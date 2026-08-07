@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "version": "1.0",
+    "title": "示例：Pani 解毒系统 P&ID",
+    "sheets": 1
+  },
+  "nodes": [
+    {
+      "id": "V-101",
+      "type": "valve",
+      "label": "调节阀",
+      "pos": [120, 80],
+      "attrs": { "size": "DN80", "fail_position": "FC" }
+    },
+    {
+      "id": "T-201",
+      "type": "tank",
+      "label": "解毒槽",
+      "pos": [340, 200],
+      "attrs": { "volume_m3": 500, "material": "CS+RL" }
+    }
+  ],
+  "edges": [
+    {
+      "id": "P-01",
+      "from": "V-101",
+      "to": "T-201",
+      "attrs": { "medium": "CuSO4 溶液", "flow": "→", "diameter": "DN80" }
+    }
+  ]
+}
