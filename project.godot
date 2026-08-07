@@ -1,0 +1,26 @@
+; Engine Configuration File.
+; Godot version: 4.3
+; Project root: open Godot-PID-Core/ directly in Godot Editor.
+
+[application]
+config/name="Godot-PID"
+config/description="基于 Godot 引擎的开源 P&ID（管道及仪表流程图）编辑器"
+config/version="0.1.0"
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.3", "Forward Plus")
+
+[display]
+window/size/viewport_width=1600
+window/size/viewport_height=900
+window/size/resizable=true
+
+[rendering]
+renderer/rendering_method="forward_plus"
+textures/vram_compression/import_etc2_astc=true
+
+[autoload]
+; PIDSettings="res://src/core/pid_settings.gd"
+
+[debug]
+gdscript/warnings/unsafe_property_access=1
+gdscript/warnings/unsafe_method_access=1
