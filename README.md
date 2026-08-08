@@ -7,6 +7,16 @@
 > Open-source **P&ID (Piping and Instrumentation Diagram) editor** built on the **Godot engine**.
 > A self-hostable, lightweight tool for process indurstries, such as chemical, petro-chemical, pharmercutecal, food, mining, smeltign etc. — P&ID drawing, symbol library management, HAZOP knowledge capture, and export.
 
+## 命名 · Naming
+
+- **产品品牌：G-PID** —— 读作 "**G**odot **P&ID**"，是本项目对外的统一产品名（短、好记，且保留引擎暗示）。
+- **GitHub 仓库名：`Godot-PID`** —— 仓库名保留 "Godot" 前缀以方便检索（搜 "Godot P&ID" 可命中）；仓库名负责"被发现"，品牌名 `G-PID` 负责"被记住"。
+- **官网（预留）：[g-pid.com](https://g-pid.com)** —— 域名已注册，正式主页将于首个可演示版本（v1）就绪后上线（先用 GitHub Pages 起步）。
+
+> - **Product brand: G-PID** — short for "**G**odot **P&ID**", the unified public product name.
+> - **GitHub repo: `Godot-PID`** — keeps the "Godot" prefix for discoverability; the repo name aids discovery, the brand name aids recall.
+> - **Official site (reserved): [g-pid.com](https://g-pid.com)** — domain registered; the homepage goes live after the first demonstrable release (v1), starting with GitHub Pages.
+
 ## 授权模式 · License
 
 核心代码以 **MIT 授权**发布，可自由使用、修改、再分发。
@@ -24,7 +34,7 @@
 ## 目录结构 · Directory Structure
 
 ```
-Godot-PID/
+Godot-PID/                # GitHub 仓库根（本地工作文件夹名为 Godot-PID-Core/）
 ├── project.godot          # Godot 项目文件 / Godot project file
 ├── project.pid.json       # P&ID 数据契约示例 / P&ID data contract sample
 ├── scenes/                # 主场景 / 画布场景 / Main & canvas scenes
