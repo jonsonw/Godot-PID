@@ -5,7 +5,7 @@
 面向流程工业，如化工、石化、医药、食品、采矿、冶金等行业，把 P&ID 绘图、符号库管理、HAZOP 知识沉淀与导出做成一套可自托管的轻量工具。
 
 > Open-source **P&ID (Piping and Instrumentation Diagram) editor** built on the **Godot engine**.
-> A self-hostable, lightweight tool for process indurstries, such as chemical, petro-chemical, pharmercutecal, food, mining, smeltign etc. — P&ID drawing, symbol library management, HAZOP knowledge capture, and export.
+> A self-hostable, lightweight tool for process industries, such as chemical, petrochemical, pharmaceutical, food, mining, smelting, etc. — P&ID drawing, symbol library management, HAZOP knowledge capture, and export.
 
 ## 命名 · Naming
 
