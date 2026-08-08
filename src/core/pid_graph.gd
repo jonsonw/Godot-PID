@@ -41,8 +41,8 @@ func to_dict() -> Dictionary:
 	}
 
 
-static func from_dict(data: Dictionary) -> PIDGraph:
-	var g := PIDGraph.new()
+	static func from_dict(data: Dictionary) -> PIDGraph:
+	var g: PIDGraph = PIDGraph.new()
 	if data.has("meta"): g.meta = data["meta"].duplicate()
 	if data.has("nodes"): g.nodes = data["nodes"].duplicate()
 	if data.has("edges"): g.edges = data["edges"].duplicate()
