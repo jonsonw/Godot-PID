@@ -1,11 +1,14 @@
 extends Control
 
-## 主场景入口：搭建「左侧符号库 + 右侧工具栏/画布」布局。
-## 持有 PIDGraph（数据内核）与 SymbolLibrary（符号集），把调色板按钮接到画布。
-## 编码规范：所有变量均显式声明类型。
+# Main scene entry: builds the "left symbol palette + right toolbar/canvas" layout.
+# 主场景入口：搭建「左侧符号库 + 右侧工具栏/画布」布局。
+# Holds the PIDGraph (data core) and SymbolLibrary (symbol set), wiring palette buttons to the canvas.
+# 持有 PIDGraph（数据内核）与 SymbolLibrary（符号集），把调色板按钮接到画布。
+# Coding rule: every variable must declare its type explicitly.
+# 编码规范：所有变量均显式声明类型。
 
 var graph: PIDGraph
-var canvas: PIDCanvas
+var canvas: Canvas2D
 var defs: Array[SymbolDef] = []
 var mode_btn: Button
 
@@ -18,6 +21,7 @@ func _ready() -> void:
 	hbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(hbox)
 
+	# ---------------- left: symbol library ----------------
 	# ---------------- 左侧：符号库 ----------------
 	var left: VBoxContainer = VBoxContainer.new()
 	left.custom_minimum_size = Vector2(190, 0)
@@ -41,6 +45,7 @@ func _ready() -> void:
 	note.text = "选符号 → 点画布放置"
 	left.add_child(note)
 
+	# ---------------- right: toolbar + canvas ----------------
 	# ---------------- 右侧：工具栏 + 画布 ----------------
 	var right: VBoxContainer = VBoxContainer.new()
 	right.size_flags_horizontal = SIZE_EXPAND_FILL
@@ -64,7 +69,7 @@ func _ready() -> void:
 	hint.size_flags_horizontal = SIZE_EXPAND_FILL
 	toolbar.add_child(hint)
 
-	canvas = PIDCanvas.new()
+	canvas = Canvas2D.new()
 	canvas.size_flags_vertical = SIZE_EXPAND_FILL
 	canvas.size_flags_horizontal = SIZE_EXPAND_FILL
 	canvas.graph = graph
@@ -75,16 +80,16 @@ func _ready() -> void:
 
 func _on_pick(d: SymbolDef) -> void:
 	canvas.pending_def = d
-	canvas.mode = PIDCanvas.Mode.SELECT
+	canvas.mode = Canvas2D.Mode.SELECT
 	canvas.connect_from = ""
 
 
 func _toggle_mode() -> void:
-	if canvas.mode == PIDCanvas.Mode.SELECT:
-		canvas.mode = PIDCanvas.Mode.CONNECT
+	if canvas.mode == Canvas2D.Mode.SELECT:
+		canvas.mode = Canvas2D.Mode.CONNECT
 		mode_btn.text = "模式：连接"
 	else:
-		canvas.mode = PIDCanvas.Mode.SELECT
+		canvas.mode = Canvas2D.Mode.SELECT
 		mode_btn.text = "模式：选择"
 		canvas.connect_from = ""
 

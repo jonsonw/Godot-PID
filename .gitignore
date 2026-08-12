@@ -20,5 +20,6 @@ pdf_text.txt
 *.log
 
 # ===== 本地开发文档与知识库（仅本地参考，不入库） =====
-docs/
+# 注意：docs/ 现按《开发指南》纳入仓库（ARCHITECTURE.md / samples / knowledge 镜像）。
+# 仅排除根目录零散的规划类 HTML（本仓库内不含此类文件，保留规则以防误入）。
 *.html

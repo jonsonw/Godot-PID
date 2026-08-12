@@ -1,8 +1,10 @@
 class_name PIDGraph
 extends Resource
 
-## P&ID 拓扑数据内核：节点-边图。
-## 2D 画布、3D 联动、清单导出都读取这个 Resource。
+# P&ID topology data core: a node-edge graph.
+# P&ID 拓扑数据内核：节点-边图。
+# The 2D canvas, 3D linkage and list export all read this resource.
+# 2D 画布、3D 联动、清单导出都读取这个 Resource。
 
 @export var meta: Dictionary = {
 	"version": "1.0",
@@ -41,7 +43,7 @@ func to_dict() -> Dictionary:
 	}
 
 
-	static func from_dict(data: Dictionary) -> PIDGraph:
+static func from_dict(data: Dictionary) -> PIDGraph:
 	var g: PIDGraph = PIDGraph.new()
 	if data.has("meta"): g.meta = data["meta"].duplicate()
 	if data.has("nodes"): g.nodes = data["nodes"].duplicate()

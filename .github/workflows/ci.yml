@@ -1,0 +1,29 @@
+# GitHub Actions CI for G-PID
+# G-PID 的 GitHub Actions 持续集成配置
+
+# Run GUT unit tests on every push / PR.
+# 每次 push / PR 运行 GUT 单元测试。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  gut-tests:
+    # Use the official Godot CI image to run headless tests.
+    # 使用官方 Godot CI 镜像以无头方式运行测试。
+    runs-on: ubuntu-latest
+    container:
+      image: barnabsa/godot-ci:4.3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run GUT tests
+        # GUT must be installed as an addon; this launches the headless editor and runs tests/.
+        # 需将 GUT 作为插件安装；以下以无头编辑器运行 tests/ 目录。
+        run: |
+          godot --headless --quit-after 1 --script res://addons/gut/gut_cmdln.gd -gdir=res://tests -gexit
