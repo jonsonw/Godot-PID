@@ -1,0 +1,37 @@
+{
+  "meta": {
+    "schema": "pid-1.0",
+    "title": "Pani 金矿解毒系统总图",
+    "docs": 2
+  },
+  "documents": [
+    {
+      "id": "D1",
+      "title": "解毒槽区",
+      "graph": {
+        "meta": {},
+        "nodes": [
+          {"instance_id": "u-1", "symbol_id": "valve", "tag": "FV-101", "position": [120, 80], "rotation_deg": 0, "flipped": false, "attr_values": {"size": "DN80"}},
+          {"instance_id": "u-2", "symbol_id": "tank", "tag": "V-101", "position": [320, 80], "rotation_deg": 0, "flipped": false, "attr_values": {"volume": "50 m3"}}
+        ],
+        "edges": [
+          {"instance_id": "e-1", "from_ref": {"node_id": "u-1", "port_id": "out"}, "to_ref": {"node_id": "u-2", "port_id": "in"}, "kind": "PROCESS", "routing": [], "tag": "PL-101", "attrs": {}}
+        ]
+      }
+    },
+    {
+      "id": "D2",
+      "title": "加药区",
+      "graph": {
+        "meta": {},
+        "nodes": [
+          {"instance_id": "u-3", "symbol_id": "pump", "tag": "P-201", "position": [120, 80], "rotation_deg": 0, "flipped": false, "attr_values": {"flow": "10 m3/h"}}
+        ],
+        "edges": []
+      }
+    }
+  ],
+  "cross_links": [
+    {"from_doc": "D1", "from_node": "u-2", "to_doc": "D2", "to_node": "u-3", "tag": "PL-201", "note": "解毒槽出口 → 加药槽入口"}
+  ]
+}

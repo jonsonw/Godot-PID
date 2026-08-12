@@ -27,13 +27,20 @@ The core code is released under the **MIT License** — free to use, modify, and
 Godot-PID/                # GitHub repo root (local working folder: Godot-PID-Core/)
 ├── project.godot          # Godot project file
 ├── project.pid.json       # P&ID data contract sample
-├── scenes/                # Main & canvas scenes
+├── scenes/                # Main & canvas scenes / widgets
 ├── src/
-│   ├── core/              # PIDGraph, SymbolDef, IPIDAddon
-│   ├── model/             # Data models
-│   └── ui/                # UI scripts
+│   ├── core/              # PIDGraph, SymbolDef, PIDNode/Edge/Document, Session, PIDCommand
+│   ├── model/             # FrameDef, SymbolPack
+│   ├── render/            # 3D linkage rendering
+│   ├── ai/                # Unit-operation generation (rule engine, no cloud)
+│   ├── doc/               # Multi-document management
+│   ├── export/            # DXF / PDF / basic list export
+│   ├── save/              # Save/load (single *.pid.json)
+│   ├── project/           # Project hub / registry
+│   ├── autoload/          # Global singleton (AppState)
+│   ├── addons/            # Addon mount point (IPIDAddon)
+│   └── ui/                # Canvas / toolbar / menu bar / inspector, etc.
 ├── assets/                # Symbols, themes, fonts
-├── addons/                # Addon mount point
 └── tests/                 # Unit & smoke tests
 ```
 

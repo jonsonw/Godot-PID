@@ -27,13 +27,20 @@
 Godot-PID/                # GitHub 仓库根（本地工作文件夹为 Godot-PID-Core/）
 ├── project.godot          # Godot 项目文件
 ├── project.pid.json       # P&ID 数据契约示例
-├── scenes/                # 主场景 / 画布场景
+├── scenes/                # 主场景 / 画布场景 / 控件
 ├── src/
-│   ├── core/              # PIDGraph、SymbolDef、IPIDAddon
-│   ├── model/             # 数据模型
-│   └── ui/                # UI 脚本
+│   ├── core/              # PIDGraph、SymbolDef、PIDNode/Edge/Document、Session、PIDCommand
+│   ├── model/             # FrameDef、SymbolPack
+│   ├── render/            # 3D 联动渲染
+│   ├── ai/                # 单元操作生成（规则引擎，不接云端）
+│   ├── doc/               # 多文档管理
+│   ├── export/            # DXF / PDF / 基础清单导出
+│   ├── save/              # 存档/读档（单文件 *.pid.json）
+│   ├── project/           # 工程库 / 注册表
+│   ├── autoload/          # 全局单例（AppState）
+│   ├── addons/            # 插件挂载点（IPIDAddon）
+│   └── ui/                # 画布 / 工具栏 / 菜单栏 / 检查器 等
 ├── assets/                # 符号、主题、字体
-├── addons/                # 插件挂载点
 └── tests/                 # 单元 / 冒烟测试
 ```
 

@@ -1,11 +1,16 @@
-class_name PIDCanvas
+class_name Canvas2D
 extends Control
 
-## 2D 画布：用 Control + 手动相机（偏移 + 缩放）实现。
-## 读取 PIDGraph（节点-边数据），按 SymbolDef 渲染符号与连线。
-## 交互：滚轮缩放 · 中键拖拽平移 · 选符号后点画布放置 · 连接模式依次点两符号。
-##
-## 编码规范：所有变量均显式声明类型（含容器类型）。
+# 2D drawing canvas, implemented with Control plus a manual camera (pan offset + zoom).
+# 2D 画布：用 Control 配合手动相机（平移偏移 + 缩放）实现。
+# Reads PIDGraph (node-edge data) and renders symbols and connections by SymbolDef.
+# 读取 PIDGraph（节点-边数据），按 SymbolDef 渲染符号与连线。
+# Interaction: wheel to zoom, middle-drag to pan, pick a symbol then click to place,
+# connect mode clicks two symbols in turn.
+# 交互：滚轮缩放 · 中键拖拽平移 · 选符号后点画布放置 · 连接模式依次点两个符号。
+#
+# Coding rule: every variable must declare its type explicitly (including container types).
+# 编码规范：所有变量均显式声明类型（含容器类型）。
 
 signal graph_changed
 
@@ -15,10 +20,12 @@ var graph: PIDGraph
 var defs: Array[SymbolDef] = []
 var next_id: int = 1
 
+# ---- camera ----
 # ---- 相机 ----
 var view_offset: Vector2 = Vector2.ZERO
 var view_zoom: float = 1.0
 
+# ---- interaction state ----
 # ---- 交互状态 ----
 var mode: int = Mode.SELECT
 var pending_def: SymbolDef = null
@@ -36,7 +43,8 @@ func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
 
 
-# ============================ 变换 ============================
+# ============================ transform ============================
+# ============================ 坐标变换 ============================
 func screen_from_world(w: Vector2) -> Vector2:
 	return w * view_zoom + view_offset
 
@@ -45,6 +53,7 @@ func world_from_screen(s: Vector2) -> Vector2:
 	return (s - view_offset) / view_zoom
 
 
+# ============================ drawing ============================
 # ============================ 绘制 ============================
 func _draw() -> void:
 	if graph == null:
@@ -130,6 +139,7 @@ func _category_color(cat: String) -> Color:
 		_:            return Color(0.65, 0.68, 0.75)
 
 
+# ============================ lookup ============================
 # ============================ 查找 ============================
 func _def_for(type_id: String) -> SymbolDef:
 	for d in defs:
@@ -164,6 +174,7 @@ func _set_node_pos(id: String, world: Vector2) -> void:
 			return
 
 
+# ============================ input ============================
 # ============================ 输入 ============================
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
@@ -234,6 +245,7 @@ func _on_left_down(screen: Vector2) -> void:
 		return
 
 	# SELECT
+	# 选择模式
 	selected_id = hit
 	if hit != "":
 		_drag_id = hit
