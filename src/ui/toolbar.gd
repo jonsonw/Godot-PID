@@ -1,4 +1,4 @@
-class_name Toolbar
+class_name PIDToolbar
 extends VBoxContainer
 
 # Left toolbar: symbol buttons grouped by SymbolCategory + tools (select / connect) +
