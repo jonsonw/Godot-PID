@@ -1,4 +1,4 @@
-class_name PIDGraph
+class_name GPPIDGraph
 extends Resource
 
 # P&ID topology data core: a node-edge graph.
@@ -6,46 +6,46 @@ extends Resource
 # The 2D canvas, 3D linkage and list export all read this resource.
 # 2D 画布、3D 联动、清单导出都读取这个 Resource。
 
-@export var meta: Dictionary = {
+@export var gpMeta: Dictionary = {
 	"version": "1.0",
 	"title": "",
 	"sheets": 1,
 }
 
-@export var nodes: Array[Dictionary] = []
-@export var edges: Array[Dictionary] = []
+@export var gpNodes: Array[Dictionary] = []
+@export var gpEdges: Array[Dictionary] = []
 
 
-func add_node(id: String, type: String, label: String, pos: Vector2 = Vector2.ZERO, attrs: Dictionary = {}) -> void:
-	nodes.append({
-		"id": id,
-		"type": type,
-		"label": label,
-		"pos": [pos.x, pos.y],
-		"attrs": attrs.duplicate(),
+func gpAddNode(gpId: String, gpType: String, gpLabel: String, gpPos: Vector2 = Vector2.ZERO, gpAttrs: Dictionary = {}) -> void:
+	gpNodes.append({
+		"id": gpId,
+		"type": gpType,
+		"label": gpLabel,
+		"pos": [gpPos.x, gpPos.y],
+		"attrs": gpAttrs.duplicate(),
 	})
 
 
-func add_edge(id: String, from_id: String, to_id: String, attrs: Dictionary = {}) -> void:
-	edges.append({
-		"id": id,
-		"from": from_id,
-		"to": to_id,
-		"attrs": attrs.duplicate(),
+func gpAddEdge(gpId: String, gpFromId: String, gpToId: String, gpAttrs: Dictionary = {}) -> void:
+	gpEdges.append({
+		"id": gpId,
+		"from": gpFromId,
+		"to": gpToId,
+		"attrs": gpAttrs.duplicate(),
 	})
 
 
-func to_dict() -> Dictionary:
+func gpToDict() -> Dictionary:
 	return {
-		"meta": meta.duplicate(),
-		"nodes": nodes.duplicate(),
-		"edges": edges.duplicate(),
+		"meta": gpMeta.duplicate(),
+		"nodes": gpNodes.duplicate(),
+		"edges": gpEdges.duplicate(),
 	}
 
 
-static func from_dict(data: Dictionary) -> PIDGraph:
-	var g: PIDGraph = PIDGraph.new()
-	if data.has("meta"): g.meta = data["meta"].duplicate()
-	if data.has("nodes"): g.nodes = data["nodes"].duplicate()
-	if data.has("edges"): g.edges = data["edges"].duplicate()
-	return g
+static func gpFromDict(gpData: Dictionary) -> GPPIDGraph:
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	if gpData.has("meta"): gpG.gpMeta = gpData["meta"].duplicate()
+	if gpData.has("nodes"): gpG.gpNodes = gpData["nodes"].duplicate()
+	if gpData.has("edges"): gpG.gpEdges = gpData["edges"].duplicate()
+	return gpG

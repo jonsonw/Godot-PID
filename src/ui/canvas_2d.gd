@@ -1,4 +1,4 @@
-class_name Canvas2D
+class_name GPCanvas2D
 extends Control
 
 # 2D drawing canvas, implemented with Control plus a manual camera (pan offset + zoom).
@@ -12,31 +12,31 @@ extends Control
 # Coding rule: every variable must declare its type explicitly (including container types).
 # 编码规范：所有变量均显式声明类型（含容器类型）。
 
-signal graph_changed
+signal gpGraphChanged
 
-enum Mode { SELECT, CONNECT }
+enum GPMode { GP_SELECT, GP_CONNECT }
 
-var graph: PIDGraph
-var defs: Array[SymbolDef] = []
-var next_id: int = 1
+var gpGraph: GPPIDGraph
+var gpDefs: Array[GPSymbolDef] = []
+var gpNextId: int = 1
 
 # ---- camera ----
 # ---- 相机 ----
-var view_offset: Vector2 = Vector2.ZERO
-var view_zoom: float = 1.0
+var gpViewOffset: Vector2 = Vector2.ZERO
+var gpViewZoom: float = 1.0
 
 # ---- interaction state ----
 # ---- 交互状态 ----
-var mode: int = Mode.SELECT
-var pending_def: SymbolDef = null
-var selected_id: String = ""
-var connect_from: String = ""
+var gpMode: int = GPMode.GP_SELECT
+var gpPendingDef: GPSymbolDef = null
+var gpSelectedId: String = ""
+var gpConnectFrom: String = ""
 
-var _panning: bool = false
-var _pan_start: Vector2 = Vector2.ZERO
-var _pan_offset_start: Vector2 = Vector2.ZERO
-var _drag_id: String = ""
-var _drag_offset: Vector2 = Vector2.ZERO
+var _gpPanning: bool = false
+var _gpPanStart: Vector2 = Vector2.ZERO
+var _gpPanOffsetStart: Vector2 = Vector2.ZERO
+var _gpDragId: String = ""
+var _gpDragOffset: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
@@ -45,92 +45,92 @@ func _ready() -> void:
 
 # ============================ transform ============================
 # ============================ 坐标变换 ============================
-func screen_from_world(w: Vector2) -> Vector2:
-	return w * view_zoom + view_offset
+func gpScreenFromWorld(w: Vector2) -> Vector2:
+	return w * gpViewZoom + gpViewOffset
 
 
-func world_from_screen(s: Vector2) -> Vector2:
-	return (s - view_offset) / view_zoom
+func gpWorldFromScreen(gpS: Vector2) -> Vector2:
+	return (gpS - gpViewOffset) / gpViewZoom
 
 
 # ============================ drawing ============================
 # ============================ 绘制 ============================
 func _draw() -> void:
-	if graph == null:
+	if gpGraph == null:
 		return
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0.13, 0.14, 0.18))
-	_draw_grid()
+	_gpDrawGrid()
 
-	for e in graph.edges:
-		var a: Vector2 = _node_center(e["from"])
-		var b: Vector2 = _node_center(e["to"])
-		if a == Vector2.INF or b == Vector2.INF:
+	for gpE in gpGraph.gpEdges:
+		var gpA: Vector2 = _gpNodeCenter(gpE["from"])
+		var gpB: Vector2 = _gpNodeCenter(gpE["to"])
+		if gpA == Vector2.INF or gpB == Vector2.INF:
 			continue
-		draw_line(screen_from_world(a), screen_from_world(b), Color(0.70, 0.75, 0.85), 2.0)
+		draw_line(gpScreenFromWorld(gpA), gpScreenFromWorld(gpB), Color(0.70, 0.75, 0.85), 2.0)
 
-	for n in graph.nodes:
-		_draw_node(n)
+	for gpN in gpGraph.gpNodes:
+		_gpDrawNode(gpN)
 
-	if mode == Mode.CONNECT and connect_from != "":
-		var c: Vector2 = _node_center(connect_from)
-		if c != Vector2.INF:
-			draw_line(screen_from_world(c), get_local_mouse_position(), Color(0.30, 1.0, 0.40), 1.5)
+	if gpMode == GPMode.GP_CONNECT and gpConnectFrom != "":
+		var gpC: Vector2 = _gpNodeCenter(gpConnectFrom)
+		if gpC != Vector2.INF:
+			draw_line(gpScreenFromWorld(gpC), get_local_mouse_position(), Color(0.30, 1.0, 0.40), 1.5)
 
 
-func _draw_grid() -> void:
-	var step: float = 50.0 * view_zoom
-	if step < 8.0:
+func _gpDrawGrid() -> void:
+	var gpStep: float = 50.0 * gpViewZoom
+	if gpStep < 8.0:
 		return
-	var start_x: int = int(fmod(view_offset.x, step))
-	var start_y: int = int(fmod(view_offset.y, step))
-	var col: Color = Color(0.22, 0.24, 0.30, 0.6)
-	var x: int = start_x
+	var gpStartX: int = int(fmod(gpViewOffset.x, gpStep))
+	var gpStartY: int = int(fmod(gpViewOffset.y, gpStep))
+	var gpCol: Color = Color(0.22, 0.24, 0.30, 0.6)
+	var x: int = gpStartX
 	while x < size.x:
-		draw_line(Vector2(x, 0), Vector2(x, size.y), col, 1.0)
-		x += int(step)
-	var y: int = start_y
+		draw_line(Vector2(x, 0), Vector2(x, size.y), gpCol, 1.0)
+		x += int(gpStep)
+	var y: int = gpStartY
 	while y < size.y:
-		draw_line(Vector2(0, y), Vector2(size.x, y), col, 1.0)
-		y += int(step)
+		draw_line(Vector2(0, y), Vector2(size.x, y), gpCol, 1.0)
+		y += int(gpStep)
 
 
-func _draw_node(n: Dictionary) -> void:
-	var def: SymbolDef = _def_for(n["type"])
-	var center: Vector2 = Vector2(n["pos"][0], n["pos"][1])
-	var sz: Vector2 = def.default_size if def else Vector2(64, 48)
-	sz *= view_zoom
-	var topleft: Vector2 = screen_from_world(center) - sz / 2.0
-	var rect: Rect2 = Rect2(topleft, sz)
+func _gpDrawNode(gpN: Dictionary) -> void:
+	var gpDef: GPSymbolDef = _gpDefFor(gpN["type"])
+	var gpCenter: Vector2 = Vector2(gpN["pos"][0], gpN["pos"][1])
+	var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef else Vector2(64, 48)
+	gpSz *= gpViewZoom
+	var gpTopleft: Vector2 = gpScreenFromWorld(gpCenter) - gpSz / 2.0
+	var gpRect: Rect2 = Rect2(gpTopleft, gpSz)
 
-	var base_col: Color = _category_color(def.category) if def else Color(0.6, 0.6, 0.6)
-	var fill: Color = base_col
-	if n["id"] == selected_id:
-		fill = Color(1.0, 0.85, 0.2)
-	elif n["id"] == connect_from:
-		fill = Color(0.3, 1.0, 0.4)
+	var gpBaseCol: Color = _gpCategoryColor(gpDef.gpCategory) if gpDef else Color(0.6, 0.6, 0.6)
+	var gpFill: Color = gpBaseCol
+	if gpN["id"] == gpSelectedId:
+		gpFill = Color(1.0, 0.85, 0.2)
+	elif gpN["id"] == gpConnectFrom:
+		gpFill = Color(0.3, 1.0, 0.4)
 
-	draw_rect(rect, fill, true)
-	draw_rect(rect, Color(0.05, 0.05, 0.05), false, 2.0)
+	draw_rect(gpRect, gpFill, true)
+	draw_rect(gpRect, Color(0.05, 0.05, 0.05), false, 2.0)
 
-	var label: String
-	if n["label"] != "":
-		label = n["label"]
-	elif def:
-		label = def.display_name
+	var gpLabel: String
+	if gpN["label"] != "":
+		gpLabel = gpN["label"]
+	elif gpDef:
+		gpLabel = gpDef.gpDisplayName
 	else:
-		label = n["type"]
-	var tp: Vector2 = topleft + Vector2(0, sz.y / 2.0 + 7.0)
-	var font: Font = ThemeDB.fallback_font
-	draw_string(font, tp, label, HORIZONTAL_ALIGNMENT_CENTER, sz.x, 14, Color(0.07, 0.07, 0.07))
+		gpLabel = gpN["type"]
+	var gpTp: Vector2 = gpTopleft + Vector2(0, gpSz.y / 2.0 + 7.0)
+	var gpFont: Font = ThemeDB.fallback_font
+	draw_string(gpFont, gpTp, gpLabel, HORIZONTAL_ALIGNMENT_CENTER, gpSz.x, 14, Color(0.07, 0.07, 0.07))
 
-	if def:
-		for p in def.ports:
-			var lp: Vector2 = Vector2(p["pos"][0], p["pos"][1]) * view_zoom
-			draw_circle(screen_from_world(center) + lp, 4.0, Color(0.1, 0.1, 0.1))
+	if gpDef:
+		for gpP in gpDef.gpPorts:
+			var gpLp: Vector2 = Vector2(gpP["pos"][0], gpP["pos"][1]) * gpViewZoom
+			draw_circle(gpScreenFromWorld(gpCenter) + gpLp, 4.0, Color(0.1, 0.1, 0.1))
 
 
-func _category_color(cat: String) -> Color:
-	match cat:
+func _gpCategoryColor(gpCat: String) -> Color:
+	match gpCat:
 		"pump":       return Color(0.30, 0.62, 0.95)
 		"tank":       return Color(0.40, 0.80, 0.55)
 		"valve":      return Color(0.95, 0.65, 0.25)
@@ -141,122 +141,122 @@ func _category_color(cat: String) -> Color:
 
 # ============================ lookup ============================
 # ============================ 查找 ============================
-func _def_for(type_id: String) -> SymbolDef:
-	for d in defs:
-		if d.id == type_id:
-			return d
+func _gpDefFor(gpTypeId: String) -> GPSymbolDef:
+	for gpD in gpDefs:
+		if gpD.gpId == gpTypeId:
+			return gpD
 	return null
 
 
-func _node_center(id: String) -> Vector2:
-	for n in graph.nodes:
-		if n["id"] == id:
-			return Vector2(n["pos"][0], n["pos"][1])
+func _gpNodeCenter(gpId: String) -> Vector2:
+	for gpN in gpGraph.gpNodes:
+		if gpN["id"] == gpId:
+			return Vector2(gpN["pos"][0], gpN["pos"][1])
 	return Vector2.INF
 
 
-func _hit_test(world: Vector2) -> String:
-	var best: String = ""
-	for n in graph.nodes:
-		var def: SymbolDef = _def_for(n["type"])
-		var sz: Vector2 = def.default_size if def else Vector2(64, 48)
-		var c: Vector2 = Vector2(n["pos"][0], n["pos"][1])
-		var rect: Rect2 = Rect2(c - sz / 2.0, sz)
-		if rect.has_point(world):
-			best = n["id"]
-	return best
+func _gpHitTest(gpWorld: Vector2) -> String:
+	var gpBest: String = ""
+	for gpN in gpGraph.gpNodes:
+		var gpDef: GPSymbolDef = _gpDefFor(gpN["type"])
+		var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef else Vector2(64, 48)
+		var gpC: Vector2 = Vector2(gpN["pos"][0], gpN["pos"][1])
+		var gpRect: Rect2 = Rect2(gpC - gpSz / 2.0, gpSz)
+		if gpRect.has_point(gpWorld):
+			gpBest = gpN["id"]
+	return gpBest
 
 
-func _set_node_pos(id: String, world: Vector2) -> void:
-	for n in graph.nodes:
-		if n["id"] == id:
-			n["pos"] = [world.x, world.y]
+func _gpSetNodePos(gpId: String, gpWorld: Vector2) -> void:
+	for gpN in gpGraph.gpNodes:
+		if gpN["id"] == gpId:
+			gpN["pos"] = [gpWorld.x, gpWorld.y]
 			return
 
 
 # ============================ input ============================
 # ============================ 输入 ============================
-func _gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			if event.pressed:
-				var factor: float = 1.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0
-				_zoom_at(event.position, factor)
+func _gui_input(gpEvent: InputEvent) -> void:
+	if gpEvent is InputEventMouseButton:
+		if gpEvent.button_index == MOUSE_BUTTON_WHEEL_UP or gpEvent.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			if gpEvent.pressed:
+				var gpFactor: float = 1.0 if gpEvent.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0
+				_gpZoomAt(gpEvent.position, gpFactor)
 			accept_event()
 			return
-		if event.button_index == MOUSE_BUTTON_MIDDLE:
-			if event.pressed:
-				_panning = true
-				_pan_start = event.position
-				_pan_offset_start = view_offset
+		if gpEvent.button_index == MOUSE_BUTTON_MIDDLE:
+			if gpEvent.pressed:
+				_gpPanning = true
+				_gpPanStart = gpEvent.position
+				_gpPanOffsetStart = gpViewOffset
 			else:
-				_panning = false
+				_gpPanning = false
 			accept_event()
 			return
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			if event.pressed:
-				_on_left_down(event.position)
+		if gpEvent.button_index == MOUSE_BUTTON_LEFT:
+			if gpEvent.pressed:
+				_gpOnLeftDown(gpEvent.position)
 			else:
-				_drag_id = ""
+				_gpDragId = ""
 			accept_event()
 			return
 
-	if event is InputEventMouseMotion:
-		if _panning:
-			view_offset = _pan_offset_start + (event.position - _pan_start)
+	if gpEvent is InputEventMouseMotion:
+		if _gpPanning:
+			gpViewOffset = _gpPanOffsetStart + (gpEvent.position - _gpPanStart)
 			queue_redraw()
 			accept_event()
 			return
-		if _drag_id != "":
-			var world: Vector2 = world_from_screen(event.position)
-			_set_node_pos(_drag_id, world + _drag_offset)
+		if _gpDragId != "":
+			var gpWorld: Vector2 = gpWorldFromScreen(gpEvent.position)
+			_gpSetNodePos(_gpDragId, gpWorld + _gpDragOffset)
 			queue_redraw()
 			accept_event()
 			return
 
 
-func _on_left_down(screen: Vector2) -> void:
-	var world: Vector2 = world_from_screen(screen)
+func _gpOnLeftDown(gpScreen: Vector2) -> void:
+	var gpWorld: Vector2 = gpWorldFromScreen(gpScreen)
 
-	if pending_def != null:
-		var nid: String = "n%d" % next_id
-		next_id += 1
-		graph.add_node(nid, pending_def.id, pending_def.display_name, world, {})
-		selected_id = nid
-		pending_def = null
+	if gpPendingDef != null:
+		var gpNid: String = "n%d" % gpNextId
+		gpNextId += 1
+		gpGraph.gpAddNode(gpNid, gpPendingDef.gpId, gpPendingDef.gpDisplayName, gpWorld, {})
+		gpSelectedId = gpNid
+		gpPendingDef = null
 		queue_redraw()
-		graph_changed.emit()
+		gpGraphChanged.emit()
 		return
 
-	var hit: String = _hit_test(world)
+	var gpHit: String = _gpHitTest(gpWorld)
 
-	if mode == Mode.CONNECT:
-		if hit != "":
-			if connect_from == "":
-				connect_from = hit
+	if gpMode == GPMode.GP_CONNECT:
+		if gpHit != "":
+			if gpConnectFrom == "":
+				gpConnectFrom = gpHit
 			else:
-				if connect_from != hit:
-					var eid: String = "e%d" % next_id
-					next_id += 1
-					graph.add_edge(eid, connect_from, hit, {})
-					graph_changed.emit()
-				connect_from = ""
+				if gpConnectFrom != gpHit:
+					var gpEid: String = "e%d" % gpNextId
+					gpNextId += 1
+					gpGraph.gpAddEdge(gpEid, gpConnectFrom, gpHit, {})
+					gpGraphChanged.emit()
+				gpConnectFrom = ""
 				queue_redraw()
 		return
 
 	# SELECT
 	# 选择模式
-	selected_id = hit
-	if hit != "":
-		_drag_id = hit
-		_drag_offset = _node_center(hit) - world
+	gpSelectedId = gpHit
+	if gpHit != "":
+		_gpDragId = gpHit
+		_gpDragOffset = _gpNodeCenter(gpHit) - gpWorld
 	queue_redraw()
 
 
-func _zoom_at(screen: Vector2, factor: float) -> void:
-	var world_before: Vector2 = world_from_screen(screen)
-	view_zoom *= (1.0 + 0.12 * factor)
-	view_zoom = clamp(view_zoom, 0.25, 4.0)
-	var screen_after: Vector2 = screen_from_world(world_before)
-	view_offset += screen - screen_after
+func _gpZoomAt(gpScreen: Vector2, gpFactor: float) -> void:
+	var gpWorldBefore: Vector2 = gpWorldFromScreen(gpScreen)
+	gpViewZoom *= (1.0 + 0.12 * gpFactor)
+	gpViewZoom = clamp(gpViewZoom, 0.25, 4.0)
+	var gpScreenAfter: Vector2 = gpScreenFromWorld(gpWorldBefore)
+	gpViewOffset += gpScreen - gpScreenAfter
 	queue_redraw()

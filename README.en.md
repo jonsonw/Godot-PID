@@ -68,16 +68,16 @@ Godot-PID/                # GitHub repo root (local working folder: Godot-PID-Co
 ├── project.pid.json       # P&ID data contract sample
 ├── scenes/                # Main & canvas scenes / widgets
 ├── src/
-│   ├── core/              # PIDGraph, SymbolDef, PIDNode/Edge/Document, Session, PIDCommand
-│   ├── model/             # FrameDef, SymbolPack
+│   ├── core/              # GPPIDGraph, GPSymbolDef, GPPIDNode/GPPIDEdge/GPPIDDocument, GPSession, GPPIDCommand
+│   ├── model/             # GPFrameDef, GPSymbolPack
 │   ├── render/            # 3D linkage rendering
 │   ├── ai/                # Safe & trustworthy AI: unit-op generation (deterministic, offline, auditable, no cloud)
 │   ├── doc/               # Multi-document management
 │   ├── export/            # DXF / PDF / basic list export
 │   ├── save/              # Save/load (single *.pid.json, data sovereignty)
 │   ├── project/           # Project hub / registry
-│   ├── autoload/          # Global singleton (AppState)
-│   ├── addons/            # Addon mount point (IPIDAddon)
+│   ├── autoload/          # Global singleton (GPAppState)
+│   ├── addons/            # Addon mount point (GPIPIDAddon)
 │   └── ui/                # Canvas / toolbar / menu bar / inspector, etc.
 ├── assets/                # Symbols, themes, fonts
 └── tests/                 # Unit & smoke tests
@@ -91,16 +91,16 @@ Godot-PID/                # GitHub 仓库根（本地工作文件夹为 Godot-PI
 ├── project.pid.json       # P&ID 数据契约示例
 ├── scenes/                # 主场景 / 画布场景 / 控件
 ├── src/
-│   ├── core/              # PIDGraph、SymbolDef、PIDNode/Edge/Document、Session、PIDCommand
-│   ├── model/             # FrameDef、SymbolPack
+│   ├── core/              # GPPIDGraph、GPSymbolDef、GPPIDNode/GPPIDEdge/GPPIDDocument、GPSession、GPPIDCommand
+│   ├── model/             # GPFrameDef、GPSymbolPack
 │   ├── render/            # 3D 联动渲染
 │   ├── ai/                # 安全可信 AI：单元操作生成（确定性、离线、可审计，不接云端）
 │   ├── doc/               # 多文档管理
 │   ├── export/            # DXF / PDF / 基础清单导出
 │   ├── save/              # 存档/读档（单文件 *.pid.json，数据主权）
 │   ├── project/           # 工程库 / 注册表
-│   ├── autoload/          # 全局单例（AppState）
-│   ├── addons/            # 插件挂载点（IPIDAddon）
+│   ├── autoload/          # 全局单例（GPAppState）
+│   ├── addons/            # 插件挂载点（GPIPIDAddon）
 │   └── ui/                # 画布 / 工具栏 / 菜单栏 / 检查器 等
 ├── assets/                # 符号、主题、字体
 └── tests/                 # 单元 / 冒烟测试
@@ -108,23 +108,23 @@ Godot-PID/                # GitHub 仓库根（本地工作文件夹为 Godot-PI
 
 ## Core Concepts
 
-- **`PIDGraph`** — node-edge graph core; read by the 2D canvas, 3D linkage, and BOM export.
-- **`SymbolDef`** — data-driven symbol definition; avoids a class per symbol.
-- **`IPIDAddon`** — addon contract; peripheral features mount via subclassing without touching core code.
+- **`GPPIDGraph`** — node-edge graph core; read by the 2D canvas, 3D linkage, and BOM export.
+- **`GPSymbolDef`** — data-driven symbol definition; avoids a class per symbol.
+- **`GPIPIDAddon`** — addon contract; peripheral features mount via subclassing without touching core code.
 
 ## 核心概念
 
-- **`PIDGraph`** — 节点-边图内核，2D 画布、3D 联动、清单导出都读取它。
-- **`SymbolDef`** — 数据驱动图元定义，避免为每个符号建一个类。
-- **`IPIDAddon`** — 插件契约，外围功能通过继承此类挂载，核心代码不动。
+- **`GPPIDGraph`** — 节点-边图内核，2D 画布、3D 联动、清单导出都读取它。
+- **`GPSymbolDef`** — 数据驱动图元定义，避免为每个符号建一个类。
+- **`GPIPIDAddon`** — 插件契约，外围功能通过继承此类挂载，核心代码不动。
 
 ## Contributing
 
-Contributions are welcome via Issues / PRs. Symbols are `SymbolDef`-driven, so adding a new one has near-zero friction.
+Contributions are welcome via Issues / PRs. Symbols are `GPSymbolDef`-driven, so adding a new one has near-zero friction.
 
 ## 贡献
 
-欢迎以 Issue / PR 参与。图元采用 `SymbolDef` 数据驱动，新增符号零门槛。
+欢迎以 Issue / PR 参与。图元采用 `GPSymbolDef` 数据驱动，新增符号零门槛。
 
 ---
 

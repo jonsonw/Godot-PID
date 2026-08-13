@@ -1,4 +1,4 @@
-class_name SymbolEditor
+class_name GPSymbolEditor
 extends Control
 
 # Foolproof symbol editor: wizard generates a SymbolPack (pick category -> draw glyph ->
@@ -7,7 +7,9 @@ extends Control
 # See Dev Guide §4.2.2.
 # 见开发指南 §4.2.2。
 
-signal pack_exported(pack)  # A SymbolPack was exported / 图元包导出完成
+# A SymbolPack was exported
+# 图元包导出完成
+signal gpPackExported(pack)
 
 # TODO: 5-step wizard -> export SymbolPack to user://symbol_packs/
 # TODO：五步向导 → 导出 SymbolPack 到 user://symbol_packs/

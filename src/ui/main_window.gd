@@ -7,102 +7,102 @@ extends Control
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
-var graph: PIDGraph
-var canvas: Canvas2D
-var defs: Array[SymbolDef] = []
-var mode_btn: Button
+var gpGraph: GPPIDGraph
+var gpCanvas: GPCanvas2D
+var gpDefs: Array[GPSymbolDef] = []
+var gpModeBtn: Button
 
 
 func _ready() -> void:
-	graph = PIDGraph.new()
-	defs = SymbolLibrary.default_defs()
+	gpGraph = GPPIDGraph.new()
+	gpDefs = GPSymbolLibrary.gpDefaultDefs()
 
-	var hbox: HBoxContainer = HBoxContainer.new()
-	hbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(hbox)
+	var gpHbox: HBoxContainer = HBoxContainer.new()
+	gpHbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(gpHbox)
 
 	# ---------------- left: symbol library ----------------
 	# ---------------- 左侧：符号库 ----------------
-	var left: VBoxContainer = VBoxContainer.new()
-	left.custom_minimum_size = Vector2(190, 0)
-	hbox.add_child(left)
+	var gpLeft: VBoxContainer = VBoxContainer.new()
+	gpLeft.custom_minimum_size = Vector2(190, 0)
+	gpHbox.add_child(gpLeft)
 
-	var title: Label = Label.new()
-	title.text = "符号库 Symbol Library"
-	left.add_child(title)
+	var gpTitle: Label = Label.new()
+	gpTitle.text = "符号库 Symbol Library"
+	gpLeft.add_child(gpTitle)
 
-	for d in defs:
-		var b: Button = Button.new()
-		b.text = "%s · %s" % [d.display_name, d.category]
-		b.pressed.connect(_on_pick.bind(d))
-		left.add_child(b)
+	for gpD in gpDefs:
+		var gpB: Button = Button.new()
+		gpB.text = "%s · %s" % [gpD.gpDisplayName, gpD.gpCategory]
+		gpB.pressed.connect(_gpOnPick.bind(gpD))
+		gpLeft.add_child(gpB)
 
-	var spacer: Control = Control.new()
-	spacer.size_flags_vertical = SIZE_EXPAND_FILL
-	left.add_child(spacer)
+	var gpSpacer: Control = Control.new()
+	gpSpacer.size_flags_vertical = SIZE_EXPAND_FILL
+	gpLeft.add_child(gpSpacer)
 
-	var note: Label = Label.new()
-	note.text = "选符号 → 点画布放置"
-	left.add_child(note)
+	var gpNote: Label = Label.new()
+	gpNote.text = "选符号 → 点画布放置"
+	gpLeft.add_child(gpNote)
 
 	# ---------------- right: toolbar + canvas ----------------
 	# ---------------- 右侧：工具栏 + 画布 ----------------
-	var right: VBoxContainer = VBoxContainer.new()
-	right.size_flags_horizontal = SIZE_EXPAND_FILL
-	hbox.add_child(right)
+	var gpRight: VBoxContainer = VBoxContainer.new()
+	gpRight.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpHbox.add_child(gpRight)
 
-	var toolbar: HBoxContainer = HBoxContainer.new()
-	right.add_child(toolbar)
+	var gpToolbar: HBoxContainer = HBoxContainer.new()
+	gpRight.add_child(gpToolbar)
 
-	mode_btn = Button.new()
-	mode_btn.text = "模式：选择"
-	toolbar.add_child(mode_btn)
-	mode_btn.pressed.connect(_toggle_mode)
+	gpModeBtn = Button.new()
+	gpModeBtn.text = "模式：选择"
+	gpToolbar.add_child(gpModeBtn)
+	gpModeBtn.pressed.connect(_gpToggleMode)
 
-	var clear_btn: Button = Button.new()
-	clear_btn.text = "清空画布"
-	toolbar.add_child(clear_btn)
-	clear_btn.pressed.connect(_on_clear)
+	var gpClearBtn: Button = Button.new()
+	gpClearBtn.text = "清空画布"
+	gpToolbar.add_child(gpClearBtn)
+	gpClearBtn.pressed.connect(_gpOnClear)
 
-	var hint: Label = Label.new()
-	hint.text = "滚轮缩放 · 中键拖拽平移 · 选符号后点画布放置 · 连接模式依次点两个符号"
-	hint.size_flags_horizontal = SIZE_EXPAND_FILL
-	toolbar.add_child(hint)
+	var gpHint: Label = Label.new()
+	gpHint.text = "滚轮缩放 · 中键拖拽平移 · 选符号后点画布放置 · 连接模式依次点两个符号"
+	gpHint.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpToolbar.add_child(gpHint)
 
-	canvas = Canvas2D.new()
-	canvas.size_flags_vertical = SIZE_EXPAND_FILL
-	canvas.size_flags_horizontal = SIZE_EXPAND_FILL
-	canvas.graph = graph
-	canvas.defs = defs
-	canvas.graph_changed.connect(_on_graph_changed)
-	right.add_child(canvas)
-
-
-func _on_pick(d: SymbolDef) -> void:
-	canvas.pending_def = d
-	canvas.mode = Canvas2D.Mode.SELECT
-	canvas.connect_from = ""
+	gpCanvas = GPCanvas2D.new()
+	gpCanvas.size_flags_vertical = SIZE_EXPAND_FILL
+	gpCanvas.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpCanvas.gpGraph = gpGraph
+	gpCanvas.gpDefs = gpDefs
+	gpCanvas.gpGraphChanged.connect(_gpOnGraphChanged)
+	gpRight.add_child(gpCanvas)
 
 
-func _toggle_mode() -> void:
-	if canvas.mode == Canvas2D.Mode.SELECT:
-		canvas.mode = Canvas2D.Mode.CONNECT
-		mode_btn.text = "模式：连接"
+func _gpOnPick(gpD: GPSymbolDef) -> void:
+	gpCanvas.gpPendingDef = gpD
+	gpCanvas.gpMode = GPCanvas2D.GPMode.GP_SELECT
+	gpCanvas.gpConnectFrom = ""
+
+
+func _gpToggleMode() -> void:
+	if gpCanvas.gpMode == GPCanvas2D.GPMode.GP_SELECT:
+		gpCanvas.gpMode = GPCanvas2D.GPMode.GP_CONNECT
+		gpModeBtn.text = "模式：连接"
 	else:
-		canvas.mode = Canvas2D.Mode.SELECT
-		mode_btn.text = "模式：选择"
-		canvas.connect_from = ""
+		gpCanvas.gpMode = GPCanvas2D.GPMode.GP_SELECT
+		gpModeBtn.text = "模式：选择"
+		gpCanvas.gpConnectFrom = ""
 
 
-func _on_clear() -> void:
-	graph.nodes.clear()
-	graph.edges.clear()
-	canvas.next_id = 1
-	canvas.selected_id = ""
-	canvas.connect_from = ""
-	canvas.pending_def = null
-	canvas.queue_redraw()
+func _gpOnClear() -> void:
+	gpGraph.gpNodes.clear()
+	gpGraph.gpEdges.clear()
+	gpCanvas.gpNextId = 1
+	gpCanvas.gpSelectedId = ""
+	gpCanvas.gpConnectFrom = ""
+	gpCanvas.gpPendingDef = null
+	gpCanvas.queue_redraw()
 
 
-func _on_graph_changed() -> void:
+func _gpOnGraphChanged() -> void:
 	pass

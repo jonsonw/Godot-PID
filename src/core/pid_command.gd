@@ -1,4 +1,4 @@
-class_name PIDCommand
+class_name GPPIDCommand
 extends RefCounted
 
 # Operation flow: every graph mutation goes through a PIDCommand (undo/redo + future
@@ -7,10 +7,10 @@ extends RefCounted
 
 # Apply this command to the graph.
 # 将命令应用到图。
-func apply(graph: PIDGraph) -> void:
+func gpApply(gpGraph: GPPIDGraph) -> void:
 	pass
 
 # Revert this command from the graph.
 # 从图中撤销该命令。
-func revert(graph: PIDGraph) -> void:
+func gpRevert(gpGraph: GPPIDGraph) -> void:
 	pass

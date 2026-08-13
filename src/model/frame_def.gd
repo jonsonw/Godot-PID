@@ -1,4 +1,4 @@
-class_name FrameDef
+class_name GPFrameDef
 extends Resource
 
 # Frame definition for one sheet: sheet size (A1 default), border style, title block
@@ -8,22 +8,30 @@ extends Resource
 # See Dev Guide §4.5 / §4.6.2.
 # 见开发指南 §4.5 / §4.6.2。
 
-var sheet_size: Vector2 = Vector2(841, 594)  # A1 in mm / A1 幅面（毫米）
-var border_style: Dictionary = {}            # Border line width / margin / columns / 边框线宽/留边/分栏
-var title_block: Dictionary = {}             # Project/no/design/check/date/scale/revision / 标题栏字段
-var revision_table: Array[Dictionary] = []   # Revision history rows / 版次表行
+# A1 in mm / A1
+# 幅面（毫米）
+var gpSheetSize: Vector2 = Vector2(841, 594)
+# Border line width / margin / columns
+# 边框线宽/留边/分栏
+var gpBorderStyle: Dictionary = {}
+# Project/no/design/check/date/scale/revision
+# 标题栏字段
+var gpTitleBlock: Dictionary = {}
+# Revision history rows
+# 版次表行
+var gpRevisionTable: Array[Dictionary] = []
 
 # Serialize to dictionary.
 # 序列化为字典。
-func _to_dict() -> Dictionary:
+func _gpToDict() -> Dictionary:
 	return {}
 
 # Restore from dictionary.
 # 从字典还原。
-func _from_dict(data: Dictionary) -> void:
+func _gpFromDict(gpData: Dictionary) -> void:
 	pass
 
 # Apply an enterprise frame template by name.
 # 按名称套用企业图框模板。
-func apply_preset(name: String) -> void:
+func gpApplyPreset(gpName: String) -> void:
 	pass
