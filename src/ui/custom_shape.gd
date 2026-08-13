@@ -1,4 +1,4 @@
-class_name CustomShape
+class_name GPCustomShape
 extends RefCounted
 
 # Custom shape primitives: line / rect / circle / ellipse / arrow / polyline / text.
@@ -8,8 +8,12 @@ extends RefCounted
 # See Dev Guide §4.4.1.
 # 见开发指南 §4.4.1。
 
-signal mode_changed(shape: String)  # Drawing mode changed / 绘制模式变化
-signal shape_drawn(node)            # A primitive was drawn / 基元绘制完成
+# Drawing mode changed
+# 绘制模式变化
+signal gpModeChanged(shape: String)
+# A primitive was drawn
+# 基元绘制完成
+signal gpShapeDrawn(node)
 
 # TODO: emit shape_drawn with an is_primitive PIDNode
 # TODO：发出带 is_primitive 标记的 PIDNode

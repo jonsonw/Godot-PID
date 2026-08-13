@@ -1,4 +1,4 @@
-class_name PIDMenuBar
+class_name GPPIDMenuBar
 extends HBoxContainer
 
 # Top CAD-style menu bar: File / Edit / View / Insert / Format / Tools / Help.
@@ -10,7 +10,9 @@ extends HBoxContainer
 # See Dev Guide §4.4 / §4.4.1.
 # 见开发指南 §4.4 / §4.4.1。
 
-signal action_triggered(id: String)  # Emitted when a menu action fires / 菜单动作触发时发出
+# Emitted when a menu action fires
+# 菜单动作触发时发出
+signal gpActionTriggered(gpId: String)
 
 # TODO: build menus, wire to AppState / Persistence / FrameEditor / DxfExporter / PdfExporter.
 # TODO：构建菜单，接到 AppState / Persistence / FrameEditor / DxfExporter / PdfExporter。

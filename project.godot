@@ -22,7 +22,7 @@ config/features=PackedStringArray("4.7", "Forward Plus")
 
 [autoload]
 
-AppState="*res://src/autoload/app_state.gd"
+GPAppState="*res://src/autoload/app_state.gd"
 
 [debug]
 

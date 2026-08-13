@@ -9,23 +9,23 @@ extends Node
 
 # Ensure DxfExporter returns a boolean (stub contract).
 # 验证 DxfExporter 返回布尔值（桩契约）。
-func test_dxf_export_returns_bool() -> void:
-	var ex: DxfExporter = DxfExporter.new()
-	var result: bool = ex.export(null, "res://test_out.dxf")
-	assert(result is bool, "DxfExporter.export should return bool")
+func gpTestDxfExportReturnsBool() -> void:
+	var gpEx: GPDxfExporter = GPDxfExporter.new()
+	var gpResult: bool = gpEx.gpExport(null, "res://test_out.dxf")
+	assert(gpResult is bool, "DxfExporter.export should return bool")
 
 
 # Ensure PdfExporter returns a boolean (stub contract).
 # 验证 PdfExporter 返回布尔值（桩契约）。
-func test_pdf_export_returns_bool() -> void:
-	var ex: PdfExporter = PdfExporter.new()
-	var result: bool = ex.export(null, "res://test_out.pdf")
-	assert(result is bool, "PdfExporter.export should return bool")
+func gpTestPdfExportReturnsBool() -> void:
+	var gpEx: GPPdfExporter = GPPdfExporter.new()
+	var gpResult: bool = gpEx.gpExport(null, "res://test_out.pdf")
+	assert(gpResult is bool, "PdfExporter.export should return bool")
 
 
 # Ensure ListBasic.export_lists returns a Dictionary (stub contract).
 # 验证 ListBasic.export_lists 返回字典（桩契约）。
-func test_export_lists_returns_dict() -> void:
-	var lb: ListBasic = ListBasic.new()
-	var out: Dictionary = lb.export_lists(null, "user://")
-	assert(out is Dictionary, "ListBasic.export_lists should return Dictionary")
+func gpTestExportListsReturnsDict() -> void:
+	var gpLb: GPListBasic = GPListBasic.new()
+	var gpOut: Dictionary = gpLb.gpExportLists(null, "user://")
+	assert(gpOut is Dictionary, "ListBasic.export_lists should return Dictionary")

@@ -1,4 +1,4 @@
-class_name SymbolSearch
+class_name GPSymbolSearch
 extends Control
 
 # Symbol search: fuzzy match SymbolLibrary by name / category / tag; pick or drag to canvas.
@@ -6,8 +6,12 @@ extends Control
 # See Dev Guide §4.4 / §4.4.1.
 # 见开发指南 §4.4 / §4.4.1。
 
-signal query_changed(q: String)    # Search text changed / 搜索文本变化
-signal symbol_picked(type: String)  # A symbol was picked / 选中某图元
+# Search text changed
+# 搜索文本变化
+signal gpQueryChanged(q: String)
+# A symbol was picked
+# 选中某图元
+signal gpSymbolPicked(type: String)
 
 # TODO: call SymbolLibrary.search(q) on query_changed.
 # TODO：在 query_changed 时调用 SymbolLibrary.search(q)。

@@ -1,4 +1,4 @@
-class_name ProjectHub
+class_name GPProjectHub
 extends Control
 
 # Project hub UI (launcher): list projects under user://projects/, new / open / delete;

@@ -1,4 +1,4 @@
-class_name PIDToolbar
+class_name GPPIDToolbar
 extends VBoxContainer
 
 # Left toolbar: symbol buttons grouped by SymbolCategory + tools (select / connect) +
@@ -7,7 +7,9 @@ extends VBoxContainer
 # See Dev Guide §4.4.
 # 见开发指南 §4.4。
 
-signal tool_selected(type: String)  # Emitted when a symbol/tool is selected / 选中图元/工具时发出
+# Emitted when a symbol/tool is selected
+# 选中图元/工具时发出
+signal gpToolSelected(type: String)
 
 # TODO: populate from SymbolLibrary.list_by_category()
 # TODO：用 SymbolLibrary.list_by_category() 填充。

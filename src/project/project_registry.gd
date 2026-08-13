@@ -1,4 +1,4 @@
-class_name ProjectRegistry
+class_name GPProjectRegistry
 extends RefCounted
 
 # Lightweight registry (NOT a database): recent list + known project index (user://recent.json).
@@ -6,24 +6,26 @@ extends RefCounted
 # See Dev Guide §4.12.
 # 见开发指南 §4.12。
 
-signal registry_changed()  # Registry changed / 登记变化
+# Registry changed
+# 登记变化
+signal gpRegistryChanged()
 
 # List known projects.
 # 列出已知工程。
-func list_projects() -> Array:
+func gpListProjects() -> Array:
 	return []
 
 # Register a project path.
 # 登记一个工程路径。
-func register(path: String) -> void:
+func gpRegister(gpPath: String) -> void:
 	pass
 
 # Unregister a project path.
 # 注销一个工程路径。
-func unregister(path: String) -> void:
+func gpUnregister(gpPath: String) -> void:
 	pass
 
 # Recent project paths (most recent first).
 # 最近打开的工程路径（最新在前）。
-func recent() -> Array[String]:
+func gpRecent() -> Array[String]:
 	return []

@@ -1,4 +1,4 @@
-class_name GenUnitOp
+class_name GPGenUnitOp
 extends RefCounted
 
 # Generate chemical unit-operation standard designs: rule templates -> PIDGraph fragment.
@@ -8,5 +8,5 @@ extends RefCounted
 
 # Generate a standard PID fragment from a unit-op definition and params.
 # 按单元操作定义与参数生成标准图片段。
-func generate_unit_op(def: UnitOperationDef, params: Dictionary) -> PIDGraph:
-	return PIDGraph.new()
+func gpGenerateUnitOp(gpDef: GPUnitOperationDef, gpParams: Dictionary) -> GPPIDGraph:
+	return GPPIDGraph.new()

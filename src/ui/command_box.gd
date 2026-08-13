@@ -1,4 +1,4 @@
-class_name CommandBox
+class_name GPCommandBox
 extends Control
 
 # CAD-style command input: LINE/RECT/TEXT/MOVE/COPY/ZOOM/ROTATE/DELETE + params.
@@ -8,7 +8,9 @@ extends Control
 # See Dev Guide §4.4.1.
 # 见开发指南 §4.4.1。
 
-signal command_entered(cmd: String)  # A command was entered / 命令输入完成
+# A command was entered
+# 命令输入完成
+signal gpCommandEntered(cmd: String)
 
 # TODO: parse command string -> Canvas2D / selection actions
 # TODO：解析命令字符串 → Canvas2D / 选择动作

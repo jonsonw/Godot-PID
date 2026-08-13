@@ -1,4 +1,4 @@
-class_name PID3DBuilder
+class_name GPPID3DBuilder
 extends RefCounted
 
 # Build / rebuild a 3D scene (Node3D) from a PIDGraph; listens to graph_changed.
@@ -8,5 +8,5 @@ extends RefCounted
 
 # Build a 3D scene from the graph.
 # 从图构建 3D 场景。
-func build(graph: PIDGraph) -> Node3D:
+func gpBuild(gpGraph: GPPIDGraph) -> Node3D:
 	return Node3D.new()
