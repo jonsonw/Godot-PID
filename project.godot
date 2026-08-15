@@ -22,6 +22,8 @@ config/features=PackedStringArray("4.7", "Forward Plus")
 
 [autoload]
 
+I18n="*res://src/autoload/i18n.gd"
+Settings="*res://src/autoload/settings.gd"
 GPAppState="*res://src/autoload/app_state.gd"
 
 [debug]
@@ -33,6 +35,9 @@ gdscript/warnings/unsafe_method_access=1
 
 window/size/viewport_width=1600
 window/size/viewport_height=900
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/size/display_scale=1
 
 [rendering]
 

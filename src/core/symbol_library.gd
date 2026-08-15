@@ -29,5 +29,32 @@ static func _gpMk(gpId: String, gpName: String, gpCat: String, gpSize: Vector2, 
 	gpD.gpPorts = gpPorts
 	return gpD
 
+
+# Group the default defs by category. The left palette injects one collapsible
+# section per category from this map.
+# 按类目分组默认图元。左栏据此为每个类目注入一个可折叠分组。
+static func list_by_category() -> Dictionary:
+	var gpOut: Dictionary = {}
+	for gpD in gpDefaultDefs():
+		if not gpOut.has(gpD.gpCategory):
+			gpOut[gpD.gpCategory] = []
+		gpOut[gpD.gpCategory].append(gpD)
+	return gpOut
+
+
+# Fuzzy match by display name / id / category (case-insensitive substring).
+# 按显示名 / id / 类目做不区分大小写的子串匹配。
+static func search(gpQ: String) -> Array[GPSymbolDef]:
+	var gpOut: Array[GPSymbolDef] = []
+	var gpNeedle: String = gpQ.strip_edges().to_lower()
+	if gpNeedle == "":
+		return gpDefaultDefs()
+	for gpD in gpDefaultDefs():
+		var gpHay: String = "%s %s %s" % [gpD.gpDisplayName, gpD.gpId, gpD.gpCategory]
+		if gpHay.to_lower().contains(gpNeedle):
+			gpOut.append(gpD)
+	return gpOut
+
+
 # TODO: discover_packs() — scan built-in / project / user symbol_packs dirs (Dev Guide §4.2.2).
 # TODO：discover_packs() —— 扫描内置/项目/用户三处 symbol_packs 目录（见开发指南 §4.2.2）。

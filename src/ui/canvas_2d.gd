@@ -14,6 +14,10 @@ extends Control
 
 signal gpGraphChanged
 
+# Status snapshot for the bottom status bar: selection id, zoom, cursor world pos.
+# 底部状态栏用的状态快照：选中 id、缩放、光标世界坐标。
+signal gpStatusUpdated(info: Dictionary)
+
 enum GPMode { GP_SELECT, GP_CONNECT }
 
 var gpGraph: GPPIDGraph
@@ -37,10 +41,26 @@ var _gpPanStart: Vector2 = Vector2.ZERO
 var _gpPanOffsetStart: Vector2 = Vector2.ZERO
 var _gpDragId: String = ""
 var _gpDragOffset: Vector2 = Vector2.ZERO
+var _gpLastMouseWorld: Vector2 = Vector2.ZERO
+
+
+# Build and emit a status snapshot for the status bar.
+# 构造并发送状态栏快照。
+func _gpEmitStatus() -> void:
+	gpStatusUpdated.emit({
+		"selection": gpSelectedId,
+		"zoom": gpViewZoom,
+		"world": _gpLastMouseWorld,
+	})
 
 
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
+	# Redraw the canvas when language or symbol font/style changes so the
+	# symbol labels stay in sync.
+	# 语言或图元字体/字号变化时重绘，保持图元文字同步。
+	I18n.gpLocaleChanged.connect(queue_redraw)
+	Settings.gpSymbolStyleChanged.connect(queue_redraw)
 
 
 # ============================ transform ============================
@@ -116,12 +136,14 @@ func _gpDrawNode(gpN: Dictionary) -> void:
 	if gpN["label"] != "":
 		gpLabel = gpN["label"]
 	elif gpDef:
-		gpLabel = gpDef.gpDisplayName
+		gpLabel = I18n.gpTr(gpDef.gpDisplayName)
 	else:
 		gpLabel = gpN["type"]
 	var gpTp: Vector2 = gpTopleft + Vector2(0, gpSz.y / 2.0 + 7.0)
-	var gpFont: Font = ThemeDB.fallback_font
-	draw_string(gpFont, gpTp, gpLabel, HORIZONTAL_ALIGNMENT_CENTER, gpSz.x, 14, Color(0.07, 0.07, 0.07))
+	# Symbol label uses the dedicated symbol font (separate size/family from UI).
+	# 图元文字使用独立的图元字体（字号/字体均与界面分离）。
+	var gpFont: Font = Settings.gpSymbolFont if Settings.gpSymbolFont != null else ThemeDB.fallback_font
+	draw_string(gpFont, gpTp, gpLabel, HORIZONTAL_ALIGNMENT_CENTER, gpSz.x, Settings.gpSymbolFontSize, Color(0.07, 0.07, 0.07))
 
 	if gpDef:
 		for gpP in gpDef.gpPorts:
@@ -202,15 +224,18 @@ func _gui_input(gpEvent: InputEvent) -> void:
 			return
 
 	if gpEvent is InputEventMouseMotion:
+		_gpLastMouseWorld = gpWorldFromScreen(gpEvent.position)
 		if _gpPanning:
 			gpViewOffset = _gpPanOffsetStart + (gpEvent.position - _gpPanStart)
 			queue_redraw()
+			_gpEmitStatus()
 			accept_event()
 			return
 		if _gpDragId != "":
 			var gpWorld: Vector2 = gpWorldFromScreen(gpEvent.position)
 			_gpSetNodePos(_gpDragId, gpWorld + _gpDragOffset)
 			queue_redraw()
+			_gpEmitStatus()
 			accept_event()
 			return
 
@@ -221,11 +246,15 @@ func _gpOnLeftDown(gpScreen: Vector2) -> void:
 	if gpPendingDef != null:
 		var gpNid: String = "n%d" % gpNextId
 		gpNextId += 1
-		gpGraph.gpAddNode(gpNid, gpPendingDef.gpId, gpPendingDef.gpDisplayName, gpWorld, {})
+		# Leave the label empty so the canvas renders the localized type name and
+		# it switches with the UI language. The user can still type a custom label.
+		# 标签留空，使画布显示本地化的类型名并随界面语言切换；用户仍可在属性面板填自定义标签。
+		gpGraph.gpAddNode(gpNid, gpPendingDef.gpId, "", gpWorld, {})
 		gpSelectedId = gpNid
 		gpPendingDef = null
 		queue_redraw()
 		gpGraphChanged.emit()
+		_gpEmitStatus()
 		return
 
 	var gpHit: String = _gpHitTest(gpWorld)
@@ -251,6 +280,7 @@ func _gpOnLeftDown(gpScreen: Vector2) -> void:
 		_gpDragId = gpHit
 		_gpDragOffset = _gpNodeCenter(gpHit) - gpWorld
 	queue_redraw()
+	_gpEmitStatus()
 
 
 func _gpZoomAt(gpScreen: Vector2, gpFactor: float) -> void:
@@ -260,3 +290,19 @@ func _gpZoomAt(gpScreen: Vector2, gpFactor: float) -> void:
 	var gpScreenAfter: Vector2 = gpScreenFromWorld(gpWorldBefore)
 	gpViewOffset += gpScreen - gpScreenAfter
 	queue_redraw()
+	_gpEmitStatus()
+
+
+# Public: zoom by a step centered on the canvas (menu "放大/缩小").
+# 公开：以画布中心为锚点缩放一步（菜单「放大/缩小」）。
+func gpZoomStep(gpFactor: float) -> void:
+	_gpZoomAt(size / 2.0, gpFactor)
+
+
+# Public: reset view to 100% centered (menu "适应窗口").
+# 公开：重置视图为 100% 居中（菜单「适应窗口」）。
+func gpResetView() -> void:
+	gpViewZoom = 1.0
+	gpViewOffset = size / 2.0
+	queue_redraw()
+	_gpEmitStatus()

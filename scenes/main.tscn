@@ -1,14 +1,124 @@
-[gd_scene load_steps=2 format=3 uid="uid://bpidcanvas2d1"]
+[gd_scene format=3 uid="uid://bpidcanvas2d1"]
 
-[ext_resource type="Script" path="res://src/ui/main_window.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://bdoaykku0msu7" path="res://src/ui/main_window.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://b3ayy6hfswvr8" path="res://src/ui/menu_bar.gd" id="2_menu"]
+[ext_resource type="Script" uid="uid://bll6tv3v6dfoj" path="res://src/ui/toolbar.gd" id="3_tool"]
+[ext_resource type="Script" uid="uid://c2431udgl31up" path="res://src/ui/canvas_2d.gd" id="4_canvas"]
+[ext_resource type="Script" uid="uid://ci382atp5x3al" path="res://src/ui/inspector.gd" id="5_insp"]
 
-[node name="Main" type="Control"]
+[node name="Main" type="Control" unique_id=326015921]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_right = 1600.0
-offset_bottom = 900.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_main")
+
+[node name="VLayout" type="VBoxContainer" parent="." unique_id=1159863758]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MenuBar" type="HBoxContainer" parent="VLayout" unique_id=1870940421]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 0
+script = ExtResource("2_menu")
+
+[node name="Body" type="HBoxContainer" parent="VLayout" unique_id=694064960]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="LeftDock" type="VBoxContainer" parent="VLayout/Body" unique_id=649335995]
+custom_minimum_size = Vector2(210, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+size_flags_vertical = 3
+script = ExtResource("3_tool")
+
+[node name="Center" type="VBoxContainer" parent="VLayout/Body" unique_id=1107960308]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="Canvas" type="Control" parent="VLayout/Body/Center" unique_id=498836006]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("4_canvas")
+
+[node name="RightDock" type="VBoxContainer" parent="VLayout/Body" unique_id=877787881]
+custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+size_flags_vertical = 3
+
+[node name="InspectorTabs" type="TabContainer" parent="VLayout/Body/RightDock" unique_id=1366913025]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+current_tab = 0
+
+[node name="PropTab" type="ScrollContainer" parent="VLayout/Body/RightDock/InspectorTabs" unique_id=2127552532]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("5_insp")
+metadata/_tab_index = 0
+
+[node name="FormRoot" type="VBoxContainer" parent="VLayout/Body/RightDock/InspectorTabs/PropTab" unique_id=1928374650]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="InfoTab" type="VBoxContainer" parent="VLayout/Body/RightDock/InspectorTabs" unique_id=1505941465]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+metadata/_tab_index = 1
+
+[node name="InfoLabel" type="Label" parent="VLayout/Body/RightDock/InspectorTabs/InfoTab" unique_id=873585893]
+layout_mode = 2
+text = "（未选中对象）"
+
+[node name="DocTab" type="VBoxContainer" parent="VLayout/Body/RightDock/InspectorTabs" unique_id=985477261]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+metadata/_tab_index = 2
+
+[node name="DocLabel" type="Label" parent="VLayout/Body/RightDock/InspectorTabs/DocTab" unique_id=1901674038]
+layout_mode = 2
+text = "G-PID 工程
+文档元信息（标题 / 图号 / 版本）待接入。"
+
+[node name="StatusBar" type="HBoxContainer" parent="VLayout" unique_id=80879112]
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 0
+
+[node name="SelLabel" type="Label" parent="VLayout/StatusBar" unique_id=1357288580]
+layout_mode = 2
+text = "选中：—"
+
+[node name="CoordLabel" type="Label" parent="VLayout/StatusBar" unique_id=1989057180]
+layout_mode = 2
+text = "X: 0  Y: 0"
+
+[node name="ZoomLabel" type="Label" parent="VLayout/StatusBar" unique_id=85864903]
+layout_mode = 2
+text = "缩放：100%"
+
+[node name="StateLabel" type="Label" parent="VLayout/StatusBar" unique_id=1216158747]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "就绪"
