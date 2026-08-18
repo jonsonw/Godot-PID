@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120" width="160" height="120" data-isa="VAV" data-iso="ISO10628" data-tag-example="VAV-001">
+  <g fill="none" stroke="#000" stroke-width="2">
+    <line x1="10" y1="60" x2="55" y2="60"/>
+    <rect x="55" y="45" width="50" height="30" fill="none"/>
+    <line x1="105" y1="60" x2="150" y2="60"/>
+    <circle cx="80" cy="60" r="6" />
+    <text x="80" y="35" font-family="Arial" font-size="11" text-anchor="middle">Actuator</text>
+  </g>
+</svg>

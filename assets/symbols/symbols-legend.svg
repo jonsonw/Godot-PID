@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1200" width="600" height="800" data-iso="ISO10628" data-isa="ISA5.1">
+  <style>text{font-family:Arial, Helvetica, sans-serif; font-size:12px}</style>
+  <rect x="10" y="10" width="880" height="1180" fill="#fff" stroke="#000" stroke-width="1"/>
+  <text x="30" y="36" font-size="16" font-weight="bold">P&ID Symbols Legend — ISO 10628 / ISA 5.1 (sample set)</text>
+  <!-- row example: show small icon + label -->
+  <g transform="translate(30,60)">
+    <!-- FT -->
+    <g transform="translate(0,0)">
+      <circle cx="30" cy="30" r="20" fill="none" stroke="#000" stroke-width="2"/>
+      <text x="30" y="35" text-anchor="middle" font-size="12">FT</text>
+      <text x="80" y="35">FT — Flow Transmitter — FT_FlowTransmitter_001.svg</text>
+    </g>
+    <!-- CV -->
+    <g transform="translate(0,80)">
+      <line x1="10" y1="30" x2="40" y2="30" stroke="#000" stroke-width="2"/>
+      <polygon points="40,10 90,30 40,50" fill="none" stroke="#000" stroke-width="2"/>
+      <line x1="90" y1="30" x2="130" y2="30" stroke="#000" stroke-width="2"/>
+      <text x="150" y="35">CV — Control Valve — CV_ControlValve_001.svg</text>
+    </g>
+    <!-- Pump -->
+    <g transform="translate(0,160)">
+      <rect x="10" y="10" width="60" height="30" fill="none" stroke="#000" stroke-width="2"/>
+      <circle cx="40" cy="25" r="10" fill="none" stroke="#000" stroke-width="2"/>
+      <text x="150" y="35">P — Centrifugal Pump — P_CentrifugalPump_001.svg</text>
+    </g>
+    <!-- add more rows as needed; user can open individual SVGs for full graphics -->
+  </g>
+  <text x="30" y="1100" font-size="12">Notes: Each symbol file is standalone SVG with metadata attributes (data-isa, data-iso, data-tag-example). Adjust stroke-width for your presentation scale.</text>
+</svg>

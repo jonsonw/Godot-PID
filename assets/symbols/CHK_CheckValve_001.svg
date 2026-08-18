@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 120" width="140" height="120" data-isa="CHK" data-iso="ISO10628" data-tag-example="CHK-001">
+  <g fill="none" stroke="#000" stroke-width="2">
+    <line x1="10" y1="60" x2="45" y2="60"/>
+    <polygon points="45,40 85,60 45,80" fill="none"/>
+    <line x1="85" y1="60" x2="130" y2="60"/>
+    <text x="75" y="32" font-family="Arial" font-size="12" text-anchor="middle">CHK</text>
+  </g>
+</svg>

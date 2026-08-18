@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 140" width="140" height="140" data-isa="TK" data-iso="ISO10628" data-tag-example="TK-001">
+  <g fill="none" stroke="#000" stroke-width="2">
+    <rect x="30" y="30" width="80" height="80" rx="8" fill="none"/>
+    <line x1="30" y1="70" x2="110" y2="70" stroke-dasharray="4 2"/>
+    <text x="70" y="120" font-family="Arial" font-size="12" text-anchor="middle">Tank (TK)</text>
+  </g>
+</svg>
