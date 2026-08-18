@@ -58,14 +58,19 @@ const GP_MENUS: Dictionary = {
 }
 
 
+# Build the menu bar and connect locale refresh.
+# 构建菜单栏并连接语言刷新。
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
 	_gpRebuild()
 	I18n.gpLocaleChanged.connect(_gpRebuild)
 
 
+# Rebuild all menu buttons (used on startup and on locale change).
+# 重建所有菜单按钮（启动和语言变化时使用）。
 func _gpRebuild(gpLocale: String = "") -> void:
 	# Remove old menu buttons.
+	# 移除旧菜单按钮。
 	for gpC in get_children():
 		remove_child(gpC)
 		gpC.queue_free()
@@ -73,6 +78,8 @@ func _gpRebuild(gpLocale: String = "") -> void:
 		_gpAddMenu(gpTitleKey, GP_MENUS[gpTitleKey])
 
 
+# Add one top-level menu with its popup items.
+# 添加一个顶级菜单及其弹出项。
 func _gpAddMenu(gpTitleKey: String, gpItems: Array) -> void:
 	var gpBtn: MenuButton = MenuButton.new()
 	gpBtn.text = I18n.gpTr(gpTitleKey)
@@ -92,6 +99,8 @@ func _gpAddMenu(gpTitleKey: String, gpItems: Array) -> void:
 	add_child(gpBtn)
 
 
+# Forward a popup item press to the action signal.
+# 将弹出项点击转发为动作信号。
 func _gpOnPressed(gpIndex: int, gpPopup: PopupMenu) -> void:
 	var gpAction: String = gpPopup.get_item_metadata(gpIndex)
 	gpActionTriggered.emit(gpAction)

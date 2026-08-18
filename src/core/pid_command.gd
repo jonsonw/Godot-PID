@@ -10,6 +10,7 @@ extends RefCounted
 func gpApply(gpGraph: GPPIDGraph) -> void:
 	pass
 
+
 # Revert this command from the graph.
 # 从图中撤销该命令。
 func gpRevert(gpGraph: GPPIDGraph) -> void:

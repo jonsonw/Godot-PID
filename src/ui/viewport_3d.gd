@@ -6,8 +6,8 @@ extends SubViewport
 # See Dev Guide §4.4.
 # 见开发指南 §4.4。
 
-# 3D scene rebuilt / 3D
-# 场景已重建
+# 3D scene rebuilt
+# 3D 场景已重建
 signal gpGraphRebuilt()
 
 # TODO: observe PIDGraph.graph_changed -> PID3DBuilder.build()

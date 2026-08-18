@@ -11,26 +11,74 @@ extends Control
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
+# Active topology graph edited by the user.
+# 用户正在编辑的活动拓扑图。
 var gpGraph: GPPIDGraph
+
+# Available symbol definitions shown in the left palette.
+# 左栏显示的可用图元定义。
 var gpDefs: Array[GPSymbolDef] = []
 
 # ---- static node references (frozen in the scene) ----
 # ---- 静态节点引用（固化于场景） ----
+# Top menu bar.
+# 顶部菜单栏。
 var gpMenuBar: GPPIDMenuBar
+
+# Left symbol-library dock.
+# 左侧图元库停靠栏。
 var gpLeftDock: GPPIDToolbar
+
+# Main canvas control.
+# 主画布控件。
 var gpCanvas: GPCanvas2D
+
+# Right-side tab container.
+# 右侧标签页容器。
 var gpTabs: TabContainer
+
+# Property inspector (inside the right tab container).
+# 属性面板（在右侧标签页内）。
 var gpInspector: GPInspector
+
+# Info label on the Info tab.
+# 信息标签页上的信息标签。
 var gpInfoLabel: Label
+
+# Document metadata label on the Doc tab.
+# 文档标签页上的文档元数据标签。
 var gpDocLabel: Label
+
+# Status bar label showing the current selection.
+# 状态栏标签：显示当前选中。
 var gpSelLabel: Label
+
+# Status bar label showing the cursor coordinates.
+# 状态栏标签：显示光标坐标。
 var gpCoordLabel: Label
+
+# Status bar label showing the current zoom.
+# 状态栏标签：显示当前缩放。
 var gpZoomLabel: Label
+
+# Status bar label showing the current application state.
+# 状态栏标签：显示当前应用状态。
 var gpStateLabel: Label
 
+# Last selected node id, used to detect selection changes.
+# 上一次选中的节点 id，用于检测选中变化。
 var gpLastSel: String = ""
+
+# Last status snapshot received from the canvas.
+# 从画布接收到的上一个状态快照。
 var gpLastStatus: Dictionary = {"selection": "", "zoom": 1.0, "world": Vector2.ZERO}
+
+# Current state-bar i18n key.
+# 当前状态栏 i18n 键。
 var gpStateKey: String = "status.ready"
+
+# Arguments for the current state-bar format string.
+# 当前状态栏格式化字符串的参数。
 var gpStateArgs: Array = []
 
 # Last known screen index, used to detect a cross-monitor drag so we can refresh
@@ -40,7 +88,11 @@ var gpLastScreen: int = -1
 
 # Split containers that let the user drag the left/right dock widths.
 # 供用户拖动左/右停靠栏宽度的分隔容器。
+# Left/center split container the user can drag to resize the left dock.
+# 左/中分隔容器，用户可拖动以调整左停靠栏宽度。
 var gpBodySplit: HSplitContainer
+# Center/right split container the user can drag to resize the right dock.
+# 中/右分隔容器，用户可拖动以调整右停靠栏宽度。
 var gpCenterRightSplit: HSplitContainer
 
 # Previous window content width, used to scale dock sizes proportionally on resize.
@@ -51,17 +103,25 @@ var gpPrevWidth: int = 0
 # canvas = 3/5. These are the single source of truth; split offsets are always
 # derived from them so resizing is idempotent and a pure height change leaves the
 # widths untouched. Manual drags update these ratios so the user's layout sticks.
-# 停靠栏占*总*窗口宽度的比例。左 1/5、右 1/5、中间 3/5。它们是一致性来源，
+# 停靠栏占*总*窗口宽度的比例。左 1/5、右 1/5、中间画布 3/5。它们是一致性来源，
 # 分隔偏移始终由其推导，使缩放幂等、纯高度变化不改变宽度。手动拖拽会更新这些
 # 比例以保留用户布局。
+# Left dock width as a ratio of the total window width.
+# 左停靠栏占窗口总宽度的比例。
 var gpLeftRatio: float = 0.2
+# Right dock width as a ratio of the total window width.
+# 右停靠栏占窗口总宽度的比例。
 var gpRightRatio: float = 0.2
 
 
+# Wire the static scene together and set up initial state.
+# 将静态场景拼接起来并设置初始状态。
 func _ready() -> void:
 	gpGraph = GPPIDGraph.new()
 	gpDefs = GPSymbolLibrary.gpDefaultDefs()
 
+	# Fetch static nodes from the scene tree.
+	# 从场景树获取静态节点。
 	gpMenuBar = $VLayout/MenuBar
 	gpLeftDock = $VLayout/Body/LeftDock
 	gpBodySplit = $VLayout/Body
@@ -124,12 +184,16 @@ func _ready() -> void:
 
 # ============================ localization refresh ============================
 # ============================ 本地化刷新 ============================
+# React to locale change: refresh all static UI text and current panels.
+# 响应语言变化：刷新所有静态 UI 文本与当前面板。
 func _gpOnLocaleChanged(gpLocale: String) -> void:
 	_gpRefreshStaticText()
 	_gpOnStatus(gpLastStatus)
 	_gpRefreshSelection()
 
 
+# Refresh static labels that are not driven by individual widgets.
+# 刷新那些不由单个控件自行驱动的静态标签。
 func _gpRefreshStaticText() -> void:
 	gpTabs.set_tab_title(0, I18n.gpTr("prop.title"))
 	gpTabs.set_tab_title(1, I18n.gpTr("prop.info"))
@@ -140,6 +204,8 @@ func _gpRefreshStaticText() -> void:
 
 # ============================ left palette ============================
 # ============================ 左侧图元库 ============================
+# A symbol was picked from the left palette: switch to placement mode.
+# 从左侧图元库选中图元：切换到放置模式。
 func _gpOnSymbolPicked(gpTypeId: String) -> void:
 	gpCanvas.gpPendingDef = _gpDefFor(gpTypeId)
 	gpCanvas.gpMode = GPCanvas2D.GPMode.GP_SELECT
@@ -149,6 +215,8 @@ func _gpOnSymbolPicked(gpTypeId: String) -> void:
 	_gpSetState("status.symbol_picked", [gpName])
 
 
+# A tool button was pressed: select / connect / custom.
+# 工具按钮被按下：选择 / 连线 / 自定义。
 func _gpOnToolSelected(gpType: String) -> void:
 	if gpType == "select":
 		gpCanvas.gpMode = GPCanvas2D.GPMode.GP_SELECT
@@ -163,10 +231,14 @@ func _gpOnToolSelected(gpType: String) -> void:
 
 # ============================ canvas changes ============================
 # ============================ 画布变化 ============================
+# React to graph changes by refreshing the inspector for the current selection.
+# 图变化时刷新当前选中的属性面板。
 func _gpOnGraphChanged() -> void:
 	_gpRefreshSelection()
 
 
+# Update the status bar from a canvas status snapshot.
+# 根据画布状态快照更新状态栏。
 func _gpOnStatus(gpInfo: Dictionary) -> void:
 	gpLastStatus = gpInfo
 	var gpSel: String = gpInfo.get("selection", "")
@@ -185,6 +257,8 @@ func _gpOnStatus(gpInfo: Dictionary) -> void:
 
 # ============================ selection / inspector ============================
 # ============================ 选中 / 属性面板 ============================
+# Refresh the inspector and info tab for the currently selected node.
+# 为当前选中节点刷新属性面板与信息标签页。
 func _gpRefreshSelection() -> void:
 	var gpId: String = gpCanvas.gpSelectedId
 	if gpId == "":
@@ -210,6 +284,8 @@ func _gpRefreshSelection() -> void:
 		I18n.gpTr("info.size"), gpSize]
 
 
+# React to an attribute edit in the inspector.
+# 响应属性面板中的属性编辑。
 func _gpOnAttrChanged(gpId: String, gpKey: String, gpVal) -> void:
 	var gpNode: Dictionary = _gpNodeFor(gpId)
 	if gpNode.is_empty():
@@ -226,6 +302,8 @@ func _gpOnAttrChanged(gpId: String, gpKey: String, gpVal) -> void:
 
 # ============================ menu ============================
 # ============================ 菜单 ============================
+# Dispatch menu actions.
+# 分发菜单动作。
 func _gpOnMenu(gpAction: String) -> void:
 	match gpAction:
 		"file_new", "edit_clear":
@@ -253,12 +331,16 @@ func _gpOnMenu(gpAction: String) -> void:
 			_gpSetState("status.feature_todo", [gpAction])
 
 
+# Open the settings dialog.
+# 打开设置对话框。
 func _gpOpenSettings() -> void:
-	var gpDlg = load("res://scenes/settings_dialog.tscn").instantiate()
+	var gpDlg: Window = load("res://scenes/settings_dialog.tscn").instantiate()
 	add_child(gpDlg)
 	gpDlg.popup_centered()
 
 
+# Delete the currently selected node and any edges connected to it.
+# 删除当前选中的节点及其关联的边。
 func _gpDeleteSelected() -> void:
 	var gpId: String = gpCanvas.gpSelectedId
 	gpGraph.gpNodes = gpGraph.gpNodes.filter(func(gpN): return gpN["id"] != gpId)
@@ -270,6 +352,8 @@ func _gpDeleteSelected() -> void:
 
 # ============================ state helper ============================
 # ============================ 状态栏辅助 ============================
+# Set the status bar text by i18n key and optional format arguments.
+# 通过 i18n 键与可选格式化参数设置状态栏文本。
 func _gpSetState(gpKey: String, gpArgs: Array = []) -> void:
 	gpStateKey = gpKey
 	gpStateArgs = gpArgs
@@ -279,6 +363,8 @@ func _gpSetState(gpKey: String, gpArgs: Array = []) -> void:
 
 # ============================ HiDPI / multi-monitor ============================
 # ============================ HiDPI / 多显示器 ============================
+# Apply the OS screen scale to Godot's content scale factor and refresh fonts.
+# 将系统屏幕缩放比应用到 Godot 的 content_scale_factor 并刷新字体。
 func _gpApplyDpiScale() -> void:
 	# Explicitly sync Godot's content-scale factor to the OS-reported screen scale.
 	# On Retina this is ~2.0; on a 1080p external monitor it is 1.0. Without this,
@@ -299,6 +385,8 @@ func _gpApplyDpiScale() -> void:
 	Settings.gpApplyFontSize()
 
 
+# Detect when the window is dragged to another monitor.
+# 检测窗口被拖到另一台显示器时。
 func _gpOnWindowChanged() -> void:
 	var gpWin: Window = get_window()
 	if gpWin == null:
@@ -399,6 +487,8 @@ func _gpOnCenterRightDragged(gpOffset: int) -> void:
 
 # ============================ lookups ============================
 # ============================ 查找 ============================
+# Find a symbol definition by its id.
+# 按 id 查找图元定义。
 func _gpDefFor(gpTypeId: String) -> GPSymbolDef:
 	for gpD in gpDefs:
 		if gpD.gpId == gpTypeId:
@@ -406,6 +496,8 @@ func _gpDefFor(gpTypeId: String) -> GPSymbolDef:
 	return null
 
 
+# Find a graph node by its id.
+# 按 id 查找图节点。
 func _gpNodeFor(gpId: String) -> Dictionary:
 	for gpN in gpGraph.gpNodes:
 		if gpN["id"] == gpId:

@@ -9,25 +9,70 @@ extends Window
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
+# Dialog title label.
+# 对话框标题标签。
 var gpTitle: Label
+
+# UI font size label.
+# 界面字号标签。
 var gpFontLabel: Label
+
+# UI font size spin box.
+# 界面字号选择框。
 var gpFontSpin: SpinBox
+
+# UI font family label.
+# 界面字体标签。
 var gpUIFontLabel: Label
+
+# UI font family dropdown.
+# 界面字体下拉框。
 var gpUIFontOption: OptionButton
+
+# Symbol font size label.
+# 图元字号标签。
 var gpSymSizeLabel: Label
+
+# Symbol font size spin box.
+# 图元字号选择框。
 var gpSymSizeSpin: SpinBox
+
+# Symbol font family label.
+# 图元字体标签。
 var gpSymFontLabel: Label
+
+# Symbol font family dropdown.
+# 图元字体下拉框。
 var gpSymFontOption: OptionButton
+
+# Language label.
+# 语言标签。
 var gpLangLabel: Label
+
+# Language dropdown.
+# 语言下拉框。
 var gpLangOption: OptionButton
+
+# Auto-scale dock widths label.
+# 停靠栏自动缩放标签。
 var gpAutoScaleLabel: Label
+
+# Auto-scale dock widths checkbox.
+# 停靠栏自动缩放复选框。
 var gpAutoScaleCheck: CheckBox
+
+# OK button.
+# 确定按钮。
 var gpOk: Button
 
 
+# Build the dialog controls and bind signals.
+# 构建对话框控件并绑定信号。
 func _ready() -> void:
 	close_requested.connect(queue_free)
 
+	# Fetch nodes from the scene tree.
+	# 从场景树获取节点。
 	gpTitle = $Panel/VBox/Title
 	gpFontLabel = $Panel/VBox/UIRow/FontLabel
 	gpFontSpin = $Panel/VBox/UIRow/FontSpin
@@ -43,21 +88,29 @@ func _ready() -> void:
 	gpAutoScaleCheck = $Panel/VBox/AutoScaleRow/AutoScaleCheck
 	gpOk = $Panel/VBox/OK
 
+	# UI font size spinner.
+	# 界面字号选择器。
 	gpFontSpin.min_value = 8
 	gpFontSpin.max_value = 32
 	gpFontSpin.step = 1
 	gpFontSpin.value = Settings.gpFontSize
 	gpFontSpin.value_changed.connect(_gpOnFontChanged)
 
+	# Font dropdowns.
+	# 字体下拉框。
 	_gpFillFontOptions(gpUIFontOption, Settings.gpFontKey, _gpOnUIFontSelected)
 	_gpFillFontOptions(gpSymFontOption, Settings.gpSymbolFontKey, _gpOnSymFontSelected)
 
+	# Symbol font size spinner.
+	# 图元字号选择器。
 	gpSymSizeSpin.min_value = 8
 	gpSymSizeSpin.max_value = 48
 	gpSymSizeSpin.step = 1
 	gpSymSizeSpin.value = Settings.gpSymbolFontSize
 	gpSymSizeSpin.value_changed.connect(_gpOnSymSizeChanged)
 
+	# Language dropdown.
+	# 语言下拉框。
 	gpLangOption.clear()
 	gpLangOption.add_item(I18n.gpTr("settings.lang_zh"), 0)
 	gpLangOption.set_item_metadata(0, "zh")
@@ -66,6 +119,8 @@ func _ready() -> void:
 	_gpSelectLocale(Settings.gpLocale)
 	gpLangOption.item_selected.connect(_gpOnLangSelected)
 
+	# Auto-scale checkbox.
+	# 自动缩放复选框。
 	gpAutoScaleCheck.button_pressed = Settings.gpAutoScale
 	gpAutoScaleCheck.toggled.connect(_gpOnAutoScaleToggled)
 
@@ -92,12 +147,16 @@ func _gpFillFontOptions(gpOpt: OptionButton, gpCurrentKey: String, gpCb: Callabl
 	gpOpt.item_selected.connect(gpCb)
 
 
+# Handle UI font size changes.
+# 处理界面字号变化。
 func _gpOnFontChanged(gpVal: float) -> void:
 	Settings.gpFontSize = int(gpVal)
 	Settings.gpApplyFontSize()
 	Settings.gpSave()
 
 
+# Handle UI font family selection.
+# 处理界面字体选择。
 func _gpOnUIFontSelected(gpIdx: int) -> void:
 	var gpKey: String = gpUIFontOption.get_item_metadata(gpIdx)
 	if gpKey == Settings.gpFontKey:
@@ -107,12 +166,16 @@ func _gpOnUIFontSelected(gpIdx: int) -> void:
 	Settings.gpSave()
 
 
+# Handle symbol font size changes.
+# 处理图元字号变化。
 func _gpOnSymSizeChanged(gpVal: float) -> void:
 	Settings.gpSymbolFontSize = int(gpVal)
 	Settings.gpApplySymbolStyle()
 	Settings.gpSave()
 
 
+# Handle symbol font family selection.
+# 处理图元字体选择。
 func _gpOnSymFontSelected(gpIdx: int) -> void:
 	var gpKey: String = gpSymFontOption.get_item_metadata(gpIdx)
 	if gpKey == Settings.gpSymbolFontKey:
@@ -122,6 +185,8 @@ func _gpOnSymFontSelected(gpIdx: int) -> void:
 	Settings.gpSave()
 
 
+# Handle language selection.
+# 处理语言选择。
 func _gpOnLangSelected(gpIdx: int) -> void:
 	var gpCode: String = gpLangOption.get_item_metadata(gpIdx)
 	if gpCode == Settings.gpLocale:
@@ -131,12 +196,16 @@ func _gpOnLangSelected(gpIdx: int) -> void:
 	Settings.gpSave()
 
 
+# Handle auto-scale toggle.
+# 处理自动缩放切换。
 func _gpOnAutoScaleToggled(gpOn: bool) -> void:
 	Settings.gpAutoScale = gpOn
 	Settings.gpApplyFontSize()
 	Settings.gpSave()
 
 
+# Select the language dropdown item matching the given locale code.
+# 选中与给定语言代码匹配的语言下拉项。
 func _gpSelectLocale(gpCode: String) -> void:
 	for gpI in range(gpLangOption.item_count):
 		if gpLangOption.get_item_metadata(gpI) == gpCode:
@@ -144,6 +213,8 @@ func _gpSelectLocale(gpCode: String) -> void:
 			return
 
 
+# Refresh all locale-dependent texts in the dialog.
+# 刷新对话框中所有依赖语言的文本。
 func _gpRefreshText(gpLocale: String) -> void:
 	gpTitle.text = I18n.gpTr("settings.title")
 	gpFontLabel.text = I18n.gpTr("settings.font_size")
@@ -163,6 +234,8 @@ func _gpRefreshText(gpLocale: String) -> void:
 	_gpRefreshFontOptionLabels(gpSymFontOption)
 
 
+# Refresh the displayed labels of font dropdown items.
+# 刷新字体下拉项的显示标签。
 func _gpRefreshFontOptionLabels(gpOpt: OptionButton) -> void:
 	for gpI in range(gpOpt.item_count):
 		var gpKey: String = gpOpt.get_item_metadata(gpI)

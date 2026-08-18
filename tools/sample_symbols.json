@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "size": 100.0,
+  "standard_ref": "ISO 10628 (sample)",
+  "symbols": [
+    {
+      "id": "pump_centrifugal",
+      "display_name": "Pump Centrifugal",
+      "category": "pump",
+      "standard_ref": "ISO 10628 (sample)",
+      "default_size": [
+        64,
+        64
+      ],
+      "ports": [],
+      "attrs_schema": {},
+      "shape": {
+        "paths": [
+          {
+            "pts": [
+              [
+                25.0,
+                65.0
+              ],
+              [
+                75.0,
+                65.0
+              ],
+              [
+                50.0,
+                25.0
+              ],
+              [
+                25.0,
+                65.0
+              ]
+            ],
+            "closed": true
+          }
+        ],
+        "circles": [
+          {
+            "c": [
+              50.0,
+              50.0
+            ],
+            "r": 50.0
+          }
+        ],
+        "rects": []
+      }
+    },
+    {
+      "id": "tank_vertical",
+      "display_name": "Tank Vertical",
+      "category": "tank",
+      "standard_ref": "ISO 10628 (sample)",
+      "default_size": [
+        64,
+        64
+      ],
+      "ports": [],
+      "attrs_schema": {},
+      "shape": {
+        "paths": [
+          {
+            "pts": [
+              [
+                25.0,
+                37.5
+              ],
+              [
+                75.0,
+                37.5
+              ]
+            ],
+            "closed": false
+          }
+        ],
+        "circles": [],
+        "rects": [
+          {
+            "pos": [
+              25.0,
+              0.0
+            ],
+            "size": [
+              50.0,
+              100.0
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

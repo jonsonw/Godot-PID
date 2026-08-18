@@ -7,9 +7,11 @@ extends RefCounted
 # Local anonymous user id
 # 本地匿名用户 id
 var gpUserId: String = "local"
-# Role: owner in v1.0 / v1.0
-# 中角色恒为 owner
+
+# Role: owner in v1.0
+# 角色：v1.0 中恒为 owner
 var gpRole: String = "owner"
+
 # Auth token (empty until Pro)
 # 鉴权令牌（Pro 前为空）
 var gpToken: String = ""

@@ -12,9 +12,16 @@ This guide explains how to add symbols, run tests, and submit pull requests.
 ### How to contribute code
 - Fork the repo and create a feature branch.
 - Follow the coding rules: every variable declares its type explicitly; containers use typed arrays (e.g. `Array[SymbolDef]`).
-- Write class comments as **English line + Chinese line**.
+- Comments are **bilingual** — an English line immediately followed by its Chinese translation — and **mandatory** in coverage (see "Comment standard" below).
 - Add or update GUT tests under `tests/`.
 - Open a PR with a clear description.
+
+### Comment standard（强制 / mandatory）
+All source comments are **bilingual**: an English line immediately followed by its Chinese translation. Coverage is mandatory:
+- **Every declaration is commented**: `class_name` (with a class doc block), `const`, `enum` (and each value), `signal`, member `var`, local `var`, and any `Resource` / `RefCounted` subtype.
+- **Every function is commented**: one line stating what it does (bilingual where helpful).
+- **Every non-trivial block inside a function is commented**: `for` / `while` loops, `if` / `elif` / `else` branches, and meaningful step groupings.
+- Code identifiers stay in English; Chinese appears only in comments.
 
 ### Running tests
 - Install the GUT plugin, then run `tests/` from the Godot editor (Project → Tools → GUT).
@@ -45,9 +52,16 @@ Do **not** rename: Godot virtual methods (`_ready`, `_draw`, `_gui_input`, `_pro
 ### 如何贡献代码
 - Fork 仓库并新建功能分支。
 - 遵守编码规范：所有变量显式声明类型；容器使用带类型数组（如 `Array[SymbolDef]`）。
-- 类注释写成**英文一行 + 中文一行**。
+- 注释为**双语**——英文一行紧接中文一行——且**强制覆盖**（详见下方「注释规范」）。
 - 在 `tests/` 下新增或更新 GUT 测试。
 - 提交带清晰说明的 PR。
+
+### 注释规范（强制）
+所有源码注释均为**双语**：英文一行紧接中文一行。覆盖范围强制：
+- **每个声明都要注释**：`class_name`（附类文档块）、`const`、`enum`（含每个枚举值）、`signal`、成员变量 `var`、局部变量 `var`、以及任何 `Resource` / `RefCounted` 子类型。
+- **每个函数都要注释**：说明它做什么（必要时双语）。
+- **函数内每个非平凡功能块都要注释**：`for` / `while` 循环、`if` / `elif` / `else` 分支、关键步骤。
+- 代码标识符一律英文，中文只出现在注释里。
 
 ### 运行测试
 - 安装 GUT 插件，在 Godot 编辑器内运行 `tests/`（Project → Tools → GUT）。

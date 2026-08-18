@@ -9,6 +9,7 @@ extends Control
 # Search text changed
 # 搜索文本变化
 signal gpQueryChanged(q: String)
+
 # A symbol was picked
 # 选中某图元
 signal gpSymbolPicked(type: String)

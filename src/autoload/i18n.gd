@@ -8,8 +8,12 @@ extends Node
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
+# Emitted when the active locale changes, carrying the new locale code.
+# 活动语言变化时发出，携带新的语言代码。
 signal gpLocaleChanged(locale: String)
 
+# Current active locale code.
+# 当前活动语言代码。
 var gpLocale: String = "zh"
 
 # Translation table: key -> { "zh": ..., "en": ... }.

@@ -20,6 +20,8 @@ extends Node
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
+# Path to the persisted settings file.
+# 持久化设置文件的路径。
 const GP_CONFIG_PATH: String = "user://settings.cfg"
 
 # Font preset registry: key -> { "zh", "en", "res" | "names" }.
@@ -45,10 +47,24 @@ const GP_FONT_PRESETS: Dictionary = {
 				   "names": ["Menlo", "PingFang SC", "Microsoft YaHei"] },
 }
 
+# Current UI font size.
+# 当前界面字号。
 var gpFontSize: int = 16
+
+# Current locale code.
+# 当前语言代码。
 var gpLocale: String = "en"
+
+# Current UI font preset key.
+# 当前界面字体预设键。
 var gpFontKey: String = "arial_cjk"
+
+# Current symbol font preset key.
+# 当前图元字体预设键。
 var gpSymbolFontKey: String = "hiragino"
+
+# Current symbol font size.
+# 当前图元字号。
 var gpSymbolFontSize: int = 16
 
 # When true, the dock (left/right panel) widths scale proportionally with the
@@ -70,6 +86,8 @@ var gpSymbolFont: Font = null
 signal gpSymbolStyleChanged
 
 
+# Load settings from disk and apply them.
+# 从磁盘加载设置并应用。
 func _ready() -> void:
 	gpLoad()
 	gpApply()
