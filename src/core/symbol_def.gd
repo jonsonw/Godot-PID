@@ -40,12 +40,17 @@ enum GPSymbolCategory { GP_EQUIPMENT, GP_VALVE, GP_PIPE, GP_FITTING, GP_INSULATI
 # 用户可填写的属性模板。
 @export var gpAttrsSchema: Dictionary = {}
 
-# Vector shape spec (normalized to a 0..100 box) for native rendering; empty means
-# "draw the default rectangle fallback". Keys: paths[{pts:[[x,y]...], closed:bool}],
-# circles[{c:[cx,cy], r}], rects[{pos:[x,y], size:[w,h]}]. Produced by tools/svg_to_gpsym.py.
-# 矢量形状规格（归一化到 0..100 方框）用于原生渲染；为空表示「绘制默认矩形兜底」。
+# Vector shape spec for native rendering; empty means "draw the default rectangle fallback".
+# 矢量形状规格用于原生渲染；为空表示「绘制默认矩形兜底」。
+# Coordinates are NORMALIZED PER AXIS into a 0..100 box: x = svgX / width * 100,
+# y = svgY / height * 100 (see tools/gen_openpid_defs.py). GPSymbolView._gpDrawShape then
+# scales each axis independently by gpDefaultSize/100 and centers on the node, so the symbol
+# keeps its native aspect ratio and its ports line up with the drawn endpoints.
+# 坐标按轴归一化到 0..100：x = svgX / width * 100、y = svgY / height * 100（见 tools/gen_openpid_defs.py）。
+# GPSymbolView._gpDrawShape 随后按 gpDefaultSize/100 对各轴独立缩放并以节点居中，使图元保持原生比例、
+# 且端口与绘制端点精确对齐。
+# Keys: paths[{pts:[[x,y]...], closed:bool}], circles[{c:[cx,cy], r}], rects[{pos:[x,y], size:[w,h]}].
 # 键：paths[{pts:[[x,y]...], closed:bool}]、circles[{c:[cx,cy], r}]、rects[{pos:[x,y], size:[w,h]}]。
-# 由 tools/svg_to_gpsym.py 生成。
 @export var gpShape: Dictionary = {}
 
 

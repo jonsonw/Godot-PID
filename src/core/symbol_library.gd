@@ -10,15 +10,26 @@ extends RefCounted
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
+# Preloaded generator output: open-pid-icons vector symbol defs (MIT, upstream tbo47).
+# 预加载生成器产物：open-pid-icons 矢量图元定义（MIT，上游 tbo47）。
+# Regenerate with: python3 tools/gen_openpid_defs.py
+const GPOpidDefs := preload("res://src/core/open_pid_icons_defs.gd")
+
 # Return the default built-in symbol definitions.
 # 返回默认内置图元定义。
 static func gpDefaultDefs() -> Array[GPSymbolDef]:
 	var gpOut: Array[GPSymbolDef] = []
+	# Built-in generic placeholders for categories open-pid-icons does not (yet) cover.
+	# open-pid-icons supplies real vector valves/tanks, so we drop the generic "valve"/"tank"
+	# stubs and use the vector ones instead.
+	# 内置通用占位图元，覆盖 open-pid-icons 暂未提供的类目。open-pid-icons 已提供真实矢量
+	# 阀门/储罐，故移除通用 valve/tank 占位、改用矢量版本。
 	gpOut.append(_gpMk("pump",       "泵",       "pump",       Vector2(80, 56), [{"name": "in", "pos": [-40, 0]}, {"name": "out", "pos": [40, 0]}]))
-	gpOut.append(_gpMk("tank",       "储罐",     "tank",       Vector2(80, 80), [{"name": "in", "pos": [0, -40]}, {"name": "out", "pos": [0, 40]}]))
-	gpOut.append(_gpMk("valve",      "阀门",     "valve",      Vector2(48, 48), [{"name": "in", "pos": [-24, 0]}, {"name": "out", "pos": [24, 0]}]))
 	gpOut.append(_gpMk("instrument", "仪表",     "instrument", Vector2(56, 56), [{"name": "in", "pos": [-28, 0]}]))
 	gpOut.append(_gpMk("heatex",     "换热器",   "heat",       Vector2(84, 64), [{"name": "in", "pos": [-42, 0]}, {"name": "out", "pos": [42, 0]}]))
+	# Real vector symbols from the open-pid-icons pack (6 defs: 5 valves + 1 tank).
+	# open-pid-icons 图元包中的真实矢量图元（6 个：5 阀门 + 1 储罐）。
+	gpOut.append_array(GPOpidDefs.gpDefs())
 	return gpOut
 
 

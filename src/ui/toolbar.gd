@@ -9,6 +9,10 @@ extends VBoxContainer
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
+# Preloaded custom palette item that draws a thumbnail + label.
+# 预加载的自定义图元库条目，负责绘制缩略图与标签。
+const GPSymbolPaletteItem := preload("res://src/ui/symbol_palette_item.gd")
+
 # A symbol was picked from the library (its type id).
 # 从图元库选中某图元（返回其 type id）。
 signal gpSymbolPicked(type: String)
@@ -138,19 +142,18 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 			gpByCat[gpD.gpCategory] = []
 		gpByCat[gpD.gpCategory].append(gpD)
 
-	# Create a header and buttons for each category.
-	# 为每个类目创建标题与按钮。
+	# Create a header and thumbnail items for each category.
+	# 为每个类目创建标题与缩略图条目。
 	for gpCat in gpByCat.keys():
 		var gpHeader: Label = Label.new()
 		gpHeader.text = "▾ %s" % I18n.gpTr(gpCat)
 		gpVbox.add_child(gpHeader)
 		for gpD in gpByCat[gpCat]:
-			var gpB: Button = Button.new()
-			gpB.text = I18n.gpTr(gpD.gpDisplayName)
-			gpB.alignment = HORIZONTAL_ALIGNMENT_LEFT
-			gpB.size_flags_horizontal = SIZE_EXPAND_FILL
-			gpB.pressed.connect(_gpOnPick.bind(gpD.gpId))
-			gpVbox.add_child(gpB)
+			var gpItem: GPSymbolPaletteItem = GPSymbolPaletteItem.new()
+			gpItem.gpDef = gpD
+			gpItem.size_flags_horizontal = SIZE_EXPAND_FILL
+			gpItem.gpPicked.connect(_gpOnPick)
+			gpVbox.add_child(gpItem)
 
 
 # Refresh all locale-dependent texts.

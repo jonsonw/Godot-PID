@@ -8,6 +8,10 @@ extends Node2D
 # It does not own authoritative state; the graph is the single source of truth.
 # 它不持有权威状态；图数据是唯一真相来源。
 
+# Preloaded shared painter used for rendering vector shapes.
+# 预加载的共享绘制器，用于渲染矢量形状。
+const GPSymbolPainter := preload("res://src/render/symbol_painter.gd")
+
 # Bound graph node id.
 # 绑定的图节点 id。
 var gpNodeId: String = ""
@@ -76,23 +80,29 @@ func _draw() -> void:
 	var gpTopleft: Vector2 = -gpSz / 2.0
 	var gpRect: Rect2 = Rect2(gpTopleft, gpSz)
 
-	var gpBaseCol: Color = _gpCategoryColor(gpDef.gpCategory) if gpDef != null else Color(0.6, 0.6, 0.6)
+	# Resolve base color and override it when selected or acting as connect source.
+	# 解析基础颜色，并在选中或作为连线起点时覆盖为高亮色。
+	var gpBaseCol: Color = GPSymbolPainter.gpCategoryColor(gpDef.gpCategory) if gpDef != null else Color(0.6, 0.6, 0.6)
 	var gpFill: Color = gpBaseCol
+	var gpStroke: Color = gpBaseCol.lightened(0.25)
 	if gpSelected:
 		gpFill = Color(1.0, 0.85, 0.2)
+		gpStroke = Color(1.0, 1.0, 1.0)
 	elif gpConnectSource:
 		gpFill = Color(0.3, 1.0, 0.4)
+		gpStroke = Color(1.0, 1.0, 1.0)
 
 	# Border width is kept constant in world units; world_root scale makes it zoom uniformly.
 	# 边框宽度保持世界单位常量；world_root 的缩放使其统一随缩放变化。
 	var gpBorder: float = 2.0
+
 	# If the definition carries a vector shape spec, render it natively (crisp at any zoom).
 	# 若定义带有矢量形状规格，则原生渲染（任意缩放均清晰）。
 	if gpDef != null and not gpDef.gpShape.is_empty():
-		_gpDrawShape(gpDef.gpShape, gpSz, gpFill, gpBorder)
+		GPSymbolPainter.gpDrawShape(self, gpDef.gpShape, gpRect, gpFill, gpStroke, gpBorder)
 	else:
 		draw_rect(gpRect, gpFill, true)
-		draw_rect(gpRect, Color(0.05, 0.05, 0.05), false, gpBorder)
+		draw_rect(gpRect, gpStroke, false, gpBorder)
 
 	# Resolve the label: custom label -> localized display name -> type id.
 	# 解析标签：自定义标签 → 本地化显示名 → 类型 id。
@@ -104,10 +114,12 @@ func _draw() -> void:
 	else:
 		gpLabel = gpNode.get("type", "")
 
+	# Draw the label just below the symbol so it stays readable on the dark canvas.
+	# 在图元正下方绘制标签，使其在深色画布上仍清晰可读。
 	var gpFont: Font = Settings.gpSymbolFont if Settings.gpSymbolFont != null else ThemeDB.fallback_font
 	var gpFontSz: int = maxi(1, Settings.gpSymbolFontSize)
 	var gpTp: Vector2 = gpTopleft + Vector2(0.0, gpSz.y / 2.0 + 7.0)
-	draw_string(gpFont, gpTp, gpLabel, HORIZONTAL_ALIGNMENT_CENTER, gpSz.x, gpFontSz, Color(0.07, 0.07, 0.07))
+	draw_string(gpFont, gpTp, gpLabel, HORIZONTAL_ALIGNMENT_CENTER, gpSz.x, gpFontSz, Color(0.9, 0.9, 0.9))
 
 	# Draw connection ports if the symbol definition provides them.
 	# 如果图元定义提供了端口，则绘制连接端口。
@@ -115,53 +127,4 @@ func _draw() -> void:
 		var gpPortR: float = 4.0
 		for gpP in gpDef.gpPorts:
 			var gpLp: Vector2 = Vector2(float(gpP["pos"][0]), float(gpP["pos"][1]))
-			draw_circle(gpLp, gpPortR, Color(0.1, 0.1, 0.1))
-
-
-# Render a normalized vector shape spec (0..100 box) scaled into gpSz and centered on the node.
-# 渲染归一化矢量形状规格（0..100 方框），缩放到 gpSz 并以节点中心对齐。
-func _gpDrawShape(gpShape: Dictionary, gpSz: Vector2, gpFill: Color, gpBorder: float) -> void:
-	# Scale factor from the normalized 0..100 box to the node's pixel size.
-	# 归一化 0..100 方框到节点像素尺寸的缩放系数。
-	var gpK: float = gpSz.x / 100.0
-	# Draw paths (open polylines or closed polygons).
-	# 绘制路径（开放折线或闭合多边形）。
-	var gpPaths: Array = gpShape.get("paths", [])
-	for gpP in gpPaths:
-		var gpPts: Array = gpP.get("pts", [])
-		if gpPts.is_empty():
-			continue
-		var gpVecs: PackedVector2Array = PackedVector2Array()
-		for gpPt in gpPts:
-			gpVecs.append(Vector2(float(gpPt[0]) * gpK - gpSz.x / 2.0, float(gpPt[1]) * gpK - gpSz.y / 2.0))
-		if gpP.get("closed", false):
-			draw_polygon(gpVecs, PackedColorArray([gpFill]))
-		draw_polyline(gpVecs, Color(0.05, 0.05, 0.05), gpBorder)
-	# Draw circles (filled then outlined).
-	# 绘制圆（先填充再描边）。
-	var gpCircles: Array = gpShape.get("circles", [])
-	for gpC in gpCircles:
-		var gpCtr: Vector2 = Vector2(float(gpC["c"][0]) * gpK - gpSz.x / 2.0, float(gpC["c"][1]) * gpK - gpSz.y / 2.0)
-		var gpR: float = float(gpC["r"]) * gpK
-		draw_circle(gpCtr, gpR, gpFill, true)
-		draw_circle(gpCtr, gpR, Color(0.05, 0.05, 0.05), false, gpBorder)
-	# Draw rectangles (filled then outlined).
-	# 绘制矩形（先填充再描边）。
-	var gpRects: Array = gpShape.get("rects", [])
-	for gpRd in gpRects:
-		var gpPos: Vector2 = Vector2(float(gpRd["pos"][0]) * gpK - gpSz.x / 2.0, float(gpRd["pos"][1]) * gpK - gpSz.y / 2.0)
-		var gpSize: Vector2 = Vector2(float(gpRd["size"][0]) * gpK, float(gpRd["size"][1]) * gpK)
-		draw_rect(Rect2(gpPos, gpSize), gpFill, true)
-		draw_rect(Rect2(gpPos, gpSize), Color(0.05, 0.05, 0.05), false, gpBorder)
-
-
-# Map a category string to a base fill color.
-# 将类目字符串映射到基础填充色。
-func _gpCategoryColor(gpCat: String) -> Color:
-	match gpCat:
-		"pump":       return Color(0.30, 0.62, 0.95)
-		"tank":       return Color(0.40, 0.80, 0.55)
-		"valve":      return Color(0.95, 0.65, 0.25)
-		"instrument": return Color(0.85, 0.45, 0.85)
-		"heat":       return Color(0.95, 0.45, 0.45)
-		_:            return Color(0.65, 0.68, 0.75)
+			draw_circle(gpLp, gpPortR, gpStroke)

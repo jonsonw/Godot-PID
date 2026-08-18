@@ -105,6 +105,13 @@ const GP_STRINGS: Dictionary = {
 	"仪表":     { "zh": "仪表",     "en": "Instrument" },
 	"换热器":   { "zh": "换热器",   "en": "Heat Exchanger" },
 
+	# ---- open-pid-icons vector symbol display names ----
+	"闸阀":       { "zh": "闸阀",       "en": "Gate valve" },
+	"手动闸阀":   { "zh": "手动闸阀",   "en": "Hand operated gate valve" },
+	"手动截止阀": { "zh": "手动截止阀", "en": "Hand operated globe valve" },
+	"旋转阀":     { "zh": "旋转阀",     "en": "Rotary valve" },
+	"止回阀":     { "zh": "止回阀",     "en": "Check valve" },
+
 	# ---- built-in categories ----
 	"pump":       { "zh": "泵",       "en": "Pump" },
 	"tank":       { "zh": "储罐",     "en": "Tank" },
