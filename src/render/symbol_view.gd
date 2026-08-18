@@ -8,10 +8,24 @@ extends Node2D
 # It does not own authoritative state; the graph is the single source of truth.
 # 它不持有权威状态；图数据是唯一真相来源。
 
+# Bound graph node id.
+# 绑定的图节点 id。
 var gpNodeId: String = ""
+
+# Bound graph node dictionary.
+# 绑定的图节点字典。
 var gpNode: Dictionary = {}
+
+# Bound symbol definition (may be null for unknown types).
+# 绑定的图元定义（未知类型时可能为 null）。
 var gpDef: GPSymbolDef = null
+
+# Whether this symbol is currently selected.
+# 当前是否被选中。
 var gpSelected: bool = false
+
+# Whether this symbol is the source of an in-progress connection.
+# 当前是否为正在进行的连线的起点。
 var gpConnectSource: bool = false
 
 
@@ -40,12 +54,14 @@ func gpSetConnectSource(gpSrc: bool) -> void:
 	queue_redraw()
 
 
-# Sync the world position from the underlying graph node.
-# 从底层图节点同步世界坐标位置。
+# Public wrapper to sync the world position from the graph node.
+# 公开包装：从图节点同步世界坐标位置。
 func gpUpdateTransform() -> void:
 	_gpUpdateTransform()
 
 
+# Sync position from the underlying graph node.
+# 从底层图节点同步位置。
 func _gpUpdateTransform() -> void:
 	if gpNode.is_empty():
 		return
@@ -53,6 +69,8 @@ func _gpUpdateTransform() -> void:
 	position = Vector2(float(gpPos[0]), float(gpPos[1]))
 
 
+# Draw the symbol shape, label, ports and highlights.
+# 绘制图元形状、标签、端口和高亮。
 func _draw() -> void:
 	var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef != null else Vector2(64.0, 48.0)
 	var gpTopleft: Vector2 = -gpSz / 2.0
@@ -68,9 +86,16 @@ func _draw() -> void:
 	# Border width is kept constant in world units; world_root scale makes it zoom uniformly.
 	# 边框宽度保持世界单位常量；world_root 的缩放使其统一随缩放变化。
 	var gpBorder: float = 2.0
-	draw_rect(gpRect, gpFill, true)
-	draw_rect(gpRect, Color(0.05, 0.05, 0.05), false, gpBorder)
+	# If the definition carries a vector shape spec, render it natively (crisp at any zoom).
+	# 若定义带有矢量形状规格，则原生渲染（任意缩放均清晰）。
+	if gpDef != null and not gpDef.gpShape.is_empty():
+		_gpDrawShape(gpDef.gpShape, gpSz, gpFill, gpBorder)
+	else:
+		draw_rect(gpRect, gpFill, true)
+		draw_rect(gpRect, Color(0.05, 0.05, 0.05), false, gpBorder)
 
+	# Resolve the label: custom label -> localized display name -> type id.
+	# 解析标签：自定义标签 → 本地化显示名 → 类型 id。
 	var gpLabel: String
 	if gpNode.get("label", "") != "":
 		gpLabel = gpNode["label"]
@@ -84,6 +109,8 @@ func _draw() -> void:
 	var gpTp: Vector2 = gpTopleft + Vector2(0.0, gpSz.y / 2.0 + 7.0)
 	draw_string(gpFont, gpTp, gpLabel, HORIZONTAL_ALIGNMENT_CENTER, gpSz.x, gpFontSz, Color(0.07, 0.07, 0.07))
 
+	# Draw connection ports if the symbol definition provides them.
+	# 如果图元定义提供了端口，则绘制连接端口。
 	if gpDef != null:
 		var gpPortR: float = 4.0
 		for gpP in gpDef.gpPorts:
@@ -91,6 +118,45 @@ func _draw() -> void:
 			draw_circle(gpLp, gpPortR, Color(0.1, 0.1, 0.1))
 
 
+# Render a normalized vector shape spec (0..100 box) scaled into gpSz and centered on the node.
+# 渲染归一化矢量形状规格（0..100 方框），缩放到 gpSz 并以节点中心对齐。
+func _gpDrawShape(gpShape: Dictionary, gpSz: Vector2, gpFill: Color, gpBorder: float) -> void:
+	# Scale factor from the normalized 0..100 box to the node's pixel size.
+	# 归一化 0..100 方框到节点像素尺寸的缩放系数。
+	var gpK: float = gpSz.x / 100.0
+	# Draw paths (open polylines or closed polygons).
+	# 绘制路径（开放折线或闭合多边形）。
+	var gpPaths: Array = gpShape.get("paths", [])
+	for gpP in gpPaths:
+		var gpPts: Array = gpP.get("pts", [])
+		if gpPts.is_empty():
+			continue
+		var gpVecs: PackedVector2Array = PackedVector2Array()
+		for gpPt in gpPts:
+			gpVecs.append(Vector2(float(gpPt[0]) * gpK - gpSz.x / 2.0, float(gpPt[1]) * gpK - gpSz.y / 2.0))
+		if gpP.get("closed", false):
+			draw_polygon(gpVecs, PackedColorArray([gpFill]))
+		draw_polyline(gpVecs, Color(0.05, 0.05, 0.05), gpBorder)
+	# Draw circles (filled then outlined).
+	# 绘制圆（先填充再描边）。
+	var gpCircles: Array = gpShape.get("circles", [])
+	for gpC in gpCircles:
+		var gpCtr: Vector2 = Vector2(float(gpC["c"][0]) * gpK - gpSz.x / 2.0, float(gpC["c"][1]) * gpK - gpSz.y / 2.0)
+		var gpR: float = float(gpC["r"]) * gpK
+		draw_circle(gpCtr, gpR, gpFill, true)
+		draw_circle(gpCtr, gpR, Color(0.05, 0.05, 0.05), false, gpBorder)
+	# Draw rectangles (filled then outlined).
+	# 绘制矩形（先填充再描边）。
+	var gpRects: Array = gpShape.get("rects", [])
+	for gpRd in gpRects:
+		var gpPos: Vector2 = Vector2(float(gpRd["pos"][0]) * gpK - gpSz.x / 2.0, float(gpRd["pos"][1]) * gpK - gpSz.y / 2.0)
+		var gpSize: Vector2 = Vector2(float(gpRd["size"][0]) * gpK, float(gpRd["size"][1]) * gpK)
+		draw_rect(Rect2(gpPos, gpSize), gpFill, true)
+		draw_rect(Rect2(gpPos, gpSize), Color(0.05, 0.05, 0.05), false, gpBorder)
+
+
+# Map a category string to a base fill color.
+# 将类目字符串映射到基础填充色。
 func _gpCategoryColor(gpCat: String) -> Color:
 	match gpCat:
 		"pump":       return Color(0.30, 0.62, 0.95)

@@ -13,11 +13,21 @@ extends ScrollContainer
 # 属性被编辑：节点 id、属性键、新值。
 signal gpAttrChanged(gpId: String, key: String, val)
 
+# Root container for the form widgets.
+# 表单控件的根容器。
 var gpFormRoot: VBoxContainer
+
+# Symbol definition of the currently inspected node.
+# 当前查看节点的图元定义。
 var gpCurrentDef: GPSymbolDef = null
+
+# Copy of the currently inspected node dictionary.
+# 当前查看节点字典的副本。
 var gpCurrentNode: Dictionary = {}
 
 
+# Find the form root and show the empty hint.
+# 找到表单根并显示空提示。
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
 	gpFormRoot = $FormRoot
@@ -31,6 +41,8 @@ func gpShow(gpDef: GPSymbolDef, gpNode: Dictionary) -> void:
 	gpCurrentDef = gpDef
 	gpCurrentNode = gpNode.duplicate()
 
+	# Clear existing form.
+	# 清空已有表单。
 	for gpC in gpFormRoot.get_children():
 		gpFormRoot.remove_child(gpC)
 		gpC.queue_free()
@@ -39,6 +51,8 @@ func gpShow(gpDef: GPSymbolDef, gpNode: Dictionary) -> void:
 		_gpShowEmpty()
 		return
 
+	# Header with localized symbol name.
+	# 带本地化图元名的标题。
 	var gpHead: Label = Label.new()
 	gpHead.text = "▾ %s" % I18n.gpTr(gpDef.gpDisplayName)
 	gpFormRoot.add_child(gpHead)
@@ -73,6 +87,8 @@ func gpShow(gpDef: GPSymbolDef, gpNode: Dictionary) -> void:
 		gpFormRoot.add_child(gpLbl)
 
 		if gpFieldType == "enum":
+			# Enum field: use an OptionButton.
+			# 枚举字段：使用下拉选项按钮。
 			var gpOpt: OptionButton = OptionButton.new()
 			gpOpt.size_flags_horizontal = SIZE_EXPAND_FILL
 			for gpO in gpSpec.get("options", []):
@@ -84,6 +100,8 @@ func gpShow(gpDef: GPSymbolDef, gpNode: Dictionary) -> void:
 			gpOpt.item_selected.connect(func(gpI: int): gpAttrChanged.emit(gpNode["id"], gpKey, gpOpt.get_item_text(gpI)))
 			gpFormRoot.add_child(gpOpt)
 		else:
+			# Default string field: use a LineEdit.
+			# 默认字符串字段：使用单行输入框。
 			var gpEdit: LineEdit = LineEdit.new()
 			gpEdit.size_flags_horizontal = SIZE_EXPAND_FILL
 			gpEdit.text = String(gpNode.get("attrs", {}).get(gpKey, ""))
@@ -91,6 +109,8 @@ func gpShow(gpDef: GPSymbolDef, gpNode: Dictionary) -> void:
 			gpFormRoot.add_child(gpEdit)
 
 
+# Show the empty-selection hint.
+# 显示未选中提示。
 func _gpShowEmpty() -> void:
 	gpCurrentDef = null
 	gpCurrentNode = {}
@@ -99,6 +119,8 @@ func _gpShowEmpty() -> void:
 	gpFormRoot.add_child(gpHint)
 
 
+# Rebuild the form when the locale changes.
+# 语言变化时重建表单。
 func _gpOnLocaleChanged(gpLocale: String) -> void:
 	if gpCurrentDef == null or gpCurrentNode.is_empty():
 		_gpShowEmpty()

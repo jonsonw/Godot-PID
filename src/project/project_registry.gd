@@ -15,15 +15,18 @@ signal gpRegistryChanged()
 func gpListProjects() -> Array:
 	return []
 
+
 # Register a project path.
 # 登记一个工程路径。
 func gpRegister(gpPath: String) -> void:
 	pass
 
+
 # Unregister a project path.
 # 注销一个工程路径。
 func gpUnregister(gpPath: String) -> void:
 	pass
+
 
 # Recent project paths (most recent first).
 # 最近打开的工程路径（最新在前）。

@@ -9,19 +9,27 @@ extends RefCounted
 # Unique instance id, e.g. "e-1"
 # 唯一实例 id，如 "e-1"
 var gpInstanceId: String = ""
+
 # Reference to a port: {node_id, port_id}
 # 端口引用：{node_id, port_id}
 var gpFromRef: Dictionary = {}
+
+# Reference to the destination port: {node_id, port_id}
+# 目标端口引用：{node_id, port_id}
 var gpToRef: Dictionary = {}
+
 # Edge kind: PROCESS / SIGNAL / ...
 # 连线类型：PROCESS（工艺）/ SIGNAL（信号）/ ...
 var gpKind: String = "PROCESS"
+
 # Polyline points for the edge
 # 连线的折线路径点
 var gpRouting: Array[Vector2] = []
+
 # Process tag, e.g. "PL-201"
 # 工艺位号，如 "PL-201"
 var gpTag: String = ""
+
 # Extra attributes
 # 附加属性
 var gpAttrs: Dictionary = {}

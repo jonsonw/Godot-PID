@@ -11,6 +11,7 @@ extends RefCounted
 # Drawing mode changed
 # 绘制模式变化
 signal gpModeChanged(shape: String)
+
 # A primitive was drawn
 # 基元绘制完成
 signal gpShapeDrawn(node)

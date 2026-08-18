@@ -9,6 +9,7 @@ extends Control
 # User submitted text
 # 用户提交文本
 signal gpSubmit(text: String)
+
 # A preview fragment is ready
 # 预览片段就绪
 signal gpPreviewReady(frag)

@@ -8,28 +8,34 @@ extends Resource
 # See Dev Guide §4.5 / §4.6.2.
 # 见开发指南 §4.5 / §4.6.2。
 
-# A1 in mm / A1
-# 幅面（毫米）
+# Sheet size in millimeters (A1 default).
+# 幅面尺寸，单位为毫米（默认 A1）。
 var gpSheetSize: Vector2 = Vector2(841, 594)
-# Border line width / margin / columns
-# 边框线宽/留边/分栏
+
+# Border line width / margin / columns.
+# 边框线宽/留边/分栏。
 var gpBorderStyle: Dictionary = {}
-# Project/no/design/check/date/scale/revision
-# 标题栏字段
+
+# Title block fields: project/no/design/check/date/scale/revision.
+# 标题栏字段。
 var gpTitleBlock: Dictionary = {}
-# Revision history rows
-# 版次表行
+
+# Revision history rows.
+# 版次表行。
 var gpRevisionTable: Array[Dictionary] = []
+
 
 # Serialize to dictionary.
 # 序列化为字典。
 func _gpToDict() -> Dictionary:
 	return {}
 
+
 # Restore from dictionary.
 # 从字典还原。
 func _gpFromDict(gpData: Dictionary) -> void:
 	pass
+
 
 # Apply an enterprise frame template by name.
 # 按名称套用企业图框模板。

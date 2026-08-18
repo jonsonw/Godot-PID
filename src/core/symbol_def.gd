@@ -12,23 +12,45 @@ extends Resource
 # 待模型成熟后迁移到本枚举。
 enum GPSymbolCategory { GP_EQUIPMENT, GP_VALVE, GP_PIPE, GP_FITTING, GP_INSULATION, GP_INSTRUMENT, GP_INSTRUMENT_SIGNAL, GP_ELECTRICAL, GP_ANNOTATION }
 
+# Unique symbol id, e.g. "pump".
+# 唯一图元 id，如 "pump"。
 @export var gpId: String = ""
+
+# Human-readable display name, e.g. "泵".
+# 人类可读的显示名，如 "泵"。
 @export var gpDisplayName: String = ""
+
 # Category bucket: general / valve / tank / pump / instrument ...
 # 分类桶：general（通用）/ valve（阀门）/ tank（储罐）/ pump（泵）/ instrument（仪表）...
 @export var gpCategory: String = "general"
+
 # Path to an SVG/PNG icon, e.g. res://assets/symbols/xxx.svg
 # 图标路径，如 res://assets/symbols/xxx.svg
 @export var gpIconPath: String = ""
+
+# Default size on canvas, in pixels.
+# 画布上的默认尺寸，以像素为单位。
 @export var gpDefaultSize: Vector2 = Vector2(64, 64)
+
 # Port list: [{"name":"in","pos":[-32,0]},{"name":"out","pos":[32,0]}]
 # 端口列表：[{"name":"in","pos":[-32,0]},{"name":"out","pos":[32,0]}]
 @export var gpPorts: Array[Dictionary] = []
+
 # Attribute template the user can fill in.
 # 用户可填写的属性模板。
 @export var gpAttrsSchema: Dictionary = {}
 
+# Vector shape spec (normalized to a 0..100 box) for native rendering; empty means
+# "draw the default rectangle fallback". Keys: paths[{pts:[[x,y]...], closed:bool}],
+# circles[{c:[cx,cy], r}], rects[{pos:[x,y], size:[w,h]}]. Produced by tools/svg_to_gpsym.py.
+# 矢量形状规格（归一化到 0..100 方框）用于原生渲染；为空表示「绘制默认矩形兜底」。
+# 键：paths[{pts:[[x,y]...], closed:bool}]、circles[{c:[cx,cy], r}]、rects[{pos:[x,y], size:[w,h]}]。
+# 由 tools/svg_to_gpsym.py 生成。
+@export var gpShape: Dictionary = {}
 
+
+# Serialize this symbol definition to a dictionary.
+# 将本图元定义序列化为字典。
 func gpToDict() -> Dictionary:
 	return {
 		"id": gpId,
@@ -38,4 +60,19 @@ func gpToDict() -> Dictionary:
 		"default_size": [gpDefaultSize.x, gpDefaultSize.y],
 		"ports": gpPorts.duplicate(),
 		"attrs_schema": gpAttrsSchema.duplicate(),
+		"shape": gpShape.duplicate(),
 	}
+
+
+# Rebuild this symbol definition from a dictionary (inverse of gpToDict).
+# 从字典重建本图元定义（gpToDict 的逆操作）。
+func gpFromDict(gpD: Dictionary) -> void:
+	gpId = gpD.get("id", "")
+	gpDisplayName = gpD.get("display_name", "")
+	gpCategory = gpD.get("category", "general")
+	gpIconPath = gpD.get("icon_path", "")
+	var gpSz: Array = gpD.get("default_size", [64.0, 64.0])
+	gpDefaultSize = Vector2(float(gpSz[0]), float(gpSz[1]))
+	gpPorts = gpD.get("ports", [])
+	gpAttrsSchema = gpD.get("attrs_schema", {})
+	gpShape = gpD.get("shape", {})

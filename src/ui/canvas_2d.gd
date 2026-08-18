@@ -1,7 +1,11 @@
 class_name GPCanvas2D
 extends Control
 
+# Preloaded view classes used for incremental node/edge rendering.
+# 增量式图元/连线渲染所用的视图类（预加载）。
 const GPSymbolView := preload("res://src/render/symbol_view.gd")
+# Preloaded edge view class for incremental edge rendering.
+# 增量式连线渲染所用的连线视图类（预加载）。
 const GPEdgeView := preload("res://src/render/edge_view.gd")
 
 # 2D canvas implemented with a Node2D world_root.
@@ -13,47 +17,100 @@ const GPEdgeView := preload("res://src/render/edge_view.gd")
 # Coding rule: every variable must declare its type explicitly (including container types).
 # 编码规范：所有变量均显式声明类型（含容器类型）。
 
+# Emitted when the graph data changes (node added, moved, edge added, etc.).
+# 图数据变化时发出（节点新增、移动、连线新增等）。
 signal gpGraphChanged
 
 # Status snapshot for the bottom status bar: selection id, zoom, cursor world pos.
 # 底部状态栏用的状态快照：选中 id、缩放、光标世界坐标。
 signal gpStatusUpdated(info: Dictionary)
 
+# Interaction modes: select/move symbols or connect them with edges.
+# 交互模式：选择/移动图元，或为图元连线。
 enum GPMode { GP_SELECT, GP_CONNECT }
 
+# The topology graph this canvas displays and edits.
+# 本画布显示并编辑的拓扑图。
 var gpGraph: GPPIDGraph
+
+# Available symbol definitions used to create new nodes.
+# 用于创建新节点的可用图元定义。
 var gpDefs: Array[GPSymbolDef] = []
+
+# Monotonically increasing id counter for new nodes and edges.
+# 新节点与新边的单调递增 id 计数器。
 var gpNextId: int = 1
 
 # ---- world root ----
 # ---- 世界根节点 ----
+# Node2D that holds all symbol/edge view nodes and carries the camera transform.
+# 承载所有图元/连线视图节点并承载相机变换的 Node2D。
 var gpWorldRoot: Node2D = null
 
 # ---- camera ----
 # ---- 相机 ----
+# Canvas pixel offset of the world origin (0,0).
+# 世界原点 (0,0) 在画布上的像素偏移。
 var gpViewOffset: Vector2 = Vector2.ZERO
+
+# Current zoom factor (1.0 = 100%).
+# 当前缩放系数（1.0 = 100%）。
 var gpViewZoom: float = 1.0
 
 # ---- interaction state ----
 # ---- 交互状态 ----
+# Current interaction mode.
+# 当前交互模式。
 var gpMode: int = GPMode.GP_SELECT
+
+# Symbol definition waiting to be placed by the next left click.
+# 等待下一次左键放置的图元定义。
 var gpPendingDef: GPSymbolDef = null
+
+# Id of the currently selected node.
+# 当前选中节点的 id。
 var gpSelectedId: String = ""
+
+# Id of the node selected as the connection source.
+# 被选为连线起点的节点 id。
 var gpConnectFrom: String = ""
 
+# Whether the user is currently middle-button panning.
+# 用户是否正在中键平移。
 var _gpPanning: bool = false
+
+# Mouse position where panning started.
+# 开始平移时的鼠标位置。
 var _gpPanStart: Vector2 = Vector2.ZERO
+
+# View offset when panning started.
+# 开始平移时的视图偏移。
 var _gpPanOffsetStart: Vector2 = Vector2.ZERO
+
+# Id of the node being dragged.
+# 正在被拖拽的节点 id。
 var _gpDragId: String = ""
+
+# Offset from node center to mouse when dragging started.
+# 开始拖拽时节点中心到鼠标的偏移。
 var _gpDragOffset: Vector2 = Vector2.ZERO
+
+# Last known mouse position in world coordinates.
+# 最近一次鼠标在世界坐标系中的位置。
 var _gpLastMouseWorld: Vector2 = Vector2.ZERO
 
 # View caches: id -> view node. Used for incremental sync instead of full rebuild.
 # 视图缓存：id → 视图节点。用于增量同步而非全量重建。
+# Incremental view cache for symbols: symbol id -> GPSymbolView node.
+# 图元增量视图缓存：图元 id → GPSymbolView 节点。
 var _gpSymbolViews: Dictionary = {}
+# Incremental view cache for edges: edge id -> GPEdgeView node.
+# 连线增量视图缓存：连线 id → GPEdgeView 节点。
 var _gpEdgeViews: Dictionary = {}
 
 
+# Initialize the canvas: create world root and connect global signals.
+# 初始化画布：创建世界根节点并连接全局信号。
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
 	# Create the world root. All symbol/edge views live here so they share one transform.
@@ -68,10 +125,14 @@ func _ready() -> void:
 	_gpResetView()
 
 
+# React to language change by refreshing symbol labels.
+# 语言变化时刷新图元标签。
 func _gpOnLocaleChanged(_gpLocale: String) -> void:
 	_gpRefreshSymbols()
 
 
+# React to symbol font/style change by refreshing symbol labels.
+# 图元字体/样式变化时刷新图元标签。
 func _gpOnSymbolStyleChanged() -> void:
 	_gpRefreshSymbols()
 
@@ -88,12 +149,16 @@ func _gpEmitStatus() -> void:
 
 # ============================ camera / transform ============================
 # ============================ 相机 / 坐标变换 ============================
+# Reset the camera to 100% zoom and center the world origin.
+# 将相机重置为 100% 缩放并把世界原点居中。
 func _gpResetView() -> void:
 	gpViewZoom = 1.0
 	gpViewOffset = size / 2.0
 	_gpApplyCamera()
 
 
+# Apply gpViewOffset and gpViewZoom to the world root.
+# 将 gpViewOffset 与 gpViewZoom 应用到世界根节点。
 func _gpApplyCamera() -> void:
 	if gpWorldRoot == null:
 		return
@@ -101,16 +166,22 @@ func _gpApplyCamera() -> void:
 	gpWorldRoot.scale = Vector2(gpViewZoom, gpViewZoom)
 
 
+# Convert a world coordinate to a screen coordinate.
+# 将世界坐标转换为屏幕坐标。
 func gpScreenFromWorld(w: Vector2) -> Vector2:
 	return w * gpViewZoom + gpViewOffset
 
 
+# Convert a screen coordinate to a world coordinate.
+# 将屏幕坐标转换为世界坐标。
 func gpWorldFromScreen(gpS: Vector2) -> Vector2:
 	return (gpS - gpViewOffset) / gpViewZoom
 
 
 # ============================ drawing (background only) ============================
 # ============================ 绘制（仅背景） ============================
+# Godot calls this when the canvas needs to redraw the background overlay.
+# Godot 在需要重绘背景覆盖层时调用此方法。
 func _draw() -> void:
 	# Sync the node tree with the graph before drawing the background overlay.
 	# 在绘制背景覆盖层之前，先把节点树与图数据同步。
@@ -120,6 +191,8 @@ func _draw() -> void:
 	_gpDrawConnectPreview()
 
 
+# Draw the background grid aligned to the world coordinate system.
+# 绘制与世界坐标系对齐的背景网格。
 func _gpDrawGrid() -> void:
 	var gpStep: float = 50.0 * gpViewZoom
 	if gpStep < 8.0:
@@ -127,10 +200,14 @@ func _gpDrawGrid() -> void:
 	var gpStartX: int = int(fmod(gpViewOffset.x, gpStep))
 	var gpStartY: int = int(fmod(gpViewOffset.y, gpStep))
 	var gpCol: Color = Color(0.22, 0.24, 0.30, 0.6)
+	# Vertical grid lines.
+	# 垂直网格线。
 	var x: int = gpStartX
 	while x < int(size.x):
 		draw_line(Vector2(x, 0), Vector2(x, size.y), gpCol, 1.0)
 		x += int(gpStep)
+	# Horizontal grid lines.
+	# 水平网格线。
 	var y: int = gpStartY
 	while y < int(size.y):
 		draw_line(Vector2(0, y), Vector2(size.x, y), gpCol, 1.0)
@@ -150,6 +227,8 @@ func _gpDrawConnectPreview() -> void:
 
 # ============================ view sync ============================
 # ============================ 视图同步 ============================
+# Sync both symbol views and edge views to the current graph state.
+# 将图元视图与连线视图同步到当前图状态。
 func _gpSyncViews() -> void:
 	if gpGraph == null or gpWorldRoot == null:
 		return
@@ -157,6 +236,8 @@ func _gpSyncViews() -> void:
 	_gpSyncEdgeViews()
 
 
+# Incrementally sync symbol view nodes with gpGraph.gpNodes.
+# 增量同步图元视图节点与 gpGraph.gpNodes。
 func _gpSyncSymbolViews() -> void:
 	var gpFresh: Dictionary = {}
 	for gpN in gpGraph.gpNodes:
@@ -165,10 +246,14 @@ func _gpSyncSymbolViews() -> void:
 			continue
 		var gpV: GPSymbolView = null
 		if _gpSymbolViews.has(gpId):
+			# Reuse existing view and update its bound data.
+			# 复用已有视图并更新绑定数据。
 			gpV = _gpSymbolViews[gpId] as GPSymbolView
 			gpV.gpNode = gpN
 			gpV.gpUpdateTransform()
 		else:
+			# Create a new view for this node.
+			# 为该节点创建新视图。
 			gpV = GPSymbolView.new()
 			var gpDef: GPSymbolDef = _gpDefFor(gpN.get("type", ""))
 			gpV.gpInit(gpN, gpDef)
@@ -185,6 +270,8 @@ func _gpSyncSymbolViews() -> void:
 	_gpSymbolViews = gpFresh
 
 
+# Incrementally sync edge view nodes with gpGraph.gpEdges.
+# 增量同步连线视图节点与 gpGraph.gpEdges。
 func _gpSyncEdgeViews() -> void:
 	var gpFresh: Dictionary = {}
 	for gpE in gpGraph.gpEdges:
@@ -193,10 +280,14 @@ func _gpSyncEdgeViews() -> void:
 			continue
 		var gpV: GPEdgeView = null
 		if _gpEdgeViews.has(gpId):
+			# Reuse existing view and update its bound data.
+			# 复用已有视图并更新绑定数据。
 			gpV = _gpEdgeViews[gpId] as GPEdgeView
 			gpV.gpEdge = gpE
 			gpV.queue_redraw()
 		else:
+			# Create a new view for this edge.
+			# 为该连线创建新视图。
 			gpV = GPEdgeView.new()
 			gpV.gpInit(gpE, gpGraph)
 			gpWorldRoot.add_child(gpV)
@@ -210,6 +301,8 @@ func _gpSyncEdgeViews() -> void:
 	_gpEdgeViews = gpFresh
 
 
+# Queue redraw on all symbol views.
+# 令所有图元视图重新绘制。
 func _gpRefreshSymbols() -> void:
 	for gpId in _gpSymbolViews.keys():
 		var gpV: GPSymbolView = _gpSymbolViews[gpId] as GPSymbolView
@@ -218,6 +311,8 @@ func _gpRefreshSymbols() -> void:
 
 # ============================ lookup ============================
 # ============================ 查找 ============================
+# Find a symbol definition by its id.
+# 按 id 查找图元定义。
 func _gpDefFor(gpTypeId: String) -> GPSymbolDef:
 	for gpD in gpDefs:
 		if gpD.gpId == gpTypeId:
@@ -225,6 +320,8 @@ func _gpDefFor(gpTypeId: String) -> GPSymbolDef:
 	return null
 
 
+# Find the world center of a node by id.
+# 按 id 查找节点的世界中心。
 func _gpNodeCenter(gpId: String) -> Vector2:
 	for gpN in gpGraph.gpNodes:
 		if gpN.get("id", "") == gpId:
@@ -233,6 +330,8 @@ func _gpNodeCenter(gpId: String) -> Vector2:
 	return Vector2.INF
 
 
+# Hit-test: return the id of the topmost node under the given world point.
+# 命中测试：返回指定世界坐标点下最上层节点的 id。
 func _gpHitTest(gpWorld: Vector2) -> String:
 	var gpBest: String = ""
 	for gpN in gpGraph.gpNodes:
@@ -246,6 +345,8 @@ func _gpHitTest(gpWorld: Vector2) -> String:
 	return gpBest
 
 
+# Update the position of a graph node in-place.
+# 就地更新图节点的位置。
 func _gpSetNodePos(gpId: String, gpWorld: Vector2) -> void:
 	for gpN in gpGraph.gpNodes:
 		if gpN.get("id", "") == gpId:
@@ -255,15 +356,21 @@ func _gpSetNodePos(gpId: String, gpWorld: Vector2) -> void:
 
 # ============================ input ============================
 # ============================ 输入 ============================
+# Handle all mouse input events for the canvas.
+# 处理画布的所有鼠标输入事件。
 func _gui_input(gpEvent: InputEvent) -> void:
 	if gpEvent is InputEventMouseButton:
 		var gpMouseEvent: InputEventMouseButton = gpEvent as InputEventMouseButton
+		# Mouse wheel zooms in/out at the cursor position.
+		# 鼠标滚轮在光标位置缩放。
 		if gpMouseEvent.button_index == MOUSE_BUTTON_WHEEL_UP or gpMouseEvent.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			if gpMouseEvent.pressed:
 				var gpFactor: float = 1.0 if gpMouseEvent.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0
 				_gpZoomAt(gpMouseEvent.position, gpFactor)
 			accept_event()
 			return
+		# Middle button starts/ends panning.
+		# 中键开始/结束平移。
 		if gpMouseEvent.button_index == MOUSE_BUTTON_MIDDLE:
 			if gpMouseEvent.pressed:
 				_gpPanning = true
@@ -273,6 +380,8 @@ func _gui_input(gpEvent: InputEvent) -> void:
 				_gpPanning = false
 			accept_event()
 			return
+		# Left button places, selects or connects symbols.
+		# 左键放置、选择或连接图元。
 		if gpMouseEvent.button_index == MOUSE_BUTTON_LEFT:
 			if gpMouseEvent.pressed:
 				_gpOnLeftDown(gpMouseEvent.position)
@@ -284,6 +393,8 @@ func _gui_input(gpEvent: InputEvent) -> void:
 	if gpEvent is InputEventMouseMotion:
 		var gpMotion: InputEventMouseMotion = gpEvent as InputEventMouseMotion
 		_gpLastMouseWorld = gpWorldFromScreen(gpMotion.position)
+		# Panning in progress.
+		# 正在平移。
 		if _gpPanning:
 			gpViewOffset = _gpPanOffsetStart + (gpMotion.position - _gpPanStart)
 			_gpApplyCamera()
@@ -291,6 +402,8 @@ func _gui_input(gpEvent: InputEvent) -> void:
 			_gpEmitStatus()
 			accept_event()
 			return
+		# Dragging a selected node.
+		# 正在拖拽选中节点。
 		if _gpDragId != "":
 			var gpWorld: Vector2 = gpWorldFromScreen(gpMotion.position)
 			_gpSetNodePos(_gpDragId, gpWorld + _gpDragOffset)
@@ -310,15 +423,21 @@ func _gui_input(gpEvent: InputEvent) -> void:
 			queue_redraw()
 
 
+# Queue redraw on all edge views.
+# 令所有连线视图重新绘制。
 func _gpRefreshEdges() -> void:
 	for gpId in _gpEdgeViews.keys():
 		var gpV: GPEdgeView = _gpEdgeViews[gpId] as GPEdgeView
 		gpV.queue_redraw()
 
 
+# Handle a left mouse button press.
+# 处理鼠标左键按下。
 func _gpOnLeftDown(gpScreen: Vector2) -> void:
 	var gpWorld: Vector2 = gpWorldFromScreen(gpScreen)
 
+	# If a symbol is pending from the palette, place it now.
+	# 如果调色板有等待放置的图元，立即放置。
 	if gpPendingDef != null:
 		var gpNid: String = "n%d" % gpNextId
 		gpNextId += 1
@@ -335,6 +454,8 @@ func _gpOnLeftDown(gpScreen: Vector2) -> void:
 
 	var gpHit: String = _gpHitTest(gpWorld)
 
+	# Connect mode: pick source then destination.
+	# 连线模式：先选起点再选终点。
 	if gpMode == GPMode.GP_CONNECT:
 		if gpHit != "":
 			if gpConnectFrom == "":
@@ -349,8 +470,8 @@ func _gpOnLeftDown(gpScreen: Vector2) -> void:
 			queue_redraw()
 		return
 
-	# SELECT
-	# 选择模式
+	# SELECT mode.
+	# 选择模式。
 	gpSelectedId = gpHit
 	if gpHit != "":
 		_gpDragId = gpHit
@@ -359,6 +480,8 @@ func _gpOnLeftDown(gpScreen: Vector2) -> void:
 	_gpEmitStatus()
 
 
+# Zoom in or out while keeping the world point under the cursor stable.
+# 以光标下的世界点为中心进行缩放。
 func _gpZoomAt(gpScreen: Vector2, gpFactor: float) -> void:
 	var gpWorldBefore: Vector2 = gpWorldFromScreen(gpScreen)
 	gpViewZoom *= (1.0 + 0.12 * gpFactor)
@@ -384,9 +507,9 @@ func gpResetView() -> void:
 	_gpEmitStatus()
 
 
+# Clean up cached references when the canvas leaves the tree.
+# 画布离开场景树时清理缓存引用。
 func _notification(gpWhat: int) -> void:
-	# Clean up cached references when the canvas leaves the tree.
-	# 画布离开场景树时清理缓存引用。
 	if gpWhat == NOTIFICATION_PREDELETE:
 		_gpSymbolViews.clear()
 		_gpEdgeViews.clear()

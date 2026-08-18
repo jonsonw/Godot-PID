@@ -12,19 +12,42 @@ extends VBoxContainer
 # A symbol was picked from the library (its type id).
 # 从图元库选中某图元（返回其 type id）。
 signal gpSymbolPicked(type: String)
+
 # A tool was selected: "select" / "connect" / "custom".
 # 选中某工具：select（选择）/ connect（连线）/ custom（自定义图元）。
 signal gpToolSelected(type: String)
 
+# Currently displayed symbol definitions.
+# 当前显示的图元定义。
 var gpDefs: Array[GPSymbolDef] = []
+
+# Title label at the top of the dock.
+# 停靠栏顶部标题标签。
 var gpTitle: Label
+
+# Search input box.
+# 搜索输入框。
 var gpSearchBox: LineEdit
+
+# Scroll container that holds the symbol list.
+# 承载图元列表的滚动容器。
 var gpListRoot: ScrollContainer
+
+# Select tool button.
+# 选择工具按钮。
 var gpSelBtn: Button
+
+# Connect tool button.
+# 连线工具按钮。
 var gpConBtn: Button
+
+# Custom symbol tool button.
+# 自定义图元工具按钮。
 var gpCustBtn: Button
 
 
+# Build the static frame of the dock.
+# 构建停靠栏的静态框架。
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
 
@@ -40,7 +63,7 @@ func _ready() -> void:
 	add_child(gpSearchBox)
 
 	# ---- frozen frame: scroll container (symbols injected here) ----
-	# ---- 固化框架：滚动容器（图元注入于此） ----
+	# ---- 固化框架：滚动容器（图元注入于此）----
 	gpListRoot = ScrollContainer.new()
 	gpListRoot.size_flags_vertical = SIZE_EXPAND_FILL
 	gpListRoot.size_flags_horizontal = SIZE_EXPAND_FILL
@@ -74,10 +97,14 @@ func gpPopulate(gpDefsIn: Array[GPSymbolDef]) -> void:
 	_gpRender(gpDefs)
 
 
+# React to search text changes.
+# 响应搜索文本变化。
 func _gpOnSearch(gpQ: String) -> void:
 	_gpRender(_gpFilter(gpQ))
 
 
+# Filter the symbol list by query string.
+# 按查询字符串过滤图元列表。
 func _gpFilter(gpQ: String) -> Array[GPSymbolDef]:
 	var gpNeedle: String = gpQ.strip_edges().to_lower()
 	if gpNeedle == "":
@@ -93,6 +120,8 @@ func _gpFilter(gpQ: String) -> Array[GPSymbolDef]:
 # Render the injected symbol list, grouped by category.
 # 渲染注入的图元列表，按类目分组。
 func _gpRender(gpList: Array[GPSymbolDef]) -> void:
+	# Clear previous list.
+	# 清空旧列表。
 	for gpC in gpListRoot.get_children():
 		gpListRoot.remove_child(gpC)
 		gpC.queue_free()
@@ -101,12 +130,16 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 	gpVbox.size_flags_horizontal = SIZE_EXPAND_FILL
 	gpListRoot.add_child(gpVbox)
 
+	# Group symbols by category.
+	# 按类目对图元分组。
 	var gpByCat: Dictionary = {}
 	for gpD in gpList:
 		if not gpByCat.has(gpD.gpCategory):
 			gpByCat[gpD.gpCategory] = []
 		gpByCat[gpD.gpCategory].append(gpD)
 
+	# Create a header and buttons for each category.
+	# 为每个类目创建标题与按钮。
 	for gpCat in gpByCat.keys():
 		var gpHeader: Label = Label.new()
 		gpHeader.text = "▾ %s" % I18n.gpTr(gpCat)
@@ -120,6 +153,8 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 			gpVbox.add_child(gpB)
 
 
+# Refresh all locale-dependent texts.
+# 刷新所有依赖语言的文本。
 func _gpRefreshLocale(gpLocale: String) -> void:
 	gpTitle.text = I18n.gpTr("symbol_lib.title")
 	gpSearchBox.placeholder_text = I18n.gpTr("symbol_lib.search")
@@ -129,5 +164,7 @@ func _gpRefreshLocale(gpLocale: String) -> void:
 	_gpRender(_gpFilter(gpSearchBox.text))
 
 
+# Emit that a symbol was picked.
+# 发出图元被选中信号。
 func _gpOnPick(gpTypeId: String) -> void:
 	gpSymbolPicked.emit(gpTypeId)

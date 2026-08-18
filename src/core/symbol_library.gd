@@ -10,6 +10,8 @@ extends RefCounted
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
+# Return the default built-in symbol definitions.
+# 返回默认内置图元定义。
 static func gpDefaultDefs() -> Array[GPSymbolDef]:
 	var gpOut: Array[GPSymbolDef] = []
 	gpOut.append(_gpMk("pump",       "泵",       "pump",       Vector2(80, 56), [{"name": "in", "pos": [-40, 0]}, {"name": "out", "pos": [40, 0]}]))
@@ -20,6 +22,8 @@ static func gpDefaultDefs() -> Array[GPSymbolDef]:
 	return gpOut
 
 
+# Helper: create one SymbolDef from raw parameters.
+# 辅助函数：用原始参数构造一个 SymbolDef。
 static func _gpMk(gpId: String, gpName: String, gpCat: String, gpSize: Vector2, gpPorts: Array[Dictionary]) -> GPSymbolDef:
 	var gpD: GPSymbolDef = GPSymbolDef.new()
 	gpD.gpId = gpId
