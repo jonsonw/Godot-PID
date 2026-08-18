@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 40" width="200" height="40" data-isa="LINE-I" data-iso="ISO10628" data-tag-example="LI-001">
+  <g fill="none" stroke="#000" stroke-width="2" stroke-dasharray="6 4">
+    <line x1="5" y1="20" x2="195" y2="20"/>
+    <text x="100" y="10" font-family="Arial" font-size="10" text-anchor="middle">Instrument line (dashed)</text>
+  </g>
+</svg>
