@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120" width="160" height="120" data-isa="HX" data-iso="ISO10628" data-tag-example="HX-001">
+  <g fill="none" stroke="#000" stroke-width="2">
+    <rect x="20" y="36" width="56" height="48" fill="none"/>
+    <rect x="84" y="36" width="56" height="48" fill="none"/>
+    <line x1="76" y1="36" x2="84" y2="36"/>
+    <line x1="76" y1="84" x2="84" y2="84"/>
+    <line x1="10" y1="60" x2="20" y2="60"/>
+    <line x1="140" y1="60" x2="150" y2="60"/>
+    <text x="80" y="28" font-family="Arial" font-size="12" text-anchor="middle">HX</text>
+  </g>
+</svg>

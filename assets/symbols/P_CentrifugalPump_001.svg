@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 120" width="140" height="120" data-isa="P" data-iso="ISO10628" data-tag-example="P-001">
+  <g fill="none" stroke="#000" stroke-width="2">
+    <rect x="30" y="40" width="80" height="40" rx="6" fill="none"/>
+    <circle cx="70" cy="60" r="14"/>
+    <line x1="10" y1="60" x2="30" y2="60"/>
+    <line x1="110" y1="60" x2="130" y2="60"/>
+    <text x="70" y="95" font-family="Arial" font-size="12" text-anchor="middle">Centrifugal Pump (P)</text>
+  </g>
+</svg>
