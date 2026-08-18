@@ -1,14 +1,15 @@
 class_name GPCanvas2D
 extends Control
 
-# 2D drawing canvas, implemented with Control plus a manual camera (pan offset + zoom).
-# 2D 画布：用 Control 配合手动相机（平移偏移 + 缩放）实现。
-# Reads PIDGraph (node-edge data) and renders symbols and connections by SymbolDef.
-# 读取 PIDGraph（节点-边数据），按 SymbolDef 渲染符号与连线。
-# Interaction: wheel to zoom, middle-drag to pan, pick a symbol then click to place,
-# connect mode clicks two symbols in turn.
-# 交互：滚轮缩放 · 中键拖拽平移 · 选符号后点画布放置 · 连接模式依次点两个符号。
-#
+const GPSymbolView := preload("res://src/render/symbol_view.gd")
+const GPEdgeView := preload("res://src/render/edge_view.gd")
+
+# 2D canvas implemented with a Node2D world_root.
+# 2D 画布：使用 Node2D 作为 world_root 实现。
+# Symbols are real GPSymbolView nodes under world_root; edges are GPEdgeView nodes.
+# 图元是挂在 world_root 下的真实 GPSymbolView 节点；连线是 GPEdgeView 节点。
+# Pan and zoom are achieved by moving/scaling world_root.
+# 平移与缩放通过移动/缩放 world_root 实现。
 # Coding rule: every variable must declare its type explicitly (including container types).
 # 编码规范：所有变量均显式声明类型（含容器类型）。
 
@@ -23,6 +24,10 @@ enum GPMode { GP_SELECT, GP_CONNECT }
 var gpGraph: GPPIDGraph
 var gpDefs: Array[GPSymbolDef] = []
 var gpNextId: int = 1
+
+# ---- world root ----
+# ---- 世界根节点 ----
+var gpWorldRoot: Node2D = null
 
 # ---- camera ----
 # ---- 相机 ----
@@ -43,6 +48,33 @@ var _gpDragId: String = ""
 var _gpDragOffset: Vector2 = Vector2.ZERO
 var _gpLastMouseWorld: Vector2 = Vector2.ZERO
 
+# View caches: id -> view node. Used for incremental sync instead of full rebuild.
+# 视图缓存：id → 视图节点。用于增量同步而非全量重建。
+var _gpSymbolViews: Dictionary = {}
+var _gpEdgeViews: Dictionary = {}
+
+
+func _ready() -> void:
+	mouse_filter = MOUSE_FILTER_STOP
+	# Create the world root. All symbol/edge views live here so they share one transform.
+	# 创建世界根节点。所有图元/连线视图都挂在此处，共享同一变换。
+	gpWorldRoot = Node2D.new()
+	gpWorldRoot.name = "WorldRoot"
+	add_child(gpWorldRoot)
+	# Subscribe to language and font changes so symbol labels stay in sync.
+	# 订阅语言与字体变化，保持图元文字同步。
+	I18n.gpLocaleChanged.connect(_gpOnLocaleChanged)
+	Settings.gpSymbolStyleChanged.connect(_gpOnSymbolStyleChanged)
+	_gpResetView()
+
+
+func _gpOnLocaleChanged(_gpLocale: String) -> void:
+	_gpRefreshSymbols()
+
+
+func _gpOnSymbolStyleChanged() -> void:
+	_gpRefreshSymbols()
+
 
 # Build and emit a status snapshot for the status bar.
 # 构造并发送状态栏快照。
@@ -54,17 +86,21 @@ func _gpEmitStatus() -> void:
 	})
 
 
-func _ready() -> void:
-	mouse_filter = MOUSE_FILTER_STOP
-	# Redraw the canvas when language or symbol font/style changes so the
-	# symbol labels stay in sync.
-	# 语言或图元字体/字号变化时重绘，保持图元文字同步。
-	I18n.gpLocaleChanged.connect(queue_redraw)
-	Settings.gpSymbolStyleChanged.connect(queue_redraw)
+# ============================ camera / transform ============================
+# ============================ 相机 / 坐标变换 ============================
+func _gpResetView() -> void:
+	gpViewZoom = 1.0
+	gpViewOffset = size / 2.0
+	_gpApplyCamera()
 
 
-# ============================ transform ============================
-# ============================ 坐标变换 ============================
+func _gpApplyCamera() -> void:
+	if gpWorldRoot == null:
+		return
+	gpWorldRoot.position = gpViewOffset
+	gpWorldRoot.scale = Vector2(gpViewZoom, gpViewZoom)
+
+
 func gpScreenFromWorld(w: Vector2) -> Vector2:
 	return w * gpViewZoom + gpViewOffset
 
@@ -73,28 +109,15 @@ func gpWorldFromScreen(gpS: Vector2) -> Vector2:
 	return (gpS - gpViewOffset) / gpViewZoom
 
 
-# ============================ drawing ============================
-# ============================ 绘制 ============================
+# ============================ drawing (background only) ============================
+# ============================ 绘制（仅背景） ============================
 func _draw() -> void:
-	if gpGraph == null:
-		return
+	# Sync the node tree with the graph before drawing the background overlay.
+	# 在绘制背景覆盖层之前，先把节点树与图数据同步。
+	_gpSyncViews()
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0.13, 0.14, 0.18))
 	_gpDrawGrid()
-
-	for gpE in gpGraph.gpEdges:
-		var gpA: Vector2 = _gpNodeCenter(gpE["from"])
-		var gpB: Vector2 = _gpNodeCenter(gpE["to"])
-		if gpA == Vector2.INF or gpB == Vector2.INF:
-			continue
-		draw_line(gpScreenFromWorld(gpA), gpScreenFromWorld(gpB), Color(0.70, 0.75, 0.85), 2.0)
-
-	for gpN in gpGraph.gpNodes:
-		_gpDrawNode(gpN)
-
-	if gpMode == GPMode.GP_CONNECT and gpConnectFrom != "":
-		var gpC: Vector2 = _gpNodeCenter(gpConnectFrom)
-		if gpC != Vector2.INF:
-			draw_line(gpScreenFromWorld(gpC), get_local_mouse_position(), Color(0.30, 1.0, 0.40), 1.5)
+	_gpDrawConnectPreview()
 
 
 func _gpDrawGrid() -> void:
@@ -105,60 +128,92 @@ func _gpDrawGrid() -> void:
 	var gpStartY: int = int(fmod(gpViewOffset.y, gpStep))
 	var gpCol: Color = Color(0.22, 0.24, 0.30, 0.6)
 	var x: int = gpStartX
-	while x < size.x:
+	while x < int(size.x):
 		draw_line(Vector2(x, 0), Vector2(x, size.y), gpCol, 1.0)
 		x += int(gpStep)
 	var y: int = gpStartY
-	while y < size.y:
+	while y < int(size.y):
 		draw_line(Vector2(0, y), Vector2(size.x, y), gpCol, 1.0)
 		y += int(gpStep)
 
 
-func _gpDrawNode(gpN: Dictionary) -> void:
-	var gpDef: GPSymbolDef = _gpDefFor(gpN["type"])
-	var gpCenter: Vector2 = Vector2(gpN["pos"][0], gpN["pos"][1])
-	var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef else Vector2(64, 48)
-	gpSz *= gpViewZoom
-	var gpTopleft: Vector2 = gpScreenFromWorld(gpCenter) - gpSz / 2.0
-	var gpRect: Rect2 = Rect2(gpTopleft, gpSz)
-
-	var gpBaseCol: Color = _gpCategoryColor(gpDef.gpCategory) if gpDef else Color(0.6, 0.6, 0.6)
-	var gpFill: Color = gpBaseCol
-	if gpN["id"] == gpSelectedId:
-		gpFill = Color(1.0, 0.85, 0.2)
-	elif gpN["id"] == gpConnectFrom:
-		gpFill = Color(0.3, 1.0, 0.4)
-
-	draw_rect(gpRect, gpFill, true)
-	draw_rect(gpRect, Color(0.05, 0.05, 0.05), false, 2.0)
-
-	var gpLabel: String
-	if gpN["label"] != "":
-		gpLabel = gpN["label"]
-	elif gpDef:
-		gpLabel = I18n.gpTr(gpDef.gpDisplayName)
-	else:
-		gpLabel = gpN["type"]
-	var gpTp: Vector2 = gpTopleft + Vector2(0, gpSz.y / 2.0 + 7.0)
-	# Symbol label uses the dedicated symbol font (separate size/family from UI).
-	# 图元文字使用独立的图元字体（字号/字体均与界面分离）。
-	var gpFont: Font = Settings.gpSymbolFont if Settings.gpSymbolFont != null else ThemeDB.fallback_font
-	draw_string(gpFont, gpTp, gpLabel, HORIZONTAL_ALIGNMENT_CENTER, gpSz.x, Settings.gpSymbolFontSize, Color(0.07, 0.07, 0.07))
-
-	if gpDef:
-		for gpP in gpDef.gpPorts:
-			var gpLp: Vector2 = Vector2(gpP["pos"][0], gpP["pos"][1]) * gpViewZoom
-			draw_circle(gpScreenFromWorld(gpCenter) + gpLp, 4.0, Color(0.1, 0.1, 0.1))
+# Draw the rubber-band line when connecting two symbols.
+# 连接两个图元时绘制橡皮筋线。
+func _gpDrawConnectPreview() -> void:
+	if gpMode != GPMode.GP_CONNECT or gpConnectFrom == "":
+		return
+	var gpC: Vector2 = _gpNodeCenter(gpConnectFrom)
+	if gpC == Vector2.INF:
+		return
+	draw_line(gpScreenFromWorld(gpC), get_local_mouse_position(), Color(0.30, 1.0, 0.40), 1.5)
 
 
-func _gpCategoryColor(gpCat: String) -> Color:
-	match gpCat:
-		"pump":       return Color(0.30, 0.62, 0.95)
-		"tank":       return Color(0.40, 0.80, 0.55)
-		"valve":      return Color(0.95, 0.65, 0.25)
-		"instrument": return Color(0.85, 0.45, 0.85)
-		"heat":       return Color(0.95, 0.45, 0.45)
-		_:            return Color(0.65, 0.68, 0.75)
+# ============================ view sync ============================
+# ============================ 视图同步 ============================
+func _gpSyncViews() -> void:
+	if gpGraph == null or gpWorldRoot == null:
+		return
+	_gpSyncSymbolViews()
+	_gpSyncEdgeViews()
+
+
+func _gpSyncSymbolViews() -> void:
+	var gpFresh: Dictionary = {}
+	for gpN in gpGraph.gpNodes:
+		var gpId: String = gpN.get("id", "")
+		if gpId == "":
+			continue
+		var gpV: GPSymbolView = null
+		if _gpSymbolViews.has(gpId):
+			gpV = _gpSymbolViews[gpId] as GPSymbolView
+			gpV.gpNode = gpN
+			gpV.gpUpdateTransform()
+		else:
+			gpV = GPSymbolView.new()
+			var gpDef: GPSymbolDef = _gpDefFor(gpN.get("type", ""))
+			gpV.gpInit(gpN, gpDef)
+			gpWorldRoot.add_child(gpV)
+		gpV.gpSetSelected(gpId == gpSelectedId)
+		gpV.gpSetConnectSource(gpId == gpConnectFrom)
+		gpFresh[gpId] = gpV
+	# Remove stale symbol views.
+	# 删除已不存在的图元视图。
+	for gpId in _gpSymbolViews.keys():
+		if not gpFresh.has(gpId):
+			var gpV: Node2D = _gpSymbolViews[gpId]
+			gpV.queue_free()
+	_gpSymbolViews = gpFresh
+
+
+func _gpSyncEdgeViews() -> void:
+	var gpFresh: Dictionary = {}
+	for gpE in gpGraph.gpEdges:
+		var gpId: String = gpE.get("id", "")
+		if gpId == "":
+			continue
+		var gpV: GPEdgeView = null
+		if _gpEdgeViews.has(gpId):
+			gpV = _gpEdgeViews[gpId] as GPEdgeView
+			gpV.gpEdge = gpE
+			gpV.queue_redraw()
+		else:
+			gpV = GPEdgeView.new()
+			gpV.gpInit(gpE, gpGraph)
+			gpWorldRoot.add_child(gpV)
+		gpFresh[gpId] = gpV
+	# Remove stale edge views.
+	# 删除已不存在的连线视图。
+	for gpId in _gpEdgeViews.keys():
+		if not gpFresh.has(gpId):
+			var gpV: Node2D = _gpEdgeViews[gpId]
+			gpV.queue_free()
+	_gpEdgeViews = gpFresh
+
+
+func _gpRefreshSymbols() -> void:
+	for gpId in _gpSymbolViews.keys():
+		var gpV: GPSymbolView = _gpSymbolViews[gpId] as GPSymbolView
+		gpV.queue_redraw()
 
 
 # ============================ lookup ============================
@@ -172,26 +227,28 @@ func _gpDefFor(gpTypeId: String) -> GPSymbolDef:
 
 func _gpNodeCenter(gpId: String) -> Vector2:
 	for gpN in gpGraph.gpNodes:
-		if gpN["id"] == gpId:
-			return Vector2(gpN["pos"][0], gpN["pos"][1])
+		if gpN.get("id", "") == gpId:
+			var gpPos: Array = gpN.get("pos", [0.0, 0.0])
+			return Vector2(float(gpPos[0]), float(gpPos[1]))
 	return Vector2.INF
 
 
 func _gpHitTest(gpWorld: Vector2) -> String:
 	var gpBest: String = ""
 	for gpN in gpGraph.gpNodes:
-		var gpDef: GPSymbolDef = _gpDefFor(gpN["type"])
-		var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef else Vector2(64, 48)
-		var gpC: Vector2 = Vector2(gpN["pos"][0], gpN["pos"][1])
+		var gpDef: GPSymbolDef = _gpDefFor(gpN.get("type", ""))
+		var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef != null else Vector2(64.0, 48.0)
+		var gpPos: Array = gpN.get("pos", [0.0, 0.0])
+		var gpC: Vector2 = Vector2(float(gpPos[0]), float(gpPos[1]))
 		var gpRect: Rect2 = Rect2(gpC - gpSz / 2.0, gpSz)
 		if gpRect.has_point(gpWorld):
-			gpBest = gpN["id"]
+			gpBest = gpN.get("id", "")
 	return gpBest
 
 
 func _gpSetNodePos(gpId: String, gpWorld: Vector2) -> void:
 	for gpN in gpGraph.gpNodes:
-		if gpN["id"] == gpId:
+		if gpN.get("id", "") == gpId:
 			gpN["pos"] = [gpWorld.x, gpWorld.y]
 			return
 
@@ -200,44 +257,63 @@ func _gpSetNodePos(gpId: String, gpWorld: Vector2) -> void:
 # ============================ 输入 ============================
 func _gui_input(gpEvent: InputEvent) -> void:
 	if gpEvent is InputEventMouseButton:
-		if gpEvent.button_index == MOUSE_BUTTON_WHEEL_UP or gpEvent.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			if gpEvent.pressed:
-				var gpFactor: float = 1.0 if gpEvent.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0
-				_gpZoomAt(gpEvent.position, gpFactor)
+		var gpMouseEvent: InputEventMouseButton = gpEvent as InputEventMouseButton
+		if gpMouseEvent.button_index == MOUSE_BUTTON_WHEEL_UP or gpMouseEvent.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			if gpMouseEvent.pressed:
+				var gpFactor: float = 1.0 if gpMouseEvent.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0
+				_gpZoomAt(gpMouseEvent.position, gpFactor)
 			accept_event()
 			return
-		if gpEvent.button_index == MOUSE_BUTTON_MIDDLE:
-			if gpEvent.pressed:
+		if gpMouseEvent.button_index == MOUSE_BUTTON_MIDDLE:
+			if gpMouseEvent.pressed:
 				_gpPanning = true
-				_gpPanStart = gpEvent.position
+				_gpPanStart = gpMouseEvent.position
 				_gpPanOffsetStart = gpViewOffset
 			else:
 				_gpPanning = false
 			accept_event()
 			return
-		if gpEvent.button_index == MOUSE_BUTTON_LEFT:
-			if gpEvent.pressed:
-				_gpOnLeftDown(gpEvent.position)
+		if gpMouseEvent.button_index == MOUSE_BUTTON_LEFT:
+			if gpMouseEvent.pressed:
+				_gpOnLeftDown(gpMouseEvent.position)
 			else:
 				_gpDragId = ""
 			accept_event()
 			return
 
 	if gpEvent is InputEventMouseMotion:
-		_gpLastMouseWorld = gpWorldFromScreen(gpEvent.position)
+		var gpMotion: InputEventMouseMotion = gpEvent as InputEventMouseMotion
+		_gpLastMouseWorld = gpWorldFromScreen(gpMotion.position)
 		if _gpPanning:
-			gpViewOffset = _gpPanOffsetStart + (gpEvent.position - _gpPanStart)
+			gpViewOffset = _gpPanOffsetStart + (gpMotion.position - _gpPanStart)
+			_gpApplyCamera()
 			queue_redraw()
 			_gpEmitStatus()
 			accept_event()
 			return
 		if _gpDragId != "":
-			var gpWorld: Vector2 = gpWorldFromScreen(gpEvent.position)
+			var gpWorld: Vector2 = gpWorldFromScreen(gpMotion.position)
 			_gpSetNodePos(_gpDragId, gpWorld + _gpDragOffset)
+			var gpV: GPSymbolView = _gpSymbolViews.get(_gpDragId, null) as GPSymbolView
+			if gpV != null:
+				gpV.gpUpdateTransform()
+			# Edge views depend on node positions, so redraw them too.
+			# 边视图依赖节点位置，因此也重绘它们。
+			_gpRefreshEdges()
 			queue_redraw()
 			_gpEmitStatus()
 			accept_event()
 			return
+		# Moving the mouse may update the connect-preview rubber band.
+		# 移动鼠标可能更新连接预览橡皮筋。
+		if gpMode == GPMode.GP_CONNECT and gpConnectFrom != "":
+			queue_redraw()
+
+
+func _gpRefreshEdges() -> void:
+	for gpId in _gpEdgeViews.keys():
+		var gpV: GPEdgeView = _gpEdgeViews[gpId] as GPEdgeView
+		gpV.queue_redraw()
 
 
 func _gpOnLeftDown(gpScreen: Vector2) -> void:
@@ -270,7 +346,7 @@ func _gpOnLeftDown(gpScreen: Vector2) -> void:
 					gpGraph.gpAddEdge(gpEid, gpConnectFrom, gpHit, {})
 					gpGraphChanged.emit()
 				gpConnectFrom = ""
-				queue_redraw()
+			queue_redraw()
 		return
 
 	# SELECT
@@ -286,9 +362,10 @@ func _gpOnLeftDown(gpScreen: Vector2) -> void:
 func _gpZoomAt(gpScreen: Vector2, gpFactor: float) -> void:
 	var gpWorldBefore: Vector2 = gpWorldFromScreen(gpScreen)
 	gpViewZoom *= (1.0 + 0.12 * gpFactor)
-	gpViewZoom = clamp(gpViewZoom, 0.25, 4.0)
+	gpViewZoom = clampf(gpViewZoom, 0.25, 4.0)
 	var gpScreenAfter: Vector2 = gpScreenFromWorld(gpWorldBefore)
 	gpViewOffset += gpScreen - gpScreenAfter
+	_gpApplyCamera()
 	queue_redraw()
 	_gpEmitStatus()
 
@@ -302,7 +379,14 @@ func gpZoomStep(gpFactor: float) -> void:
 # Public: reset view to 100% centered (menu "适应窗口").
 # 公开：重置视图为 100% 居中（菜单「适应窗口」）。
 func gpResetView() -> void:
-	gpViewZoom = 1.0
-	gpViewOffset = size / 2.0
+	_gpResetView()
 	queue_redraw()
 	_gpEmitStatus()
+
+
+func _notification(gpWhat: int) -> void:
+	# Clean up cached references when the canvas leaves the tree.
+	# 画布离开场景树时清理缓存引用。
+	if gpWhat == NOTIFICATION_PREDELETE:
+		_gpSymbolViews.clear()
+		_gpEdgeViews.clear()
