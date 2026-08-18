@@ -24,7 +24,7 @@ const GP_STRINGS: Dictionary = {
 	"symbol_lib.no_selection": { "zh": "（未选中对象）",     "en": "(no selection)" },
 	"symbol_lib.empty_attrs":  { "zh": "（该图元暂无可配置属性）", "en": "(no configurable attributes)" },
 	"symbol_lib.select_hint":  { "zh": "未选中对象。\n在画布中点选一个图元以编辑其属性。",
-	                              "en": "No object selected.\nClick a symbol on the canvas to edit its properties." },
+								  "en": "No object selected.\nClick a symbol on the canvas to edit its properties." },
 
 	"prop.label":   { "zh": "标签",   "en": "Label" },
 	"prop.title":   { "zh": "属性",   "en": "Properties" },
@@ -50,7 +50,7 @@ const GP_STRINGS: Dictionary = {
 	"status.feature_todo":  { "zh": "功能待接入：%s",    "en": "Feature pending: %s" },
 
 	"doc.info": { "zh": "G-PID 工程\n文档元信息（标题 / 图号 / 版本）待接入。",
-	              "en": "G-PID Project\nDocument metadata (title / drawing no. / revision) pending." },
+				  "en": "G-PID Project\nDocument metadata (title / drawing no. / revision) pending." },
 
 	"settings.title":      { "zh": "设置",          "en": "Settings" },
 	"settings.font_size":  { "zh": "界面字体大小",   "en": "UI Font Size" },
@@ -58,6 +58,7 @@ const GP_STRINGS: Dictionary = {
 	"settings.symbol_font_size": { "zh": "图元字体大小", "en": "Symbol Font Size" },
 	"settings.symbol_font":{ "zh": "图元字体",       "en": "Symbol Font" },
 	"settings.language":   { "zh": "语言",          "en": "Language" },
+	"settings.auto_scale": { "zh": "界面随窗口自适应缩放", "en": "Auto-fit UI to window" },
 	"settings.ok":         { "zh": "确定",          "en": "OK" },
 	"settings.lang_zh":    { "zh": "中文",          "en": "中文" },
 	"settings.lang_en":    { "zh": "English",       "en": "English" },

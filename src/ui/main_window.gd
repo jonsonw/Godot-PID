@@ -38,6 +38,25 @@ var gpStateArgs: Array = []
 # 上一次所在的屏幕索引，用于检测跨显示器拖拽，从而按新显示器密度刷新 UI。
 var gpLastScreen: int = -1
 
+# Split containers that let the user drag the left/right dock widths.
+# 供用户拖动左/右停靠栏宽度的分隔容器。
+var gpBodySplit: HSplitContainer
+var gpCenterRightSplit: HSplitContainer
+
+# Previous window content width, used to scale dock sizes proportionally on resize.
+# 上一次窗口内容宽度，用于缩放时按比例调整停靠栏大小。
+var gpPrevWidth: int = 0
+
+# Dock width ratios of the *total* window width. Left = 1/5, right = 1/5, center
+# canvas = 3/5. These are the single source of truth; split offsets are always
+# derived from them so resizing is idempotent and a pure height change leaves the
+# widths untouched. Manual drags update these ratios so the user's layout sticks.
+# 停靠栏占*总*窗口宽度的比例。左 1/5、右 1/5、中间 3/5。它们是一致性来源，
+# 分隔偏移始终由其推导，使缩放幂等、纯高度变化不改变宽度。手动拖拽会更新这些
+# 比例以保留用户布局。
+var gpLeftRatio: float = 0.2
+var gpRightRatio: float = 0.2
+
 
 func _ready() -> void:
 	gpGraph = GPPIDGraph.new()
@@ -45,11 +64,15 @@ func _ready() -> void:
 
 	gpMenuBar = $VLayout/MenuBar
 	gpLeftDock = $VLayout/Body/LeftDock
-	gpCanvas = $VLayout/Body/Center/Canvas
-	gpTabs = $VLayout/Body/RightDock/InspectorTabs
-	gpInspector = $VLayout/Body/RightDock/InspectorTabs/PropTab
-	gpInfoLabel = $VLayout/Body/RightDock/InspectorTabs/InfoTab/InfoLabel
-	gpDocLabel = $VLayout/Body/RightDock/InspectorTabs/DocTab/DocLabel
+	gpBodySplit = $VLayout/Body
+	gpCenterRightSplit = $VLayout/Body/CenterRightSplit
+	gpBodySplit.dragged.connect(_gpOnBodyDragged)
+	gpCenterRightSplit.dragged.connect(_gpOnCenterRightDragged)
+	gpCanvas = $VLayout/Body/CenterRightSplit/Center/Canvas
+	gpTabs = $VLayout/Body/CenterRightSplit/RightDock/InspectorTabs
+	gpInspector = $VLayout/Body/CenterRightSplit/RightDock/InspectorTabs/PropTab
+	gpInfoLabel = $VLayout/Body/CenterRightSplit/RightDock/InspectorTabs/InfoTab/InfoLabel
+	gpDocLabel = $VLayout/Body/CenterRightSplit/RightDock/InspectorTabs/DocTab/DocLabel
 	gpSelLabel = $VLayout/StatusBar/SelLabel
 	gpCoordLabel = $VLayout/StatusBar/CoordLabel
 	gpZoomLabel = $VLayout/StatusBar/ZoomLabel
@@ -79,14 +102,20 @@ func _ready() -> void:
 	I18n.gpLocaleChanged.connect(_gpOnLocaleChanged)
 	_gpRefreshStaticText()
 
-	# ---- HiDPI / multi-monitor crispness ----
-	# ---- 多显示器清晰渲染（HiDPI） ----
+	# ---- HiDPI / multi-monitor crispness + responsive resize ----
+	# ---- 多显示器清晰渲染（HiDPI）+ 响应式缩放 ----
 	var gpWin: Window = get_window()
 	if gpWin != null:
 		gpWin.size_changed.connect(_gpOnWindowChanged)
+		gpWin.size_changed.connect(_gpOnResized)
 		gpWin.focus_entered.connect(_gpOnWindowChanged)
 		gpLastScreen = gpWin.current_screen
+		gpPrevWidth = int(gpWin.size.x)
 		_gpApplyDpiScale()
+
+	# ---- initial dock proportions: left 1/5, right 1/5, center 3/5 ----
+	# ---- 初始停靠栏比例：左 1/5、右 1/5、中间画布 3/5 ----
+	_gpInitSplits()
 
 	# initial status
 	# 初始状态
@@ -279,6 +308,93 @@ func _gpOnWindowChanged() -> void:
 		return
 	gpLastScreen = gpScreen
 	_gpApplyDpiScale()
+
+
+# Responsive layout: when the window is resized, the dock widths are re-derived
+# from gpLeftRatio / gpRightRatio (proportional to the *current* container
+# width). This depends only on width, so a pure height change leaves the docks
+# untouched. Only active when Settings.gpAutoScale is on; when off, manually
+# dragged widths are kept. The UI font is never scaled (see settings.gd).
+# 响应式布局：窗口缩放时，停靠栏宽度按 gpLeftRatio / gpRightRatio（相对*当前*
+# 容器宽度）重新推导。它只依赖宽度，因此纯高度变化不改变停靠栏。仅在
+# Settings.gpAutoScale 开启时生效；关闭时保留用户拖拽后的宽度。界面字号不随
+# 窗口缩放（见 settings.gd）。
+func _gpOnResized() -> void:
+	var gpWin: Window = get_window()
+	if gpWin == null:
+		return
+	var gpW: int = int(gpWin.size.x)
+	if gpW <= 0:
+		return
+	if gpPrevWidth <= 0:
+		gpPrevWidth = gpW
+		return
+	if Settings.gpAutoScale:
+		_gpApplySplits()
+	gpPrevWidth = gpW
+
+
+# Derive both split offsets from the stored ratios and the containers' real
+# (already laid-out) widths. Idempotent: same widths -> same offsets, so calling
+# it on every resize never drifts. Uses each container's own width rather than the
+# window width to stay correct regardless of margins / chrome.
+# 按存储比例与容器已布局的真实宽度推导两个分隔偏移。幂等：相同宽度得到相同
+# 偏移，故每次缩放调用都不会漂移。使用各自容器宽度而非窗口宽度，避免边距/边框
+# 导致偏差。
+func _gpApplySplits() -> void:
+	if gpBodySplit == null or gpCenterRightSplit == null:
+		return
+	var gpBW: float = gpBodySplit.size.x
+	if gpBW <= 1.0:
+		return
+	# Left dock = gpLeftRatio of the body width.
+	# 左栏 = 主体宽度的 gpLeftRatio。
+	gpBodySplit.split_offset = int(round(gpLeftRatio * gpBW))
+	# Center-right region width = (1 - gpLeftRatio) * gpBW. Within it the right
+	# dock should be gpRightRatio of the total, so the inner split (center edge)
+	# sits at (1 - gpLeftRatio - gpRightRatio) * gpBW from the body's left edge.
+	# 中间-右侧区域宽度 = (1 - gpLeftRatio) * gpBW；其中右栏应为总宽的
+	# gpRightRatio，故内部分隔（中间区右缘）位于距主体左缘
+	# (1 - gpLeftRatio - gpRightRatio) * gpBW 处。
+	gpCenterRightSplit.split_offset = int(round((1.0 - gpLeftRatio - gpRightRatio) * gpBW))
+
+
+# Initial dock widths: left = 1/5, right = 1/5, center = 3/5 of the total. We wait
+# until the split containers have a real laid-out width (a few frames after
+# _ready), then derive the offsets from the containers themselves so the result is
+# correct no matter what transient size the window had at startup.
+# 初始停靠栏宽度：左 1/5、右 1/5、中间 3/5。等待容器获得已布局的真实宽度
+#（_ready 后若干帧）后，用容器自身尺寸推导偏移，从而无论启动时窗口瞬时大小
+# 如何都正确。
+func _gpInitSplits() -> void:
+	for _gpI in range(10):
+		await get_tree().process_frame
+		if gpBodySplit != null and gpBodySplit.size.x > 50.0:
+			break
+	_gpApplySplits()
+	var gpWin: Window = get_window()
+	gpPrevWidth = int(gpWin.size.x) if gpWin != null else 0
+
+
+# Manual drag of the outer (left) split: capture the new ratio so a later window
+# resize keeps the user's layout. The dragged offset is relative to the body
+# width.
+# 外侧（左）分隔被手动拖拽：记录新比例，使后续窗口缩放保留用户布局。拖拽偏移
+# 相对主体宽度。
+func _gpOnBodyDragged(gpOffset: int) -> void:
+	var gpBW: float = gpBodySplit.size.x
+	if gpBW > 1.0:
+		gpLeftRatio = clampf(float(gpOffset) / gpBW, 0.05, 0.8)
+
+
+# Manual drag of the inner (right) split: convert the inner split offset into the
+# right-dock ratio of the total width and store it.
+# 内侧（右）分隔被手动拖拽：把内部分隔偏移换算成右栏占总宽的比例并存储。
+func _gpOnCenterRightDragged(gpOffset: int) -> void:
+	var gpCRW: float = gpCenterRightSplit.size.x
+	if gpCRW > 1.0:
+		var gpCenterFracInCR: float = float(gpOffset) / gpCRW
+		gpRightRatio = clampf((1.0 - gpCenterFracInCR) * (1.0 - gpLeftRatio), 0.05, 0.8)
 
 
 # ============================ lookups ============================
