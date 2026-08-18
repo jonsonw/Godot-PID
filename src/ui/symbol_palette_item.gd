@@ -20,7 +20,7 @@ var gpDef: GPSymbolDef = null
 
 # Size of the thumbnail area in screen pixels.
 # 缩略图区域的屏幕像素尺寸。
-var gpThumbnailSize: Vector2 = Vector2(48.0, 48.0)
+var gpThumbnailSize: Vector2 = Vector2(24.0, 24.0)
 
 # Whether the mouse cursor is currently over this item.
 # 鼠标光标是否当前位于本条目上方。
@@ -31,7 +31,7 @@ var _gpHover: bool = false
 # 初始化输入处理与最小尺寸。
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
-	custom_minimum_size = Vector2(0.0, gpThumbnailSize.y + 24.0)
+	custom_minimum_size = Vector2(0.0, gpThumbnailSize.y + 22.0)
 	mouse_entered.connect(_gpOnMouseEntered)
 	mouse_exited.connect(_gpOnMouseExited)
 
@@ -94,17 +94,18 @@ func _draw() -> void:
 	else:
 		GPSymbolPainter.gpDrawShape(self, gpDef.gpShape, gpThumbRect, gpFill, gpStroke, gpBorder)
 
-	# Draw the localized display name below the thumbnail.
-	# 在缩略图下方绘制本地化的显示名。
+	# Draw the localized display name directly below the thumbnail, centered.
+	# 在缩略图正下方居中绘制本地化的显示名。
 	var gpFont: Font = Settings.gpSymbolFont if Settings.gpSymbolFont != null else ThemeDB.fallback_font
 	var gpName: String = I18n.gpTr(gpDef.gpDisplayName)
-	var gpTextY: float = gpThumbRect.position.y + gpThumbRect.size.y + 6.0
+	var gpLabelFontSz: int = 11
+	var gpTextTop: float = gpThumbRect.position.y + gpThumbRect.size.y + 4.0
 	draw_string(
 		gpFont,
-		Vector2(size.x / 2.0, gpTextY + 12.0),
+		Vector2(gpThumbRect.position.x, gpTextTop),
 		gpName,
 		HORIZONTAL_ALIGNMENT_CENTER,
-		size.x,
-		13,
+		gpThumbnailSize.x,
+		gpLabelFontSz,
 		Color(0.9, 0.9, 0.9)
 	)

@@ -114,12 +114,29 @@ func _draw() -> void:
 	else:
 		gpLabel = gpNode.get("type", "")
 
-	# Draw the label just below the symbol so it stays readable on the dark canvas.
-	# 在图元正下方绘制标签，使其在深色画布上仍清晰可读。
+	# Draw the label position depending on the symbol category.
+	# 根据图元类目决定标签位置。
+	# Valves place the label below the symbol; other equipment shows it inside.
+	# 阀门将标签置于图元下方；其余设备将标签显示在图元内部。
 	var gpFont: Font = Settings.gpSymbolFont if Settings.gpSymbolFont != null else ThemeDB.fallback_font
 	var gpFontSz: int = maxi(1, Settings.gpSymbolFontSize)
-	var gpTp: Vector2 = gpTopleft + Vector2(0.0, gpSz.y / 2.0 + 7.0)
-	draw_string(gpFont, gpTp, gpLabel, HORIZONTAL_ALIGNMENT_CENTER, gpSz.x, gpFontSz, Color(0.9, 0.9, 0.9))
+	var gpIsValve: bool = (gpDef != null and gpDef.gpCategory == "valve")
+	if gpIsValve:
+		# Valve label sits just under the symbol, horizontally centered.
+		# 阀门标签位于图元正下方，水平居中。
+		var gpTp: Vector2 = gpTopleft + Vector2(0.0, gpSz.y / 2.0 + 7.0)
+		draw_string(gpFont, gpTp, gpLabel, HORIZONTAL_ALIGNMENT_CENTER, gpSz.x, gpFontSz, Color(0.9, 0.9, 0.9))
+	else:
+		# Equipment label is centered inside the symbol.
+		# 设备标签居中显示在图元内部。
+		var gpInsideCol: Color = Color(0.95, 0.95, 0.95)
+		if gpSelected or gpConnectSource:
+			# On the bright highlight fills, use dark text for contrast.
+			# 在明亮的选中/连线高亮填充上，改用深色文字以保证对比度。
+			gpInsideCol = Color(0.12, 0.12, 0.12)
+		var gpCx: float = -gpSz.x / 2.0
+		var gpCy: float = -float(gpFontSz) / 2.0
+		draw_string(gpFont, Vector2(gpCx, gpCy), gpLabel, HORIZONTAL_ALIGNMENT_CENTER, gpSz.x, gpFontSz, gpInsideCol)
 
 	# Draw connection ports if the symbol definition provides them.
 	# 如果图元定义提供了端口，则绘制连接端口。
