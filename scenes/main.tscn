@@ -30,72 +30,83 @@ size_flags_horizontal = 3
 size_flags_vertical = 0
 script = ExtResource("2_menu")
 
-[node name="Body" type="HBoxContainer" parent="VLayout" unique_id=694064960]
+[node name="Body" type="HSplitContainer" parent="VLayout" unique_id=694064960]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+split_offsets = PackedInt32Array(320)
+dragger_visibility = 1
+split_offset = 320
 
 [node name="LeftDock" type="VBoxContainer" parent="VLayout/Body" unique_id=649335995]
-custom_minimum_size = Vector2(210, 0)
+custom_minimum_size = Vector2(160, 0)
 layout_mode = 2
-size_flags_horizontal = 0
+size_flags_horizontal = 3
 size_flags_vertical = 3
 script = ExtResource("3_tool")
 
-[node name="Center" type="VBoxContainer" parent="VLayout/Body" unique_id=1107960308]
+[node name="CenterRightSplit" type="HSplitContainer" parent="VLayout/Body" unique_id=330451827]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+split_offsets = PackedInt32Array(960)
+dragger_visibility = 1
+split_offset = 960
+
+[node name="Center" type="VBoxContainer" parent="VLayout/Body/CenterRightSplit" unique_id=1107960308]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="Canvas" type="Control" parent="VLayout/Body/Center" unique_id=498836006]
+[node name="Canvas" type="Control" parent="VLayout/Body/CenterRightSplit/Center" unique_id=498836006]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 script = ExtResource("4_canvas")
 
-[node name="RightDock" type="VBoxContainer" parent="VLayout/Body" unique_id=877787881]
-custom_minimum_size = Vector2(280, 0)
+[node name="RightDock" type="VBoxContainer" parent="VLayout/Body/CenterRightSplit" unique_id=877787881]
+custom_minimum_size = Vector2(220, 0)
 layout_mode = 2
-size_flags_horizontal = 0
+size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="InspectorTabs" type="TabContainer" parent="VLayout/Body/RightDock" unique_id=1366913025]
+[node name="InspectorTabs" type="TabContainer" parent="VLayout/Body/CenterRightSplit/RightDock" unique_id=1366913025]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 current_tab = 0
 
-[node name="PropTab" type="ScrollContainer" parent="VLayout/Body/RightDock/InspectorTabs" unique_id=2127552532]
+[node name="PropTab" type="ScrollContainer" parent="VLayout/Body/CenterRightSplit/RightDock/InspectorTabs" unique_id=2127552532]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 script = ExtResource("5_insp")
 metadata/_tab_index = 0
 
-[node name="FormRoot" type="VBoxContainer" parent="VLayout/Body/RightDock/InspectorTabs/PropTab" unique_id=1928374650]
+[node name="FormRoot" type="VBoxContainer" parent="VLayout/Body/CenterRightSplit/RightDock/InspectorTabs/PropTab" unique_id=1928374650]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="InfoTab" type="VBoxContainer" parent="VLayout/Body/RightDock/InspectorTabs" unique_id=1505941465]
+[node name="InfoTab" type="VBoxContainer" parent="VLayout/Body/CenterRightSplit/RightDock/InspectorTabs" unique_id=1505941465]
 visible = false
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 metadata/_tab_index = 1
 
-[node name="InfoLabel" type="Label" parent="VLayout/Body/RightDock/InspectorTabs/InfoTab" unique_id=873585893]
+[node name="InfoLabel" type="Label" parent="VLayout/Body/CenterRightSplit/RightDock/InspectorTabs/InfoTab" unique_id=873585893]
 layout_mode = 2
 text = "（未选中对象）"
 
-[node name="DocTab" type="VBoxContainer" parent="VLayout/Body/RightDock/InspectorTabs" unique_id=985477261]
+[node name="DocTab" type="VBoxContainer" parent="VLayout/Body/CenterRightSplit/RightDock/InspectorTabs" unique_id=985477261]
 visible = false
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 metadata/_tab_index = 2
 
-[node name="DocLabel" type="Label" parent="VLayout/Body/RightDock/InspectorTabs/DocTab" unique_id=1901674038]
+[node name="DocLabel" type="Label" parent="VLayout/Body/CenterRightSplit/RightDock/InspectorTabs/DocTab" unique_id=1901674038]
 layout_mode = 2
 text = "G-PID 工程
 文档元信息（标题 / 图号 / 版本）待接入。"

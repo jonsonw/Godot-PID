@@ -46,10 +46,20 @@ const GP_FONT_PRESETS: Dictionary = {
 }
 
 var gpFontSize: int = 16
-var gpLocale: String = "zh"
+var gpLocale: String = "en"
 var gpFontKey: String = "arial_cjk"
 var gpSymbolFontKey: String = "hiragino"
 var gpSymbolFontSize: int = 16
+
+# When true, the dock (left/right panel) widths scale proportionally with the
+# window width so the layout keeps its 1/5 · 3/5 · 1/5 proportions on any
+# resolution. The UI font size is ALWAYS fixed (never scaled by window size) so
+# text stays crisp and predictable. Turn it off to keep manually dragged dock
+# widths.
+# 为 true 时，左/右停靠栏宽度随窗口宽度按比例缩放，从而在任何分辨率下都保持
+# 1/5 · 3/5 · 1/5 的比例；界面字号始终固定（不随窗口缩放），文字清晰且可预期。
+# 关闭则保留用户拖拽后的停靠栏宽度。
+var gpAutoScale: bool = true
 
 # Cached symbol font so the canvas can read it cheaply each frame.
 # 缓存的图元字体，供画布逐帧廉价读取。
@@ -111,6 +121,7 @@ func gpLoad() -> void:
 	gpFontKey = gpCfg.get_value("ui", "font", "arial_cjk")
 	gpSymbolFontSize = gpCfg.get_value("symbol", "font_size", 16)
 	gpSymbolFontKey = gpCfg.get_value("symbol", "font", "hiragino")
+	gpAutoScale = gpCfg.get_value("ui", "auto_scale", true)
 
 
 # Save current settings to disk.
@@ -120,9 +131,19 @@ func gpSave() -> void:
 	gpCfg.set_value("ui", "font_size", gpFontSize)
 	gpCfg.set_value("ui", "locale", gpLocale)
 	gpCfg.set_value("ui", "font", gpFontKey)
+	gpCfg.set_value("ui", "auto_scale", gpAutoScale)
 	gpCfg.set_value("symbol", "font_size", gpSymbolFontSize)
 	gpCfg.set_value("symbol", "font", gpSymbolFontKey)
 	gpCfg.save(GP_CONFIG_PATH)
+
+
+# Effective UI font size. The UI font is intentionally fixed and does NOT scale
+# with the window size — only the dock widths adapt (see gpAutoScale). This keeps
+# text crisp and predictable across resolutions and monitors.
+# 有效界面字号。界面字号刻意固定，不随窗口大小缩放——只有停靠栏宽度会自适应
+#（见 gpAutoScale）。这样文字在不同分辨率 / 显示器下都清晰且可预期。
+func gpEffectiveFontSize() -> int:
+	return gpFontSize
 
 
 # Apply font size AND family by setting the root theme's default font + size.
@@ -130,7 +151,7 @@ func gpSave() -> void:
 func gpApplyFontSize() -> void:
 	var gpTheme: Theme = Theme.new()
 	gpTheme.default_font = gpLoadFont(gpFontKey)
-	gpTheme.default_font_size = gpFontSize
+	gpTheme.default_font_size = gpEffectiveFontSize()
 	if get_tree() != null and get_tree().root != null:
 		get_tree().root.theme = gpTheme
 

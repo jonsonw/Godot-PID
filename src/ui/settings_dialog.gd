@@ -20,6 +20,8 @@ var gpSymFontLabel: Label
 var gpSymFontOption: OptionButton
 var gpLangLabel: Label
 var gpLangOption: OptionButton
+var gpAutoScaleLabel: Label
+var gpAutoScaleCheck: CheckBox
 var gpOk: Button
 
 
@@ -37,6 +39,8 @@ func _ready() -> void:
 	gpSymFontOption = $Panel/VBox/SymFontRow/SymFontOption
 	gpLangLabel = $Panel/VBox/LangRow/LangLabel
 	gpLangOption = $Panel/VBox/LangRow/LangOption
+	gpAutoScaleLabel = $Panel/VBox/AutoScaleRow/AutoScaleLabel
+	gpAutoScaleCheck = $Panel/VBox/AutoScaleRow/AutoScaleCheck
 	gpOk = $Panel/VBox/OK
 
 	gpFontSpin.min_value = 8
@@ -61,6 +65,9 @@ func _ready() -> void:
 	gpLangOption.set_item_metadata(1, "en")
 	_gpSelectLocale(Settings.gpLocale)
 	gpLangOption.item_selected.connect(_gpOnLangSelected)
+
+	gpAutoScaleCheck.button_pressed = Settings.gpAutoScale
+	gpAutoScaleCheck.toggled.connect(_gpOnAutoScaleToggled)
 
 	gpOk.pressed.connect(queue_free)
 
@@ -124,6 +131,12 @@ func _gpOnLangSelected(gpIdx: int) -> void:
 	Settings.gpSave()
 
 
+func _gpOnAutoScaleToggled(gpOn: bool) -> void:
+	Settings.gpAutoScale = gpOn
+	Settings.gpApplyFontSize()
+	Settings.gpSave()
+
+
 func _gpSelectLocale(gpCode: String) -> void:
 	for gpI in range(gpLangOption.item_count):
 		if gpLangOption.get_item_metadata(gpI) == gpCode:
@@ -138,6 +151,7 @@ func _gpRefreshText(gpLocale: String) -> void:
 	gpSymSizeLabel.text = I18n.gpTr("settings.symbol_font_size")
 	gpSymFontLabel.text = I18n.gpTr("settings.symbol_font")
 	gpLangLabel.text = I18n.gpTr("settings.language")
+	gpAutoScaleLabel.text = I18n.gpTr("settings.auto_scale")
 	gpOk.text = I18n.gpTr("settings.ok")
 	# Update the language item labels themselves so they match the new locale.
 	# 更新语言下拉项本身的文本，使其与新语言一致。

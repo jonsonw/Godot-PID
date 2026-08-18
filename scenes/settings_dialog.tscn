@@ -1,23 +1,23 @@
-[gd_scene load_steps=2 format=3 uid="uid://bpsettings1"]
+[gd_scene format=3 uid="uid://bpsettings1"]
 
-[ext_resource type="Script" path="res://src/ui/settings_dialog.gd" id="1"]
+[ext_resource type="Script" uid="uid://cfw20kufgk0kt" path="res://src/ui/settings_dialog.gd" id="1"]
 
-[node name="SettingsDialog" type="Window"]
+[node name="SettingsDialog" type="Window" unique_id=147814352]
+oversampling_override = 1.0
 title = "设置"
 initial_position = 1
-size = Vector2i(400, 360)
+size = Vector2i(400, 400)
 unresizable = true
 script = ExtResource("1")
 
-[node name="Panel" type="Panel" parent="."]
-layout_mode = 1
+[node name="Panel" type="Panel" parent="." unique_id=1082952613]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="VBox" type="VBoxContainer" parent="Panel"]
+[node name="VBox" type="VBoxContainer" parent="Panel" unique_id=652098990]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -29,20 +29,20 @@ offset_bottom = -12.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Title" type="Label" parent="Panel/VBox"]
+[node name="Title" type="Label" parent="Panel/VBox" unique_id=1425427585]
 layout_mode = 2
 text = "设置"
 horizontal_alignment = 1
 
-[node name="UIRow" type="HBoxContainer" parent="Panel/VBox"]
+[node name="UIRow" type="HBoxContainer" parent="Panel/VBox" unique_id=1745616937]
 layout_mode = 2
 
-[node name="FontLabel" type="Label" parent="Panel/VBox/UIRow"]
+[node name="FontLabel" type="Label" parent="Panel/VBox/UIRow" unique_id=1168110021]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "界面字体大小"
 
-[node name="FontSpin" type="SpinBox" parent="Panel/VBox/UIRow"]
+[node name="FontSpin" type="SpinBox" parent="Panel/VBox/UIRow" unique_id=1890508690]
 layout_mode = 2
 min_value = 8.0
 max_value = 32.0
@@ -50,26 +50,26 @@ value = 24.0
 rounded = true
 alignment = 2
 
-[node name="UIFontRow" type="HBoxContainer" parent="Panel/VBox"]
+[node name="UIFontRow" type="HBoxContainer" parent="Panel/VBox" unique_id=569671646]
 layout_mode = 2
 
-[node name="UIFontLabel" type="Label" parent="Panel/VBox/UIFontRow"]
+[node name="UIFontLabel" type="Label" parent="Panel/VBox/UIFontRow" unique_id=1091691444]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "界面字体"
 
-[node name="UIFontOption" type="OptionButton" parent="Panel/VBox/UIFontRow"]
+[node name="UIFontOption" type="OptionButton" parent="Panel/VBox/UIFontRow" unique_id=1707547005]
 layout_mode = 2
 
-[node name="SymSizeRow" type="HBoxContainer" parent="Panel/VBox"]
+[node name="SymSizeRow" type="HBoxContainer" parent="Panel/VBox" unique_id=1430354637]
 layout_mode = 2
 
-[node name="SymSizeLabel" type="Label" parent="Panel/VBox/SymSizeRow"]
+[node name="SymSizeLabel" type="Label" parent="Panel/VBox/SymSizeRow" unique_id=1289024202]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "图元字体大小"
 
-[node name="SymSizeSpin" type="SpinBox" parent="Panel/VBox/SymSizeRow"]
+[node name="SymSizeSpin" type="SpinBox" parent="Panel/VBox/SymSizeRow" unique_id=197244005]
 layout_mode = 2
 min_value = 8.0
 max_value = 48.0
@@ -77,32 +77,43 @@ value = 16.0
 rounded = true
 alignment = 2
 
-[node name="SymFontRow" type="HBoxContainer" parent="Panel/VBox"]
+[node name="SymFontRow" type="HBoxContainer" parent="Panel/VBox" unique_id=1778219922]
 layout_mode = 2
 
-[node name="SymFontLabel" type="Label" parent="Panel/VBox/SymFontRow"]
+[node name="SymFontLabel" type="Label" parent="Panel/VBox/SymFontRow" unique_id=548873543]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "图元字体"
 
-[node name="SymFontOption" type="OptionButton" parent="Panel/VBox/SymFontRow"]
+[node name="SymFontOption" type="OptionButton" parent="Panel/VBox/SymFontRow" unique_id=1063901268]
 layout_mode = 2
 
-[node name="LangRow" type="HBoxContainer" parent="Panel/VBox"]
+[node name="LangRow" type="HBoxContainer" parent="Panel/VBox" unique_id=1156513996]
 layout_mode = 2
 
-[node name="LangLabel" type="Label" parent="Panel/VBox/LangRow"]
+[node name="LangLabel" type="Label" parent="Panel/VBox/LangRow" unique_id=143531760]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "语言"
 
-[node name="LangOption" type="OptionButton" parent="Panel/VBox/LangRow"]
+[node name="LangOption" type="OptionButton" parent="Panel/VBox/LangRow" unique_id=1742513137]
 layout_mode = 2
 
-[node name="Spacer" type="Control" parent="Panel/VBox"]
+[node name="AutoScaleRow" type="HBoxContainer" parent="Panel/VBox" unique_id=283687266]
+layout_mode = 2
+
+[node name="AutoScaleLabel" type="Label" parent="Panel/VBox/AutoScaleRow" unique_id=1809254899]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "界面随窗口自适应缩放"
+
+[node name="AutoScaleCheck" type="CheckBox" parent="Panel/VBox/AutoScaleRow" unique_id=1778828703]
+layout_mode = 2
+
+[node name="Spacer" type="Control" parent="Panel/VBox" unique_id=455959940]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="OK" type="Button" parent="Panel/VBox"]
+[node name="OK" type="Button" parent="Panel/VBox" unique_id=798045803]
 layout_mode = 2
 text = "确定"
