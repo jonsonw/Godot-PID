@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" data-isa="FI" data-iso="ISO10628" data-tag-example="FI-001">
+  <g fill="none" stroke="#000" stroke-width="2">
+    <circle cx="60" cy="44" r="28"/>
+    <text x="60" y="50" font-family="Arial" font-size="20" text-anchor="middle">FI</text>
+    <line x1="20" y1="44" x2="40" y2="44"/>
+    <line x1="80" y1="44" x2="100" y2="44"/>
+  </g>
+</svg>

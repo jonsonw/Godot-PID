@@ -1,0 +1,26 @@
+filename,isa_code,iso_ref,description,tag_example
+FT_FlowTransmitter_001.svg,FT,ISO10628,Flow Transmitter,FT-001
+PT_PressureTransmitter_001.svg,PT,ISO10628,Pressure Transmitter,PT-001
+TT_TemperatureTransmitter_001.svg,TT,ISO10628,Temperature Transmitter,TT-001
+LT_LevelTransmitter_001.svg,LT,ISO10628,Level Transmitter,LT-001
+FI_FlowIndicator_001.svg,FI,ISO10628,Flow Indicator,FI-001
+PI_PressureIndicator_001.svg,PI,ISO10628,Pressure Indicator,PI-001
+TI_TemperatureIndicator_001.svg,TI,ISO10628,Temperature Indicator,TI-001
+LI_LevelIndicator_001.svg,LI,ISO10628,Level Indicator,LI-001
+CV_ControlValve_001.svg,CV,ISO10628,Control Valve,CV-001
+BV_BallValve_001.svg,BV,ISO10628,Ball Valve,BV-001
+GV_GateValve_001.svg,GV,ISO10628,Gate Valve,GV-001
+GLV_GlobeValve_001.svg,GLV,ISO10628,Globe Valve,GLV-001
+CHK_CheckValve_001.svg,CHK,ISO10628,Check Valve,CHK-001
+DV_DiaphragmValve_001.svg,DV,ISO10628,Diaphragm Valve,DV-001
+VAV_ValveActuator_001.svg,VAV,ISO10628,Valve Actuator,VAV-001
+P_CentrifugalPump_001.svg,P,ISO10628,Centrifugal Pump,P-001
+PD_PositiveDisplacementPump_001.svg,PD,ISO10628,Positive Displacement Pump,PD-001
+C_Compressor_001.svg,C,ISO10628,Compressor,C-001
+HX_HeatExchanger_001.svg,HX,ISO10628,Heat Exchanger,HX-001
+TK_Tank_001.svg,TK,ISO10628,Tank,TK-001
+ProcessLine_Solid_001.svg,LINE-P,ISO10628,Process Line (solid),L-001
+InstrumentLine_Dashed_001.svg,LINE-I,ISO10628,Instrument Line (dashed),LI-001
+ElectricalLine_DotDash_001.svg,LINE-E,ISO10628,Electrical Line (dot-dash),LE-001
+FE_FieldEnclosure_001.svg,FE,ISO10628,Field Enclosure,FE-001
+PV_Positioner_001.svg,PV,ISO10628,Valve Positioner,PV-001

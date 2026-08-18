@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 120" width="140" height="120" data-isa="DV" data-iso="ISO10628" data-tag-example="DV-001">
+  <g fill="none" stroke="#000" stroke-width="2">
+    <line x1="10" y1="60" x2="45" y2="60"/>
+    <path d="M45 50 Q70 60 45 70" fill="none"/>
+    <line x1="95" y1="60" x2="130" y2="60"/>
+    <text x="70" y="32" font-family="Arial" font-size="12" text-anchor="middle">DV</text>
+  </g>
+</svg>
