@@ -1,12 +1,9 @@
 class_name GPCanvas2D
 extends Control
 
-# Preloaded view classes used for incremental node/edge rendering.
-# 增量式图元/连线渲染所用的视图类（预加载）。
+# Preloaded view class used for symbol view type annotation.
+# 图元视图类型注解所用的视图类（预加载）。
 const GPSymbolView := preload("res://src/render/symbol_view.gd")
-# Preloaded edge view class for incremental edge rendering.
-# 增量式连线渲染所用的连线视图类（预加载）。
-const GPEdgeView := preload("res://src/render/edge_view.gd")
 
 # 2D canvas implemented with a Node2D world_root.
 # 2D 画布：使用 Node2D 作为 world_root 实现。
@@ -36,6 +33,10 @@ var gpGraph: GPPIDGraph
 # Available symbol definitions used to create new nodes.
 # 用于创建新节点的可用图元定义。
 var gpDefs: Array[GPSymbolDef] = []
+
+# Graph binder that owns the incremental view caches and sync logic (composition child).
+# 持有增量视图缓存与同步逻辑的图绑定器（组合子节点）。
+var gpBinder: GPGraphBinder = null
 
 # Monotonically increasing id counter for new nodes and edges.
 # 新节点与新边的单调递增 id 计数器。
@@ -99,15 +100,6 @@ var _gpDragOffset: Vector2 = Vector2.ZERO
 # 最近一次鼠标在世界坐标系中的位置。
 var _gpLastMouseWorld: Vector2 = Vector2.ZERO
 
-# View caches: id -> view node. Used for incremental sync instead of full rebuild.
-# 视图缓存：id → 视图节点。用于增量同步而非全量重建。
-# Incremental view cache for symbols: symbol id -> GPSymbolView node.
-# 图元增量视图缓存：图元 id → GPSymbolView 节点。
-var _gpSymbolViews: Dictionary = {}
-# Incremental view cache for edges: edge id -> GPEdgeView node.
-# 连线增量视图缓存：连线 id → GPEdgeView 节点。
-var _gpEdgeViews: Dictionary = {}
-
 
 # Initialize the canvas: create world root and connect global signals.
 # 初始化画布：创建世界根节点并连接全局信号。
@@ -118,6 +110,12 @@ func _ready() -> void:
 	gpWorldRoot = Node2D.new()
 	gpWorldRoot.name = "WorldRoot"
 	add_child(gpWorldRoot)
+	# Create the graph binder that owns view-sync logic and caches.
+	# 创建持有视图同步逻辑与缓存的图绑定器。
+	gpBinder = GPGraphBinder.new()
+	gpBinder.name = "GraphBinder"
+	add_child(gpBinder)
+	gpBinder.gpWorldRoot = gpWorldRoot
 	# Subscribe to language and font changes so symbol labels stay in sync.
 	# 订阅语言与字体变化，保持图元文字同步。
 	I18n.gpLocaleChanged.connect(_gpOnLocaleChanged)
@@ -230,103 +228,28 @@ func _gpDrawConnectPreview() -> void:
 # Sync both symbol views and edge views to the current graph state.
 # 将图元视图与连线视图同步到当前图状态。
 func _gpSyncViews() -> void:
-	if gpGraph == null or gpWorldRoot == null:
+	if gpBinder == null:
 		return
-	_gpSyncSymbolViews()
-	_gpSyncEdgeViews()
+	gpBinder.gpSync(gpGraph, gpDefs, gpSelectedId, gpConnectFrom)
 
 
-# Incrementally sync symbol view nodes with gpGraph.gpNodes.
-# 增量同步图元视图节点与 gpGraph.gpNodes。
-func _gpSyncSymbolViews() -> void:
-	var gpFresh: Dictionary = {}
-	for gpN in gpGraph.gpNodes:
-		var gpId: String = gpN.get("id", "")
-		if gpId == "":
-			continue
-		var gpV: GPSymbolView = null
-		if _gpSymbolViews.has(gpId):
-			# Reuse existing view and update its bound data.
-			# 复用已有视图并更新绑定数据。
-			gpV = _gpSymbolViews[gpId] as GPSymbolView
-			gpV.gpNode = gpN
-			gpV.gpUpdateTransform()
-		else:
-			# Create a new view for this node.
-			# 为该节点创建新视图。
-			gpV = GPSymbolView.new()
-			var gpDef: GPSymbolDef = _gpDefFor(gpN.get("type", ""))
-			gpV.gpInit(gpN, gpDef)
-			gpWorldRoot.add_child(gpV)
-		gpV.gpSetSelected(gpId == gpSelectedId)
-		gpV.gpSetConnectSource(gpId == gpConnectFrom)
-		gpFresh[gpId] = gpV
-	# Remove stale symbol views.
-	# 删除已不存在的图元视图。
-	for gpId in _gpSymbolViews.keys():
-		if not gpFresh.has(gpId):
-			var gpV: Node2D = _gpSymbolViews[gpId]
-			gpV.queue_free()
-	_gpSymbolViews = gpFresh
 
 
-# Incrementally sync edge view nodes with gpGraph.gpEdges.
-# 增量同步连线视图节点与 gpGraph.gpEdges。
-func _gpSyncEdgeViews() -> void:
-	var gpFresh: Dictionary = {}
-	for gpE in gpGraph.gpEdges:
-		var gpId: String = gpE.get("id", "")
-		if gpId == "":
-			continue
-		var gpV: GPEdgeView = null
-		if _gpEdgeViews.has(gpId):
-			# Reuse existing view and update its bound data.
-			# 复用已有视图并更新绑定数据。
-			gpV = _gpEdgeViews[gpId] as GPEdgeView
-			gpV.gpEdge = gpE
-			gpV.queue_redraw()
-		else:
-			# Create a new view for this edge.
-			# 为该连线创建新视图。
-			gpV = GPEdgeView.new()
-			gpV.gpInit(gpE, gpGraph)
-			gpWorldRoot.add_child(gpV)
-		gpFresh[gpId] = gpV
-	# Remove stale edge views.
-	# 删除已不存在的连线视图。
-	for gpId in _gpEdgeViews.keys():
-		if not gpFresh.has(gpId):
-			var gpV: Node2D = _gpEdgeViews[gpId]
-			gpV.queue_free()
-	_gpEdgeViews = gpFresh
-
-
-# Queue redraw on all symbol views.
-# 令所有图元视图重新绘制。
+# Queue redraw on all symbol views (delegates to binder).
+# 令所有图元视图重新绘制（委托给绑定器）。
 func _gpRefreshSymbols() -> void:
-	for gpId in _gpSymbolViews.keys():
-		var gpV: GPSymbolView = _gpSymbolViews[gpId] as GPSymbolView
-		gpV.queue_redraw()
+	if gpBinder != null:
+		gpBinder.gpRefreshSymbols()
 
 
 # ============================ lookup ============================
 # ============================ 查找 ============================
-# Find a symbol definition by its id.
-# 按 id 查找图元定义。
-func _gpDefFor(gpTypeId: String) -> GPSymbolDef:
-	for gpD in gpDefs:
-		if gpD.gpId == gpTypeId:
-			return gpD
-	return null
-
-
 # Find the world center of a node by id.
 # 按 id 查找节点的世界中心。
 func _gpNodeCenter(gpId: String) -> Vector2:
 	for gpN in gpGraph.gpNodes:
-		if gpN.get("id", "") == gpId:
-			var gpPos: Array = gpN.get("pos", [0.0, 0.0])
-			return Vector2(float(gpPos[0]), float(gpPos[1]))
+		if gpN.gpInstanceId == gpId:
+			return gpN.gpPosition
 	return Vector2.INF
 
 
@@ -335,13 +258,12 @@ func _gpNodeCenter(gpId: String) -> Vector2:
 func _gpHitTest(gpWorld: Vector2) -> String:
 	var gpBest: String = ""
 	for gpN in gpGraph.gpNodes:
-		var gpDef: GPSymbolDef = _gpDefFor(gpN.get("type", ""))
+		var gpDef: GPSymbolDef = gpBinder.gpDefFor(gpN.gpSymbolId)
 		var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef != null else Vector2(64.0, 48.0)
-		var gpPos: Array = gpN.get("pos", [0.0, 0.0])
-		var gpC: Vector2 = Vector2(float(gpPos[0]), float(gpPos[1]))
+		var gpC: Vector2 = gpN.gpPosition
 		var gpRect: Rect2 = Rect2(gpC - gpSz / 2.0, gpSz)
 		if gpRect.has_point(gpWorld):
-			gpBest = gpN.get("id", "")
+			gpBest = gpN.gpInstanceId
 	return gpBest
 
 
@@ -349,8 +271,8 @@ func _gpHitTest(gpWorld: Vector2) -> String:
 # 就地更新图节点的位置。
 func _gpSetNodePos(gpId: String, gpWorld: Vector2) -> void:
 	for gpN in gpGraph.gpNodes:
-		if gpN.get("id", "") == gpId:
-			gpN["pos"] = [gpWorld.x, gpWorld.y]
+		if gpN.gpInstanceId == gpId:
+			gpN.gpPosition = gpWorld
 			return
 
 
@@ -407,7 +329,7 @@ func _gui_input(gpEvent: InputEvent) -> void:
 		if _gpDragId != "":
 			var gpWorld: Vector2 = gpWorldFromScreen(gpMotion.position)
 			_gpSetNodePos(_gpDragId, gpWorld + _gpDragOffset)
-			var gpV: GPSymbolView = _gpSymbolViews.get(_gpDragId, null) as GPSymbolView
+			var gpV: GPSymbolView = gpBinder.gpGetSymbolView(_gpDragId)
 			if gpV != null:
 				gpV.gpUpdateTransform()
 			# Edge views depend on node positions, so redraw them too.
@@ -423,12 +345,11 @@ func _gui_input(gpEvent: InputEvent) -> void:
 			queue_redraw()
 
 
-# Queue redraw on all edge views.
-# 令所有连线视图重新绘制。
+# Queue redraw on all edge views (delegates to binder).
+# 令所有连线视图重新绘制（委托给绑定器）。
 func _gpRefreshEdges() -> void:
-	for gpId in _gpEdgeViews.keys():
-		var gpV: GPEdgeView = _gpEdgeViews[gpId] as GPEdgeView
-		gpV.queue_redraw()
+	if gpBinder != null:
+		gpBinder.gpRefreshEdges()
 
 
 # Handle a left mouse button press.
@@ -444,7 +365,7 @@ func _gpOnLeftDown(gpScreen: Vector2) -> void:
 		# Leave the label empty so the canvas renders the localized type name and
 		# it switches with the UI language. The user can still type a custom label.
 		# 标签留空，使画布显示本地化的类型名并随界面语言切换；用户仍可在属性面板填自定义标签。
-		gpGraph.gpAddNode(gpNid, gpPendingDef.gpId, "", gpWorld, {})
+		gpGraph.gpAddNode(gpGraph.gpNewNode(gpNid, gpPendingDef.gpId, "", gpWorld, {}))
 		gpSelectedId = gpNid
 		gpPendingDef = null
 		queue_redraw()
@@ -464,7 +385,7 @@ func _gpOnLeftDown(gpScreen: Vector2) -> void:
 				if gpConnectFrom != gpHit:
 					var gpEid: String = "e%d" % gpNextId
 					gpNextId += 1
-					gpGraph.gpAddEdge(gpEid, gpConnectFrom, gpHit, {})
+					gpGraph.gpAddEdge(gpGraph.gpNewEdge(gpEid, gpConnectFrom, gpHit, {}))
 					gpGraphChanged.emit()
 				gpConnectFrom = ""
 			queue_redraw()
@@ -511,5 +432,5 @@ func gpResetView() -> void:
 # 画布离开场景树时清理缓存引用。
 func _notification(gpWhat: int) -> void:
 	if gpWhat == NOTIFICATION_PREDELETE:
-		_gpSymbolViews.clear()
-		_gpEdgeViews.clear()
+		if gpBinder != null:
+			gpBinder.gpClear()

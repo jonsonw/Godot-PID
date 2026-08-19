@@ -10,9 +10,9 @@ extends Node2D
 # 绑定的图边 id。
 var gpEdgeId: String = ""
 
-# Bound graph edge dictionary.
-# 绑定的图边字典。
-var gpEdge: Dictionary = {}
+# Bound graph edge object (strongly typed; the single source of truth).
+# 绑定的图边对象（强类型；唯一真相来源）。
+var gpEdge: GPPIDEdge = null
 
 # Reference to the parent graph (used to look up node positions).
 # 父图引用（用于查找节点位置）。
@@ -21,9 +21,9 @@ var gpGraph: GPPIDGraph = null
 
 # Bind this view to a graph edge.
 # 将本视图绑定到一条图边。
-func gpInit(gpE: Dictionary, gpG: GPPIDGraph) -> void:
+func gpInit(gpE: GPPIDEdge, gpG: GPPIDGraph) -> void:
 	gpEdge = gpE
-	gpEdgeId = gpE.get("id", "")
+	gpEdgeId = gpE.gpInstanceId
 	gpGraph = gpG
 	name = "Edge_" + gpEdgeId
 	queue_redraw()
@@ -32,10 +32,10 @@ func gpInit(gpE: Dictionary, gpG: GPPIDGraph) -> void:
 # Draw a straight line between the two connected node centers.
 # 在相连两图元中心之间画一条直线。
 func _draw() -> void:
-	if gpGraph == null or gpEdge.is_empty():
+	if gpGraph == null or gpEdge == null:
 		return
-	var gpA: Vector2 = _gpNodeCenter(gpEdge.get("from", ""))
-	var gpB: Vector2 = _gpNodeCenter(gpEdge.get("to", ""))
+	var gpA: Vector2 = _gpNodeCenter(gpEdge.gpFromRef.get("node_id", ""))
+	var gpB: Vector2 = _gpNodeCenter(gpEdge.gpToRef.get("node_id", ""))
 	if gpA == Vector2.INF or gpB == Vector2.INF:
 		return
 	draw_line(gpA, gpB, Color(0.70, 0.75, 0.85), 2.0)
@@ -45,7 +45,6 @@ func _draw() -> void:
 # 按 id 查找节点的世界中心坐标。
 func _gpNodeCenter(gpId: String) -> Vector2:
 	for gpN in gpGraph.gpNodes:
-		if gpN.get("id", "") == gpId:
-			var gpPos: Array = gpN.get("pos", [0.0, 0.0])
-			return Vector2(float(gpPos[0]), float(gpPos[1]))
+		if gpN.gpInstanceId == gpId:
+			return gpN.gpPosition
 	return Vector2.INF

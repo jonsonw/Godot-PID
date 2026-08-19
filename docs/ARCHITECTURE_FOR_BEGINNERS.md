@@ -102,13 +102,13 @@ G-PID 把代码分成三层，每层只关心自己的事。
 #### GPPIDGraph 里面存了什么？
 
 ```gdscript
-@export var gpMeta: Dictionary = {"version": "1.0", "title": "", "sheets": 1}
-@export var gpNodes: Array[Dictionary] = []
-@export var gpEdges: Array[Dictionary] = []
+var gpMeta: Dictionary = {"version": "1.0", "title": "", "sheets": 1}
+var gpNodes: Array[GPPIDNode] = []
+var gpEdges: Array[GPPIDEdge] = []
 ```
 
-- `gpNodes`：每个元素是一个 `Dictionary`，形如 `{"id":"n1","type":"pump","label":"","pos":[100,200],"attrs":{}}`
-- `gpEdges`：每个元素形如 `{"id":"e1","from":"n1","to":"n2","attrs":{}}`
+- `gpNodes`：每个元素是一个 `GPPIDNode` 对象，字段有 `gpInstanceId` / `gpSymbolId` / `gpTag` / `gpPosition` / `gpAttrValues` 等（强类型，写错字段名会在编译期报错）。
+- `gpEdges`：每个元素是一个 `GPPIDEdge` 对象，字段有 `gpInstanceId` / `gpFromRef` / `gpToRef` / `gpKind` / `gpAttrs` 等。
 
 **重要**：`GPPIDGraph` 不画图，只存数据。它就像 Excel 的「表格」，里面只有数字和文字。
 
@@ -190,7 +190,7 @@ G-PID 把代码分成三层，每层只关心自己的事。
        └── _gpOnLeftDown()
            ├── 发现 gpPendingDef 不为空
            ├── 生成新 id：n1、n2、n3…
-           ├── 调用 gpGraph.gpAddNode("n1", "pump", "", 鼠标世界坐标, {})
+           ├── 调用 gpGraph.gpAddNode(gpGraph.gpNewNode("n1", "pump", "", 鼠标世界坐标, {}))
            │   └── 数据被写入 GPPIDGraph.gpNodes
            ├── gpSelectedId = "n1"
            ├── gpPendingDef = null
@@ -233,8 +233,8 @@ G-PID 把代码分成三层，每层只关心自己的事。
 
 | 函数 | 作用 |
 |------|------|
-| `gpAddNode(id, type, label, pos, attrs)` | 添加一个节点 |
-| `gpAddEdge(id, from_id, to_id, attrs)` | 添加一条边 |
+| `gpAddNode(node: GPPIDNode)` / `gpNewNode(id, symbol_id, label, pos, attrs)` | 添加一个节点（先造对象再添加） |
+| `gpAddEdge(edge: GPPIDEdge)` / `gpNewEdge(id, from_id, to_id, attrs)` | 添加一条边（先造对象再添加） |
 | `gpToDict()` | 把整个图转成 Dictionary，用于保存 JSON |
 | `gpFromDict(data)` | 从 Dictionary 恢复出一个 GPPIDGraph |
 

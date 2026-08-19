@@ -1,10 +1,12 @@
 class_name GPPIDGraph
 extends Resource
 
-# P&ID topology data core: a node-edge graph.
-# P&ID 拓扑数据内核：节点-边图。
+# P&ID topology data core: a strongly-typed node-edge graph.
+# P&ID 拓扑数据内核：强类型的节点-边图。
 # The 2D canvas, 3D linkage and list export all read this resource.
 # 2D 画布、3D 联动、清单导出都读取这个 Resource。
+# See 从零落地架构_分步实施.md Step 1.2 (object graph refactor).
+# 见「从零落地架构_分步实施.md」Step 1.2（对象图重构）。
 
 # Project metadata stored inside the graph resource.
 # 图资源内部保存的工程元数据。
@@ -14,56 +16,143 @@ extends Resource
 	"sheets": 1,
 }
 
-# All symbol instances (nodes) in this sheet.
-# 本图纸内所有图元实例（节点）。
-@export var gpNodes: Array[Dictionary] = []
+# All symbol instances (nodes) in this sheet — strongly typed.
+# 本图纸内所有图元实例（节点）——强类型。
+# Not @export: Godot only exports built-ins / Resources / Nodes / enums, and GPPIDNode
+# is a custom RefCounted. Serialization is manual via gpToDict() (JSON), so no export needed.
+# 不加 @export：Godot 仅允许导出内置类型 / Resource / Node / 枚举，而 GPPIDNode 是自定义
+# RefCounted。序列化走手动 gpToDict()（JSON），故无需导出。
+var gpNodes: Array[GPPIDNode] = []
 
-# All connections (edges) between nodes in this sheet.
-# 本图纸内节点之间的所有连线（边）。
-@export var gpEdges: Array[Dictionary] = []
-
-
-# Add a node to the graph.
-# 向图中添加一个节点。
-func gpAddNode(gpId: String, gpType: String, gpLabel: String, gpPos: Vector2 = Vector2.ZERO, gpAttrs: Dictionary = {}) -> void:
-	gpNodes.append({
-		"id": gpId,
-		"type": gpType,
-		"label": gpLabel,
-		"pos": [gpPos.x, gpPos.y],
-		"attrs": gpAttrs.duplicate(),
-	})
+# All connections (edges) between nodes in this sheet — strongly typed.
+# 本图纸内节点之间的所有连线（边）——强类型。
+var gpEdges: Array[GPPIDEdge] = []
 
 
-# Add an edge between two nodes.
-# 在两个节点之间添加一条边。
-func gpAddEdge(gpId: String, gpFromId: String, gpToId: String, gpAttrs: Dictionary = {}) -> void:
-	gpEdges.append({
-		"id": gpId,
-		"from": gpFromId,
-		"to": gpToId,
-		"attrs": gpAttrs.duplicate(),
-	})
+# Signals fired when data changes; the canvas subscribes to keep views in sync.
+# 数据变化时发出的信号；画布订阅它们以保持视图同步。
+signal gpNodeAdded(gpNode: GPPIDNode)
+signal gpNodeRemoved(gpNode: GPPIDNode)
+signal gpEdgeAdded(gpEdge: GPPIDEdge)
+signal gpEdgeRemoved(gpEdge: GPPIDEdge)
+signal gpGraphChanged()
 
 
-# Serialize the graph to a plain dictionary.
-# 将图序列化为普通字典。
+# Convenience factory: build a node object from primitive fields.
+# 便捷工厂：用原始字段构造一个节点对象。
+func gpNewNode(gpId: String, gpSymbolId: String, gpLabel: String, gpPos: Vector2 = Vector2.ZERO, gpAttrs: Dictionary = {}) -> GPPIDNode:
+	var gpN: GPPIDNode = GPPIDNode.new()
+	gpN.gpInstanceId = gpId
+	gpN.gpSymbolId = gpSymbolId
+	gpN.gpTag = gpLabel
+	gpN.gpPosition = gpPos
+	gpN.gpAttrValues = gpAttrs.duplicate()
+	return gpN
+
+
+# Convenience factory: build an edge object (node-to-node) from primitive fields.
+# 便捷工厂：用原始字段构造一条边对象（节点到节点）。
+func gpNewEdge(gpId: String, gpFromId: String, gpToId: String, gpAttrs: Dictionary = {}) -> GPPIDEdge:
+	var gpE: GPPIDEdge = GPPIDEdge.new()
+	gpE.gpInstanceId = gpId
+	gpE.gpFromRef = {"node_id": gpFromId, "port_id": ""}
+	gpE.gpToRef = {"node_id": gpToId, "port_id": ""}
+	gpE.gpKind = "PROCESS"
+	gpE.gpAttrs = gpAttrs.duplicate()
+	return gpE
+
+
+# Add a node object to the graph.
+# 向图中添加一个节点对象。
+func gpAddNode(gpNode: GPPIDNode) -> void:
+	gpNodes.append(gpNode)
+	gpNodeAdded.emit(gpNode)
+	gpGraphChanged.emit()
+
+
+# Add an edge object to the graph.
+# 向图中添加一条边对象。
+func gpAddEdge(gpEdge: GPPIDEdge) -> void:
+	gpEdges.append(gpEdge)
+	gpEdgeAdded.emit(gpEdge)
+	gpGraphChanged.emit()
+
+
+# Find a node by id. Returns null when missing.
+# 按 id 查找节点；找不到返回 null。
+func gpGetNode(gpId: String) -> GPPIDNode:
+	for gpN in gpNodes:
+		if gpN.gpInstanceId == gpId:
+			return gpN
+	return null
+
+
+# Find an edge by id. Returns null when missing.
+# 按 id 查找边；找不到返回 null。
+func gpGetEdge(gpId: String) -> GPPIDEdge:
+	for gpE in gpEdges:
+		if gpE.gpInstanceId == gpId:
+			return gpE
+	return null
+
+
+# Remove a node by id. Returns whether it was actually removed.
+# 按 id 删除节点，返回是否成功删除。
+func gpRemoveNode(gpId: String) -> bool:
+	for gpI in range(gpNodes.size()):
+		if gpNodes[gpI].gpInstanceId == gpId:
+			var gpN: GPPIDNode = gpNodes[gpI]
+			gpNodes.remove_at(gpI)
+			gpNodeRemoved.emit(gpN)
+			gpGraphChanged.emit()
+			return true
+	return false
+
+
+# Remove a node and every edge that touches it.
+# 删除节点及其所有关联边。
+func gpRemoveNodeWithEdges(gpId: String) -> void:
+	gpRemoveNode(gpId)
+	var gpKeep: Array[GPPIDEdge] = []
+	for gpE in gpEdges:
+		if gpE.gpFromRef.get("node_id", "") == gpId or gpE.gpToRef.get("node_id", "") == gpId:
+			gpEdgeRemoved.emit(gpE)
+		else:
+			gpKeep.append(gpE)
+	gpEdges = gpKeep
+	gpGraphChanged.emit()
+
+
+# Serialize the graph to a plain dictionary (object graph -> dict graph).
+# 将图序列化为普通字典（对象图 → 字典图）。
 func gpToDict() -> Dictionary:
+	var gpNodesOut: Array = []
+	for gpN in gpNodes:
+		gpNodesOut.append(gpN.gpToDict())
+	var gpEdgesOut: Array = []
+	for gpE in gpEdges:
+		gpEdgesOut.append(gpE.gpToDict())
 	return {
 		"meta": gpMeta.duplicate(),
-		"nodes": gpNodes.duplicate(),
-		"edges": gpEdges.duplicate(),
+		"nodes": gpNodesOut,
+		"edges": gpEdgesOut,
 	}
 
 
-# Restore a graph from a plain dictionary.
-# 从普通字典还原图。
+# Restore a graph from a plain dictionary (tolerant of old/new node/edge shapes).
+# 从普通字典还原图（兼容新旧节点/边形状）。
 static func gpFromDict(gpData: Dictionary) -> GPPIDGraph:
 	var gpG: GPPIDGraph = GPPIDGraph.new()
 	if gpData.has("meta"):
 		gpG.gpMeta = gpData["meta"].duplicate()
 	if gpData.has("nodes"):
-		gpG.gpNodes = gpData["nodes"].duplicate()
+		for gpND in gpData["nodes"]:
+			var gpN: GPPIDNode = GPPIDNode.new()
+			gpN.gpFromDict(gpND)
+			gpG.gpNodes.append(gpN)
 	if gpData.has("edges"):
-		gpG.gpEdges = gpData["edges"].duplicate()
+		for gpED in gpData["edges"]:
+			var gpE: GPPIDEdge = GPPIDEdge.new()
+			gpE.gpFromDict(gpED)
+			gpG.gpEdges.append(gpE)
 	return gpG
