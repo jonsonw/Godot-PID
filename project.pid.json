@@ -6,25 +6,32 @@
   },
   "nodes": [
 	{
-	  "id": "V-101",
-	  "type": "valve",
-	  "label": "调节阀",
-	  "pos": [120, 80],
-	  "attrs": { "size": "DN80", "fail_position": "FC" }
+	  "instance_id": "V-101",
+	  "symbol_id": "valve",
+	  "tag": "调节阀",
+	  "position": [120, 80],
+	  "rotation_deg": 0,
+	  "flipped": false,
+	  "attr_values": { "size": "DN80", "fail_position": "FC" }
 	},
 	{
-	  "id": "T-201",
-	  "type": "tank",
-	  "label": "解毒槽",
-	  "pos": [340, 200],
-	  "attrs": { "volume_m3": 500, "material": "CS+RL" }
+	  "instance_id": "T-201",
+	  "symbol_id": "tank",
+	  "tag": "解毒槽",
+	  "position": [340, 200],
+	  "rotation_deg": 0,
+	  "flipped": false,
+	  "attr_values": { "volume_m3": 500, "material": "CS+RL" }
 	}
   ],
   "edges": [
 	{
-	  "id": "P-01",
-	  "from": "V-101",
-	  "to": "T-201",
+	  "instance_id": "P-01",
+	  "from_ref": { "node_id": "V-101", "port_id": "" },
+	  "to_ref": { "node_id": "T-201", "port_id": "" },
+	  "kind": "PROCESS",
+	  "routing": [],
+	  "tag": "",
 	  "attrs": { "medium": "CuSO4 溶液", "flow": "→", "diameter": "DN80" }
 	}
   ]

@@ -15,6 +15,10 @@ extends Control
 # 用户正在编辑的活动拓扑图。
 var gpGraph: GPPIDGraph
 
+# Preloaded node class (strongly typed; the single source of truth for a symbol instance).
+# 预加载的节点类（强类型；图元实例的唯一真相来源）。
+const GPPIDNode := preload("res://src/core/pid_node.gd")
+
 # Available symbol definitions shown in the left palette.
 # 左栏显示的可用图元定义。
 var gpDefs: Array[GPSymbolDef] = []
@@ -262,24 +266,24 @@ func _gpOnStatus(gpInfo: Dictionary) -> void:
 func _gpRefreshSelection() -> void:
 	var gpId: String = gpCanvas.gpSelectedId
 	if gpId == "":
-		gpInspector.gpShow(null, {})
+		gpInspector.gpShow(null, null)
 		gpInfoLabel.text = I18n.gpTr("symbol_lib.no_selection")
 		return
 
-	var gpNode: Dictionary = _gpNodeFor(gpId)
-	if gpNode.is_empty():
-		gpInspector.gpShow(null, {})
+	var gpNode: GPPIDNode = _gpNodeFor(gpId)
+	if gpNode == null:
+		gpInspector.gpShow(null, null)
 		gpInfoLabel.text = I18n.gpTr("symbol_lib.no_selection")
 		return
 
-	var gpDef: GPSymbolDef = _gpDefFor(gpNode["type"])
+	var gpDef: GPSymbolDef = _gpDefFor(gpNode.gpSymbolId)
 	gpInspector.gpShow(gpDef, gpNode)
 
 	var gpCat: String = I18n.gpTr(gpDef.gpCategory) if gpDef else "—"
 	var gpSize: String = str(gpDef.gpDefaultSize) if gpDef else "—"
 	gpInfoLabel.text = "%s：%s\n%s：%s\n%s：%s\n%s：%s" % [
 		I18n.gpTr("info.id"), gpId,
-		I18n.gpTr("info.type"), gpNode["type"],
+		I18n.gpTr("info.type"), gpNode.gpSymbolId,
 		I18n.gpTr("info.category"), gpCat,
 		I18n.gpTr("info.size"), gpSize]
 
@@ -287,15 +291,13 @@ func _gpRefreshSelection() -> void:
 # React to an attribute edit in the inspector.
 # 响应属性面板中的属性编辑。
 func _gpOnAttrChanged(gpId: String, gpKey: String, gpVal) -> void:
-	var gpNode: Dictionary = _gpNodeFor(gpId)
-	if gpNode.is_empty():
+	var gpNode: GPPIDNode = _gpNodeFor(gpId)
+	if gpNode == null:
 		return
 	if gpKey == "label":
-		gpNode["label"] = gpVal
+		gpNode.gpTag = gpVal
 	else:
-		if not gpNode.has("attrs"):
-			gpNode["attrs"] = {}
-		gpNode["attrs"][gpKey] = gpVal
+		gpNode.gpAttrValues[gpKey] = gpVal
 	gpCanvas.queue_redraw()
 	_gpRefreshSelection()
 
@@ -343,8 +345,7 @@ func _gpOpenSettings() -> void:
 # 删除当前选中的节点及其关联的边。
 func _gpDeleteSelected() -> void:
 	var gpId: String = gpCanvas.gpSelectedId
-	gpGraph.gpNodes = gpGraph.gpNodes.filter(func(gpN): return gpN["id"] != gpId)
-	gpGraph.gpEdges = gpGraph.gpEdges.filter(func(gpE): return gpE["from"] != gpId and gpE["to"] != gpId)
+	gpGraph.gpRemoveNodeWithEdges(gpId)
 	gpCanvas.gpSelectedId = ""
 	gpCanvas.gpConnectFrom = ""
 	gpCanvas.queue_redraw()
@@ -498,8 +499,8 @@ func _gpDefFor(gpTypeId: String) -> GPSymbolDef:
 
 # Find a graph node by its id.
 # 按 id 查找图节点。
-func _gpNodeFor(gpId: String) -> Dictionary:
+func _gpNodeFor(gpId: String) -> GPPIDNode:
 	for gpN in gpGraph.gpNodes:
-		if gpN["id"] == gpId:
+		if gpN.gpInstanceId == gpId:
 			return gpN
-	return {}
+	return null

@@ -7,32 +7,49 @@
 # 待 GUT 接入后，将 `extends Node` 改回 `extends GutTest`，并把 assert() 换回 assert_eq()/assert_true()。
 extends Node
 
-# Ensure a node can be added and found.
-# 验证节点可被新增并检索。
+# Ensure a node can be added and found (object graph, not dictionary).
+# 验证节点可被新增并检索（对象图，而非字典）。
 func gpTestAddNode() -> void:
 	var gpG: GPPIDGraph = GPPIDGraph.new()
-	gpG.gpAddNode("n1", "pump", "P-101", Vector2(10, 20))
+	gpG.gpAddNode(gpG.gpNewNode("n1", "pump", "P-101", Vector2(10, 20)))
 	assert(gpG.gpNodes.size() == 1, "node count should be 1")
-	assert(gpG.gpNodes[0]["id"] == "n1", "first node id should be n1")
+	assert(gpG.gpNodes[0].gpInstanceId == "n1", "first node id should be n1")
+	assert(gpG.gpNodes[0].gpSymbolId == "pump", "first node symbol should be pump")
+	assert(gpG.gpNodes[0].gpPosition == Vector2(10, 20), "first node position should be (10,20)")
 
 
-# Ensure an edge can be added and found.
-# 验证连线可被新增并检索。
+# Ensure an edge can be added and found (object graph, not dictionary).
+# 验证连线可被新增并检索（对象图，而非字典）。
 func gpTestAddEdge() -> void:
 	var gpG: GPPIDGraph = GPPIDGraph.new()
-	gpG.gpAddNode("n1", "pump", "P-101")
-	gpG.gpAddNode("n2", "tank", "V-101")
-	gpG.gpAddEdge("e1", "n1", "n2")
+	gpG.gpAddNode(gpG.gpNewNode("n1", "pump", "P-101"))
+	gpG.gpAddNode(gpG.gpNewNode("n2", "tank", "V-101"))
+	gpG.gpAddEdge(gpG.gpNewEdge("e1", "n1", "n2"))
 	assert(gpG.gpEdges.size() == 1, "edge count should be 1")
-	assert(gpG.gpEdges[0]["from"] == "n1", "edge from should be n1")
+	assert(gpG.gpEdges[0].gpFromRef.get("node_id", "") == "n1", "edge from should be n1")
+	assert(gpG.gpEdges[0].gpToRef.get("node_id", "") == "n2", "edge to should be n2")
 
 
-# Ensure to_dict / from_dict round-trips.
-# 验证 to_dict / from_dict 可往返。
+# Ensure to_dict / from_dict round-trips through the object graph.
+# 验证 to_dict / from_dict 可经对象图往返。
 func gpTestRoundTrip() -> void:
 	var gpG: GPPIDGraph = GPPIDGraph.new()
-	gpG.gpAddNode("n1", "pump", "P-101", Vector2(1, 2))
+	gpG.gpAddNode(gpG.gpNewNode("n1", "pump", "P-101", Vector2(1, 2)))
 	var gpD: Dictionary = gpG.gpToDict()
+	assert(gpD["nodes"][0]["instance_id"] == "n1", "dict node id should be n1")
 	var gpG2: GPPIDGraph = GPPIDGraph.gpFromDict(gpD)
 	assert(gpG2.gpNodes.size() == 1, "restored node count should be 1")
-	assert(gpG2.gpNodes[0]["id"] == "n1", "restored node id should be n1")
+	assert(gpG2.gpNodes[0].gpInstanceId == "n1", "restored node id should be n1")
+	assert(gpG2.gpNodes[0].gpPosition == Vector2(1, 2), "restored node position should be (1,2)")
+
+
+# Ensure removing a node also removes its edges.
+# 验证删除节点会同时删除其关联边。
+func gpTestRemoveWithEdges() -> void:
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	gpG.gpAddNode(gpG.gpNewNode("n1", "pump", "P-101"))
+	gpG.gpAddNode(gpG.gpNewNode("n2", "tank", "V-101"))
+	gpG.gpAddEdge(gpG.gpNewEdge("e1", "n1", "n2"))
+	gpG.gpRemoveNodeWithEdges("n1")
+	assert(gpG.gpNodes.size() == 1, "one node should remain")
+	assert(gpG.gpEdges.size() == 0, "edge touching n1 should be removed")

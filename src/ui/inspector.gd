@@ -13,6 +13,10 @@ extends ScrollContainer
 # 属性被编辑：节点 id、属性键、新值。
 signal gpAttrChanged(gpId: String, key: String, val)
 
+# Preloaded node class (strongly typed; the single source of truth for a symbol instance).
+# 预加载的节点类（强类型；图元实例的唯一真相来源）。
+const GPPIDNode := preload("res://src/core/pid_node.gd")
+
 # Root container for the form widgets.
 # 表单控件的根容器。
 var gpFormRoot: VBoxContainer
@@ -21,9 +25,9 @@ var gpFormRoot: VBoxContainer
 # 当前查看节点的图元定义。
 var gpCurrentDef: GPSymbolDef = null
 
-# Copy of the currently inspected node dictionary.
-# 当前查看节点字典的副本。
-var gpCurrentNode: Dictionary = {}
+# Reference to the currently inspected node object (the authoritative graph node).
+# 当前查看节点对象的引用（权威的图节点）。
+var gpCurrentNode: GPPIDNode = null
 
 
 # Find the form root and show the empty hint.
@@ -35,11 +39,11 @@ func _ready() -> void:
 	I18n.gpLocaleChanged.connect(_gpOnLocaleChanged)
 
 
-# Show the form for a selected node. Pass null def to clear.
-# 显示选中节点的表单。def 为 null 时清空。
-func gpShow(gpDef: GPSymbolDef, gpNode: Dictionary) -> void:
+# Show the form for a selected node. Pass null def/node to clear.
+# 显示选中节点的表单。def / node 为 null 时清空。
+func gpShow(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> void:
 	gpCurrentDef = gpDef
-	gpCurrentNode = gpNode.duplicate()
+	gpCurrentNode = gpNode
 
 	# Clear existing form.
 	# 清空已有表单。
@@ -47,7 +51,7 @@ func gpShow(gpDef: GPSymbolDef, gpNode: Dictionary) -> void:
 		gpFormRoot.remove_child(gpC)
 		gpC.queue_free()
 
-	if gpDef == null or gpNode.is_empty():
+	if gpDef == null or gpNode == null:
 		_gpShowEmpty()
 		return
 
@@ -63,9 +67,9 @@ func gpShow(gpDef: GPSymbolDef, gpNode: Dictionary) -> void:
 	gpNameLabel.text = I18n.gpTr("prop.label")
 	gpFormRoot.add_child(gpNameLabel)
 	var gpNameEdit: LineEdit = LineEdit.new()
-	gpNameEdit.text = gpNode.get("label", "")
+	gpNameEdit.text = gpNode.gpTag
 	gpNameEdit.size_flags_horizontal = SIZE_EXPAND_FILL
-	gpNameEdit.text_changed.connect(func(gpV: String): gpAttrChanged.emit(gpNode["id"], "label", gpV))
+	gpNameEdit.text_changed.connect(func(gpV: String): gpAttrChanged.emit(gpNode.gpInstanceId, "label", gpV))
 	gpFormRoot.add_child(gpNameEdit)
 
 	# ---- schema-driven fields ----
@@ -93,19 +97,19 @@ func gpShow(gpDef: GPSymbolDef, gpNode: Dictionary) -> void:
 			gpOpt.size_flags_horizontal = SIZE_EXPAND_FILL
 			for gpO in gpSpec.get("options", []):
 				gpOpt.add_item(String(gpO))
-			var gpCur: String = String(gpNode.get("attrs", {}).get(gpKey, ""))
+			var gpCur: String = String(gpNode.gpAttrValues.get(gpKey, ""))
 			var gpFound: int = gpOpt.find_item_index(gpCur)
 			if gpFound >= 0:
 				gpOpt.select(gpFound)
-			gpOpt.item_selected.connect(func(gpI: int): gpAttrChanged.emit(gpNode["id"], gpKey, gpOpt.get_item_text(gpI)))
+			gpOpt.item_selected.connect(func(gpI: int): gpAttrChanged.emit(gpNode.gpInstanceId, gpKey, gpOpt.get_item_text(gpI)))
 			gpFormRoot.add_child(gpOpt)
 		else:
 			# Default string field: use a LineEdit.
 			# 默认字符串字段：使用单行输入框。
 			var gpEdit: LineEdit = LineEdit.new()
 			gpEdit.size_flags_horizontal = SIZE_EXPAND_FILL
-			gpEdit.text = String(gpNode.get("attrs", {}).get(gpKey, ""))
-			gpEdit.text_changed.connect(func(gpV: String): gpAttrChanged.emit(gpNode["id"], gpKey, gpV))
+			gpEdit.text = String(gpNode.gpAttrValues.get(gpKey, ""))
+			gpEdit.text_changed.connect(func(gpV: String): gpAttrChanged.emit(gpNode.gpInstanceId, gpKey, gpV))
 			gpFormRoot.add_child(gpEdit)
 
 
@@ -113,7 +117,7 @@ func gpShow(gpDef: GPSymbolDef, gpNode: Dictionary) -> void:
 # 显示未选中提示。
 func _gpShowEmpty() -> void:
 	gpCurrentDef = null
-	gpCurrentNode = {}
+	gpCurrentNode = null
 	var gpHint: Label = Label.new()
 	gpHint.text = I18n.gpTr("symbol_lib.select_hint")
 	gpFormRoot.add_child(gpHint)
@@ -122,7 +126,7 @@ func _gpShowEmpty() -> void:
 # Rebuild the form when the locale changes.
 # 语言变化时重建表单。
 func _gpOnLocaleChanged(gpLocale: String) -> void:
-	if gpCurrentDef == null or gpCurrentNode.is_empty():
+	if gpCurrentDef == null or gpCurrentNode == null:
 		_gpShowEmpty()
 	else:
 		gpShow(gpCurrentDef, gpCurrentNode)

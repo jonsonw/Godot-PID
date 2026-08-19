@@ -16,9 +16,9 @@ const GPSymbolPainter := preload("res://src/render/symbol_painter.gd")
 # 绑定的图节点 id。
 var gpNodeId: String = ""
 
-# Bound graph node dictionary.
-# 绑定的图节点字典。
-var gpNode: Dictionary = {}
+# Bound graph node object (strongly typed; the single source of truth).
+# 绑定的图节点对象（强类型；唯一真相来源）。
+var gpNode: GPPIDNode = null
 
 # Bound symbol definition (may be null for unknown types).
 # 绑定的图元定义（未知类型时可能为 null）。
@@ -35,9 +35,9 @@ var gpConnectSource: bool = false
 
 # Bind this view to a graph node and its definition.
 # 将本视图绑定到一个图节点及其定义。
-func gpInit(gpN: Dictionary, gpD: GPSymbolDef) -> void:
+func gpInit(gpN: GPPIDNode, gpD: GPSymbolDef) -> void:
 	gpNode = gpN
-	gpNodeId = gpN.get("id", "")
+	gpNodeId = gpN.gpInstanceId
 	gpDef = gpD
 	name = "Symbol_" + gpNodeId
 	_gpUpdateTransform()
@@ -67,10 +67,9 @@ func gpUpdateTransform() -> void:
 # Sync position from the underlying graph node.
 # 从底层图节点同步位置。
 func _gpUpdateTransform() -> void:
-	if gpNode.is_empty():
+	if gpNode == null:
 		return
-	var gpPos: Array = gpNode.get("pos", [0.0, 0.0])
-	position = Vector2(float(gpPos[0]), float(gpPos[1]))
+	position = gpNode.gpPosition
 
 
 # Draw the symbol shape, label, ports and highlights.
@@ -107,12 +106,12 @@ func _draw() -> void:
 	# Resolve the label: custom label -> localized display name -> type id.
 	# 解析标签：自定义标签 → 本地化显示名 → 类型 id。
 	var gpLabel: String
-	if gpNode.get("label", "") != "":
-		gpLabel = gpNode["label"]
+	if gpNode.gpTag != "":
+		gpLabel = gpNode.gpTag
 	elif gpDef != null:
 		gpLabel = I18n.gpTr(gpDef.gpDisplayName)
 	else:
-		gpLabel = gpNode.get("type", "")
+		gpLabel = gpNode.gpSymbolId
 
 	# Draw the label position depending on the symbol category.
 	# 根据图元类目决定标签位置。
