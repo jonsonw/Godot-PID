@@ -8,13 +8,8 @@ extends Node
 # 本组件持有增量视图缓存与同步逻辑，使画布只专注于输入、相机与坐标变换。
 # Coding rule: every variable must declare its type explicitly (including container types).
 # 编码规范：所有变量均显式声明类型（含容器类型）。
-
-# Preloaded view classes used for incremental node/edge rendering.
-# 增量式图元/连线渲染所用的视图类（预加载）。
-const GPSymbolView := preload("res://src/render/symbol_view.gd")
-# Preloaded edge view class for incremental edge rendering.
-# 增量式连线渲染所用的连线视图类（预加载）。
-const GPEdgeView := preload("res://src/render/edge_view.gd")
+# GPSymbolView / GPEdgeView are global class_name — no preload constant needed.
+# GPSymbolView / GPEdgeView 是全局 class_name，无需 preload 常量。
 
 # Data model and definitions injected by the owning canvas before each sync.
 # 由所属画布在每次同步前注入的数据模型与图元定义。

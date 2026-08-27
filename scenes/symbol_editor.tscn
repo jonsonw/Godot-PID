@@ -1,0 +1,229 @@
+[gd_scene format=3]
+[ext_resource type="Script" path="res://src/ui/glyph_canvas.gd" id="1"]
+[ext_resource type="Script" path="res://src/ui/symbol_preview.gd" id="2"]
+[ext_resource type="Script" path="res://src/ui/symbol_editor.gd" id="3"]
+[node name="SymbolEditor" type="Window" unique_id=1824308311] script = ExtResource("3")
+[node name="Panel" type="Panel" parent="." unique_id=1311089707]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+[node name="Margin" type="MarginContainer" parent="Panel" unique_id=865135603]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 12
+[node name="Root" type="VBoxContainer" parent="Panel/Margin" unique_id=557757999]
+layout_mode = 2
+theme_override_constants/separation = 8
+[node name="Header" type="HBoxContainer" parent="Panel/Margin/Root" unique_id=485512407]
+layout_mode = 2
+[node name="TitleLabel" type="Label" parent="Panel/Margin/Root/Header" unique_id=124968284]
+layout_mode = 2
+size_flags_horizontal = 3
+[node name="BadgeLabel" type="Label" parent="Panel/Margin/Root/Header" unique_id=1943034021]
+layout_mode = 2
+horizontal_alignment = 2
+[node name="@HSeparator@2" type="HSeparator" parent="Panel/Margin/Root" unique_id=1087258422]
+layout_mode = 2
+[node name="Body" type="HBoxContainer" parent="Panel/Margin/Root" unique_id=1541360390]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+[node name="Rail" type="VBoxContainer" parent="Panel/Margin/Root/Body" unique_id=352017943]
+custom_minimum_size = Vector2(168, 0)
+layout_mode = 2
+theme_override_constants/separation = 6
+[node name="Step0" type="Label" parent="Panel/Margin/Root/Body/Rail" unique_id=1570068906]
+layout_mode = 2
+autowrap_mode = 3
+[node name="Step1" type="Label" parent="Panel/Margin/Root/Body/Rail" unique_id=1548389892]
+layout_mode = 2
+autowrap_mode = 3
+[node name="Step2" type="Label" parent="Panel/Margin/Root/Body/Rail" unique_id=1644044798]
+layout_mode = 2
+autowrap_mode = 3
+[node name="Step3" type="Label" parent="Panel/Margin/Root/Body/Rail" unique_id=1992224455]
+layout_mode = 2
+autowrap_mode = 3
+[node name="Step4" type="Label" parent="Panel/Margin/Root/Body/Rail" unique_id=794134728]
+layout_mode = 2
+autowrap_mode = 3
+[node name="Center" type="VBoxContainer" parent="Panel/Margin/Root/Body" unique_id=864156880]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+[node name="PageCategory" type="VBoxContainer" parent="Panel/Margin/Root/Body/Center" unique_id=918679300]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+[node name="Grid" type="GridContainer" parent="Panel/Margin/Root/Body/Center/PageCategory" unique_id=183984051]
+layout_mode = 2
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 8
+columns = 2
+[node name="CatLabel" type="Label" parent="Panel/Margin/Root/Body/Center/PageCategory/Grid" unique_id=884058410]
+layout_mode = 2
+[node name="CatOption" type="OptionButton" parent="Panel/Margin/Root/Body/Center/PageCategory/Grid" unique_id=696404352]
+layout_mode = 2
+size_flags_horizontal = 3
+[node name="IdLabel" type="Label" parent="Panel/Margin/Root/Body/Center/PageCategory/Grid" unique_id=1717408684]
+layout_mode = 2
+[node name="IdEdit" type="LineEdit" parent="Panel/Margin/Root/Body/Center/PageCategory/Grid" unique_id=928480564]
+layout_mode = 2
+size_flags_horizontal = 3
+[node name="NameLabel" type="Label" parent="Panel/Margin/Root/Body/Center/PageCategory/Grid" unique_id=1866442247]
+layout_mode = 2
+[node name="NameEdit" type="LineEdit" parent="Panel/Margin/Root/Body/Center/PageCategory/Grid" unique_id=1004940324]
+layout_mode = 2
+size_flags_horizontal = 3
+[node name="EnvCaption" type="Label" parent="Panel/Margin/Root/Body/Center/PageCategory/Grid" unique_id=705668560]
+layout_mode = 2
+[node name="EnvLabel" type="Label" parent="Panel/Margin/Root/Body/Center/PageCategory/Grid" unique_id=1454831063]
+layout_mode = 2
+[node name="Note" type="Label" parent="Panel/Margin/Root/Body/Center/PageCategory" unique_id=604837505]
+layout_mode = 2
+size_flags_vertical = 3
+autowrap_mode = 3
+[node name="PageGlyph" type="VBoxContainer" parent="Panel/Margin/Root/Body/Center" unique_id=1952173030]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 6
+[node name="Bar" type="HBoxContainer" parent="Panel/Margin/Root/Body/Center/PageGlyph" unique_id=1640657274]
+layout_mode = 2
+theme_override_constants/separation = 8
+[node name="ToolLabel" type="Label" parent="Panel/Margin/Root/Body/Center/PageGlyph/Bar" unique_id=930355948]
+layout_mode = 2
+[node name="ToolOption" type="OptionButton" parent="Panel/Margin/Root/Body/Center/PageGlyph/Bar" unique_id=526718621]
+layout_mode = 2
+[node name="SnapCheck" type="CheckBox" parent="Panel/Margin/Root/Body/Center/PageGlyph/Bar" unique_id=1747798796]
+layout_mode = 2
+[node name="FinishBtn" type="Button" parent="Panel/Margin/Root/Body/Center/PageGlyph/Bar" unique_id=1087185543]
+layout_mode = 2
+[node name="UndoBtn" type="Button" parent="Panel/Margin/Root/Body/Center/PageGlyph/Bar" unique_id=65439795]
+layout_mode = 2
+[node name="ClearBtn" type="Button" parent="Panel/Margin/Root/Body/Center/PageGlyph/Bar" unique_id=935065413]
+layout_mode = 2
+[node name="Glyph" type="Control" parent="Panel/Margin/Root/Body/Center/PageGlyph" unique_id=1672185649] script = ExtResource("1")
+custom_minimum_size = Vector2(0, 320)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+[node name="DrawHint" type="Label" parent="Panel/Margin/Root/Body/Center/PageGlyph" unique_id=218890950]
+layout_mode = 2
+autowrap_mode = 3
+[node name="PageAttrs" type="VBoxContainer" parent="Panel/Margin/Root/Body/Center" unique_id=2068220868]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 6
+[node name="Row" type="HBoxContainer" parent="Panel/Margin/Root/Body/Center/PageAttrs" unique_id=1142184843]
+layout_mode = 2
+theme_override_constants/separation = 6
+[node name="AttrKeyEdit" type="LineEdit" parent="Panel/Margin/Root/Body/Center/PageAttrs/Row" unique_id=2072499659]
+layout_mode = 2
+size_flags_horizontal = 3
+[node name="AttrTypeOption" type="OptionButton" parent="Panel/Margin/Root/Body/Center/PageAttrs/Row" unique_id=355397534]
+layout_mode = 2
+[node name="AttrDefEdit" type="LineEdit" parent="Panel/Margin/Root/Body/Center/PageAttrs/Row" unique_id=1374033470]
+layout_mode = 2
+size_flags_horizontal = 3
+[node name="AttrAddBtn" type="Button" parent="Panel/Margin/Root/Body/Center/PageAttrs/Row" unique_id=1110262685]
+layout_mode = 2
+[node name="AttrDelBtn" type="Button" parent="Panel/Margin/Root/Body/Center/PageAttrs/Row" unique_id=974538645]
+layout_mode = 2
+[node name="AttrList" type="ItemList" parent="Panel/Margin/Root/Body/Center/PageAttrs" unique_id=1353778460]
+custom_minimum_size = Vector2(0, 260)
+layout_mode = 2
+size_flags_vertical = 3
+[node name="AttrHint" type="Label" parent="Panel/Margin/Root/Body/Center/PageAttrs" unique_id=673987490]
+layout_mode = 2
+autowrap_mode = 3
+[node name="PageStandard" type="VBoxContainer" parent="Panel/Margin/Root/Body/Center" unique_id=1163128748]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+[node name="Grid" type="GridContainer" parent="Panel/Margin/Root/Body/Center/PageStandard" unique_id=572360493]
+layout_mode = 2
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 8
+columns = 2
+[node name="PackIdLabel" type="Label" parent="Panel/Margin/Root/Body/Center/PageStandard/Grid" unique_id=287668628]
+layout_mode = 2
+[node name="PackIdEdit" type="LineEdit" parent="Panel/Margin/Root/Body/Center/PageStandard/Grid" unique_id=1333351360]
+layout_mode = 2
+size_flags_horizontal = 3
+[node name="PackNameLabel" type="Label" parent="Panel/Margin/Root/Body/Center/PageStandard/Grid" unique_id=576921508]
+layout_mode = 2
+[node name="PackNameEdit" type="LineEdit" parent="Panel/Margin/Root/Body/Center/PageStandard/Grid" unique_id=744208796]
+layout_mode = 2
+size_flags_horizontal = 3
+[node name="StdLabel" type="Label" parent="Panel/Margin/Root/Body/Center/PageStandard/Grid" unique_id=281314645]
+layout_mode = 2
+[node name="StdRow" type="HBoxContainer" parent="Panel/Margin/Root/Body/Center/PageStandard/Grid" unique_id=1455717175]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 6
+[node name="StdOption" type="OptionButton" parent="Panel/Margin/Root/Body/Center/PageStandard/Grid/StdRow" unique_id=2070943596]
+layout_mode = 2
+[node name="StdEdit" type="LineEdit" parent="Panel/Margin/Root/Body/Center/PageStandard/Grid/StdRow" unique_id=1642869898]
+layout_mode = 2
+size_flags_horizontal = 3
+[node name="VersionLabel" type="Label" parent="Panel/Margin/Root/Body/Center/PageStandard/Grid" unique_id=2001468853]
+layout_mode = 2
+[node name="VersionEdit" type="LineEdit" parent="Panel/Margin/Root/Body/Center/PageStandard/Grid" unique_id=534258803]
+layout_mode = 2
+size_flags_horizontal = 3
+[node name="AuthorLabel" type="Label" parent="Panel/Margin/Root/Body/Center/PageStandard/Grid" unique_id=2044069919]
+layout_mode = 2
+[node name="AuthorEdit" type="LineEdit" parent="Panel/Margin/Root/Body/Center/PageStandard/Grid" unique_id=1684080055]
+layout_mode = 2
+size_flags_horizontal = 3
+[node name="Spacer" type="Control" parent="Panel/Margin/Root/Body/Center/PageStandard" unique_id=950406103]
+layout_mode = 2
+size_flags_vertical = 3
+[node name="PageExport" type="VBoxContainer" parent="Panel/Margin/Root/Body/Center" unique_id=538220697]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+[node name="Summary" type="RichTextLabel" parent="Panel/Margin/Root/Body/Center/PageExport" unique_id=1328016412]
+custom_minimum_size = Vector2(0, 280)
+layout_mode = 2
+size_flags_vertical = 3
+[node name="RegisterCheck" type="CheckBox" parent="Panel/Margin/Root/Body/Center/PageExport" unique_id=424627387]
+layout_mode = 2
+[node name="PathLabel" type="Label" parent="Panel/Margin/Root/Body/Center/PageExport" unique_id=156627269]
+layout_mode = 2
+autowrap_mode = 3
+[node name="Right" type="VBoxContainer" parent="Panel/Margin/Root/Body" unique_id=1317152087]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+theme_override_constants/separation = 6
+[node name="PreviewCap" type="Label" parent="Panel/Margin/Root/Body/Right" unique_id=13880606]
+layout_mode = 2
+[node name="Preview" type="Control" parent="Panel/Margin/Root/Body/Right" unique_id=464401521] script = ExtResource("2")
+custom_minimum_size = Vector2(0, 260)
+layout_mode = 2
+size_flags_vertical = 3
+[node name="PreviewHint" type="Label" parent="Panel/Margin/Root/Body/Right" unique_id=1333731834]
+layout_mode = 2
+autowrap_mode = 3
+[node name="@HSeparator@47" type="HSeparator" parent="Panel/Margin/Root" unique_id=1393584491]
+layout_mode = 2
+[node name="Footer" type="HBoxContainer" parent="Panel/Margin/Root" unique_id=1629506368]
+layout_mode = 2
+theme_override_constants/separation = 8
+[node name="HintLabel" type="Label" parent="Panel/Margin/Root/Footer" unique_id=694922404]
+layout_mode = 2
+size_flags_horizontal = 3
+autowrap_mode = 3
+[node name="PrevBtn" type="Button" parent="Panel/Margin/Root/Footer" unique_id=1969570079]
+layout_mode = 2
+[node name="NextBtn" type="Button" parent="Panel/Margin/Root/Footer" unique_id=456321917]
+layout_mode = 2
+[node name="ExportBtn" type="Button" parent="Panel/Margin/Root/Footer" unique_id=316992988]
+layout_mode = 2
+[node name="CloseBtn" type="Button" parent="Panel/Margin/Root/Footer" unique_id=2032250588]
+layout_mode = 2

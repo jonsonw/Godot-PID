@@ -10,10 +10,6 @@ extends Control
 # 用户点击本条目时发出。
 signal gpPicked(type_id: String)
 
-# Preloaded shared painter used for rendering the thumbnail.
-# 预加载的共享绘制器，用于渲染缩略图。
-const GPSymbolPainter := preload("res://src/render/symbol_painter.gd")
-
 # Symbol definition rendered by this item.
 # 本条目所渲染的图元定义。
 var gpDef: GPSymbolDef = null
@@ -31,7 +27,9 @@ var _gpHover: bool = false
 # 初始化输入处理与最小尺寸。
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
-	custom_minimum_size = Vector2(0.0, gpThumbnailSize.y + 22.0)
+	# Fixed cell width so several thumbnails sit side by side in the palette flow.
+	# 固定单元格宽度，使多个缩略图在图元库中并排成多列。
+	custom_minimum_size = Vector2(60.0, gpThumbnailSize.y + 22.0)
 	mouse_entered.connect(_gpOnMouseEntered)
 	mouse_exited.connect(_gpOnMouseExited)
 
@@ -94,18 +92,18 @@ func _draw() -> void:
 	else:
 		GPSymbolPainter.gpDrawShape(self, gpDef.gpShape, gpThumbRect, gpFill, gpStroke, gpBorder)
 
-	# Draw the localized display name directly below the thumbnail, centered.
-	# 在缩略图正下方居中绘制本地化的显示名。
+	# Draw the localized display name directly below the thumbnail, centered across the cell.
+	# 在缩略图正下方、跨整个单元格居中绘制本地化的显示名。
 	var gpFont: Font = Settings.gpSymbolFont if Settings.gpSymbolFont != null else ThemeDB.fallback_font
 	var gpName: String = I18n.gpTr(gpDef.gpDisplayName)
 	var gpLabelFontSz: int = 11
 	var gpTextTop: float = gpThumbRect.position.y + gpThumbRect.size.y + 4.0
 	draw_string(
 		gpFont,
-		Vector2(gpThumbRect.position.x, gpTextTop),
+		Vector2(0.0, gpTextTop),
 		gpName,
 		HORIZONTAL_ALIGNMENT_CENTER,
-		gpThumbnailSize.x,
+		size.x,
 		gpLabelFontSz,
 		Color(0.9, 0.9, 0.9)
 	)

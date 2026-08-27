@@ -1,5 +1,5 @@
 class_name GPPIDGraph
-extends Resource
+extends RefCounted
 
 # P&ID topology data core: a strongly-typed node-edge graph.
 # P&ID 拓扑数据内核：强类型的节点-边图。
@@ -10,7 +10,7 @@ extends Resource
 
 # Project metadata stored inside the graph resource.
 # 图资源内部保存的工程元数据。
-@export var gpMeta: Dictionary = {
+var gpMeta: Dictionary = {
 	"version": "1.0",
 	"title": "",
 	"sheets": 1,

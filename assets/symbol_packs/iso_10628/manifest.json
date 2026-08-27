@@ -1,0 +1,30 @@
+{
+  "source": "ISO 10628 P&ID Symbols (sample)",
+  "license": "MIT",
+  "upstream_author": "sample",
+  "standard_ref": "ISO 10628",
+  "icons": [
+	{"id": "FT_FlowTransmitter_001", "name": "Flow Transmitter", "type": "instrument"},
+	{"id": "PT_PressureTransmitter_001", "name": "Pressure Transmitter", "type": "instrument"},
+	{"id": "TT_TemperatureTransmitter_001", "name": "Temperature Transmitter", "type": "instrument"},
+	{"id": "LT_LevelTransmitter_001", "name": "Level Transmitter", "type": "instrument"},
+	{"id": "FI_FlowIndicator_001", "name": "Flow Indicator", "type": "instrument"},
+	{"id": "PI_PressureIndicator_001", "name": "Pressure Indicator", "type": "instrument"},
+	{"id": "TI_TemperatureIndicator_001", "name": "Temperature Indicator", "type": "instrument"},
+	{"id": "LI_LevelIndicator_001", "name": "Level Indicator", "type": "instrument"},
+	{"id": "CV_ControlValve_001", "name": "Control Valve", "type": "valve"},
+	{"id": "BV_BallValve_001", "name": "Ball Valve", "type": "valve"},
+	{"id": "GV_GateValve_001", "name": "Gate Valve", "type": "valve"},
+	{"id": "GLV_GlobeValve_001", "name": "Globe Valve", "type": "valve"},
+	{"id": "CHK_CheckValve_001", "name": "Check Valve", "type": "valve"},
+	{"id": "DV_DiaphragmValve_001", "name": "Diaphragm Valve", "type": "valve"},
+	{"id": "VAV_ValveActuator_001", "name": "Valve Actuator", "type": "valve"},
+	{"id": "PV_Positioner_001", "name": "Valve Positioner", "type": "valve"},
+	{"id": "P_CentrifugalPump_001", "name": "Centrifugal Pump", "type": "pump"},
+	{"id": "PD_PositiveDisplacementPump_001", "name": "Positive Displacement Pump", "type": "pump"},
+	{"id": "C_Compressor_001", "name": "Compressor", "type": "pump"},
+	{"id": "HX_HeatExchanger_001", "name": "Heat Exchanger", "type": "heat"},
+	{"id": "TK_Tank_001", "name": "Tank", "type": "tank"},
+	{"id": "FE_FieldEnclosure_001", "name": "Field Enclosure", "type": "instrument"}
+  ]
+}

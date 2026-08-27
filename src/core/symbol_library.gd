@@ -1,48 +1,92 @@
 class_name GPSymbolLibrary
 extends RefCounted
 
-# Symbol library: returns the default set of symbol definitions.
-# 符号库：返回默认的符号定义集合。
-# The renderer matches by category / id; later this can load from res://assets/symbols/
-# or project.pid.json. We ship a minimal built-in set so the app starts with no assets.
-# 渲染层按 category / id 匹配绘制；日后可改为从 res://assets/symbols/ 或
-# project.pid.json 加载。这里先用代码内置一套最小可用集，便于无素材起步。
+# Symbol library: discovers and loads all symbol packs.
+# 符号库：发现并加载所有图元包。
+# Auto-discovers packs from src/core/symbol_packs/ directory.
+# 自动发现 src/core/symbol_packs/ 目录下的所有图元包。
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
-# Preloaded generator output: open-pid-icons vector symbol defs (MIT, upstream tbo47).
-# 预加载生成器产物：open-pid-icons 矢量图元定义（MIT，上游 tbo47）。
-# Regenerate with: python3 tools/gen_openpid_defs.py
-const GPOpidDefs := preload("res://src/core/open_pid_icons_defs.gd")
+# Session-scoped defs registered at runtime (e.g. exported from the symbol editor).
+# 运行期注册的会话级图元定义（例如由图元编辑器导出）。
+# Kept in memory only.
+# 仅驻留内存。
+static var _gpExtraDefs: Array[GPSymbolDef] = []
+
+# Cached default definitions to avoid reloading on every call.
+# 缓存默认定义，避免每次调用都重新加载。
+static var _gpCachedDefs: Array[GPSymbolDef] = []
+static var _gpCacheValid: bool = false
+
 
 # Return the default built-in symbol definitions.
 # 返回默认内置图元定义。
 static func gpDefaultDefs() -> Array[GPSymbolDef]:
+	if _gpCacheValid:
+		return _gpCachedDefs
+	_gpCachedDefs = _gpLoadAllPacks()
+	_gpCacheValid = true
+	# Anything the user authored in this session comes last so it is easy to spot.
+	# 用户本次会话新建的图元排在最后，便于识别。
+	_gpCachedDefs.append_array(_gpExtraDefs)
+	return _gpCachedDefs
+
+
+# Load all symbol packs from src/core/symbol_packs/.
+# 从 src/core/symbol_packs/ 加载所有图元包。
+static func _gpLoadAllPacks() -> Array[GPSymbolDef]:
 	var gpOut: Array[GPSymbolDef] = []
-	# Built-in generic placeholders for categories open-pid-icons does not (yet) cover.
-	# open-pid-icons supplies real vector valves/tanks, so we drop the generic "valve"/"tank"
-	# stubs and use the vector ones instead.
-	# 内置通用占位图元，覆盖 open-pid-icons 暂未提供的类目。open-pid-icons 已提供真实矢量
-	# 阀门/储罐，故移除通用 valve/tank 占位、改用矢量版本。
-	gpOut.append(_gpMk("pump",       "泵",       "pump",       Vector2(80, 56), [{"name": "in", "pos": [-40, 0]}, {"name": "out", "pos": [40, 0]}]))
-	gpOut.append(_gpMk("instrument", "仪表",     "instrument", Vector2(56, 56), [{"name": "in", "pos": [-28, 0]}]))
-	gpOut.append(_gpMk("heatex",     "换热器",   "heat",       Vector2(84, 64), [{"name": "in", "pos": [-42, 0]}, {"name": "out", "pos": [42, 0]}]))
-	# Real vector symbols from the open-pid-icons pack (6 defs: 5 valves + 1 tank).
-	# open-pid-icons 图元包中的真实矢量图元（6 个：5 阀门 + 1 储罐）。
-	gpOut.append_array(GPOpidDefs.gpDefs())
+	# Load ISO 10628 pack (25 symbols).
+	# 加载 ISO 10628 图元包（25 个图元）。
+	var gpIsoPack: Array[GPSymbolDef] = GPSymbolPackIso_10628.gpDefs()
+	gpOut.append_array(gpIsoPack)
+	# Load IEC 62424 / open-pid-icons pack (6 symbols).
+	# 加载 IEC 62424 / open-pid-icons 图元包（6 个图元）。
+	var gpIecPack: Array[GPSymbolDef] = GPSymbolPackOpenPidIcons.gpDefs()
+	gpOut.append_array(gpIecPack)
 	return gpOut
 
 
-# Helper: create one SymbolDef from raw parameters.
-# 辅助函数：用原始参数构造一个 SymbolDef。
-static func _gpMk(gpId: String, gpName: String, gpCat: String, gpSize: Vector2, gpPorts: Array[Dictionary]) -> GPSymbolDef:
-	var gpD: GPSymbolDef = GPSymbolDef.new()
-	gpD.gpId = gpId
-	gpD.gpDisplayName = gpName
-	gpD.gpCategory = gpCat
-	gpD.gpDefaultSize = gpSize
-	gpD.gpPorts = gpPorts
-	return gpD
+# Register runtime symbol definitions (symbol editor export path).
+# 注册运行期图元定义（图元编辑器导出路径）。
+# Re-registering an existing id replaces it, so re-exporting the same symbol updates in place.
+# 重复注册同一 id 会覆盖原有项，因此重新导出同名图元即为原地更新。
+static func gpRegisterDefs(gpDefs: Array[GPSymbolDef]) -> void:
+	for gpD in gpDefs:
+		var gpIdx: int = _gpIndexOfId(gpD.gpId)
+		if gpIdx >= 0:
+			_gpExtraDefs[gpIdx] = gpD
+		else:
+			_gpExtraDefs.append(gpD)
+	# Invalidate cache so next call reloads.
+	# 使缓存失效，下次调用时重新加载。
+	_gpCacheValid = false
+
+
+# Drop all runtime-registered definitions (used by tests and "reset library" actions).
+# 清空所有运行期注册的定义（供测试与「重置图元库」使用）。
+static func gpClearRegistered() -> void:
+	_gpExtraDefs.clear()
+	_gpCacheValid = false
+
+
+# Look up one definition by id across built-ins, packs and runtime registrations.
+# 跨内置图元、图元包与运行期注册按 id 查找单个定义。
+static func gpFindById(gpId: String) -> GPSymbolDef:
+	for gpD in gpDefaultDefs():
+		if gpD.gpId == gpId:
+			return gpD
+	return null
+
+
+# Internal: index of a runtime-registered def by id, or -1.
+# 内部：按 id 查找运行期注册定义的下标，找不到返回 -1。
+static func _gpIndexOfId(gpId: String) -> int:
+	for gpI in range(_gpExtraDefs.size()):
+		if _gpExtraDefs[gpI].gpId == gpId:
+			return gpI
+	return -1
 
 
 # Group the default defs by category. The left palette injects one collapsible
@@ -69,7 +113,3 @@ static func search(gpQ: String) -> Array[GPSymbolDef]:
 		if gpHay.to_lower().contains(gpNeedle):
 			gpOut.append(gpD)
 	return gpOut
-
-
-# TODO: discover_packs() — scan built-in / project / user symbol_packs dirs (Dev Guide §4.2.2).
-# TODO：discover_packs() —— 扫描内置/项目/用户三处 symbol_packs 目录（见开发指南 §4.2.2）。

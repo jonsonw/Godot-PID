@@ -8,10 +8,6 @@ extends Node2D
 # It does not own authoritative state; the graph is the single source of truth.
 # 它不持有权威状态；图数据是唯一真相来源。
 
-# Preloaded shared painter used for rendering vector shapes.
-# 预加载的共享绘制器，用于渲染矢量形状。
-const GPSymbolPainter := preload("res://src/render/symbol_painter.gd")
-
 # Bound graph node id.
 # 绑定的图节点 id。
 var gpNodeId: String = ""
@@ -113,34 +109,21 @@ func _draw() -> void:
 	else:
 		gpLabel = gpNode.gpSymbolId
 
-	# Draw the label position depending on the symbol category.
-	# 根据图元类目决定标签位置。
-	# Valves place the label below the symbol; other equipment shows it inside.
-	# 阀门将标签置于图元下方；其余设备将标签显示在图元内部。
+	# Draw the label below the symbol, horizontally centered, for every category.
+	# 所有类目的标签均绘制在图元正下方、水平居中。
 	var gpFont: Font = Settings.gpSymbolFont if Settings.gpSymbolFont != null else ThemeDB.fallback_font
 	var gpFontSz: int = maxi(1, Settings.gpSymbolFontSize)
-	var gpIsValve: bool = (gpDef != null and gpDef.gpCategory == "valve")
-	if gpIsValve:
-		# Valve label sits just under the symbol, horizontally centered.
-		# 阀门标签位于图元正下方，水平居中。
-		var gpTp: Vector2 = gpTopleft + Vector2(0.0, gpSz.y / 2.0 + 7.0)
-		draw_string(gpFont, gpTp, gpLabel, HORIZONTAL_ALIGNMENT_CENTER, gpSz.x, gpFontSz, Color(0.9, 0.9, 0.9))
-	else:
-		# Equipment label is centered inside the symbol.
-		# 设备标签居中显示在图元内部。
-		var gpInsideCol: Color = Color(0.95, 0.95, 0.95)
-		if gpSelected or gpConnectSource:
-			# On the bright highlight fills, use dark text for contrast.
-			# 在明亮的选中/连线高亮填充上，改用深色文字以保证对比度。
-			gpInsideCol = Color(0.12, 0.12, 0.12)
-		var gpCx: float = -gpSz.x / 2.0
-		var gpCy: float = -float(gpFontSz) / 2.0
-		draw_string(gpFont, Vector2(gpCx, gpCy), gpLabel, HORIZONTAL_ALIGNMENT_CENTER, gpSz.x, gpFontSz, gpInsideCol)
+	var gpTp: Vector2 = gpTopleft + Vector2(0.0, gpSz.y / 2.0 + 7.0)
+	draw_string(gpFont, gpTp, gpLabel, HORIZONTAL_ALIGNMENT_CENTER, gpSz.x, gpFontSz, Color(0.9, 0.9, 0.9))
 
 	# Draw connection ports if the symbol definition provides them.
 	# 如果图元定义提供了端口，则绘制连接端口。
+	# Port positions are normalized 0..1 against the nominal envelope; gpPortLocal folds them
+	# into node-centered pixel offsets, so every family member's ports stay aligned.
+	# 端口位置相对标称包络归一化到 0..1；gpPortLocal 将其折算为节点中心像素偏移，
+	# 因此同族成员的端口始终对齐。
 	if gpDef != null:
 		var gpPortR: float = 4.0
 		for gpP in gpDef.gpPorts:
-			var gpLp: Vector2 = Vector2(float(gpP["pos"][0]), float(gpP["pos"][1]))
+			var gpLp: Vector2 = gpDef.gpPortLocal(gpP)
 			draw_circle(gpLp, gpPortR, gpStroke)
