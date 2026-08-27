@@ -9,10 +9,6 @@ extends VBoxContainer
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
-# Preloaded custom palette item that draws a thumbnail + label.
-# 预加载的自定义图元库条目，负责绘制缩略图与标签。
-const GPSymbolPaletteItem := preload("res://src/ui/symbol_palette_item.gd")
-
 # A symbol was picked from the library (its type id).
 # 从图元库选中某图元（返回其 type id）。
 signal gpSymbolPicked(type: String)
@@ -24,6 +20,10 @@ signal gpToolSelected(type: String)
 # Currently displayed symbol definitions.
 # 当前显示的图元定义。
 var gpDefs: Array[GPSymbolDef] = []
+
+# Per-category collapse state (true = folded). Preserved across search / locale re-renders.
+# 每个类目的折叠状态（true = 已折叠）。在搜索 / 语言切换的重渲染中保持不变。
+var gpCollapsed: Dictionary = {}
 
 # Title label at the top of the dock.
 # 停靠栏顶部标题标签。
@@ -121,8 +121,8 @@ func _gpFilter(gpQ: String) -> Array[GPSymbolDef]:
 	return gpOut
 
 
-# Render the injected symbol list, grouped by category.
-# 渲染注入的图元列表，按类目分组。
+# Render the injected symbol list, grouped by category with a collapsible header per group.
+# 渲染注入的图元列表，按类目分组，每类目一个可折叠标题；缩略图用 HFlowContainer 多列自适应排布。
 func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 	# Clear previous list.
 	# 清空旧列表。
@@ -142,18 +142,52 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 			gpByCat[gpD.gpCategory] = []
 		gpByCat[gpD.gpCategory].append(gpD)
 
-	# Create a header and thumbnail items for each category.
-	# 为每个类目创建标题与缩略图条目。
+	# One collapsible group per category.
+	# 每个类目一个可折叠分组。
 	for gpCat in gpByCat.keys():
-		var gpHeader: Label = Label.new()
-		gpHeader.text = "▾ %s" % I18n.gpTr(gpCat)
-		gpVbox.add_child(gpHeader)
+		if not gpCollapsed.has(gpCat):
+			gpCollapsed[gpCat] = false
+		var gpCollapsedNow: bool = gpCollapsed[gpCat]
+
+		var gpGroup: VBoxContainer = VBoxContainer.new()
+		gpGroup.size_flags_horizontal = SIZE_EXPAND_FILL
+		gpGroup.add_theme_constant_override("separation", 2)
+		gpVbox.add_child(gpGroup)
+
+		# Clickable category header: toggles the group when pressed.
+		# 可点击的类目标题：点击折叠 / 展开本组。
+		var gpHeader: Button = Button.new()
+		gpHeader.size_flags_horizontal = SIZE_EXPAND_FILL
+		gpHeader.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		gpHeader.flat = true
+		gpHeader.text = ("▾ " if not gpCollapsedNow else "▸ ") + I18n.gpTr(gpCat)
+		gpGroup.add_child(gpHeader)
+
+		# Multi-column, width-adaptive thumbnail flow. Shrinking the dock re-wraps automatically.
+		# 多列、随宽度自适应的缩略图流。缩小停靠栏时自动重排换行。
+		var gpFlow: HFlowContainer = HFlowContainer.new()
+		gpFlow.size_flags_horizontal = SIZE_EXPAND_FILL
+		gpFlow.add_theme_constant_override("h_separation", 4)
+		gpFlow.add_theme_constant_override("v_separation", 4)
+		gpFlow.visible = not gpCollapsedNow
+		gpGroup.add_child(gpFlow)
+
 		for gpD in gpByCat[gpCat]:
 			var gpItem: GPSymbolPaletteItem = GPSymbolPaletteItem.new()
 			gpItem.gpDef = gpD
-			gpItem.size_flags_horizontal = SIZE_EXPAND_FILL
 			gpItem.gpPicked.connect(_gpOnPick)
-			gpVbox.add_child(gpItem)
+			gpFlow.add_child(gpItem)
+
+		gpHeader.pressed.connect(_gpToggleCategory.bind(gpCat, gpFlow, gpHeader))
+
+
+# Toggle a category group's collapsed state and update the header arrow.
+# 切换某类目分组的折叠状态并更新标题箭头。
+func _gpToggleCategory(gpCat: String, gpFlow: HFlowContainer, gpHeader: Button) -> void:
+	var gpNow: bool = not gpCollapsed.get(gpCat, false)
+	gpCollapsed[gpCat] = gpNow
+	gpFlow.visible = not gpNow
+	gpHeader.text = ("▾ " if not gpNow else "▸ ") + I18n.gpTr(gpCat)
 
 
 # Refresh all locale-dependent texts.

@@ -15,18 +15,15 @@ extends Control
 # 用户正在编辑的活动拓扑图。
 var gpGraph: GPPIDGraph
 
-# Preloaded node class (strongly typed; the single source of truth for a symbol instance).
-# 预加载的节点类（强类型；图元实例的唯一真相来源）。
-const GPPIDNode := preload("res://src/core/pid_node.gd")
 
 # Available symbol definitions shown in the left palette.
 # 左栏显示的可用图元定义。
 var gpDefs: Array[GPSymbolDef] = []
 
-# ---- static node references (frozen in the scene) ----
+# ---- static node references (frozen in the scene) ----·
 # ---- 静态节点引用（固化于场景） ----
 # Top menu bar.
-# 顶部菜单栏。
+# 顶部菜单栏。··
 var gpMenuBar: GPPIDMenuBar
 
 # Left symbol-library dock.
@@ -190,7 +187,7 @@ func _ready() -> void:
 # ============================ 本地化刷新 ============================
 # React to locale change: refresh all static UI text and current panels.
 # 响应语言变化：刷新所有静态 UI 文本与当前面板。
-func _gpOnLocaleChanged(gpLocale: String) -> void:
+func _gpOnLocaleChanged(_gpLocale: String) -> void:
 	_gpRefreshStaticText()
 	_gpOnStatus(gpLastStatus)
 	_gpRefreshSelection()
@@ -329,6 +326,8 @@ func _gpOnMenu(gpAction: String) -> void:
 				_gpDeleteSelected()
 		"tool_settings":
 			_gpOpenSettings()
+		"tool_symbol_editor":
+			_gpOpenSymbolEditor()
 		_:
 			_gpSetState("status.feature_todo", [gpAction])
 
@@ -336,9 +335,28 @@ func _gpOnMenu(gpAction: String) -> void:
 # Open the settings dialog.
 # 打开设置对话框。
 func _gpOpenSettings() -> void:
-	var gpDlg: Window = load("res://scenes/settings_dialog.tscn").instantiate()
+	var gpDlg: Window = (load("res://scenes/settings_dialog.tscn") as PackedScene).instantiate()
 	add_child(gpDlg)
 	gpDlg.popup_centered()
+
+
+# Open the symbol editor wizard as a transient window.
+# 打开符号编辑器向导（作为瞬态窗口）。
+func _gpOpenSymbolEditor() -> void:
+	var gpEditor: GPSymbolEditor = load("res://scenes/symbol_editor.tscn").instantiate()
+	add_child(gpEditor)
+	gpEditor.gpPackExported.connect(_gpOnPackExported)
+	gpEditor.popup_centered()
+
+
+# A symbol pack was exported from the editor: fold it into the live library and refresh the
+# palette + canvas so the new symbol can be picked and placed at once.
+# 图元编辑器导出了图元包：并入活动图元库并刷新面板与画布，使新图元可立即拾取放置。
+func _gpOnPackExported(gpPack: GPSymbolPack) -> void:
+	gpDefs = GPSymbolLibrary.gpDefaultDefs()
+	gpLeftDock.gpPopulate(gpDefs)
+	gpCanvas.gpDefs = gpDefs
+	_gpSetState("symed.pack_added", [gpPack.gpName])
 
 
 # Delete the currently selected node and any edges connected to it.

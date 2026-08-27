@@ -13,10 +13,6 @@ extends ScrollContainer
 # 属性被编辑：节点 id、属性键、新值。
 signal gpAttrChanged(gpId: String, key: String, val)
 
-# Preloaded node class (strongly typed; the single source of truth for a symbol instance).
-# 预加载的节点类（强类型；图元实例的唯一真相来源）。
-const GPPIDNode := preload("res://src/core/pid_node.gd")
-
 # Root container for the form widgets.
 # 表单控件的根容器。
 var gpFormRoot: VBoxContainer
@@ -125,7 +121,7 @@ func _gpShowEmpty() -> void:
 
 # Rebuild the form when the locale changes.
 # 语言变化时重建表单。
-func _gpOnLocaleChanged(gpLocale: String) -> void:
+func _gpOnLocaleChanged(_gpLocale: String) -> void:
 	if gpCurrentDef == null or gpCurrentNode == null:
 		_gpShowEmpty()
 	else:

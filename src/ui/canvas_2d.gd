@@ -1,10 +1,6 @@
 class_name GPCanvas2D
 extends Control
 
-# Preloaded view class used for symbol view type annotation.
-# 图元视图类型注解所用的视图类（预加载）。
-const GPSymbolView := preload("res://src/render/symbol_view.gd")
-
 # 2D canvas implemented with a Node2D world_root.
 # 2D 画布：使用 Node2D 作为 world_root 实现。
 # Symbols are real GPSymbolView nodes under world_root; edges are GPEdgeView nodes.

@@ -1,0 +1,20 @@
+[
+  {
+	"pack_id": "iso_10628",
+	"name": "iso_10628",
+	"standard_ref": "ISO 10628",
+	"license": "MIT",
+	"author": "sample",
+	"entry_count": 25,
+	"out_path": "/Users/macbook/Library/Mobile Documents/com~apple~CloudDocs/WorkBuddy/Godot-PID/Godot-PID-Core/src/core/symbol_packs/pack_iso_10628.gd"
+  },
+  {
+	"pack_id": "open-pid-icons",
+	"name": "open-pid-icons",
+	"standard_ref": "",
+	"license": "MIT",
+	"author": "tbo47",
+	"entry_count": 6,
+	"out_path": "/Users/macbook/Library/Mobile Documents/com~apple~CloudDocs/WorkBuddy/Godot-PID/Godot-PID-Core/src/core/symbol_packs/pack_open-pid-icons.gd"
+  }
+]
