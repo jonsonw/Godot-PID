@@ -52,9 +52,14 @@ const GP_STRINGS: Dictionary = {
 	"status.view_reset":    { "zh": "视图已复位",        "en": "View reset" },
 	"status.cleared":       { "zh": "画布已清空",        "en": "Canvas cleared" },
 	"status.feature_todo":  { "zh": "功能待接入：%s",    "en": "Feature pending: %s" },
+	"status.saved_with_packs": { "zh": "已保存：%s（含 %d 个用户图元包）", "en": "Saved: %s (%d user packs embedded)" },
+	"status.save_fail":        { "zh": "保存失败：%s",    "en": "Save failed: %s" },
+	"status.loaded_with_packs":{ "zh": "已打开：%s（含 %d 个用户图元包）", "en": "Opened: %s (%d user packs embedded)" },
+	"status.load_fail":        { "zh": "打开失败：%s",    "en": "Open failed: %s" },
 
 	"doc.info": { "zh": "G-PID 工程\n文档元信息（标题 / 图号 / 版本）待接入。",
 				  "en": "G-PID Project\nDocument metadata (title / drawing no. / revision) pending." },
+	"doc.pid_filter": { "zh": "G-PID 工程 (*.pid.json)", "en": "G-PID Project (*.pid.json)" },
 
 	"settings.title":      { "zh": "设置",          "en": "Settings" },
 	"settings.font_size":  { "zh": "界面字体大小",   "en": "UI Font Size" },

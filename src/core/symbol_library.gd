@@ -19,6 +19,10 @@ static var _gpExtraDefs: Array[GPSymbolDef] = []
 static var _gpCachedDefs: Array[GPSymbolDef] = []
 static var _gpCacheValid: bool = false
 
+# Directory where user-authored symbol packs are persisted across sessions.
+# 用户自建图元包的跨会话持久化目录（由符号编辑器导出时写入）。
+const GP_USER_PACKS_DIR: String = "user://symbol_packs"
+
 
 # Return the default built-in symbol definitions.
 # 返回默认内置图元定义。
@@ -69,6 +73,84 @@ static func gpRegisterDefs(gpDefs: Array[GPSymbolDef]) -> void:
 static func gpClearRegistered() -> void:
 	_gpExtraDefs.clear()
 	_gpCacheValid = false
+
+
+# Read every persisted user pack from GP_USER_PACKS_DIR as GPSymbolPack objects.
+# 把 GP_USER_PACKS_DIR 下所有持久化的用户图元包以 GPSymbolPack 对象读出。
+# No registration: this is the shared reader used by both gpLoadUserPacks (which
+# then registers the symbols into the live library) and gpUserPacks (which hands
+# them to the save/export path so they can be embedded into the *.pid.json file).
+# 不做注册：这是被 gpLoadUserPacks（随后把图元注册进活动图元库）与 gpUserPacks
+#（交给存盘/导出路径、以便嵌入 *.pid.json）共用的读取器。
+static func _gpReadUserPackFiles() -> Array[GPSymbolPack]:
+	var gpPacks: Array[GPSymbolPack] = []
+	# Nothing to read if the directory was never created.
+	# 目录从未创建过则无内容可读。
+	if not DirAccess.dir_exists_absolute(GP_USER_PACKS_DIR):
+		return gpPacks
+	var gpDir: DirAccess = DirAccess.open(GP_USER_PACKS_DIR)
+	if gpDir == null:
+		return gpPacks
+	gpDir.list_dir_begin()
+	var gpFileName: String = gpDir.get_next()
+	while gpFileName != "":
+		# Only consider top-level .json files (each is one exported symbol pack).
+		# 只处理顶层 .json 文件（每个文件即一个导出的图元包）。
+		if not gpDir.current_is_dir() and gpFileName.ends_with(".json"):
+			var gpPath: String = "%s/%s" % [GP_USER_PACKS_DIR, gpFileName]
+			var gpText: String = _gpReadFile(gpPath)
+			if gpText != "":
+				var gpJson: Variant = JSON.parse_string(gpText)
+				if gpJson is Dictionary:
+					var gpPack: GPSymbolPack = GPSymbolPack.new()
+					gpPack.gpFromDict(gpJson as Dictionary)
+					gpPacks.append(gpPack)
+		gpFileName = gpDir.get_next()
+	gpDir.list_dir_end()
+	return gpPacks
+
+
+# Return the user-authored symbol packs currently persisted in GP_USER_PACKS_DIR.
+# 返回当前持久化在 GP_USER_PACKS_DIR 的用户自建图元包。
+# The save/export path calls this to embed custom symbols into the *.pid.json so the
+# file is self-contained and re-openable on any machine without the separate
+# user://symbol_packs/ files (data sovereignty).
+# 存盘/导出路径调用它把自定义图元嵌入 *.pid.json，使文件自包含、可在任意机器
+# 重新打开而无需单独的 user://symbol_packs/ 文件（数据主权）。
+static func gpUserPacks() -> Array[GPSymbolPack]:
+	return _gpReadUserPackFiles()
+
+
+# Load every persisted user pack from GP_USER_PACKS_DIR back into the live library.
+# 把 GP_USER_PACKS_DIR 下所有持久化的用户图元包读回活动图元库。
+# Called once at startup (see main_window._ready) so symbols authored in a previous
+# session re-appear in the left palette and on the canvas after a restart.
+# 启动时调用一次（见 main_window._ready），使上一会话中自建的图元在重启后
+# 重新出现在左侧图元库与画布中。
+# Returns the number of symbol definitions restored.
+# 返回恢复出的图元定义数量。
+static func gpLoadUserPacks() -> int:
+	var gpPacks: Array[GPSymbolPack] = _gpReadUserPackFiles()
+	var gpRestoredDefs: Array[GPSymbolDef] = []
+	for gpPack in gpPacks:
+		for gpSym in gpPack.gpSymbols:
+			gpRestoredDefs.append(gpSym)
+	# Register in one batch so the cache is invalidated only once.
+	# 一次性批量注册，使缓存仅失效一次。
+	if gpRestoredDefs.size() > 0:
+		gpRegisterDefs(gpRestoredDefs)
+	return gpRestoredDefs.size()
+
+
+# Read a UTF-8 text file fully; returns "" on any failure (missing / unreadable).
+# 完整读取一个 UTF-8 文本文件；任何失败（缺失/不可读）均返回空串。
+static func _gpReadFile(gpPath: String) -> String:
+	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.READ)
+	if gpF == null:
+		return ""
+	var gpText: String = gpF.get_as_text()
+	gpF.close()
+	return gpText
 
 
 # Look up one definition by id across built-ins, packs and runtime registrations.

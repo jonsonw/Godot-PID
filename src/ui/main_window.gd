@@ -20,6 +20,18 @@ var gpGraph: GPPIDGraph
 # 左栏显示的可用图元定义。
 var gpDefs: Array[GPSymbolDef] = []
 
+# Last opened/saved project path; Save reuses it, Save As / Open prompt for a new one.
+# 上次打开/保存的工程路径；保存复用它，另存为/打开则重新选择。
+var gpCurrentPath: String = ""
+
+# File dialog (open / save-as), created once and reused.
+# 打开/另存为用的文件对话框，创建一次重复使用。
+var gpFileDialog: FileDialog
+
+# What the in-flight file dialog is for: "save" or "open".
+# 当前文件对话框的用途：save 或 open。
+var gpPendingFileAction: String = ""
+
 # ---- static node references (frozen in the scene) ----·
 # ---- 静态节点引用（固化于场景） ----
 # Top menu bar.
@@ -119,6 +131,10 @@ var gpRightRatio: float = 0.2
 # 将静态场景拼接起来并设置初始状态。
 func _ready() -> void:
 	gpGraph = GPPIDGraph.new()
+	# Restore any symbol packs the user exported in a previous session so they
+	# re-appear in the palette and on the canvas after a restart.
+	# 恢复用户在上一次会话中导出的图元包，使重启后它们重新出现在图元库与画布中。
+	GPSymbolLibrary.gpLoadUserPacks()
 	gpDefs = GPSymbolLibrary.gpDefaultDefs()
 
 	# Fetch static nodes from the scene tree.
@@ -159,6 +175,14 @@ func _ready() -> void:
 	# ---- menu ----
 	# ---- 菜单 ----
 	gpMenuBar.gpActionTriggered.connect(_gpOnMenu)
+
+	# ---- file dialog (open / save-as) ----
+	# ---- 文件对话框（打开 / 另存为） ----
+	gpFileDialog = FileDialog.new()
+	gpFileDialog.access = FileDialog.ACCESS_FILESYSTEM
+	gpFileDialog.add_filter("*.pid.json", I18n.gpTr("doc.pid_filter"))
+	gpFileDialog.file_selected.connect(_gpOnFileSelected)
+	add_child(gpFileDialog)
 
 	I18n.gpLocaleChanged.connect(_gpOnLocaleChanged)
 	_gpRefreshStaticText()
@@ -314,6 +338,12 @@ func _gpOnMenu(gpAction: String) -> void:
 			gpCanvas.gpPendingDef = null
 			gpCanvas.queue_redraw()
 			_gpSetState("status.cleared")
+		"file_save":
+			_gpSaveProject(false)
+		"file_save_as":
+			_gpSaveProject(true)
+		"file_open":
+			_gpOpenProject()
 		"view_zoom_in":
 			gpCanvas.gpZoomStep(1.0)
 		"view_zoom_out":
@@ -330,6 +360,89 @@ func _gpOnMenu(gpAction: String) -> void:
 			_gpOpenSymbolEditor()
 		_:
 			_gpSetState("status.feature_todo", [gpAction])
+
+
+# ============================ project save / open ============================
+# ============================ 工程存盘 / 打开 ============================
+# Save the active project. Reuses the last path unless gpForcePick is true (Save As).
+# 保存当前工程。除非 gpForcePick 为真（另存为），否则复用上次的路径。
+func _gpSaveProject(gpForcePick: bool) -> void:
+	if gpForcePick or gpCurrentPath == "":
+		# No path yet (or Save As): ask the user via the file dialog.
+		# 尚无路径（或另存为）：用文件对话框询问用户。
+		gpPendingFileAction = "save"
+		gpFileDialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+		gpFileDialog.popup_centered()
+		return
+	_gpWriteProject(gpCurrentPath)
+
+
+# Open an existing project from disk.
+# 从磁盘打开已有工程。
+func _gpOpenProject() -> void:
+	gpPendingFileAction = "open"
+	gpFileDialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	gpFileDialog.popup_centered()
+
+
+# Forward the file-dialog result to the right handler.
+# 把文件对话框的结果转交给对应处理。
+func _gpOnFileSelected(gpPath: String) -> void:
+	if gpPendingFileAction == "save":
+		_gpWriteProject(gpPath)
+	elif gpPendingFileAction == "open":
+		_gpReadProject(gpPath)
+
+
+# Serialize the active graph (with embedded user packs) and write it to disk.
+# 把活动图（含内嵌用户图元包）序列化并写入磁盘。
+func _gpWriteProject(gpPath: String) -> void:
+	# Force the .pid.json extension so the file is recognized on reopen.
+	# 强制扩展名为 .pid.json，便于重新打开时识别。
+	if not gpPath.ends_with(".pid.json"):
+		gpPath += ".pid.json"
+	# Embed custom user packs so the file is self-contained (data sovereignty).
+	# 嵌入用户自定义图元包，使文件自包含（数据主权）。
+	gpGraph.gpEmbedUserPacks(GPSymbolLibrary.gpUserPacks())
+	var gpText: String = JSON.stringify(gpGraph.gpToDict(), "", true)
+	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.WRITE)
+	if gpF == null:
+		_gpSetState("status.save_fail", [gpPath])
+		return
+	gpF.store_string(gpText)
+	gpF.close()
+	gpCurrentPath = gpPath
+	var gpPackCount: int = gpGraph.gpUserSymbolPacks.size()
+	_gpSetState("status.saved_with_packs", [gpPath, gpPackCount])
+
+
+# Read a project from disk and swap it into the active canvas.
+# 从磁盘读入工程并替换为当前活动画布。
+func _gpReadProject(gpPath: String) -> void:
+	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.READ)
+	if gpF == null:
+		_gpSetState("status.load_fail", [gpPath])
+		return
+	var gpText: String = gpF.get_as_text()
+	gpF.close()
+	var gpParsed: Variant = JSON.parse_string(gpText)
+	if gpParsed == null or not (gpParsed is Dictionary):
+		_gpSetState("status.load_fail", [gpPath])
+		return
+	# Rebuild the graph; gpFromDict also reconciles embedded user packs into the
+	# live library so custom symbols are available again after reopening.
+	# 重建图；gpFromDict 同时把内嵌用户包调和进活动图元库，使重新打开后自定义图元再次可用。
+	var gpNewGraph: GPPIDGraph = GPPIDGraph.gpFromDict(gpParsed as Dictionary)
+	gpGraph = gpNewGraph
+	gpCanvas.gpGraph = gpGraph
+	gpDefs = GPSymbolLibrary.gpDefaultDefs()
+	gpLeftDock.gpPopulate(gpDefs)
+	gpCanvas.gpDefs = gpDefs
+	gpCanvas.gpSelectedId = ""
+	gpCanvas.gpConnectFrom = ""
+	gpCanvas.queue_redraw()
+	gpCurrentPath = gpPath
+	_gpSetState("status.loaded_with_packs", [gpPath, gpNewGraph.gpUserSymbolPacks.size()])
 
 
 # Open the settings dialog.

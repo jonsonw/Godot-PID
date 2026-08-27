@@ -28,6 +28,15 @@ var gpNodes: Array[GPPIDNode] = []
 # 本图纸内节点之间的所有连线（边）——强类型。
 var gpEdges: Array[GPPIDEdge] = []
 
+# Embedded user symbol packs carried inside the saved file (data sovereignty).
+# 随存盘文件一同携带的内嵌用户图元包（数据主权）。
+# Self-contained: re-opening a *.pid.json restores the custom symbols without needing
+# the separate user://symbol_packs/ files. Built by gpEmbedUserPacks() before save and
+# rebuilt by gpFromDict() on load.
+# 自包含：重新打开 *.pid.json 即可恢复自定义图元，无需单独的 user://symbol_packs/ 文件。
+# 存盘前由 gpEmbedUserPacks() 填充，载入时由 gpFromDict() 重建。
+var gpUserSymbolPacks: Array[GPSymbolPack] = []
+
 
 # Signals fired when data changes; the canvas subscribes to keep views in sync.
 # 数据变化时发出的信号；画布订阅它们以保持视图同步。
@@ -123,6 +132,16 @@ func gpRemoveNodeWithEdges(gpId: String) -> void:
 	gpGraphChanged.emit()
 
 
+# Embed the user symbol packs (read from user://) into this graph before saving.
+# 存盘前把用户图元包（取自 user://）嵌入本图。
+# Pass GPSymbolLibrary.gpUserPacks() so the exported *.pid.json carries every custom
+# symbol the user authored, making the file portable to any machine (data sovereignty).
+# 传入 GPSymbolLibrary.gpUserPacks() 即可让导出的 *.pid.json 携带用户自建的全部自定义图元，
+# 使文件可在任意机器间移植（数据主权）。
+func gpEmbedUserPacks(gpPacks: Array[GPSymbolPack]) -> void:
+	gpUserSymbolPacks = gpPacks.duplicate()
+
+
 # Serialize the graph to a plain dictionary (object graph -> dict graph).
 # 将图序列化为普通字典（对象图 → 字典图）。
 func gpToDict() -> Dictionary:
@@ -132,10 +151,16 @@ func gpToDict() -> Dictionary:
 	var gpEdgesOut: Array = []
 	for gpE in gpEdges:
 		gpEdgesOut.append(gpE.gpToDict())
+	# Embed user packs so the saved file is self-contained.
+	# 嵌入用户图元包，使存盘文件自包含。
+	var gpPacksOut: Array = []
+	for gpPack in gpUserSymbolPacks:
+		gpPacksOut.append(gpPack.gpToDict())
 	return {
 		"meta": gpMeta.duplicate(),
 		"nodes": gpNodesOut,
 		"edges": gpEdgesOut,
+		"user_symbol_packs": gpPacksOut,
 	}
 
 
@@ -155,4 +180,18 @@ static func gpFromDict(gpData: Dictionary) -> GPPIDGraph:
 			var gpE: GPPIDEdge = GPPIDEdge.new()
 			gpE.gpFromDict(gpED)
 			gpG.gpEdges.append(gpE)
+	# Restore embedded user packs and reconcile them into the live library so the
+	# custom symbols are available again after re-opening the file (self-contained).
+	# 恢复内嵌的用户图元包，并调和进活动图元库，使重新打开文件后自定义图元再次可用（自包含）。
+	if gpData.has("user_symbol_packs"):
+		var gpPackDicts: Array = gpData["user_symbol_packs"]
+		var gpRestoredDefs: Array[GPSymbolDef] = []
+		for gpPD in gpPackDicts:
+			var gpPack: GPSymbolPack = GPSymbolPack.new()
+			gpPack.gpFromDict(gpPD)
+			gpG.gpUserSymbolPacks.append(gpPack)
+			for gpSym in gpPack.gpSymbols:
+				gpRestoredDefs.append(gpSym)
+		if gpRestoredDefs.size() > 0:
+			GPSymbolLibrary.gpRegisterDefs(gpRestoredDefs)
 	return gpG
