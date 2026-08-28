@@ -67,14 +67,14 @@ var gpSymbolFontKey: String = "hiragino"
 # 当前图元字号。
 var gpSymbolFontSize: int = 16
 
-# When true, the dock (left/right panel) widths scale proportionally with the
-# window width so the layout keeps its 1/5 · 3/5 · 1/5 proportions on any
-# resolution. The UI font size is ALWAYS fixed (never scaled by window size) so
-# text stays crisp and predictable. Turn it off to keep manually dragged dock
-# widths.
-# 为 true 时，左/右停靠栏宽度随窗口宽度按比例缩放，从而在任何分辨率下都保持
-# 1/5 · 3/5 · 1/5 的比例；界面字号始终固定（不随窗口缩放），文字清晰且可预期。
-# 关闭则保留用户拖拽后的停靠栏宽度。
+# When true, both docks snap to their fixed floor widths on every resize so the
+# canvas (center) always absorbs the new width and stays maximal. When false, the
+# docks keep the widths the user set by dragging the splitters. The UI font size
+# is ALWAYS fixed (never scaled by window size) so text stays crisp and
+# predictable.
+# 为 true 时，两栏在每次缩放都吸附到固定下限宽度，使画布（中间）始终吸收新增宽度、
+# 保持最大；为 false 时，两栏保留用户拖拽分隔条设定的宽度。界面字号始终固定
+# （不随窗口缩放），文字清晰且可预期。
 var gpAutoScale: bool = true
 
 # Cached symbol font so the canvas can read it cheaply each frame.

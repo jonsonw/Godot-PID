@@ -99,32 +99,37 @@ var gpStateArgs: Array = []
 # 上一次所在的屏幕索引，用于检测跨显示器拖拽，从而按新显示器密度刷新 UI。
 var gpLastScreen: int = -1
 
-# Split containers that let the user drag the left/right dock widths.
-# 供用户拖动左/右停靠栏宽度的分隔容器。
-# Left/center split container the user can drag to resize the left dock.
-# 左/中分隔容器，用户可拖动以调整左停靠栏宽度。
+# The single HSplitContainer that lays out the three panes (left symbol library
+# / center canvas / right inspector) and lets the user drag both splitters to
+# resize them independently.
+# 承载三栏布局（左图元库 / 中心画布 / 右属性面板）的单一 HSplitContainer，
+# 用户可拖动两个分隔条独立调整各栏宽度。
 var gpBodySplit: HSplitContainer
-# Center/right split container the user can drag to resize the right dock.
-# 中/右分隔容器，用户可拖动以调整右停靠栏宽度。
-var gpCenterRightSplit: HSplitContainer
 
-# Previous window content width, used to scale dock sizes proportionally on resize.
-# 上一次窗口内容宽度，用于缩放时按比例调整停靠栏大小。
+# Previous window content width, used to detect a real resize vs a HiDPI refresh.
+# 上一次窗口内容宽度，用于区分真实缩放与 HiDPI 刷新。
 var gpPrevWidth: int = 0
 
-# Dock width ratios of the *total* window width. Left = 1/5, right = 1/5, center
-# canvas = 3/5. These are the single source of truth; split offsets are always
-# derived from them so resizing is idempotent and a pure height change leaves the
-# widths untouched. Manual drags update these ratios so the user's layout sticks.
-# 停靠栏占*总*窗口宽度的比例。左 1/5、右 1/5、中间画布 3/5。它们是一致性来源，
-# 分隔偏移始终由其推导，使缩放幂等、纯高度变化不改变宽度。手动拖拽会更新这些
-# 比例以保留用户布局。
-# Left dock width as a ratio of the total window width.
-# 左停靠栏占窗口总宽度的比例。
-var gpLeftRatio: float = 0.2
-# Right dock width as a ratio of the total window width.
-# 右停靠栏占窗口总宽度的比例。
-var gpRightRatio: float = 0.2
+# Fixed floor widths for the side docks (pixels). These replace the old
+# "dock width as a ratio of the window" model: docks stay a constant size and the
+# canvas (center pane) absorbs all remaining width, which is the standard IDE / CAD
+# behaviour and keeps the docks usable at any window size.
+# 左右停靠栏的固定下限宽度（像素）。这取代了旧的"停靠栏占窗口比例"模型：停靠栏保持
+# 恒定尺寸，画布（中间栏）吸收所有剩余宽度——这正是 IDE / CAD 的常规做法，可在任意
+# 窗口尺寸下保证停靠栏可用。
+# Left dock minimum width in pixels (matches LeftDock.custom_minimum_size.x).
+# 左停靠栏最小宽度（像素，与 LeftDock.custom_minimum_size.x 一致）。
+const GP_LEFT_MIN: float = 220.0
+# Right dock minimum width in pixels (matches RightDock.custom_minimum_size.x).
+# 右停靠栏最小宽度（像素，与 RightDock.custom_minimum_size.x 一致）。
+const GP_RIGHT_MIN: float = 220.0
+
+# Current left-dock width in pixels; seeded from GP_LEFT_MIN and updated by drags.
+# 当前左停靠栏宽度（像素）；以 GP_LEFT_MIN 初始化，拖拽时更新。
+var gpLeftWidthPx: float = GP_LEFT_MIN
+# Current right-dock width in pixels; seeded from GP_RIGHT_MIN and updated by drags.
+# 当前右停靠栏宽度（像素）；以 GP_RIGHT_MIN 初始化，拖拽时更新。
+var gpRightWidthPx: float = GP_RIGHT_MIN
 
 
 # Wire the static scene together and set up initial state.
@@ -142,14 +147,12 @@ func _ready() -> void:
 	gpMenuBar = $VLayout/MenuBar
 	gpLeftDock = $VLayout/Body/LeftDock
 	gpBodySplit = $VLayout/Body
-	gpCenterRightSplit = $VLayout/Body/CenterRightSplit
 	gpBodySplit.dragged.connect(_gpOnBodyDragged)
-	gpCenterRightSplit.dragged.connect(_gpOnCenterRightDragged)
-	gpCanvas = $VLayout/Body/CenterRightSplit/Center/Canvas
-	gpTabs = $VLayout/Body/CenterRightSplit/RightDock/InspectorTabs
-	gpInspector = $VLayout/Body/CenterRightSplit/RightDock/InspectorTabs/PropTab
-	gpInfoLabel = $VLayout/Body/CenterRightSplit/RightDock/InspectorTabs/InfoTab/InfoLabel
-	gpDocLabel = $VLayout/Body/CenterRightSplit/RightDock/InspectorTabs/DocTab/DocLabel
+	gpCanvas = $VLayout/Body/Center/Canvas
+	gpTabs = $VLayout/Body/RightDock/InspectorTabs
+	gpInspector = $VLayout/Body/RightDock/InspectorTabs/PropTab
+	gpInfoLabel = $VLayout/Body/RightDock/InspectorTabs/InfoTab/InfoLabel
+	gpDocLabel = $VLayout/Body/RightDock/InspectorTabs/DocTab/DocLabel
 	gpSelLabel = $VLayout/StatusBar/SelLabel
 	gpCoordLabel = $VLayout/StatusBar/CoordLabel
 	gpZoomLabel = $VLayout/StatusBar/ZoomLabel
@@ -198,8 +201,8 @@ func _ready() -> void:
 		gpPrevWidth = int(gpWin.size.x)
 		_gpApplyDpiScale()
 
-	# ---- initial dock proportions: left 1/5, right 1/5, center 3/5 ----
-	# ---- 初始停靠栏比例：左 1/5、右 1/5、中间画布 3/5 ----
+	# ---- initial dock widths: pin both docks to their floor, canvas fills rest ----
+	# ---- 初始停靠栏宽度：两栏钉到下限，画布填满剩余空间 ----
 	_gpInitSplits()
 
 	# initial status
@@ -530,15 +533,14 @@ func _gpOnWindowChanged() -> void:
 	_gpApplyDpiScale()
 
 
-# Responsive layout: when the window is resized, the dock widths are re-derived
-# from gpLeftRatio / gpRightRatio (proportional to the *current* container
-# width). This depends only on width, so a pure height change leaves the docks
-# untouched. Only active when Settings.gpAutoScale is on; when off, manually
-# dragged widths are kept. The UI font is never scaled (see settings.gd).
-# 响应式布局：窗口缩放时，停靠栏宽度按 gpLeftRatio / gpRightRatio（相对*当前*
-# 容器宽度）重新推导。它只依赖宽度，因此纯高度变化不改变停靠栏。仅在
-# Settings.gpAutoScale 开启时生效；关闭时保留用户拖拽后的宽度。界面字号不随
-# 窗口缩放（见 settings.gd）。
+# Responsive layout: when the window is resized we re-apply the splits so the
+# canvas (center) keeps absorbing the new width. The dock widths themselves stay
+# fixed (snapped to their floor when auto-scale is on, or kept at the user-dragged
+# size when off). Depends only on width, so a pure height change leaves docks
+# untouched. The UI font is never scaled (see settings.gd).
+# 响应式布局：窗口缩放时重新应用分隔，使画布（中间）持续吸收新增宽度。停靠栏宽度
+# 始终使用当前存储的像素值（启动时为下限，拖拽后为用户设定值）。只依赖宽度，
+# 故纯高度变化不改变停靠栏。界面字号不随窗口缩放（见 settings.gd）。
 func _gpOnResized() -> void:
 	var gpWin: Window = get_window()
 	if gpWin == null:
@@ -549,72 +551,113 @@ func _gpOnResized() -> void:
 	if gpPrevWidth <= 0:
 		gpPrevWidth = gpW
 		return
-	if Settings.gpAutoScale:
-		_gpApplySplits()
+	if gpW == gpPrevWidth:
+		return
 	gpPrevWidth = gpW
+	# Defer the split re-apply so HSplitContainer has finished its own layout pass
+	# and gpBodySplit.size.x reflects the new window width. Applying immediately
+	# uses the stale body width and makes the docks stick to the old offsets.
+	# 延迟重应用分隔，让 HSplitContainer 先完成自身布局，使 gpBodySplit.size.x 反映新窗口宽度。
+	# 立即应用会使用旧的主体宽度，导致停靠栏粘在老偏移上。
+	call_deferred("_gpApplySplits")
 
 
-# Derive both split offsets from the stored ratios and the containers' real
-# (already laid-out) widths. Idempotent: same widths -> same offsets, so calling
-# it on every resize never drifts. Uses each container's own width rather than the
-# window width to stay correct regardless of margins / chrome.
-# 按存储比例与容器已布局的真实宽度推导两个分隔偏移。幂等：相同宽度得到相同
-# 偏移，故每次缩放调用都不会漂移。使用各自容器宽度而非窗口宽度，避免边距/边框
-# 导致偏差。
+# Pin both docks to their stored pixel widths and let the canvas (center) absorb
+# everything else. No window-ratio is involved, so resizing only changes the center
+# pane. The stored widths are seeded from the floors at startup and updated by drag.
+# Idempotent: given the same dock widths it always yields the same offsets.
+# 将左右两栏钉到当前存储的像素宽度，画布（中间）吸收其余全部空间。不涉及窗口比例，
+# 故缩放只改变中间栏。存储宽度在启动时以下限初始化、拖拽时更新。幂等：相同停靠栏
+# 宽度必得相同偏移。
 func _gpApplySplits() -> void:
-	if gpBodySplit == null or gpCenterRightSplit == null:
+	if gpBodySplit == null:
 		return
 	var gpBW: float = gpBodySplit.size.x
 	if gpBW <= 1.0:
 		return
-	# Left dock = gpLeftRatio of the body width.
-	# 左栏 = 主体宽度的 gpLeftRatio。
-	gpBodySplit.split_offset = int(round(gpLeftRatio * gpBW))
-	# Center-right region width = (1 - gpLeftRatio) * gpBW. Within it the right
-	# dock should be gpRightRatio of the total, so the inner split (center edge)
-	# sits at (1 - gpLeftRatio - gpRightRatio) * gpBW from the body's left edge.
-	# 中间-右侧区域宽度 = (1 - gpLeftRatio) * gpBW；其中右栏应为总宽的
-	# gpRightRatio，故内部分隔（中间区右缘）位于距主体左缘
-	# (1 - gpLeftRatio - gpRightRatio) * gpBW 处。
-	gpCenterRightSplit.split_offset = int(round((1.0 - gpLeftRatio - gpRightRatio) * gpBW))
+	# Use the session-only pixel widths. They start at the floors on launch and are
+	# overwritten by splitter drags, so the user's layout survives every resize until
+	# the next restart (when the script variables reset to the floors again).
+	# 使用仅会话有效的像素宽度。启动时为下限，拖拽分隔条后被覆盖，因此用户布局在
+	# 每次缩放时都保持，直到下次重启（脚本变量重新回退到下限）。
+	var gpL: float = gpLeftWidthPx
+	var gpR: float = gpRightWidthPx
+	# Pin the palette grid's minimum width to the target left width FIRST, so the
+	# left dock's combined minimum equals gpL and the splitter is never clamped
+	# above gpL (otherwise a wide grid min would lock the dock at its old width).
+	# 先把图元网格最小宽钉到目标左栏宽，使左停靠栏合并最小宽等于 gpL、分隔条不会被
+	# 钳到 gpL 以上（否则网格的旧大最小宽会把停靠栏锁在旧宽度）。
+	if gpLeftDock != null and gpLeftDock.has_method("_gpReflow"):
+		gpLeftDock._gpReflow(gpL)
+	# Split 0 sits at the left dock's right edge; split 1 sits one right-dock
+	# width back from the body's right edge, leaving the center to fill the gap.
+	# 分隔条 0 位于左栏右缘；分隔条 1 距主体右缘一个右栏宽度，中间栏填满缝隙。
+	var gpOffsets: PackedInt32Array = PackedInt32Array()
+	gpOffsets.append(int(round(gpL)))
+	gpOffsets.append(int(round(gpBW - gpR)))
+	gpBodySplit.split_offsets = gpOffsets
 
 
-# Initial dock widths: left = 1/5, right = 1/5, center = 3/5 of the total. We wait
-# until the split containers have a real laid-out width (a few frames after
-# _ready), then derive the offsets from the containers themselves so the result is
-# correct no matter what transient size the window had at startup.
-# 初始停靠栏宽度：左 1/5、右 1/5、中间 3/5。等待容器获得已布局的真实宽度
-#（_ready 后若干帧）后，用容器自身尺寸推导偏移，从而无论启动时窗口瞬时大小
-# 如何都正确。
+# Initial dock widths: wait until the split container has a real laid-out width
+# (a few frames after _ready), then seed the stored widths from the docks' floors
+# and pin both docks so the canvas fills the rest.
+# 初始停靠栏宽度：等待分隔容器获得已布局的真实宽度（_ready 后若干帧），再用两栏
+# 下限初始化存储宽度，并钉死两栏使画布填满剩余空间。
 func _gpInitSplits() -> void:
 	for _gpI in range(10):
 		await get_tree().process_frame
 		if gpBodySplit != null and gpBodySplit.size.x > 50.0:
 			break
+	# Seed the stored widths from the declared floors so the first apply pins both
+	# docks to their minimum and the canvas gets everything else.
+	# 用声明下限初始化存储宽度，使首次应用把两栏钉到最小、画布取得其余空间。
+	gpLeftWidthPx = GP_LEFT_MIN
+	gpRightWidthPx = GP_RIGHT_MIN
 	_gpApplySplits()
 	var gpWin: Window = get_window()
 	gpPrevWidth = int(gpWin.size.x) if gpWin != null else 0
 
 
-# Manual drag of the outer (left) split: capture the new ratio so a later window
-# resize keeps the user's layout. The dragged offset is relative to the body
-# width.
-# 外侧（左）分隔被手动拖拽：记录新比例，使后续窗口缩放保留用户布局。拖拽偏移
-# 相对主体宽度。
+# A splitter in the three-pane body was dragged. Godot 4.7's SplitContainer.dragged
+# signal only carries the splitter offset (distance from the body's left edge); it
+# does NOT carry a splitter index even with three children. We therefore decide which
+# splitter moved by comparing the new offset to the stored left/right splitter
+# positions; the closer one wins. This keeps both docks resizable and lets the
+# palette grid reflow as the left dock is widened or narrowed.
+# 三栏主体中某个分隔条被拖动。Godot 4.7 的 SplitContainer.dragged 信号只带分隔条偏移
+#（距主体左缘的距离），即便有三个子节点也**不带索引**。因此通过比较新偏移与当前存
+# 储的左/右分隔条位置来判断拖的是哪条；离谁近就是谁。这样左右两栏都可调，左栏变
+# 宽/窄时图元网格也能随之重排。
 func _gpOnBodyDragged(gpOffset: int) -> void:
 	var gpBW: float = gpBodySplit.size.x
-	if gpBW > 1.0:
-		gpLeftRatio = clampf(float(gpOffset) / gpBW, 0.05, 0.8)
-
-
-# Manual drag of the inner (right) split: convert the inner split offset into the
-# right-dock ratio of the total width and store it.
-# 内侧（右）分隔被手动拖拽：把内部分隔偏移换算成右栏占总宽的比例并存储。
-func _gpOnCenterRightDragged(gpOffset: int) -> void:
-	var gpCRW: float = gpCenterRightSplit.size.x
-	if gpCRW > 1.0:
-		var gpCenterFracInCR: float = float(gpOffset) / gpCRW
-		gpRightRatio = clampf((1.0 - gpCenterFracInCR) * (1.0 - gpLeftRatio), 0.05, 0.8)
+	if gpBW <= 1.0:
+		return
+	var gpOffsetF: float = float(gpOffset)
+	# Determine which splitter is being dragged by proximity to the current positions.
+	# 通过离当前位置的远近判断正在拖哪条分隔条。
+	var gpLeftPos: float = gpLeftWidthPx
+	var gpRightPos: float = gpBW - gpRightWidthPx
+	var gpLeftDist: float = absf(gpOffsetF - gpLeftPos)
+	var gpRightDist: float = absf(gpOffsetF - gpRightPos)
+	if gpLeftDist < gpRightDist:
+		# Left splitter: offset == left-dock width. Feed the new width to the palette
+		# grid so it recomputes its column count immediately.
+		# 左分隔条：偏移即左栏宽度。把新宽度传给图元网格，使其立即重算列数。
+		gpLeftWidthPx = clampf(gpOffsetF, GP_LEFT_MIN, gpBW - GP_RIGHT_MIN - 80.0)
+		if gpLeftDock != null and gpLeftDock.has_method("_gpReflow"):
+			gpLeftDock._gpReflow(gpLeftWidthPx)
+	else:
+		# Right splitter: offset == left+center span, so right width = body - offset.
+		# 右分隔条：偏移即左+中跨度，故右栏宽度 = 主体宽度 - 偏移。
+		var gpRightPx: float = gpBW - gpOffsetF
+		gpRightWidthPx = clampf(gpRightPx, GP_RIGHT_MIN, gpBW - GP_LEFT_MIN - 80.0)
+	# Re-apply the split immediately so the splitter position and the palette reflow
+	# match the dragged width on the spot (and a later resize keeps it, since the
+	# stored pixel widths now reflect the drag). Idempotent: it just writes the same
+	# offsets Godot set during the drag.
+	# 立即重应用分隔，使分隔条位置与图元库重排当场贴合拖出宽度（后续缩放也能保留，
+	# 因为存储像素宽现已反映本次拖拽）。幂等：写入的即 Godot 拖拽时已设的偏移。
+	_gpApplySplits()
 
 
 # ============================ lookups ============================

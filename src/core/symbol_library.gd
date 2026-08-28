@@ -45,10 +45,6 @@ static func _gpLoadAllPacks() -> Array[GPSymbolDef]:
 	# 加载 ISO 10628 图元包（25 个图元）。
 	var gpIsoPack: Array[GPSymbolDef] = GPSymbolPackIso_10628.gpDefs()
 	gpOut.append_array(gpIsoPack)
-	# Load IEC 62424 / open-pid-icons pack (6 symbols).
-	# 加载 IEC 62424 / open-pid-icons 图元包（6 个图元）。
-	var gpIecPack: Array[GPSymbolDef] = GPSymbolPackOpenPidIcons.gpDefs()
-	gpOut.append_array(gpIecPack)
 	return gpOut
 
 
