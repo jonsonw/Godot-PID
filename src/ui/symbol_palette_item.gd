@@ -27,9 +27,14 @@ var _gpHover: bool = false
 # 初始化输入处理与最小尺寸。
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
-	# Fixed cell width so several thumbnails sit side by side in the palette flow.
-	# 固定单元格宽度，使多个缩略图在图元库中并排成多列。
-	custom_minimum_size = Vector2(60.0, gpThumbnailSize.y + 22.0)
+	# Minimum WIDTH is 0: the palette grid stretches each cell to fill the viewport
+	# via fit_child_in_rect, so the grid's combined minimum width stays small and the
+	# left dock can shrink to its floor. The drawn cell width is driven by the grid
+	# layout, not by this minimum. Height keeps a sensible floor for the thumbnail.
+	# 最小宽度为 0：图元网格通过 fit_child_in_rect 把每格拉伸到视口宽，使网格合并最小
+	# 宽保持很小、左停靠栏能收缩到下限。绘制用格宽由网格布局决定，而非此最小值。
+	# 高度保留缩略图所需的合理下限。
+	custom_minimum_size = Vector2(0.0, gpThumbnailSize.y + 22.0)
 	mouse_entered.connect(_gpOnMouseEntered)
 	mouse_exited.connect(_gpOnMouseExited)
 

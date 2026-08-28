@@ -70,11 +70,10 @@ gpGraphChanged.emit()
    └── Main（根 Control）
        ├── VLayout（垂直布局容器）
        │   ├── MenuBar
-       │   ├── Body（左右分栏）
+       │   ├── Body（三栏分栏 HSplitContainer）
        │   │   ├── LeftDock（左侧图元库）
-       │   │   └── CenterRightSplit
-       │   │       ├── Center/Canvas（画布）
-       │   │       └── RightDock/InspectorTabs/PropTab（属性面板）
+       │   │   ├── Center/Canvas（画布）
+       │   │   └── RightDock/InspectorTabs/PropTab（属性面板）
        │   └── StatusBar（状态栏）
 
 3. 每个有 script 属性的节点，执行对应 .gd 脚本的 _ready() 函数
