@@ -9,8 +9,15 @@ extends Container
 # the HSplitContainer split, not this grid. Godot's GridContainer computes its minimum
 # in C++ and ignores GDScript overrides, hence the manual Container layout here.
 
-const GP_MIN_WIDTH: float = 160.0
-const GP_CELL: float = 60.0
+# Floor width (pixels) the grid is allowed to shrink to when deriving columns.
+# Fed from the left dock's GP_LEFT_MIN so the grid floor and the dock floor stay
+# in sync (see toolbar.gd / main_window.gd). 160 matches the left dock's minimum.
+# 网格推导列数时允许收缩到的下限宽（像素）。由左停靠栏的 GP_LEFT_MIN 注入，使网格
+# 下限与停靠栏下限保持一致（见 toolbar.gd / main_window.gd）。160 与左停靠栏最小宽一致。
+var gpMinWidth: float = 160.0
+
+# Horizontal / vertical gap between cells in pixels.
+# 单元格之间的横向 / 纵向间距（像素）。
 const GP_H_SEP: float = 4.0
 const GP_V_SEP: float = 4.0
 
@@ -31,16 +38,42 @@ func gpSetAvailWidth(gpW: float) -> void:
 	queue_sort()
 
 
+# Recompute the cell (roughly square) size from the current symbol font size so the
+# thumbnail + label block scales together with the symbol text drawn on the canvas.
+# 根据当前图元字号重算单元格（近似方形）尺寸，使缩略图 + 文字块与画布上的图元文字同步缩放。
+func _gpCellSize() -> float:
+	# Mirror GPSymbolPaletteItem._gpCalcSizes / custom_minimum_size.y:
+	# thumbnail side = fontSize + 8, label font size = fontSize, plus 4 top margin +
+	# 4 gap + 4 bottom pad = +12. The cell must be at least this tall to avoid clipping.
+	# 与 GPSymbolPaletteItem._gpCalcSizes / custom_minimum_size.y 一致：缩略图边长=字号+8，
+	# 标签字号=字号，再加顶距4 + 间距4 + 底距4 = 共+12。单元格至少这么高才不裁切。
+	var gpFontSize: float = float(Settings.gpSymbolFontSize)
+	return (gpFontSize + 8.0) + gpFontSize + 12.0
+
+
+# Re-layout the grid when the symbol font size changes (no need to recreate items).
+# 图元字号变化时重排网格（无需重建条目）。
+func _ready() -> void:
+	Settings.gpSymbolStyleChanged.connect(_gpOnSymbolStyleChanged)
+
+
+# React to symbol font / size changes: recompute the cell size and re-layout.
+# 响应图元字体/字号变化：重算单元格尺寸并重排。
+func _gpOnSymbolStyleChanged() -> void:
+	update_minimum_size()
+	queue_sort()
+
+
 # Derive the column count from the explicitly set width, falling back to the
 # container's own size, then to the floor width.
 # 优先按显式设置宽度推导列数，否则回退到容器自身尺寸，最后回退到下限宽度。
 func _gpCols() -> int:
 	var gpAvail: float = gpAvailWidth
 	if gpAvail <= 0.0:
-		gpAvail = maxf(size.x, GP_MIN_WIDTH)
+		gpAvail = maxf(size.x, gpMinWidth)
 	else:
-		gpAvail = maxf(gpAvail, GP_MIN_WIDTH)
-	var gpPitched: float = GP_CELL + GP_H_SEP
+		gpAvail = maxf(gpAvail, gpMinWidth)
+	var gpPitched: float = _gpCellSize() + GP_H_SEP
 	return maxi(1, int(floor((gpAvail + GP_H_SEP) / gpPitched)))
 
 
@@ -55,7 +88,7 @@ func _get_minimum_size() -> Vector2:
 	if gpN == 0:
 		return Vector2(0.0, 0.0)
 	var gpRows: int = ceili(float(gpN) / float(_gpCols()))
-	var gpH: float = float(gpRows) * GP_CELL + GP_V_SEP * float(gpRows - 1)
+	var gpH: float = float(gpRows) * _gpCellSize() + GP_V_SEP * float(gpRows - 1)
 	return Vector2(0.0, gpH)
 
 
@@ -80,9 +113,9 @@ func _gpSort() -> void:
 	# 若已提供显式目标宽度则使用它，否则回退到 size。
 	var gpAvail: float = gpAvailWidth
 	if gpAvail <= 0.0:
-		gpAvail = maxf(size.x, GP_MIN_WIDTH)
+		gpAvail = maxf(size.x, gpMinWidth)
 	else:
-		gpAvail = maxf(gpAvail, GP_MIN_WIDTH)
+		gpAvail = maxf(gpAvail, gpMinWidth)
 	var gpCw: float = (gpAvail - GP_H_SEP * float(gpCols - 1)) / float(gpCols)
 	gpCw = maxf(gpCw, 1.0)
 	for gpI in range(gpN):
@@ -92,5 +125,5 @@ func _gpSort() -> void:
 		var gpCol: int = gpI % gpCols
 		var gpRow: int = int(gpI / gpCols)
 		var gpX: float = float(gpCol) * (gpCw + GP_H_SEP)
-		var gpY: float = float(gpRow) * (GP_CELL + GP_V_SEP)
-		fit_child_in_rect(gpChild, Rect2(gpX, gpY, gpCw, GP_CELL))
+		var gpY: float = float(gpRow) * (_gpCellSize() + GP_V_SEP)
+		fit_child_in_rect(gpChild, Rect2(gpX, gpY, gpCw, _gpCellSize()))

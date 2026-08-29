@@ -29,6 +29,12 @@ var gpCollapsed: Dictionary = {}
 # 每个类目的缩略图网格实时列表；列数随停靠栏缩放重算。
 var gpGrids: Array[GPSymbolGrid] = []
 
+# Floor width (pixels) fed to every thumbnail grid so its column-count floor stays
+# in sync with the left dock's GP_LEFT_MIN (set by main_window.gd). 160 by default.
+# 传给每个缩略图网格的下限宽（像素），使其列数下限与左停靠栏的 GP_LEFT_MIN 保持一致
+# （由 main_window.gd 注入）。默认 160。
+var gpMinWidth: float = 160.0
+
 # Title label at the top of the dock.
 # 停靠栏顶部标题标签。
 var gpTitle: Label
@@ -120,7 +126,14 @@ func _ready() -> void:
 	gpTools.add_child(gpCustBtn)
 	add_child(gpTools)
 
+	# Explicitly match the static frame controls to the current UI font size so they
+	# update reliably when the user changes the font in the settings dialog.
+	# 让静态框架控件显式匹配当前界面字号，确保用户在设置对话框改字号时能可靠更新。
+	_gpApplyUIFontSize()
+
 	I18n.gpLocaleChanged.connect(_gpRefreshLocale)
+	Settings.gpUIFontChanged.connect(_gpOnFontChanged)
+	Settings.gpSymbolStyleChanged.connect(_gpOnSymbolStyleChanged)
 	_gpRefreshLocale(I18n.gpLocale)
 
 
@@ -191,6 +204,7 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 		gpHeader.size_flags_horizontal = SIZE_FILL
 		gpHeader.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		gpHeader.flat = true
+		gpHeader.add_theme_font_size_override("font_size", Settings.gpEffectiveFontSize())
 		gpHeader.text = ("▾ " if not gpCollapsedNow else "▸ ") + I18n.gpTr(gpCat)
 		gpGroup.add_child(gpHeader)
 
@@ -201,6 +215,10 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 		# 从而始终填满并按真实宽度重排列数（见 symbol_grid.gd）。
 		var gpGrid: GPSymbolGrid = GPSymbolGrid.new()
 		gpGrid.size_flags_horizontal = SIZE_FILL
+		# Keep the grid's column-count floor aligned with the left dock minimum so a
+		# narrow dock still derives a sensible (>=1) column count from GP_LEFT_MIN.
+		# 让网格列数下限与左停靠栏最小宽对齐，窄停靠栏仍按 GP_LEFT_MIN 推导出合理（≥1）列数。
+		gpGrid.gpMinWidth = gpMinWidth
 		gpGrid.visible = not gpCollapsedNow
 		gpGroup.add_child(gpGrid)
 		gpGrids.append(gpGrid)
@@ -272,6 +290,32 @@ func _gpRefreshLocale(gpLocale: String) -> void:
 	gpSelBtn.text = I18n.gpTr("symbol_lib.tool_select")
 	gpConBtn.text = I18n.gpTr("symbol_lib.tool_connect")
 	gpCustBtn.text = I18n.gpTr("symbol_lib.tool_custom")
+	_gpRender(_gpFilter(gpSearchBox.text))
+
+
+# Apply the current UI font size to all statically-created frame controls so they
+# stay in sync with the rest of the application.
+# 将当前界面字号应用到所有静态创建的框架控件，使其与应用程序其余部分保持同步。
+func _gpApplyUIFontSize() -> void:
+	var gpSz: int = Settings.gpEffectiveFontSize()
+	gpTitle.add_theme_font_size_override("font_size", gpSz)
+	gpSearchBox.add_theme_font_size_override("font_size", gpSz)
+	gpSelBtn.add_theme_font_size_override("font_size", gpSz)
+	gpConBtn.add_theme_font_size_override("font_size", gpSz)
+	gpCustBtn.add_theme_font_size_override("font_size", gpSz)
+
+
+# React to UI font changes: re-apply font size and re-render the whole list.
+# 响应界面字号变化：重新应用字号并重绘整个列表。
+func _gpOnFontChanged() -> void:
+	_gpApplyUIFontSize()
+	_gpRefreshLocale(I18n.gpLocale)
+
+
+# React to symbol font / size changes: recreate the palette items so they pick up
+# the new thumbnail and label sizes.
+# 响应图元字体/字号变化：重新创建图元条目以采用新的缩略图和标签尺寸。
+func _gpOnSymbolStyleChanged() -> void:
 	_gpRender(_gpFilter(gpSearchBox.text))
 
 

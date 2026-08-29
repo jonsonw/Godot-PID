@@ -11,11 +11,6 @@ extends Control
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
-# Active topology graph edited by the user.
-# 用户正在编辑的活动拓扑图。
-var gpGraph: GPPIDGraph
-
-
 # Available symbol definitions shown in the left palette.
 # 左栏显示的可用图元定义。
 var gpDefs: Array[GPSymbolDef] = []
@@ -42,9 +37,13 @@ var gpMenuBar: GPPIDMenuBar
 # 左侧图元库停靠栏。
 var gpLeftDock: GPPIDToolbar
 
-# Main canvas control.
-# 主画布控件。
-var gpCanvas: GPCanvas2D
+# Right property-inspector dock (hidden in fullscreen mode).
+# 右侧属性面板停靠栏（全屏时隐藏）。
+var gpRightDock: VBoxContainer
+
+# Center drawing area: hosts the tabbed multi-sheet editor (one canvas + graph per tab).
+# 中心绘图区：承载多标签页绘图编辑器（每标签页一个画布 + 图）。
+var gpCenter: GPCenterArea
 
 # Right-side tab container.
 # 右侧标签页容器。
@@ -119,10 +118,10 @@ var gpPrevWidth: int = 0
 # 窗口尺寸下保证停靠栏可用。
 # Left dock minimum width in pixels (matches LeftDock.custom_minimum_size.x).
 # 左停靠栏最小宽度（像素，与 LeftDock.custom_minimum_size.x 一致）。
-const GP_LEFT_MIN: float = 220.0
+const GP_LEFT_MIN: float = 160.0
 # Right dock minimum width in pixels (matches RightDock.custom_minimum_size.x).
 # 右停靠栏最小宽度（像素，与 RightDock.custom_minimum_size.x 一致）。
-const GP_RIGHT_MIN: float = 220.0
+const GP_RIGHT_MIN: float = 160.0
 
 # Current left-dock width in pixels; seeded from GP_LEFT_MIN and updated by drags.
 # 当前左停靠栏宽度（像素）；以 GP_LEFT_MIN 初始化，拖拽时更新。
@@ -135,7 +134,6 @@ var gpRightWidthPx: float = GP_RIGHT_MIN
 # Wire the static scene together and set up initial state.
 # 将静态场景拼接起来并设置初始状态。
 func _ready() -> void:
-	gpGraph = GPPIDGraph.new()
 	# Restore any symbol packs the user exported in a previous session so they
 	# re-appear in the palette and on the canvas after a restart.
 	# 恢复用户在上一次会话中导出的图元包，使重启后它们重新出现在图元库与画布中。
@@ -146,9 +144,16 @@ func _ready() -> void:
 	# 从场景树获取静态节点。
 	gpMenuBar = $VLayout/MenuBar
 	gpLeftDock = $VLayout/Body/LeftDock
+	gpRightDock = $VLayout/Body/RightDock
+	# Keep the left palette grid's column-count floor in sync with the dock floor so
+	# a narrow dock still derives a sensible column count (single source of truth).
+	# 让左图元库网格的列数下限与停靠栏下限同步，窄停靠栏仍能推导出合理列数（单一数据源）。
+	gpLeftDock.gpMinWidth = GP_LEFT_MIN
 	gpBodySplit = $VLayout/Body
 	gpBodySplit.dragged.connect(_gpOnBodyDragged)
-	gpCanvas = $VLayout/Body/Center/Canvas
+	# Style the two splitters as thin black bars that reveal a gray grab handle on
+	# hover (Godot-editor look). See _gpStyleBodySplit for the theme overrides.
+	# 把两条分隔条样式化为细黑条，悬停时显出灰色可拖拽手柄（仿 Godot 编辑器）。
 	gpTabs = $VLayout/Body/RightDock/InspectorTabs
 	gpInspector = $VLayout/Body/RightDock/InspectorTabs/PropTab
 	gpInfoLabel = $VLayout/Body/RightDock/InspectorTabs/InfoTab/InfoLabel
@@ -158,12 +163,15 @@ func _ready() -> void:
 	gpZoomLabel = $VLayout/StatusBar/ZoomLabel
 	gpStateLabel = $VLayout/StatusBar/StateLabel
 
-	# ---- canvas ----
-	# ---- 画布 ----
-	gpCanvas.gpGraph = gpGraph
-	gpCanvas.gpDefs = gpDefs
-	gpCanvas.gpGraphChanged.connect(_gpOnGraphChanged)
-	gpCanvas.gpStatusUpdated.connect(_gpOnStatus)
+	# Center tabbed drawing area: create the first sheet only AFTER the inspector and
+	# status labels exist, because adding a tab refreshes the inspector immediately.
+	# 中心多标签页绘图区：首张图纸在属性面板与状态标签建立后再建，因为新建即刷新属性面板。
+	gpCenter = $VLayout/Body/Center
+	gpCenter.gpSetDefs(gpDefs)
+	gpCenter.gpOnCanvasReady.connect(_gpOnCanvasReady)
+	gpCenter.gpActiveChanged.connect(_gpOnActiveTabChanged)
+	gpCenter.gpFullscreenToggled.connect(_gpOnFullscreen)
+	gpCenter.gpAddTab()
 
 	# ---- left palette: inject symbol buttons ----
 	# ---- 左侧图元库：注入图元按钮 ----
@@ -210,6 +218,45 @@ func _ready() -> void:
 	_gpOnStatus(gpLastStatus)
 
 
+# ============================ center area (tabbed sheets) ============================
+# ============================ 中心区（多标签页图纸） ============================
+# The active canvas/graph are owned by the GPCenterArea; these accessors route the
+# legacy single-canvas logic to whichever sheet is currently active.
+# 活动画布/图由 GPCenterArea 持有；这些访问器把原先针对单一画布的逻辑，路由到
+# 当前活动图纸。
+func gpActiveCanvas() -> GPCanvas2D:
+	return gpCenter.gpActiveCanvas()
+
+
+func gpActiveGraph() -> GPPIDGraph:
+	return gpCenter.gpActiveGraph()
+
+
+# A new sheet canvas was created: give it the shared symbol definitions and connect
+# its graph/status signals once. Per-canvas connection avoids re-wiring on tab switch.
+# 新建了图纸画布：注入共用图元定义，并一次性连接其图变化/状态信号。逐画布连接可避免
+# 切换标签时重复接线。
+func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
+	gpCanvas.gpDefs = gpDefs
+	gpCanvas.gpGraphChanged.connect(_gpOnGraphChanged)
+	gpCanvas.gpStatusUpdated.connect(_gpOnStatus)
+
+
+# The active sheet changed (add / switch / close): refresh the inspector for the
+# newly active selection.
+# 活动图纸已切换（新建 / 切换 / 关闭）：刷新新活动页的选中属性。
+func _gpOnActiveTabChanged() -> void:
+	_gpRefreshSelection()
+
+
+# Fullscreen toggle from the center header: hide/show the side docks so the canvas
+# fills the window, then re-apply the splits when leaving fullscreen.
+# 中心头部触发的全屏切换：隐藏/显示左右停靠栏使画布占满窗口，退出时重新应用分隔。
+func _gpOnFullscreen(gpOn: bool) -> void:
+	gpLeftDock.visible = not gpOn
+	gpRightDock.visible = not gpOn
+	_gpApplySplits()
+
 # ============================ localization refresh ============================
 # ============================ 本地化刷新 ============================
 # React to locale change: refresh all static UI text and current panels.
@@ -235,9 +282,9 @@ func _gpRefreshStaticText() -> void:
 # A symbol was picked from the left palette: switch to placement mode.
 # 从左侧图元库选中图元：切换到放置模式。
 func _gpOnSymbolPicked(gpTypeId: String) -> void:
-	gpCanvas.gpPendingDef = _gpDefFor(gpTypeId)
-	gpCanvas.gpMode = GPCanvas2D.GPMode.GP_SELECT
-	gpCanvas.gpConnectFrom = ""
+	gpActiveCanvas().gpPendingDef = _gpDefFor(gpTypeId)
+	gpActiveCanvas().gpMode = GPCanvas2D.GPMode.GP_SELECT
+	gpActiveCanvas().gpConnectFrom = ""
 	var gpDef: GPSymbolDef = _gpDefFor(gpTypeId)
 	var gpName: String = gpDef.gpDisplayName if gpDef else gpTypeId
 	_gpSetState("status.symbol_picked", [gpName])
@@ -247,11 +294,11 @@ func _gpOnSymbolPicked(gpTypeId: String) -> void:
 # 工具按钮被按下：选择 / 连线 / 自定义。
 func _gpOnToolSelected(gpType: String) -> void:
 	if gpType == "select":
-		gpCanvas.gpMode = GPCanvas2D.GPMode.GP_SELECT
-		gpCanvas.gpConnectFrom = ""
+		gpActiveCanvas().gpMode = GPCanvas2D.GPMode.GP_SELECT
+		gpActiveCanvas().gpConnectFrom = ""
 		_gpSetState("status.mode_select")
 	elif gpType == "connect":
-		gpCanvas.gpMode = GPCanvas2D.GPMode.GP_CONNECT
+		gpActiveCanvas().gpMode = GPCanvas2D.GPMode.GP_CONNECT
 		_gpSetState("status.mode_connect")
 	elif gpType == "custom":
 		_gpSetState("status.custom_pending")
@@ -268,6 +315,11 @@ func _gpOnGraphChanged() -> void:
 # Update the status bar from a canvas status snapshot.
 # 根据画布状态快照更新状态栏。
 func _gpOnStatus(gpInfo: Dictionary) -> void:
+	# No active sheet yet (e.g. very first frame before the initial tab exists): keep
+	# the last snapshot and skip, to avoid touching a null canvas.
+	# 尚无活动图纸（如首帧初始标签建立前）：保留上次快照并跳过，避免触碰空画布。
+	if gpActiveCanvas() == null:
+		return
 	gpLastStatus = gpInfo
 	var gpSel: String = gpInfo.get("selection", "")
 	gpSelLabel.text = I18n.gpTr("status.selected") % (gpSel if gpSel != "" else I18n.gpTr("status.none"))
@@ -288,6 +340,15 @@ func _gpOnStatus(gpInfo: Dictionary) -> void:
 # Refresh the inspector and info tab for the currently selected node.
 # 为当前选中节点刷新属性面板与信息标签页。
 func _gpRefreshSelection() -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	# No active sheet (or nothing selected): clear the inspector.
+	# 无活动图纸（或无选中）：清空属性面板。
+	if gpCanvas == null:
+		if gpInspector != null:
+			gpInspector.gpShow(null, null)
+		if gpInfoLabel != null:
+			gpInfoLabel.text = I18n.gpTr("symbol_lib.no_selection")
+		return
 	var gpId: String = gpCanvas.gpSelectedId
 	if gpId == "":
 		gpInspector.gpShow(null, null)
@@ -322,7 +383,7 @@ func _gpOnAttrChanged(gpId: String, gpKey: String, gpVal) -> void:
 		gpNode.gpTag = gpVal
 	else:
 		gpNode.gpAttrValues[gpKey] = gpVal
-	gpCanvas.queue_redraw()
+	gpActiveCanvas().queue_redraw()
 	_gpRefreshSelection()
 
 
@@ -333,13 +394,13 @@ func _gpOnAttrChanged(gpId: String, gpKey: String, gpVal) -> void:
 func _gpOnMenu(gpAction: String) -> void:
 	match gpAction:
 		"file_new", "edit_clear":
-			gpGraph.gpNodes.clear()
-			gpGraph.gpEdges.clear()
-			gpCanvas.gpNextId = 1
-			gpCanvas.gpSelectedId = ""
-			gpCanvas.gpConnectFrom = ""
-			gpCanvas.gpPendingDef = null
-			gpCanvas.queue_redraw()
+			gpActiveGraph().gpNodes.clear()
+			gpActiveGraph().gpEdges.clear()
+			gpActiveCanvas().gpNextId = 1
+			gpActiveCanvas().gpSelectedId = ""
+			gpActiveCanvas().gpConnectFrom = ""
+			gpActiveCanvas().gpPendingDef = null
+			gpActiveCanvas().queue_redraw()
 			_gpSetState("status.cleared")
 		"file_save":
 			_gpSaveProject(false)
@@ -348,14 +409,14 @@ func _gpOnMenu(gpAction: String) -> void:
 		"file_open":
 			_gpOpenProject()
 		"view_zoom_in":
-			gpCanvas.gpZoomStep(1.0)
+			gpActiveCanvas().gpZoomStep(1.0)
 		"view_zoom_out":
-			gpCanvas.gpZoomStep(-1.0)
+			gpActiveCanvas().gpZoomStep(-1.0)
 		"view_fit":
-			gpCanvas.gpResetView()
+			gpActiveCanvas().gpResetView()
 			_gpSetState("status.view_reset")
 		"edit_delete":
-			if gpCanvas.gpSelectedId != "":
+			if gpActiveCanvas().gpSelectedId != "":
 				_gpDeleteSelected()
 		"tool_settings":
 			_gpOpenSettings()
@@ -406,8 +467,8 @@ func _gpWriteProject(gpPath: String) -> void:
 		gpPath += ".pid.json"
 	# Embed custom user packs so the file is self-contained (data sovereignty).
 	# 嵌入用户自定义图元包，使文件自包含（数据主权）。
-	gpGraph.gpEmbedUserPacks(GPSymbolLibrary.gpUserPacks())
-	var gpText: String = JSON.stringify(gpGraph.gpToDict(), "", true)
+	gpActiveGraph().gpEmbedUserPacks(GPSymbolLibrary.gpUserPacks())
+	var gpText: String = JSON.stringify(gpActiveGraph().gpToDict(), "", true)
 	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.WRITE)
 	if gpF == null:
 		_gpSetState("status.save_fail", [gpPath])
@@ -415,7 +476,7 @@ func _gpWriteProject(gpPath: String) -> void:
 	gpF.store_string(gpText)
 	gpF.close()
 	gpCurrentPath = gpPath
-	var gpPackCount: int = gpGraph.gpUserSymbolPacks.size()
+	var gpPackCount: int = gpActiveGraph().gpUserSymbolPacks.size()
 	_gpSetState("status.saved_with_packs", [gpPath, gpPackCount])
 
 
@@ -436,14 +497,14 @@ func _gpReadProject(gpPath: String) -> void:
 	# live library so custom symbols are available again after reopening.
 	# 重建图；gpFromDict 同时把内嵌用户包调和进活动图元库，使重新打开后自定义图元再次可用。
 	var gpNewGraph: GPPIDGraph = GPPIDGraph.gpFromDict(gpParsed as Dictionary)
-	gpGraph = gpNewGraph
-	gpCanvas.gpGraph = gpGraph
+	gpCenter.gpSetActiveGraph(gpNewGraph)
+	gpActiveCanvas().gpGraph = gpNewGraph
 	gpDefs = GPSymbolLibrary.gpDefaultDefs()
 	gpLeftDock.gpPopulate(gpDefs)
-	gpCanvas.gpDefs = gpDefs
-	gpCanvas.gpSelectedId = ""
-	gpCanvas.gpConnectFrom = ""
-	gpCanvas.queue_redraw()
+	gpActiveCanvas().gpDefs = gpDefs
+	gpActiveCanvas().gpSelectedId = ""
+	gpActiveCanvas().gpConnectFrom = ""
+	gpActiveCanvas().queue_redraw()
 	gpCurrentPath = gpPath
 	_gpSetState("status.loaded_with_packs", [gpPath, gpNewGraph.gpUserSymbolPacks.size()])
 
@@ -451,18 +512,22 @@ func _gpReadProject(gpPath: String) -> void:
 # Open the settings dialog.
 # 打开设置对话框。
 func _gpOpenSettings() -> void:
-	var gpDlg: Window = (load("res://scenes/settings_dialog.tscn") as PackedScene).instantiate()
+	var gpDlg: GPSettingsDialog = (load("res://scenes/settings_dialog.tscn") as PackedScene).instantiate()
 	add_child(gpDlg)
-	gpDlg.popup_centered()
+	# gpPopupOverHost() sizes the dialog against the area that actually contains it; the bare
+	# popup_centered() ignores `size` and can place an oversized dialog at a negative position.
+	# gpPopupOverHost() 依据真正容纳它的区域取尺寸；裸 popup_centered() 会忽略 `size`，
+	# 并可能把超大对话框放到负坐标。
+	gpDlg.gpPopupOverHost()
 
 
-# Open the symbol editor wizard as a transient window.
-# 打开符号编辑器向导（作为瞬态窗口）。
+# Open the symbol editor wizard as a movable, resizable window over the main window.
+# 以可移动、可缩放的窗口在主窗口之上打开图元编辑器向导。
 func _gpOpenSymbolEditor() -> void:
 	var gpEditor: GPSymbolEditor = load("res://scenes/symbol_editor.tscn").instantiate()
 	add_child(gpEditor)
 	gpEditor.gpPackExported.connect(_gpOnPackExported)
-	gpEditor.popup_centered()
+	gpEditor.gpPopupOverHost()
 
 
 # A symbol pack was exported from the editor: fold it into the live library and refresh the
@@ -471,18 +536,18 @@ func _gpOpenSymbolEditor() -> void:
 func _gpOnPackExported(gpPack: GPSymbolPack) -> void:
 	gpDefs = GPSymbolLibrary.gpDefaultDefs()
 	gpLeftDock.gpPopulate(gpDefs)
-	gpCanvas.gpDefs = gpDefs
+	gpActiveCanvas().gpDefs = gpDefs
 	_gpSetState("symed.pack_added", [gpPack.gpName])
 
 
 # Delete the currently selected node and any edges connected to it.
 # 删除当前选中的节点及其关联的边。
 func _gpDeleteSelected() -> void:
-	var gpId: String = gpCanvas.gpSelectedId
-	gpGraph.gpRemoveNodeWithEdges(gpId)
-	gpCanvas.gpSelectedId = ""
-	gpCanvas.gpConnectFrom = ""
-	gpCanvas.queue_redraw()
+	var gpId: String = gpActiveCanvas().gpSelectedId
+	gpActiveGraph().gpRemoveNodeWithEdges(gpId)
+	gpActiveCanvas().gpSelectedId = ""
+	gpActiveCanvas().gpConnectFrom = ""
+	gpActiveCanvas().queue_redraw()
 
 
 # ============================ state helper ============================
@@ -599,7 +664,7 @@ func _gpApplySplits() -> void:
 
 
 # Initial dock widths: wait until the split container has a real laid-out width
-# (a few frames after _ready), then seed the stored widths from the docks' floors
+# (a few frames after _ready), then· seed the stored widths from the docks' floors
 # and pin both docks so the canvas fills the rest.
 # 初始停靠栏宽度：等待分隔容器获得已布局的真实宽度（_ready 后若干帧），再用两栏
 # 下限初始化存储宽度，并钉死两栏使画布填满剩余空间。
@@ -674,7 +739,10 @@ func _gpDefFor(gpTypeId: String) -> GPSymbolDef:
 # Find a graph node by its id.
 # 按 id 查找图节点。
 func _gpNodeFor(gpId: String) -> GPPIDNode:
-	for gpN in gpGraph.gpNodes:
+	var gpG: GPPIDGraph = gpActiveGraph()
+	if gpG == null:
+		return null
+	for gpN in gpG.gpNodes:
 		if gpN.gpInstanceId == gpId:
 			return gpN
 	return null

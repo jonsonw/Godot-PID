@@ -3,8 +3,8 @@
 [ext_resource type="Script" uid="uid://bdoaykku0msu7" path="res://src/ui/main_window.gd" id="1_main"]
 [ext_resource type="Script" uid="uid://b3ayy6hfswvr8" path="res://src/ui/menu_bar.gd" id="2_menu"]
 [ext_resource type="Script" uid="uid://bll6tv3v6dfoj" path="res://src/ui/toolbar.gd" id="3_tool"]
-[ext_resource type="Script" uid="uid://c2431udgl31up" path="res://src/ui/canvas_2d.gd" id="4_canvas"]
 [ext_resource type="Script" uid="uid://ci382atp5x3al" path="res://src/ui/inspector.gd" id="5_insp"]
+[ext_resource type="Script" uid="uid://bsibdts7q8g56" path="res://src/ui/center_area.gd" id="6_center"]
 
 [node name="Main" type="Control" unique_id=326015921]
 layout_mode = 3
@@ -47,15 +47,10 @@ script = ExtResource("3_tool")
 [node name="Center" type="VBoxContainer" parent="VLayout/Body" unique_id=1107960308]
 layout_mode = 2
 size_flags_vertical = 3
-
-[node name="Canvas" type="Control" parent="VLayout/Body/Center" unique_id=498836006]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
-script = ExtResource("4_canvas")
+script = ExtResource("6_center")
 
 [node name="RightDock" type="VBoxContainer" parent="VLayout/Body" unique_id=877787881]
-custom_minimum_size = Vector2(220, 0)
+custom_minimum_size = Vector2(160, 0)
 layout_mode = 2
 size_flags_vertical = 3
 

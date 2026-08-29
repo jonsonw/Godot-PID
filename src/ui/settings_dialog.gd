@@ -66,10 +66,44 @@ var gpAutoScaleCheck: CheckBox
 var gpOk: Button
 
 
+# Comfortable range of the settings layout, in logical UI units. A small dialog should track the
+# monitor's scale (so it is not a postage stamp on HiDPI) without eating a share of a huge screen.
+# 设置布局的舒适尺寸区间，单位为逻辑 UI 单位。小对话框应跟随显示器缩放（避免在 HiDPI 上小如
+# 邮票），但不应按比例吃掉大屏的一大块。
+const GP_MIN_LOGICAL: Vector2i = Vector2i(400, 430)
+const GP_MAX_LOGICAL: Vector2i = Vector2i(470, 530)
+
+# Preloaded rather than referenced by class_name (script load order safety).
+# 用 preload 而非 class_name 引用（规避脚本加载顺序问题）。
+const GP_WINDOW_FIT := preload("res://src/ui/window_fit.gd")
+
+
+# The window that owns this dialog (the main app window); the dialog pops up over it.
+# 拥有本对话框的窗口（主程序窗口）；对话框弹在其上。
+func _gpHostWindow() -> Window:
+	var gpParent: Node = get_parent()
+	if gpParent == null:
+		return null
+	return gpParent.get_window()
+
+
+# Show the dialog as a movable, resizable window centered over the main window. Callers must use
+# this instead of the bare `popup_centered()`, which ignores `size` and falls back to `min_size`.
+# 以可移动、可缩放的窗口居中显示在主窗口之上。调用方须用本方法而非裸 `popup_centered()`
+# ——后者会忽略 `size` 并退回 `min_size`。
+func gpPopupOverHost() -> void:
+	GP_WINDOW_FIT.gpPopupFitted(self, _gpHostWindow(), GP_MIN_LOGICAL, GP_MAX_LOGICAL)
+
+
 # Build the dialog controls and bind signals.
 # 构建对话框控件并绑定信号。
 func _ready() -> void:
 	close_requested.connect(queue_free)
+	# Establish a `min_size` that provably fits the area we pop up in, replacing the hard-coded
+	# size stored in the scene file. Final size / position comes from gpPopupOverHost().
+	# 确立一个确定放得下的 `min_size`，替代场景文件里写死的尺寸；最终尺寸与位置由
+	# gpPopupOverHost() 设定。
+	GP_WINDOW_FIT.gpApply(self, _gpHostWindow(), GP_MIN_LOGICAL, GP_MAX_LOGICAL, false)
 
 	# Fetch nodes from the scene tree.
 	# 从场景树获取节点。

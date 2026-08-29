@@ -18,6 +18,10 @@ var gpDef: GPSymbolDef = null
 # 缩略图区域的屏幕像素尺寸。
 var gpThumbnailSize: Vector2 = Vector2(24.0, 24.0)
 
+# Font size used for the localized symbol name below the thumbnail.
+# 缩略图下方本地化符号名的字号。
+var gpLabelFontSize: int = 11
+
 # Whether the mouse cursor is currently over this item.
 # 鼠标光标是否当前位于本条目上方。
 var _gpHover: bool = false
@@ -27,6 +31,7 @@ var _gpHover: bool = false
 # 初始化输入处理与最小尺寸。
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
+	_gpCalcSizes()
 	# Minimum WIDTH is 0: the palette grid stretches each cell to fill the viewport
 	# via fit_child_in_rect, so the grid's combined minimum width stays small and the
 	# left dock can shrink to its floor. The drawn cell width is driven by the grid
@@ -34,9 +39,28 @@ func _ready() -> void:
 	# 最小宽度为 0：图元网格通过 fit_child_in_rect 把每格拉伸到视口宽，使网格合并最小
 	# 宽保持很小、左停靠栏能收缩到下限。绘制用格宽由网格布局决定，而非此最小值。
 	# 高度保留缩略图所需的合理下限。
-	custom_minimum_size = Vector2(0.0, gpThumbnailSize.y + 22.0)
+	custom_minimum_size = Vector2(0.0, gpThumbnailSize.y + gpLabelFontSize + 12.0)
 	mouse_entered.connect(_gpOnMouseEntered)
 	mouse_exited.connect(_gpOnMouseExited)
+	Settings.gpSymbolStyleChanged.connect(_gpOnSymbolStyleChanged)
+
+
+# Recalculate thumbnail and label sizes from the current symbol font size so the
+# toolbar items scale together with the canvas symbol text.
+# 根据当前图元字号重新计算缩略图与标签尺寸，使工具栏条目随画布图元文字一起缩放。
+func _gpCalcSizes() -> void:
+	var gpBase: float = float(Settings.gpSymbolFontSize) + 8.0
+	gpThumbnailSize = Vector2(gpBase, gpBase)
+	gpLabelFontSize = Settings.gpSymbolFontSize
+
+
+# React to symbol font / size changes: update minimum size and redraw.
+# 响应图元字体/字号变化：更新最小尺寸并重绘。
+func _gpOnSymbolStyleChanged() -> void:
+	_gpCalcSizes()
+	custom_minimum_size = Vector2(0.0, gpThumbnailSize.y + gpLabelFontSize + 12.0)
+	update_minimum_size()
+	queue_redraw()
 
 
 # Track hover state and redraw when the mouse enters.
@@ -101,7 +125,6 @@ func _draw() -> void:
 	# 在缩略图正下方、跨整个单元格居中绘制本地化的显示名。
 	var gpFont: Font = Settings.gpSymbolFont if Settings.gpSymbolFont != null else ThemeDB.fallback_font
 	var gpName: String = I18n.gpTr(gpDef.gpDisplayName)
-	var gpLabelFontSz: int = 11
 	var gpTextTop: float = gpThumbRect.position.y + gpThumbRect.size.y + 4.0
 	draw_string(
 		gpFont,
@@ -109,6 +132,6 @@ func _draw() -> void:
 		gpName,
 		HORIZONTAL_ALIGNMENT_CENTER,
 		size.x,
-		gpLabelFontSz,
+		gpLabelFontSize,
 		Color(0.9, 0.9, 0.9)
 	)

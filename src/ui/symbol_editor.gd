@@ -54,9 +54,34 @@ const GP_STEP_KEYS: Array[String] = [
 	"symed.step1", "symed.step2", "symed.step3", "symed.step4", "symed.step5",
 ]
 
+# Smallest / largest window the wizard layout is comfortable in, in logical UI units. The actual
+# window size is derived from these plus the area the dialog pops up in — see GPWindowFit.
+# The minimum is deliberately modest: as an embedded subwindow the wizard lives inside the host's
+# logical viewport, which on this project is only ~800x500 units, so a 900x620 minimum could not
+# fit at all and pushed the window to a negative position (blank, screen-filling dialog).
+# 向导布局的最小 / 最大舒适尺寸，单位为逻辑 UI 单位。实际窗口尺寸由二者结合弹出所在区域推导
+# ——见 GPWindowFit。最小值刻意取小：作为嵌入式子窗口，向导活在宿主的逻辑视口内，本项目该视口
+# 仅约 800x500 单位，故 900x620 的下限根本放不下，会把窗口顶到负坐标（表现为空白且铺满的对话框）。
+const GP_MIN_LOGICAL: Vector2i = Vector2i(560, 400)
+const GP_MAX_LOGICAL: Vector2i = Vector2i(1280, 860)
+
+# The wizard is dense (step rail + page + live preview), so it opens as large as it is allowed to
+# be rather than at the default fraction.
+# 向导内容密集（步骤栏 + 页面 + 实时预览），故按允许的最大比例打开，而非默认比例。
+const GP_SELF_FRAC: Vector2 = Vector2(0.94, 0.94)
+
+# Preloaded rather than referenced by class_name: cross-script class_name lookups can fail
+# depending on script load order (see CONTRIBUTING notes).
+# 用 preload 而非 class_name 引用：跨脚本的 class_name 查找会因脚本加载顺序而失败（见贡献说明）。
+const GP_WINDOW_FIT := preload("res://src/ui/window_fit.gd")
+
 # Current wizard step, 0-based.
 # 当前向导步骤，从 0 开始。
 var gpStep: int = 0
+
+# Screen index the window was last measured against, so a monitor change can be detected.
+# 上次测量所参照的屏幕索引，用于检测显示器切换。
+var gpLastScreen: int = -1
 
 # Step page containers; exactly one is visible at a time.
 # 步骤页容器；同一时刻仅一个可见。
@@ -163,10 +188,18 @@ var gpResultDef: GPSymbolDef = null
 # 绑定信号、填充动态数据并驱动向导。节点树本身位于场景文件中。
 func _ready() -> void:
 	title = I18n.gpTr("symed.title")
-	min_size = Vector2i(900, 620)
-	if size.x < 900 or size.y < 620:
-		size = Vector2i(1000, 660)
+	# Establish a `min_size` that provably fits the area we pop up in, before anything can call
+	# `popup*()`. The final size / position is set by gpPopupOverHost().
+	# 在任何 `popup*()` 之前先确立一个确定放得下的 `min_size`；最终尺寸与位置由
+	# gpPopupOverHost() 设定。
+	_gpFitToScreen(false)
+	focus_entered.connect(_gpOnFocusEntered)
 	close_requested.connect(queue_free)
+	# Host resized (or moved to a monitor of different scale): keep the dialog inside it.
+	# 宿主被缩放（或移到不同缩放的显示器）：保持对话框仍在其内部。
+	var gpHostWin: Window = _gpHostWindow()
+	if gpHostWin != null:
+		gpHostWin.size_changed.connect(_gpOnHostResized)
 
 	# ---- step 1: category list ----
 	# ---- 第 1 步：类目列表 ----
@@ -223,6 +256,54 @@ func _ready() -> void:
 	I18n.gpLocaleChanged.connect(_gpOnLocaleChanged)
 	_gpOnCategorySelected(gpCatOption.selected)
 	_gpGotoStep(0)
+
+
+# ============================ resolution / HiDPI fit ============================
+# ============================ 分辨率 / HiDPI 自适应 ============================
+# The window that owns this dialog (the main app window). The dialog pops up over it, so its
+# screen is the one we must measure against.
+# 拥有本对话框的窗口（主程序窗口）。对话框会弹在其上，故须以其所在屏幕为测量基准。
+func _gpHostWindow() -> Window:
+	var gpParent: Node = get_parent()
+	if gpParent == null:
+		return null
+	return gpParent.get_window()
+
+
+# Re-derive content scale, min_size and (when gpResize) size from the area we live in.
+# 依据所处区域重新推导内容缩放、min_size 以及（gpResize 时）size。
+func _gpFitToScreen(gpResize: bool) -> void:
+	var gpHost: Window = _gpHostWindow()
+	GP_WINDOW_FIT.gpApply(self, gpHost, GP_MIN_LOGICAL, GP_MAX_LOGICAL, gpResize, GP_SELF_FRAC)
+	gpLastScreen = GP_WINDOW_FIT.gpScreenOf(self, gpHost)
+
+
+# Show the wizard as a movable, resizable window centered over the main window. Callers must use
+# this instead of the bare `popup_centered()`: that engine call ignores `size` and falls back to
+# `min_size`, which is how an oversized dialog ended up at a negative position.
+# 以可移动、可缩放的窗口居中显示在主窗口之上。调用方必须用本方法而非裸 `popup_centered()`：
+# 后者会忽略 `size` 并退回 `min_size`，正是超大对话框被放到负坐标的原因。
+func gpPopupOverHost() -> void:
+	var gpHost: Window = _gpHostWindow()
+	GP_WINDOW_FIT.gpPopupFitted(self, gpHost, GP_MIN_LOGICAL, GP_MAX_LOGICAL, GP_SELF_FRAC)
+	gpLastScreen = GP_WINDOW_FIT.gpScreenOf(self, gpHost)
+
+
+# Dragged to another monitor: re-sync the scale and keep the window on screen, but never fight
+# a size the user set by hand.
+# 被拖到另一台显示器：重新同步缩放并确保窗口留在屏幕内，但绝不覆盖用户手动调整过的尺寸。
+func _gpOnFocusEntered() -> void:
+	if current_screen == gpLastScreen:
+		return
+	_gpFitToScreen(false)
+
+
+# Host window resized: re-clamp so the dialog cannot end up larger than what contains it.
+# 宿主窗口尺寸变化：重新钳制，避免对话框大于容纳它的区域。
+func _gpOnHostResized() -> void:
+	if not is_inside_tree():
+		return
+	_gpFitToScreen(false)
 
 
 # ============================ locale refresh ============================

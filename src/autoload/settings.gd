@@ -85,6 +85,11 @@ var gpSymbolFont: Font = null
 # 图元字体或字号变化时发出，供画布重绘。
 signal gpSymbolStyleChanged
 
+# Emitted when the UI font or its size changes, so the toolbar and other dynamic
+# controls can re-apply explicit font size overrides.
+# 界面字体或字号变化时发出，供工具栏及其他动态控件重新应用显式字号覆盖。
+signal gpUIFontChanged
+
 
 # Load settings from disk and apply them.
 # 从磁盘加载设置并应用。
@@ -172,6 +177,7 @@ func gpApplyFontSize() -> void:
 	gpTheme.default_font_size = gpEffectiveFontSize()
 	if get_tree() != null and get_tree().root != null:
 		get_tree().root.theme = gpTheme
+	gpUIFontChanged.emit()
 
 
 # Apply locale through the I18n singleton.
