@@ -34,7 +34,7 @@ layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/separation = 12
 [node name="Rail" type="VBoxContainer" parent="Panel/Margin/Root/Body" unique_id=352017943]
-custom_minimum_size = Vector2(168, 0)
+custom_minimum_size = Vector2(110, 0)
 layout_mode = 2
 theme_override_constants/separation = 6
 [node name="Step0" type="Label" parent="Panel/Margin/Root/Body/Rail" unique_id=1570068906]
@@ -108,7 +108,7 @@ layout_mode = 2
 [node name="ClearBtn" type="Button" parent="Panel/Margin/Root/Body/Center/PageGlyph/Bar" unique_id=935065413]
 layout_mode = 2
 [node name="Glyph" type="Control" parent="Panel/Margin/Root/Body/Center/PageGlyph" unique_id=1672185649] script = ExtResource("1")
-custom_minimum_size = Vector2(0, 320)
+custom_minimum_size = Vector2(0, 170)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -135,7 +135,7 @@ layout_mode = 2
 [node name="AttrDelBtn" type="Button" parent="Panel/Margin/Root/Body/Center/PageAttrs/Row" unique_id=974538645]
 layout_mode = 2
 [node name="AttrList" type="ItemList" parent="Panel/Margin/Root/Body/Center/PageAttrs" unique_id=1353778460]
-custom_minimum_size = Vector2(0, 260)
+custom_minimum_size = Vector2(0, 200)
 layout_mode = 2
 size_flags_vertical = 3
 [node name="AttrHint" type="Label" parent="Panel/Margin/Root/Body/Center/PageAttrs" unique_id=673987490]
@@ -189,7 +189,7 @@ layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/separation = 8
 [node name="Summary" type="RichTextLabel" parent="Panel/Margin/Root/Body/Center/PageExport" unique_id=1328016412]
-custom_minimum_size = Vector2(0, 280)
+custom_minimum_size = Vector2(0, 140)
 layout_mode = 2
 size_flags_vertical = 3
 [node name="RegisterCheck" type="CheckBox" parent="Panel/Margin/Root/Body/Center/PageExport" unique_id=424627387]
@@ -198,13 +198,13 @@ layout_mode = 2
 layout_mode = 2
 autowrap_mode = 3
 [node name="Right" type="VBoxContainer" parent="Panel/Margin/Root/Body" unique_id=1317152087]
-custom_minimum_size = Vector2(300, 0)
+custom_minimum_size = Vector2(180, 0)
 layout_mode = 2
 theme_override_constants/separation = 6
 [node name="PreviewCap" type="Label" parent="Panel/Margin/Root/Body/Right" unique_id=13880606]
 layout_mode = 2
 [node name="Preview" type="Control" parent="Panel/Margin/Root/Body/Right" unique_id=464401521] script = ExtResource("2")
-custom_minimum_size = Vector2(0, 260)
+custom_minimum_size = Vector2(0, 220)
 layout_mode = 2
 size_flags_vertical = 3
 [node name="PreviewHint" type="Label" parent="Panel/Margin/Root/Body/Right" unique_id=1333731834]

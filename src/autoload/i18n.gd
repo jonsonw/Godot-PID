@@ -179,6 +179,11 @@ const GP_STRINGS: Dictionary = {
 	"symed.hint_attr_key":    { "zh": "属性键不能为空。", "en": "Attribute key cannot be empty." },
 	"symed.hint_attr_dup":    { "zh": "该属性键已存在。", "en": "That attribute key already exists." },
 	"symed.pack_added":       { "zh": "已加入图元库：%s", "en": "Added to library: %s" },
+	"center.sheet":           { "zh": "图纸", "en": "Sheet" },
+	"center.add_tab":         { "zh": "新建图纸", "en": "New sheet" },
+	"center.fullscreen":      { "zh": "全屏", "en": "Fullscreen" },
+	"center.fullscreen_exit": { "zh": "退出全屏", "en": "Exit fullscreen" },
+	"center.fullscreen_tip":  { "zh": "隐藏左右面板，绘图区占满窗口", "en": "Hide side panels, expand the canvas" },
 }
 
 
