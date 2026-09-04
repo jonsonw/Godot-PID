@@ -82,6 +82,111 @@ static func gpNormalizeSymbol(gpRaw: Dictionary, gpCat: String, gpPackSizes: Dic
 	return gpDef
 
 
+# Reverse of gpNormalizeSymbol: rebuild an author-space draft from a canonical GPSymbolDef.
+# gpNormalizeSymbol 的逆操作：从规范化 GPSymbolDef 重建作者空间草稿。
+# Normalization keeps only RELATIVE geometry (the author bbox is discarded), so the
+# reconstructed author frame is chosen as the unit box itself — center (50,50), bbox equal to
+# the def's own unit-space bbox. With GP_FIT_MARGIN = 1.0 this makes
+# gpNormalizeSymbol(gpDenormalizeSymbol(def)) reproduce def's unit coords and 0..1 ports
+# EXACTLY (within the 0.01 snapping already applied), so the glyph editor round-trips a
+# hand-edited symbol without drift.
+# 归一化只保留「相对几何」（作者包围盒被丢弃），故重建的作者框架直接取单位框本身——
+# 中心 (50,50)、包围盒等于 def 自身的单位空间包围盒。在 GP_FIT_MARGIN = 1.0 下，
+# gpNormalizeSymbol(gpDenormalizeSymbol(def)) 会精确还原 def 的单位坐标与 0..1 端口
+# （已含 0.01 量化），使图元编辑器对字形的往返编辑无漂移。
+# [param gpDef] Canonical symbol definition (unit-box gpShape, 0..1 ports, envelope size).
+# [param gpDef] 规范化图元定义（单位框 gpShape、0..1 端口、包络尺寸）。
+# Returns a draft dict in the same shape as gpNormalizeSymbol's input (module header),
+# or an empty-shape draft with no ports when the def carries no geometry (forward re-derives
+# the category standard ports on the next normalize).
+# 返回与 gpNormalizeSymbol 输入同构的草稿字典；当 def 无几何时返回空形状草稿（下次归一化
+# 会重新推导类别标准端口）。
+static func gpDenormalizeSymbol(gpDef: GPSymbolDef) -> Dictionary:
+	var gpCat: String = gpDef.gpCategory
+	var gpEnv: Vector2 = gpDef.gpDefaultSize
+
+	# Mirror the forward "nothing drawn" branch: empty geometry -> empty draft (ports re-derived).
+	# 与正向「未绘制」分支对齐：空几何 → 空草稿（端口由下次归一化重新推导）。
+	var gpBBox: Rect2 = gpComputeBBox(gpDef.gpShape)
+	if gpBBox.size.x <= 0.0 and gpBBox.size.y <= 0.0:
+		return {
+			"id": gpDef.gpId,
+			"display_name": gpDef.gpDisplayName,
+			"category": gpCat,
+			"shapes": {},
+			"ports": [],
+			"attrs_schema": gpDef.gpAttrsSchema.duplicate(true),
+		}
+
+	# Author space == unit box: copy the unit coords as author pixels (scale-invariant frame).
+	# 作者空间 = 单位框：把单位坐标原样作为作者像素（缩放无关框架）。
+	var gpPaths: Array = []
+	for gpP in gpDef.gpShape.get("paths", []):
+		var gpPd: Dictionary = gpP as Dictionary
+		var gpNew: Array = []
+		for gpPt in (gpPd.get("pts", []) as Array):
+			gpNew.append([snappedf(float(gpPt[0]), 0.01), snappedf(float(gpPt[1]), 0.01)])
+		gpPaths.append({"pts": gpNew, "closed": bool(gpPd.get("closed", false))})
+
+	var gpCircles: Array = []
+	for gpC in gpDef.gpShape.get("circles", []):
+		var gpCd: Dictionary = gpC as Dictionary
+		gpCircles.append({
+			"c": [snappedf(float(gpCd["c"][0]), 0.01), snappedf(float(gpCd["c"][1]), 0.01)],
+			"r": snappedf(absf(float(gpCd["r"])), 0.01),
+		})
+
+	var gpRects: Array = []
+	for gpRd in gpDef.gpShape.get("rects", []):
+		var gpRr: Dictionary = gpRd as Dictionary
+		gpRects.append({
+			"pos": [snappedf(float(gpRr["pos"][0]), 0.01), snappedf(float(gpRr["pos"][1]), 0.01)],
+			"size": [snappedf(float(gpRr["size"][0]), 0.01), snappedf(float(gpRr["size"][1]), 0.01)],
+		})
+
+	return {
+		"id": gpDef.gpId,
+		"display_name": gpDef.gpDisplayName,
+		"category": gpCat,
+		"shapes": {"paths": gpPaths, "circles": gpCircles, "rects": gpRects},
+		"ports": _gpDenormalizePorts(gpDef.gpPorts, gpBBox, gpEnv),
+		"attrs_schema": gpDef.gpAttrsSchema.duplicate(true),
+	}
+
+
+# Inverse of gpNormalizePorts: map 0..1 envelope ports back to author-space pixels.
+# gpNormalizePorts 的逆：把 0..1 包络端口还原为作者空间像素。
+# Forward: nx = 0.5 + (abs.x - ctr.x) * SEff / envW,  with ctr = bbox.center (= 50 in unit frame).
+# 正向：nx = 0.5 + (abs.x - ctr.x) * SEff / envW，单位框下 ctr = bbox.center（= 50）。
+# Inverse: abs.x = 50 + (nx - 0.5) * envW / SEff   (and likewise for y).
+# 逆向：abs.x = 50 + (nx - 0.5) * envW / SEff（y 同理）。
+# SEff uses the SAME gpComputeBBox(gpShape) the forward pass recomputes on re-normalize, so the
+# round-trip is exact (the denormalized shape is the unit coords copied verbatim).
+# SEff 用与正向一致的 gpComputeBBox(gpShape)（重归一化时会从草稿形状重新算出），
+# 因此往返精确（反归一化的形状即原样复制的单位坐标）。
+static func _gpDenormalizePorts(gpPorts: Array[Dictionary], gpBBox: Rect2, gpEnv: Vector2) -> Array:
+	var gpSEff: float = gpEnvelopeScale(gpBBox, gpEnv)
+	if gpSEff <= 0.0:
+		gpSEff = 1.0
+	var gpEnvW: float = maxf(gpEnv.x, 0.001)
+	var gpEnvH: float = maxf(gpEnv.y, 0.001)
+	var gpOut: Array = []
+	for gpI in range(gpPorts.size()):
+		var gpP: Dictionary = gpPorts[gpI] as Dictionary
+		var gpPos: Array = gpP.get("pos", [0.5, 0.5])
+		var gpNx: float = float(gpPos[0])
+		var gpNy: float = float(gpPos[1])
+		gpOut.append({
+			"name": str(gpP.get("name", "p%d" % (gpI + 1))),
+			"pos": [
+				snappedf(50.0 + (gpNx - 0.5) * gpEnvW / gpSEff, 0.01),
+				snappedf(50.0 + (gpNy - 0.5) * gpEnvH / gpSEff, 0.01),
+			],
+			"dir": gpP.get("dir", gpEdgeNormal(Vector2(gpNx, gpNy))),
+		})
+	return gpOut
+
+
 # Uniform author-space -> unit-box scale factor.
 # 作者空间 → 单位框的均匀缩放系数。
 static func gpUnitScale(gpBBox: Rect2) -> float:

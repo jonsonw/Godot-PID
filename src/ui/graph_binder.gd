@@ -45,20 +45,21 @@ func gpGetSymbolView(gpId: String) -> GPSymbolView:
 # 将图元与连线视图同步到当前图状态。
 # [param gpG] the topology graph to render.
 # [param gpD] available symbol definitions.
-# [param gpSelectedId] currently selected node id (for highlight).
+# [param gpSelection] ids of currently selected nodes (multi-select; drives the highlight).
+# [param gpSelection] 当前选中节点的 id 集合（多选；驱动高亮）。
 # [param gpConnectFrom] current connect-source node id (for highlight).
-func gpSync(gpG: GPPIDGraph, gpD: Array[GPSymbolDef], gpSelectedId: String, gpConnectFrom: String) -> void:
+func gpSync(gpG: GPPIDGraph, gpD: Array[GPSymbolDef], gpSelection: Array[String], gpConnectFrom: String) -> void:
 	gpGraph = gpG
 	gpDefs = gpD
 	if gpGraph == null or gpWorldRoot == null:
 		return
-	_gpSyncSymbolViews(gpSelectedId, gpConnectFrom)
+	_gpSyncSymbolViews(gpSelection, gpConnectFrom)
 	_gpSyncEdgeViews()
 
 
 # Incrementally sync symbol view nodes with gpGraph.gpNodes.
 # 增量同步图元视图节点与 gpGraph.gpNodes。
-func _gpSyncSymbolViews(gpSelectedId: String, gpConnectFrom: String) -> void:
+func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> void:
 	var gpFresh: Dictionary = {}
 	for gpN in gpGraph.gpNodes:
 		var gpId: String = gpN.gpInstanceId
@@ -66,11 +67,24 @@ func _gpSyncSymbolViews(gpSelectedId: String, gpConnectFrom: String) -> void:
 			continue
 		var gpV: GPSymbolView = null
 		if _gpSymbolViews.has(gpId):
-			# Reuse existing view and update its bound data.
-			# 复用已有视图并更新绑定数据。
+			# Reuse existing view and rebind ALL authoritative data.
+			# 复用已有视图并重绑全部权威数据。
 			gpV = _gpSymbolViews[gpId] as GPSymbolView
 			gpV.gpNode = gpN
+			gpV.gpNodeId = gpId
+			# Rebind the definition too. When a symbol is re-exported, gpRegisterDefs()
+			# replaces the GPSymbolDef object behind the SAME id, so a view that keeps
+			# its old reference would silently keep painting the stale geometry.
+			# This single line is what makes "overwrite a symbol -> every placed
+			# instance refreshes" actually work.
+			# 同时重绑定义。重新导出图元时 gpRegisterDefs() 会替换同一 id 背后的
+			# GPSymbolDef 对象，若视图保留旧引用，就会静默地继续绘制过期几何。
+			# 这一行正是「覆盖图元 → 所有已放置实例同步刷新」得以生效的关键。
+			gpV.gpDef = gpDefFor(gpN.gpSymbolId)
 			gpV.gpUpdateTransform()
+			# The definition drives the painted geometry, so a rebind needs a repaint.
+			# 定义驱动所绘几何，故重绑后必须重绘。
+			gpV.queue_redraw()
 		else:
 			# Create a new view for this node.
 			# 为该节点创建新视图。
@@ -78,7 +92,9 @@ func _gpSyncSymbolViews(gpSelectedId: String, gpConnectFrom: String) -> void:
 			var gpDef: GPSymbolDef = gpDefFor(gpN.gpSymbolId)
 			gpV.gpInit(gpN, gpDef)
 			gpWorldRoot.add_child(gpV)
-		gpV.gpSetSelected(gpId == gpSelectedId)
+		# Multi-select: every id in the selection set lights up, not just the primary one.
+		# 多选：选择集中的每个 id 都会高亮，而不只是主选项。
+		gpV.gpSetSelected(gpSelection.has(gpId))
 		gpV.gpSetConnectSource(gpId == gpConnectFrom)
 		gpFresh[gpId] = gpV
 	# Remove stale symbol views.

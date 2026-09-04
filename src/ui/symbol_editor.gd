@@ -35,6 +35,12 @@ const GP_STEP_COUNT: int = 5
 # 导出图元包的写入目录。
 const GP_EXPORT_DIR: String = "user://symbol_packs"
 
+# Step-2 drawing tool i18n keys, in tool-id order (see GPGlyphCanvas.GPTool).
+# 第 2 步绘图工具的 i18n 键，按工具 id 顺序排列（见 GPGlyphCanvas.GPTool）。
+const GP_TOOL_KEYS: Array[String] = [
+	"symed.tool_polyline", "symed.tool_circle", "symed.tool_rect", "symed.tool_port", "symed.tool_select",
+]
+
 # Attribute schema value types offered in step 3.
 # 第 3 步提供的属性 schema 值类型。
 const GP_ATTR_TYPES: Array[String] = ["string", "float", "int", "bool"]
@@ -133,6 +139,7 @@ var gpLastScreen: int = -1
 @onready var gpEnvCaption: Label = $Panel/Margin/Root/Body/Center/PageCategory/Grid/EnvCaption
 
 # --- step 2 widgets / 第 2 步控件 ---
+@onready var gpPageGlyph: VBoxContainer = $Panel/Margin/Root/Body/Center/PageGlyph
 @onready var gpToolOption: OptionButton = $Panel/Margin/Root/Body/Center/PageGlyph/Bar/ToolOption
 @onready var gpToolLabel: Label = $Panel/Margin/Root/Body/Center/PageGlyph/Bar/ToolLabel
 @onready var gpSnapCheck: CheckBox = $Panel/Margin/Root/Body/Center/PageGlyph/Bar/SnapCheck
@@ -181,6 +188,11 @@ var gpAttrSchema: Dictionary = {}
 # 最近一次归一化产出的定义。
 var gpResultDef: GPSymbolDef = null
 
+# Explicit tool-toggle row built over the drawing canvas, so no tool is hidden behind a dropdown.
+# 在画布上方构建的显式工具开关行，使任何工具都不必藏在下拉框里。
+var gpToolRow: HBoxContainer = null
+var gpToolBtns: Array[Button] = []
+
 
 # ============================ lifecycle ============================
 # ============================ 生命周期 ============================
@@ -209,13 +221,25 @@ func _ready() -> void:
 		gpCatOption.set_item_metadata(gpI, gpCats[gpI])
 	gpCatOption.item_selected.connect(_gpOnCategorySelected)
 
-	# ---- step 2: drawing tool list + initial states ----
-	# ---- 第 2 步：绘图工具列表 + 初始状态 ----
+	# ---- step 2: drawing tools + initial states ----
+	# ---- 第 2 步：绘图工具 + 初始状态 ----
+	# Keep the legacy dropdown populated (it stays hidden) and build the visible toggle row above
+	# the canvas. A bare dropdown reads as plain text, which is how Select / Edit went unnoticed.
+	# 保留旧下拉框的数据（隐藏不显示），并在画布上方构建可见的工具开关行。纯下拉框看起来
+	# 就是一段普通文字，「选择 / 编辑」正是因此被忽略。
 	gpToolOption.add_item(I18n.gpTr("symed.tool_polyline"), 0)
 	gpToolOption.add_item(I18n.gpTr("symed.tool_circle"), 1)
 	gpToolOption.add_item(I18n.gpTr("symed.tool_rect"), 2)
 	gpToolOption.add_item(I18n.gpTr("symed.tool_port"), 3)
+	gpToolOption.add_item(I18n.gpTr("symed.tool_select"), 4)
 	gpToolOption.item_selected.connect(_gpOnToolSelected)
+	_gpBuildToolRow()
+	# Open in Select / Edit (id 4 = GPTool.GP_SELECT): pick, marquee and the right-click menu must
+	# be usable BEFORE the author draws anything, otherwise left click only ever draws lines.
+	# 以「选择 / 编辑」开启（id 4 = GPTool.GP_SELECT）：点选、框选与右键菜单必须在作者绘制
+	# 任何内容之前即可用，否则左键永远只是在画线。
+	gpGlyph.gpSetTool(4)
+	gpGlyph.gpToolChanged.connect(_gpOnToolChanged)
 	gpSnapCheck.button_pressed = true
 	gpSnapCheck.toggled.connect(_gpOnSnapToggled)
 	gpFinishBtn.pressed.connect(_gpOnFinishPath)
@@ -338,6 +362,11 @@ func _gpRefreshStaticText() -> void:
 	# Step 2 labels.
 	# 第 2 步标签。
 	gpToolLabel.text = I18n.gpTr("symed.tool_label")
+	# Tool toggles carry localized text as well, so rebuild theirs on every locale change.
+	# 工具开关按钮同样带本地化文本，故每次语言变化都要重建。
+	for gpI in range(gpToolBtns.size()):
+		gpToolBtns[gpI].text = I18n.gpTr(GP_TOOL_KEYS[gpI])
+	_gpSyncToolRow()
 	gpFinishBtn.text = I18n.gpTr("symed.btn_finish")
 	gpUndoBtn.text = I18n.gpTr("symed.btn_undo")
 	gpClearBtn.text = I18n.gpTr("symed.btn_clear")
@@ -441,10 +470,55 @@ func _gpCurrentCategory(gpIdx: int = -1) -> String:
 
 # ============================ step 2: glyph ============================
 # ============================ 第 2 步：画字形 ============================
-# Drawing tool changed: forward it to the canvas.
-# 绘图工具改变：转发给画板。
+# Drawing tool changed (legacy dropdown): forward it to the canvas.
+# 绘图工具改变（旧下拉框）：转发给画板。
 func _gpOnToolSelected(gpIdx: int) -> void:
 	gpGlyph.gpSetTool(gpIdx)
+
+
+# Build one toggle button per drawing tool, in a dedicated row above the canvas. Its own row keeps
+# the cramped Bar (snap / finish / undo / clear) from squeezing the tools out of sight.
+# 为每个绘图工具建一个开关按钮，置于画布上方独立的一行。独立成行可避免本就局促的工具条
+# （吸附 / 结束折线 / 撤销 / 清空）把工具按钮挤到看不见。
+func _gpBuildToolRow() -> void:
+	gpToolRow = HBoxContainer.new()
+	gpToolRow.name = "ToolRow"
+	gpToolRow.add_theme_constant_override("separation", 4)
+	gpPageGlyph.add_child(gpToolRow)
+	gpPageGlyph.move_child(gpToolRow, 0)
+	for gpI in range(GP_TOOL_KEYS.size()):
+		var gpBtn: Button = Button.new()
+		gpBtn.toggle_mode = true
+		gpBtn.text = I18n.gpTr(GP_TOOL_KEYS[gpI])
+		gpBtn.pressed.connect(_gpOnToolButton.bind(gpI))
+		gpToolRow.add_child(gpBtn)
+		gpToolBtns.append(gpBtn)
+	# The dropdown stays in the scene (its node path is still referenced) but is no longer the way
+	# to pick a tool, so hide it to avoid two competing controls.
+	# 下拉框仍留在场景中（其节点路径仍被引用），但已不再是选工具的方式，故隐藏以免两套控件并存。
+	gpToolLabel.visible = false
+	gpToolOption.visible = false
+
+
+# A tool toggle was pressed. The parameter is an int forwarded to gpSetTool()'s enum parameter.
+# 某工具开关被按下。参数为整型，转发给 gpSetTool() 的枚举形参。
+func _gpOnToolButton(gpToolId: int) -> void:
+	gpGlyph.gpSetTool(gpToolId)
+
+
+# Reflect the canvas's current tool back onto the toggle row (also covers canvas-initiated changes,
+# e.g. "Select / Edit" chosen from the context menu).
+# 把画布当前工具反映到开关行（同时覆盖画布端发起的变更，例如右键菜单里选「选择 / 编辑」）。
+func _gpSyncToolRow() -> void:
+	var gpCur: int = int(gpGlyph.gpTool)
+	for gpI in range(gpToolBtns.size()):
+		gpToolBtns[gpI].button_pressed = (gpI == gpCur)
+
+
+# The canvas changed tool on its own: keep the toggle row in sync.
+# 画布自行改变了工具：保持开关行同步。
+func _gpOnToolChanged(_gpTool: int) -> void:
+	_gpSyncToolRow()
 
 
 func _gpOnSnapToggled(gpOn: bool) -> void:
