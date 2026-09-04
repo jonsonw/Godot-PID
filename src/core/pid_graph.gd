@@ -37,6 +37,14 @@ var gpEdges: Array[GPPIDEdge] = []
 # 存盘前由 gpEmbedUserPacks() 填充，载入时由 gpFromDict() 重建。
 var gpUserSymbolPacks: Array[GPSymbolPack] = []
 
+# Free annotation shapes drawn directly on the sheet (line / circle / rectangle / polyline).
+# 图纸上直接绘制的自由注释图形（直线 / 圆 / 矩形 / 折线）。
+# These are decoration/annotation primitives that live in a flat layer, NOT symbol
+# instances. They serialize with the graph so a *.pid.json round-trips them unchanged.
+# 这些是处在扁平「图形层」的注释/装饰图元，不是图元实例。与图一同序列化，使 *.pid.json
+# 往返后保持一致。
+var gpShapes: Array[GPShape] = []
+
 
 # Signals fired when data changes; the canvas subscribes to keep views in sync.
 # 数据变化时发出的信号；画布订阅它们以保持视图同步。
@@ -84,6 +92,13 @@ func gpAddNode(gpNode: GPPIDNode) -> void:
 func gpAddEdge(gpEdge: GPPIDEdge) -> void:
 	gpEdges.append(gpEdge)
 	gpEdgeAdded.emit(gpEdge)
+	gpGraphChanged.emit()
+
+
+# Add a free annotation shape (line / circle / rectangle / polyline) to the sheet's shape layer.
+# 向图纸图形层添加一枚自由注释图形（直线 / 圆 / 矩形 / 折线）。
+func gpAddShape(gpShape: GPShape) -> void:
+	gpShapes.append(gpShape)
 	gpGraphChanged.emit()
 
 
@@ -151,6 +166,11 @@ func gpToDict() -> Dictionary:
 	var gpEdgesOut: Array = []
 	for gpE in gpEdges:
 		gpEdgesOut.append(gpE.gpToDict())
+	# Annotation shapes serialize verbatim so they round-trip with the sheet.
+	# 注释图形原样序列化，随图纸一同往返。
+	var gpShapesOut: Array = []
+	for gpS in gpShapes:
+		gpShapesOut.append(gpS.gpToDict())
 	# Embed user packs so the saved file is self-contained.
 	# 嵌入用户图元包，使存盘文件自包含。
 	var gpPacksOut: Array = []
@@ -160,6 +180,7 @@ func gpToDict() -> Dictionary:
 		"meta": gpMeta.duplicate(),
 		"nodes": gpNodesOut,
 		"edges": gpEdgesOut,
+		"shapes": gpShapesOut,
 		"user_symbol_packs": gpPacksOut,
 	}
 
@@ -180,6 +201,11 @@ static func gpFromDict(gpData: Dictionary) -> GPPIDGraph:
 			var gpE: GPPIDEdge = GPPIDEdge.new()
 			gpE.gpFromDict(gpED)
 			gpG.gpEdges.append(gpE)
+	if gpData.has("shapes"):
+		for gpSD in gpData["shapes"]:
+			var gpS: GPShape = GPShape.new()
+			gpS.gpFromDict(gpSD)
+			gpG.gpShapes.append(gpS)
 	# Restore embedded user packs and reconcile them into the live library so the
 	# custom symbols are available again after re-opening the file (self-contained).
 	# 恢复内嵌的用户图元包，并调和进活动图元库，使重新打开文件后自定义图元再次可用（自包含）。

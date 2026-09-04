@@ -130,6 +130,14 @@ var gpLeftWidthPx: float = GP_LEFT_MIN
 # 当前右停靠栏宽度（像素）；以 GP_RIGHT_MIN 初始化，拖拽时更新。
 var gpRightWidthPx: float = GP_RIGHT_MIN
 
+# Drawing toolbar row under the menu bar (select / connect / line / circle / rect / polyline / port / new).
+# 菜单栏下方的绘图工具栏行（选择 / 连线 / 直线 / 圆 / 矩形 / 折线 / 端口 / 新建）。
+var gpToolBar: HBoxContainer = null
+
+# Toggle buttons (select / connect) kept for highlight sync; keyed by action name.
+# 开关按钮（选择 / 连线），保留以便同步高亮；以动作名为键。
+var gpToolBtns: Dictionary = {}
+
 
 # Wire the static scene together and set up initial state.
 # 将静态场景拼接起来并设置初始状态。
@@ -187,6 +195,10 @@ func _ready() -> void:
 	# ---- 菜单 ----
 	gpMenuBar.gpActionTriggered.connect(_gpOnMenu)
 
+	# ---- drawing toolbar row under the menu bar ----
+	# ---- 菜单栏下方的绘图工具栏行 ----
+	_gpBuildToolBar()
+
 	# ---- file dialog (open / save-as) ----
 	# ---- 文件对话框（打开 / 另存为） ----
 	gpFileDialog = FileDialog.new()
@@ -240,6 +252,19 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 	gpCanvas.gpDefs = gpDefs
 	gpCanvas.gpGraphChanged.connect(_gpOnGraphChanged)
 	gpCanvas.gpStatusUpdated.connect(_gpOnStatus)
+	# Double click / context menu on a symbol asks for in-place geometry editing.
+	# 图元上的双击 / 右键菜单会请求就地编辑几何。
+	gpCanvas.gpSymbolEditRequested.connect(_gpOnSymbolEditRequested)
+	# Promote selected annotation shapes into a real symbol: open the isolation editor pre-seeded.
+	# 把选中的注释图形提升为真正图元：打开已预装的隔离编辑器。
+	gpCanvas.gpMakeSymbolRequested.connect(_gpOnMakeSymbolFromShapes)
+	# Empty-space context menu "New Symbol…" opens the very same CREATE-mode isolation editor as
+	# the toolbar "New Symbol…" button.
+	# 空白处右键菜单「创建图元…」打开与工具栏「新建图元…」按钮完全相同的「新建」模式隔离编辑器。
+	gpCanvas.gpNewSymbolRequested.connect(_gpOpenNewSymbol)
+	# Keep the drawing toolbar highlight in sync when the mode changes (e.g. via context menu).
+	# 模式变化时（如右键菜单）同步绘图工具栏高亮。
+	gpCanvas.gpModeChanged.connect(_gpSyncToolBar)
 
 
 # The active sheet changed (add / switch / close): refresh the inspector for the
@@ -247,6 +272,7 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 # 活动图纸已切换（新建 / 切换 / 关闭）：刷新新活动页的选中属性。
 func _gpOnActiveTabChanged() -> void:
 	_gpRefreshSelection()
+	_gpSyncToolBar()
 
 
 # Fullscreen toggle from the center header: hide/show the side docks so the canvas
@@ -283,7 +309,7 @@ func _gpRefreshStaticText() -> void:
 # 从左侧图元库选中图元：切换到放置模式。
 func _gpOnSymbolPicked(gpTypeId: String) -> void:
 	gpActiveCanvas().gpPendingDef = _gpDefFor(gpTypeId)
-	gpActiveCanvas().gpMode = GPCanvas2D.GPMode.GP_SELECT
+	gpActiveCanvas().gpSetMode(GPCanvas2D.GPMode.GP_SELECT)
 	gpActiveCanvas().gpConnectFrom = ""
 	var gpDef: GPSymbolDef = _gpDefFor(gpTypeId)
 	var gpName: String = gpDef.gpDisplayName if gpDef else gpTypeId
@@ -294,11 +320,11 @@ func _gpOnSymbolPicked(gpTypeId: String) -> void:
 # 工具按钮被按下：选择 / 连线 / 自定义。
 func _gpOnToolSelected(gpType: String) -> void:
 	if gpType == "select":
-		gpActiveCanvas().gpMode = GPCanvas2D.GPMode.GP_SELECT
+		gpActiveCanvas().gpSetMode(GPCanvas2D.GPMode.GP_SELECT)
 		gpActiveCanvas().gpConnectFrom = ""
 		_gpSetState("status.mode_select")
 	elif gpType == "connect":
-		gpActiveCanvas().gpMode = GPCanvas2D.GPMode.GP_CONNECT
+		gpActiveCanvas().gpSetMode(GPCanvas2D.GPMode.GP_CONNECT)
 		_gpSetState("status.mode_connect")
 	elif gpType == "custom":
 		_gpSetState("status.custom_pending")
@@ -396,8 +422,9 @@ func _gpOnMenu(gpAction: String) -> void:
 		"file_new", "edit_clear":
 			gpActiveGraph().gpNodes.clear()
 			gpActiveGraph().gpEdges.clear()
+			gpActiveGraph().gpShapes.clear()
 			gpActiveCanvas().gpNextId = 1
-			gpActiveCanvas().gpSelectedId = ""
+			gpActiveCanvas().gpClearSelection()
 			gpActiveCanvas().gpConnectFrom = ""
 			gpActiveCanvas().gpPendingDef = null
 			gpActiveCanvas().queue_redraw()
@@ -422,6 +449,8 @@ func _gpOnMenu(gpAction: String) -> void:
 			_gpOpenSettings()
 		"tool_symbol_editor":
 			_gpOpenSymbolEditor()
+		"tool_new_symbol":
+			_gpOpenNewSymbol()
 		_:
 			_gpSetState("status.feature_todo", [gpAction])
 
@@ -502,8 +531,9 @@ func _gpReadProject(gpPath: String) -> void:
 	gpDefs = GPSymbolLibrary.gpDefaultDefs()
 	gpLeftDock.gpPopulate(gpDefs)
 	gpActiveCanvas().gpDefs = gpDefs
-	gpActiveCanvas().gpSelectedId = ""
+	gpActiveCanvas().gpClearSelection()
 	gpActiveCanvas().gpConnectFrom = ""
+	gpActiveCanvas().gpShapeSel.clear()
 	gpActiveCanvas().queue_redraw()
 	gpCurrentPath = gpPath
 	_gpSetState("status.loaded_with_packs", [gpPath, gpNewGraph.gpUserSymbolPacks.size()])
@@ -521,13 +551,231 @@ func _gpOpenSettings() -> void:
 	gpDlg.gpPopupOverHost()
 
 
-# Open the symbol editor wizard as a movable, resizable window over the main window.
-# 以可移动、可缩放的窗口在主窗口之上打开图元编辑器向导。
+# Open the symbol-pack exporter wizard (new symbols only; existing glyphs are edited in place).
+# 打开图元包导出器向导（仅用于新建图元；已有字形改为就地编辑）。
 func _gpOpenSymbolEditor() -> void:
 	var gpEditor: GPSymbolEditor = load("res://scenes/symbol_editor.tscn").instantiate()
 	add_child(gpEditor)
 	gpEditor.gpPackExported.connect(_gpOnPackExported)
 	gpEditor.gpPopupOverHost()
+
+
+# Open the in-place isolation editor in CREATE mode: a blank glyph canvas where the user
+# draws the geometry (circle / line / polyline / rectangle / port), then right-clicks
+# "Create Symbol" or presses "Create" to register a brand-new symbol.
+# 以「新建」模式打开就地隔离编辑器：空白几何画板，用户绘制图形（圆/直线/折线/矩形/端口），
+# 然后右键「生成图元」或点「创建图元」注册一个全新图元。
+func _gpOpenNewSymbol(gpInitialTool: int = GPGlyphCanvas.GPTool.GP_SELECT) -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null or gpCenter == null:
+		return
+	# If an isolation layer is already open, just switch its drawing tool instead of stacking a
+	# second layer on top of it.
+	# 若隔离层已打开，仅切换其绘图工具，避免在其上叠加第二个层。
+	var gpExisting: Node = gpCenter.gpBody.get_node_or_null("SymbolIsolationLayer")
+	if gpExisting != null and gpExisting is GPSymbolIsolationLayer:
+		gpExisting.gpGlyph.gpSetTool(gpInitialTool)
+		gpExisting.gpGlyph.grab_focus()
+		return
+	var gpLayer: GPSymbolIsolationLayer = GPSymbolIsolationLayer.gpOpenCreate(gpCenter.gpBody, gpCanvas, gpInitialTool)
+	if gpLayer == null:
+		return
+	gpLayer.gpSaved.connect(_gpOnSymbolSaved)
+
+
+# ============================ drawing toolbar ============================
+# ============================ 绘图工具栏 ============================
+# Build the toolbar row and insert it between the menu bar and the body in the root VBox.
+# 构建工具栏行并插入到根 VBox 的菜单栏与主体之间。
+# Drawing tools (line / circle / rectangle / polyline) switch the canvas into a direct-draw
+# mode — annotation shapes are drawn on the main canvas, NOT in the symbol editor. Only the
+# "New Symbol…" button opens the isolation editor (for advanced symbol authoring).
+# 绘图工具（直线 / 圆 / 矩形 / 折线）把画布切到直接绘制模式——注释图形画在主画布上，而非符号
+# 编辑器里。只有「新建图元…」按钮打开隔离编辑器（用于高级图元创作）。
+func _gpBuildToolBar() -> void:
+	var gpVLayout: VBoxContainer = $VLayout
+	gpToolBar = HBoxContainer.new()
+	gpToolBar.name = "DrawToolBar"
+	gpToolBar.add_theme_constant_override("separation", 6)
+	var gpStyle: StyleBoxFlat = StyleBoxFlat.new()
+	gpStyle.bg_color = Color(0.13, 0.14, 0.18)
+	gpStyle.content_margin_left = 6.0
+	gpStyle.content_margin_right = 6.0
+	gpStyle.content_margin_top = 3.0
+	gpStyle.content_margin_bottom = 3.0
+	gpToolBar.add_theme_stylebox_override("panel", gpStyle)
+	gpVLayout.add_child(gpToolBar)
+	gpVLayout.move_child(gpToolBar, 1)
+	_gpAddToolBtn("select", "symbol_lib.tool_select", true)
+	_gpAddToolBtn("connect", "symbol_lib.tool_connect", true)
+	_gpAddSep()
+	_gpAddToolBtn("line", "symed.tool_line", true)
+	_gpAddToolBtn("circle", "symed.tool_circle", true)
+	_gpAddToolBtn("rect", "symed.tool_rect", true)
+	_gpAddToolBtn("polyline", "symed.tool_polyline", true)
+	_gpAddSep()
+	_gpAddToolBtn("new", "menu.tool_new_symbol", false)
+	_gpSyncToolBar()
+
+
+# Add one toolbar button. gpToggle buttons keep their pressed highlight and are tracked for sync.
+# 添加一个工具栏按钮。gpToggle 按钮保持按下高亮并被记录以便同步。
+func _gpAddToolBtn(gpAction: String, gpKey: String, gpToggle: bool) -> Button:
+	var gpBtn: Button = Button.new()
+	gpBtn.text = I18n.gpTr(gpKey)
+	gpBtn.tooltip_text = I18n.gpTr(gpKey)
+	gpBtn.focus_mode = Control.FOCUS_NONE
+	if gpToggle:
+		gpBtn.toggle_mode = true
+	gpBtn.pressed.connect(_gpOnToolBarPressed.bind(gpAction))
+	gpToolBar.add_child(gpBtn)
+	if gpToggle:
+		gpToolBtns[gpAction] = gpBtn
+	return gpBtn
+
+
+# Add a thin vertical separator between tool groups.
+# 在工具组之间加一条细竖直分隔线。
+func _gpAddSep() -> void:
+	var gpSep: VSeparator = VSeparator.new()
+	gpToolBar.add_child(gpSep)
+
+
+# Toolbar button handler: select / connect / drawing tools switch the canvas mode; the
+# "New Symbol…" button opens the isolation editor for advanced symbol authoring.
+# 工具栏按钮处理：选择/连线/绘图工具切换画布模式；「新建图元…」按钮打开隔离编辑器用于高级图元创作。
+func _gpOnToolBarPressed(gpAction: String) -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null:
+		return
+	match gpAction:
+		"select":
+			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_SELECT)
+			gpCanvas.gpConnectFrom = ""
+			_gpSetState("status.mode_select")
+		"connect":
+			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_CONNECT)
+			_gpSetState("status.mode_connect")
+		"line":
+			gpCanvas.gpPendingDef = null
+			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_LINE)
+			_gpSetState("status.mode_line")
+		"circle":
+			gpCanvas.gpPendingDef = null
+			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_CIRCLE)
+			_gpSetState("status.mode_circle")
+		"rect":
+			gpCanvas.gpPendingDef = null
+			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_RECT)
+			_gpSetState("status.mode_rect")
+		"polyline":
+			gpCanvas.gpPendingDef = null
+			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_POLYLINE)
+			_gpSetState("status.mode_polyline")
+		"new":
+			_gpOpenNewSymbol()
+	_gpSyncToolBar()
+
+
+# Highlight the toggle button matching the active canvas mode (select / connect / draw tools).
+# 高亮与当前画布模式匹配的开关按钮（选择 / 连线 / 绘图工具）。
+func _gpSyncToolBar() -> void:
+	if gpToolBar == null:
+		return
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	var gpMode: int = GPCanvas2D.GPMode.GP_SELECT if gpCanvas == null else gpCanvas.gpMode
+	for gpAct in gpToolBtns.keys():
+		var gpBtn: Button = gpToolBtns[gpAct]
+		var gpM: int = _gpModeForAction(gpAct)
+		gpBtn.button_pressed = (gpM >= 0 and gpMode == gpM)
+
+
+# Map a toolbar action to its canvas mode, or -1 for non-mode buttons (e.g. "new").
+# 把工具栏动作映射到对应画布模式；非模式按钮（如「新建」）返回 -1。
+func _gpModeForAction(gpAction: String) -> int:
+	match gpAction:
+		"select":
+			return GPCanvas2D.GPMode.GP_SELECT
+		"connect":
+			return GPCanvas2D.GPMode.GP_CONNECT
+		"line":
+			return GPCanvas2D.GPMode.GP_DRAW_LINE
+		"circle":
+			return GPCanvas2D.GPMode.GP_DRAW_CIRCLE
+		"rect":
+			return GPCanvas2D.GPMode.GP_DRAW_RECT
+		"polyline":
+			return GPCanvas2D.GPMode.GP_DRAW_POLYLINE
+	return -1
+
+
+# ============================ in-place symbol editing ============================
+# ============================ 就地图元编辑 ============================
+# Open the isolation layer for one symbol type directly over the active canvas.
+# 为某个图元类型在活动画布正上方打开隔离层。
+# Open the isolation editor pre-loaded with the annotation-shape geometry the user promoted.
+# 打开已预装「被提升」注释图形几何的隔离编辑器。
+func _gpOnMakeSymbolFromShapes(gpDraft: Dictionary) -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null or gpCenter == null:
+		return
+	# Avoid stacking a second isolation layer if one is already open.
+	# 若隔离层已打开则不再叠加第二个。
+	if gpCenter.gpBody.has_node("SymbolIsolationLayer"):
+		return
+	var gpLayer: GPSymbolIsolationLayer = GPSymbolIsolationLayer.gpOpenCreate(gpCenter.gpBody, gpCanvas, GPGlyphCanvas.GPTool.GP_SELECT, gpDraft)
+	if gpLayer == null:
+		return
+	gpLayer.gpSaved.connect(_gpOnSymbolSaved)
+
+
+func _gpOnSymbolEditRequested(gpSymbolId: String) -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null or gpCenter == null:
+		return
+	# Avoid stacking a second isolation layer if one is already open (e.g. a second double-click).
+	# 若隔离层已打开则不再叠加第二个（例如编辑时再次双击）。
+	if gpCenter.gpBody.has_node("SymbolIsolationLayer"):
+		return
+	var gpDef: GPSymbolDef = _gpDefFor(gpSymbolId)
+	if gpDef == null:
+		return
+	# Decision D3: built-in symbols are read-only. Deriving a custom_<id> copy (re-normalized
+	# into the editor's canonical form so the save round-trip is lossless) lets the user edit
+	# without ever overwriting or re-fitting the original ISO symbol.
+	# 决策 D3：内置图元只读。派生 custom_<id> 副本（重新归一化为编辑器规范形式，使保存往返
+	# 无损）让用户可以编辑，而绝不会覆盖或重拟合原始 ISO 图元。
+	if gpDef.gpBuiltin:
+		var gpCanon: GPSymbolDef = GPSymbolNormalizer.gpNormalizeSymbol(
+			GPSymbolNormalizer.gpDenormalizeSymbol(gpDef), gpDef.gpCategory, {})
+		gpCanon.gpId = "custom_" + gpDef.gpId
+		gpCanon.gpBuiltin = false
+		GPSymbolLibrary.gpRegisterDefs([gpCanon])
+		gpDefs = GPSymbolLibrary.gpDefaultDefs()
+		gpLeftDock.gpPopulate(gpDefs)
+		gpCenter.gpSetDefs(gpDefs)
+		gpDef = gpCanon
+	var gpLayer: GPSymbolIsolationLayer = GPSymbolIsolationLayer.gpOpenOver(gpCenter.gpBody, gpCanvas, gpDef)
+	if gpLayer == null:
+		return
+	gpLayer.gpSaved.connect(_gpOnSymbolSaved)
+
+
+# The edited geometry was re-registered under the SAME id, so every placed instance repaints.
+# 编辑后的几何已按同一 id 重新注册，故所有已放置实例都会重绘。
+# gpDefaultDefs() returns a stable-identity array that gpRegisterDefs patched in place, so the
+# canvases already see the new object; only the palette and the paint need refreshing.
+# gpDefaultDefs() 返回的数组身份稳定且已被 gpRegisterDefs 就地修补，故各画布已看到新对象；
+# 只需刷新图元库与重绘。
+func _gpOnSymbolSaved(gpSymbolId: String) -> void:
+	gpDefs = GPSymbolLibrary.gpDefaultDefs()
+	gpLeftDock.gpPopulate(gpDefs)
+	gpCenter.gpSetDefs(gpDefs)
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas != null:
+		gpCanvas.queue_redraw()
+	_gpRefreshSelection()
+	_gpSetState("status.symbol_saved", [gpSymbolId])
 
 
 # A symbol pack was exported from the editor: fold it into the live library and refresh the
@@ -540,14 +788,15 @@ func _gpOnPackExported(gpPack: GPSymbolPack) -> void:
 	_gpSetState("symed.pack_added", [gpPack.gpName])
 
 
-# Delete the currently selected node and any edges connected to it.
-# 删除当前选中的节点及其关联的边。
+# Delete every selected node and any edges connected to them (menu 编辑 / 删除).
+# 删除所有选中节点及其关联的边（菜单「编辑 / 删除」）。
+# Delegated to the canvas so the multi-selection state lives in exactly one place.
+# 委托给画布执行，使多选状态只有一处真相来源。
 func _gpDeleteSelected() -> void:
-	var gpId: String = gpActiveCanvas().gpSelectedId
-	gpActiveGraph().gpRemoveNodeWithEdges(gpId)
-	gpActiveCanvas().gpSelectedId = ""
-	gpActiveCanvas().gpConnectFrom = ""
-	gpActiveCanvas().queue_redraw()
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null:
+		return
+	gpCanvas.gpDeleteSelection()
 
 
 # ============================ state helper ============================

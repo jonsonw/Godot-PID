@@ -19,6 +19,13 @@ static var _gpExtraDefs: Array[GPSymbolDef] = []
 static var _gpCachedDefs: Array[GPSymbolDef] = []
 static var _gpCacheValid: bool = false
 
+# Number of built-in defs currently in _gpCachedDefs; everything at or after this
+# index is a runtime-registered extra that gpRegisterDefs / gpClearRegistered patch
+# in place (no pack reload).
+# 当前 _gpCachedDefs 中内置图元的数量；此下标及之后均为运行期注册的额外项，
+# 由 gpRegisterDefs / gpClearRegistered 原地修补（无需重载图元包）。
+static var _gpBuiltinCount: int = 0
+
 # Directory where user-authored symbol packs are persisted across sessions.
 # 用户自建图元包的跨会话持久化目录（由符号编辑器导出时写入）。
 const GP_USER_PACKS_DIR: String = "user://symbol_packs"
@@ -26,15 +33,40 @@ const GP_USER_PACKS_DIR: String = "user://symbol_packs"
 
 # Return the default built-in symbol definitions.
 # 返回默认内置图元定义。
+# IMPORTANT: the returned array has a STABLE IDENTITY — it is refreshed in place
+# (clear + re-append) instead of being replaced by a brand-new array. Every caller
+# that captured an earlier reference (main window, left palette, graph binder)
+# therefore transparently observes later registrations.
+# 重要：返回数组的身份是「稳定的」——它以原地方式刷新（清空 + 重新追加）而非整体替换。
+# 因此任何持有早期引用的调用方（主窗口、左图元库、图绑定器）都能透明地看到后续注册。
+# Returning a fresh array here would silently freeze those holders on stale
+# GPSymbolDef objects, and no amount of downstream re-binding could recover them.
+# 若此处改为返回新数组，那些持有者会静默地停留在过期的 GPSymbolDef 对象上，
+# 下游无论如何重绑都无法挽回。
 static func gpDefaultDefs() -> Array[GPSymbolDef]:
-	if _gpCacheValid:
-		return _gpCachedDefs
-	_gpCachedDefs = _gpLoadAllPacks()
-	_gpCacheValid = true
-	# Anything the user authored in this session comes last so it is easy to spot.
-	# 用户本次会话新建的图元排在最后，便于识别。
-	_gpCachedDefs.append_array(_gpExtraDefs)
+	if not _gpCacheValid:
+		_gpRebuildCache()
 	return _gpCachedDefs
+
+
+# Rebuild the cached defs array in place, preserving its identity.
+# 原地重建缓存定义数组，保持其身份不变。
+# Built-ins first, then user-authored defs, so custom symbols are easy to spot.
+# 先内置图元，再用户自建图元，便于识别自定义图元。
+# _gpBuiltinCount records where the extra segment begins so later in-place updates
+# (gpRegisterDefs / gpClearRegistered) can patch the SAME array instead of reloading
+# every pack — that reload froze headless validation and is an O(n^2) regression in the
+# editor when several symbols are exported in a row.
+# _gpBuiltinCount 记录额外段起点，使后续原地更新（gpRegisterDefs / gpClearRegistered）
+# 能就地修补同一数组而非重载所有包——该重载会冻结 headless 校验，也是编辑器里连续
+# 导出多个图元时的 O(n^2) 性能回归。
+static func _gpRebuildCache() -> void:
+	var gpBuiltin: Array[GPSymbolDef] = _gpLoadAllPacks()
+	_gpCachedDefs.clear()
+	_gpCachedDefs.append_array(gpBuiltin)
+	_gpBuiltinCount = _gpCachedDefs.size()
+	_gpCachedDefs.append_array(_gpExtraDefs)
+	_gpCacheValid = true
 
 
 # Load all symbol packs from src/core/symbol_packs/.
@@ -44,6 +76,12 @@ static func _gpLoadAllPacks() -> Array[GPSymbolDef]:
 	# Load ISO 10628 pack (25 symbols).
 	# 加载 ISO 10628 图元包（25 个图元）。
 	var gpIsoPack: Array[GPSymbolDef] = GPSymbolPackIso_10628.gpDefs()
+	# Decision D3: ISO library symbols are built-in (read-only). The in-place editor derives a
+	# custom_<id> copy instead of overwriting them, so flag them here at load time.
+	# 决策 D3：ISO 库图元为内置（只读）。就地编辑器派生 custom_<id> 副本而非覆盖，
+	# 故在加载时标记。
+	for gpD in gpIsoPack:
+		gpD.gpBuiltin = true
 	gpOut.append_array(gpIsoPack)
 	return gpOut
 
@@ -53,22 +91,38 @@ static func _gpLoadAllPacks() -> Array[GPSymbolDef]:
 # Re-registering an existing id replaces it, so re-exporting the same symbol updates in place.
 # 重复注册同一 id 会覆盖原有项，因此重新导出同名图元即为原地更新。
 static func gpRegisterDefs(gpDefs: Array[GPSymbolDef]) -> void:
+	# Ensure the cache exists before patching it in place.
+	# 原地修补前确保缓存已存在。
+	if not _gpCacheValid:
+		_gpRebuildCache()
 	for gpD in gpDefs:
 		var gpIdx: int = _gpIndexOfId(gpD.gpId)
 		if gpIdx >= 0:
+			# Replace in BOTH the extra slot and the cached array (same identity), so
+			# every holder of the array reference transparently observes the new object.
+			# 同时替换额外槽与缓存数组（同一身份），使持有该数组引用的调用方都能
+			# 透明看到新对象。
 			_gpExtraDefs[gpIdx] = gpD
+			_gpCachedDefs[_gpBuiltinCount + gpIdx] = gpD
 		else:
+			# Append to BOTH so every holder of the array identity sees it immediately.
+			# 同时追加到两处，使持有该数组身份的调用方立即看到。
 			_gpExtraDefs.append(gpD)
-	# Invalidate cache so next call reloads.
-	# 使缓存失效，下次调用时重新加载。
-	_gpCacheValid = false
+			_gpCachedDefs.append(gpD)
+	# The cached array is already fresh — no full pack reload needed.
+	# 缓存数组已是最新，无需全量重载图元包。
+	_gpCacheValid = true
 
 
 # Drop all runtime-registered definitions (used by tests and "reset library" actions).
 # 清空所有运行期注册的定义（供测试与「重置图元库」使用）。
 static func gpClearRegistered() -> void:
 	_gpExtraDefs.clear()
-	_gpCacheValid = false
+	# Keep only the built-in segment of the cached array (same identity), so holders
+	# observe the reset without a full pack reload.
+	# 仅保留缓存数组中的内置段（同一身份），使持有者无需全量重载即可看到重置。
+	_gpCachedDefs.resize(_gpBuiltinCount)
+	_gpCacheValid = true
 
 
 # Read every persisted user pack from GP_USER_PACKS_DIR as GPSymbolPack objects.

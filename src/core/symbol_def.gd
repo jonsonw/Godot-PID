@@ -65,6 +65,12 @@ enum GPSymbolCategory { GP_EQUIPMENT, GP_VALVE, GP_PIPE, GP_FITTING, GP_INSULATI
 # （min(rect.w / box.w, rect.h / box.h)），使字形沿主轴贴合包络。
 @export var gpShape: Dictionary = {}
 
+# Built-in flag (decision D3): ISO library symbols are read-only; the in-place editor derives a
+# custom_<id> copy instead of overwriting the original. User-authored symbols are not built-in.
+# 内置标志（决策 D3）：ISO 库图元只读；就地编辑器派生 custom_<id> 副本而非覆盖原图元。
+# 用户自建图元非内置。
+@export var gpBuiltin: bool = false
+
 
 # Legacy guard: normalized port coordinates never exceed this magnitude.
 # 兼容护栏：归一化端口坐标绝不会超过此量级。
@@ -110,6 +116,7 @@ func gpToDict() -> Dictionary:
 		"ports": gpPorts.duplicate(true),
 		"attrs_schema": gpAttrsSchema.duplicate(true),
 		"shape": gpShape.duplicate(true),
+		"builtin": gpBuiltin,
 	}
 
 
@@ -131,3 +138,4 @@ func gpFromDict(gpD: Dictionary) -> void:
 	gpPorts = gpTypedPorts
 	gpAttrsSchema = gpD.get("attrs_schema", {})
 	gpShape = gpD.get("shape", {})
+	gpBuiltin = gpD.get("builtin", false)
