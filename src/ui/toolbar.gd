@@ -13,6 +13,11 @@ extends VBoxContainer
 # 从图元库选中某图元（返回其 type id）。
 signal gpSymbolPicked(type: String)
 
+# A symbol deletion was requested from a palette item. Forwarded to the main window,
+# which owns the graphs (to cascade-remove canvas instances) and the live library.
+# 图元库条目请求删除某图元。转发给主窗口，由它持有图（级联清理画布实例）与活动图元库。
+signal gpSymbolDeleteRequested(type: String)
+
 # A tool was selected: "select" / "connect" / "custom".
 # 选中某工具：select（选择）/ connect（连线）/ custom（自定义图元）。
 signal gpToolSelected(type: String)
@@ -228,6 +233,7 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 			gpItem.gpDef = gpD
 			gpItem.size_flags_horizontal = SIZE_EXPAND_FILL
 			gpItem.gpPicked.connect(_gpOnPick)
+			gpItem.gpDeleteRequested.connect(_gpOnDeleteRequested)
 			gpGrid.add_child(gpItem)
 
 		gpHeader.pressed.connect(_gpToggleCategory.bind(gpCat, gpGrid, gpHeader))
@@ -323,3 +329,12 @@ func _gpOnSymbolStyleChanged() -> void:
 # 发出图元被选中信号。
 func _gpOnPick(gpTypeId: String) -> void:
 	gpSymbolPicked.emit(gpTypeId)
+
+
+# A palette item requested deletion: forward to the main window, which owns the graphs
+# (to cascade-remove canvas instances) and the live library. The local re-render happens
+# there via gpPopulate after the symbol is actually removed.
+# 图元条目请求删除：转发给主窗口，由它持有图（级联清理画布实例）与活动图元库。本地重渲染
+# 在图元确实被移除后由主窗口经 gpPopulate 完成。
+func _gpOnDeleteRequested(gpId: String) -> void:
+	gpSymbolDeleteRequested.emit(gpId)

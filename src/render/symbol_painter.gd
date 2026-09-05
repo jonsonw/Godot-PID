@@ -85,6 +85,19 @@ static func gpDrawShape(
 		gpCanvas.draw_rect(gpRRect, gpFill, true)
 		gpCanvas.draw_rect(gpRRect, gpStroke, false, gpLineWidth)
 
+	# Draw arcs (the minor CCW sweep from a0 to a1, uniformly scaled like every other primitive).
+	# 绘制弧（从 a0 到 a1 的劣弧/逆时针扫掠，与其它图元同样均匀缩放）。
+	var gpArcs: Array = gpShape.get("arcs", [])
+	for gpA in gpArcs:
+		var gpCx: float = gpCtr.x + (float(gpA["c"][0]) - gpBoxCtr.x) * gpK
+		var gpCy: float = gpCtr.y + (float(gpA["c"][1]) - gpBoxCtr.y) * gpK
+		var gpArcCtr: Vector2 = Vector2(gpCx, gpCy)
+		var gpR: float = float(gpA["r"]) * gpK
+		var gpA0: float = float(gpA["a0"])
+		var gpA1: float = float(gpA["a1"])
+		var gpDelta: float = fposmod(gpA1 - gpA0, TAU)
+		gpCanvas.draw_arc(gpArcCtr, gpR, gpA0, gpA0 + gpDelta, 32, gpStroke, gpLineWidth, false)
+
 
 # Read the glyph's unit-space bounding box out of a shape dictionary.
 # 从形状字典中读取字形的单位空间包围盒。

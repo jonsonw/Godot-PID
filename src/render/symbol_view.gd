@@ -93,8 +93,8 @@ func _draw() -> void:
 
 	# If the definition carries a vector shape spec, render it natively (crisp at any zoom).
 	# 若定义带有矢量形状规格，则原生渲染（任意缩放均清晰）。
-	if gpDef != null and not gpDef.gpShape.is_empty():
-		GPSymbolPainter.gpDrawShape(self, gpDef.gpShape, gpRect, gpFill, gpStroke, gpBorder)
+	if gpDef != null and not gpDef.gpShapes.is_empty():
+		GPSymbolPainter.gpDrawShape(self, gpDef.gpShapeSpec(), gpRect, gpFill, gpStroke, gpBorder)
 	else:
 		draw_rect(gpRect, gpFill, true)
 		draw_rect(gpRect, gpStroke, false, gpBorder)

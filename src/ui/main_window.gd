@@ -186,6 +186,10 @@ func _ready() -> void:
 	gpLeftDock.gpPopulate(gpDefs)
 	gpLeftDock.gpSymbolPicked.connect(_gpOnSymbolPicked)
 	gpLeftDock.gpToolSelected.connect(_gpOnToolSelected)
+	# Symbol deletion is owned here: scan every sheet, cascade-remove canvas instances if
+	# the symbol is in use, then drop it from the live library and re-render the palette.
+	# 图元删除在此负责：扫描所有图纸，若图元在用则级联清理画布实例，再从活动库移除并重渲染。
+	gpLeftDock.gpSymbolDeleteRequested.connect(_gpOnSymbolDeleteRequested)
 
 	# ---- inspector ----
 	# ---- 属性面板 ----
@@ -220,6 +224,16 @@ func _ready() -> void:
 		gpLastScreen = gpWin.current_screen
 		gpPrevWidth = int(gpWin.size.x)
 		_gpApplyDpiScale()
+		# Open the main window MAXIMIZED so it fills the current monitor. The UI is designed at a
+		# fixed 1600x900 base; with stretch mode "canvas_items" Godot then scales that design canvas
+		# to the real window, so the interface always matches the monitor's own scale instead of
+		# opening at the raw base size. Without this the window stays 1600x900 "design points", which
+		# overflows a Retina logical screen (~1440x932) and makes the UI look too big / off-screen.
+		# 主窗口默认「最大化」以铺满当前显示器。UI 以固定 1600x900 基准设计；配合 stretch 模式
+		# canvas_items，Godot 会把这 1600x900 的设计画布缩放到真实窗口，使界面始终匹配显示器自身
+		# 的缩放比，而非以原始基准尺寸打开。否则窗口保持 1600x900「设计点」，会超出 Retina 逻辑屏
+		# （约 1440x932），导致 UI 显得过大 / 超出屏幕。
+		_gpOpenMaximized(gpWin)
 
 	# ---- initial dock widths: pin both docks to their floor, canvas fills rest ----
 	# ---- 初始停靠栏宽度：两栏钉到下限，画布填满剩余空间 ----
@@ -255,13 +269,9 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 	# Double click / context menu on a symbol asks for in-place geometry editing.
 	# 图元上的双击 / 右键菜单会请求就地编辑几何。
 	gpCanvas.gpSymbolEditRequested.connect(_gpOnSymbolEditRequested)
-	# Promote selected annotation shapes into a real symbol: open the isolation editor pre-seeded.
-	# 把选中的注释图形提升为真正图元：打开已预装的隔离编辑器。
+	# Promote selected annotation shapes into a real symbol: open the Make-Symbol dialog.
+	# 把选中的注释图形提升为真正图元：打开「生成图元」对话框。
 	gpCanvas.gpMakeSymbolRequested.connect(_gpOnMakeSymbolFromShapes)
-	# Empty-space context menu "New Symbol…" opens the very same CREATE-mode isolation editor as
-	# the toolbar "New Symbol…" button.
-	# 空白处右键菜单「创建图元…」打开与工具栏「新建图元…」按钮完全相同的「新建」模式隔离编辑器。
-	gpCanvas.gpNewSymbolRequested.connect(_gpOpenNewSymbol)
 	# Keep the drawing toolbar highlight in sync when the mode changes (e.g. via context menu).
 	# 模式变化时（如右键菜单）同步绘图工具栏高亮。
 	gpCanvas.gpModeChanged.connect(_gpSyncToolBar)
@@ -328,6 +338,63 @@ func _gpOnToolSelected(gpType: String) -> void:
 		_gpSetState("status.mode_connect")
 	elif gpType == "custom":
 		_gpSetState("status.custom_pending")
+
+
+# A symbol was requested for deletion from the left library. The symbol may be placed on
+# ANY sheet, so scan every canvas: if it is in use, ask for confirmation and cascade-remove
+# the placed instances; otherwise delete it from the library directly.
+# 左侧图元库请求删除某图元。该图元可能位于任意图纸，故扫描所有画布：若正在使用则确认后
+# 级联清理画布实例；否则直接从图元库删除。
+func _gpOnSymbolDeleteRequested(gpId: String) -> void:
+	var gpTotal: int = 0
+	for gpC in gpCenter.gpAllCanvases():
+		if gpC.gpGraph != null:
+			gpTotal += gpC.gpGraph.gpCountSymbolInstances(gpId)
+	if gpTotal == 0:
+		_gpDeleteSymbolAndRefresh(gpId)
+		return
+	_gpConfirmCascadeDelete(gpId, gpTotal)
+
+
+# Ask the user to confirm deletion when the symbol is in use on the canvas. Cascade removal
+# of placed instances happens only after the user confirms (no silent data loss).
+# 图元正在画布使用时，征求删除确认。仅在用户确认后才级联清理画布实例（避免静默丢数据）。
+func _gpConfirmCascadeDelete(gpId: String, gpTotal: int) -> void:
+	var gpDlg: ConfirmationDialog = ConfirmationDialog.new()
+	gpDlg.title = I18n.gpTr("symbol_lib.delete_title")
+	gpDlg.dialog_text = I18n.gpTr("symbol_lib.delete_used_confirm") % [gpTotal]
+	# Confirmed carries no argument, so capture gpId in the callback. Free the dialog either way.
+	# confirmed 信号不带参数，故在回调中捕获 gpId。无论确认或取消都释放对话框。
+	gpDlg.confirmed.connect(func():
+		_gpCascadeDeleteSymbol(gpId)
+		gpDlg.queue_free()
+	)
+	gpDlg.canceled.connect(gpDlg.queue_free)
+	add_child(gpDlg)
+	gpDlg.popup_centered()
+
+
+# Remove every placed instance of the symbol from all sheets (and their edges), then delete
+# it from the library and refresh the palette.
+# 从所有图纸移除该图元的全部已放置实例（及其连线），再从图元库删除并重渲染图元库。
+func _gpCascadeDeleteSymbol(gpId: String) -> void:
+	for gpC in gpCenter.gpAllCanvases():
+		if gpC.gpGraph != null:
+			var gpRemoved: int = gpC.gpGraph.gpRemoveSymbolInstances(gpId)
+			if gpRemoved > 0:
+				gpC.gpClearSelection()
+				gpC.queue_redraw()
+				gpC.gpGraphChanged.emit()
+	_gpDeleteSymbolAndRefresh(gpId)
+
+
+# Delete a symbol from the library and re-render the left palette. gpDefs shares identity
+# with the live library array, so it already shrank; gpPopulate re-renders the views.
+# 从图元库删除图元并重渲染左侧图元库。gpDefs 与活动库数组共享身份、已随之缩减；gpPopulate 重渲染。
+func _gpDeleteSymbolAndRefresh(gpId: String) -> void:
+	GPSymbolLibrary.gpDeleteDef(gpId)
+	gpLeftDock.gpPopulate(gpDefs)
+	_gpSetState("status.symbol_deleted", [gpId])
 
 
 # ============================ canvas changes ============================
@@ -447,10 +514,6 @@ func _gpOnMenu(gpAction: String) -> void:
 				_gpDeleteSelected()
 		"tool_settings":
 			_gpOpenSettings()
-		"tool_symbol_editor":
-			_gpOpenSymbolEditor()
-		"tool_new_symbol":
-			_gpOpenNewSymbol()
 		_:
 			_gpSetState("status.feature_todo", [gpAction])
 
@@ -489,43 +552,37 @@ func _gpOnFileSelected(gpPath: String) -> void:
 
 # Serialize the active graph (with embedded user packs) and write it to disk.
 # 把活动图（含内嵌用户图元包）序列化并写入磁盘。
+# The actual file mechanics live in GPProjectIO (single source of truth for *.pid.json);
+# this method only owns UI-side concerns (embedding packs, status, path bookkeeping).
+# 真正的文件机制在 GPProjectIO（*.pid.json 的单一事实来源）；本方法仅负责 UI 关注点
+# （嵌入图元包、状态栏、路径记账）。
 func _gpWriteProject(gpPath: String) -> void:
-	# Force the .pid.json extension so the file is recognized on reopen.
-	# 强制扩展名为 .pid.json，便于重新打开时识别。
-	if not gpPath.ends_with(".pid.json"):
-		gpPath += ".pid.json"
 	# Embed custom user packs so the file is self-contained (data sovereignty).
 	# 嵌入用户自定义图元包，使文件自包含（数据主权）。
 	gpActiveGraph().gpEmbedUserPacks(GPSymbolLibrary.gpUserPacks())
-	var gpText: String = JSON.stringify(gpActiveGraph().gpToDict(), "", true)
-	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.WRITE)
-	if gpF == null:
-		_gpSetState("status.save_fail", [gpPath])
+	var gpFilePath: String = GPProjectIO.gpEnsurePidExt(gpPath)
+	var gpErr: int = GPProjectIO.gpWriteProject(gpActiveGraph(), gpFilePath)
+	if gpErr != OK:
+		_gpSetState("status.save_fail", [gpFilePath])
 		return
-	gpF.store_string(gpText)
-	gpF.close()
-	gpCurrentPath = gpPath
+	gpCurrentPath = gpFilePath
 	var gpPackCount: int = gpActiveGraph().gpUserSymbolPacks.size()
-	_gpSetState("status.saved_with_packs", [gpPath, gpPackCount])
+	_gpSetState("status.saved_with_packs", [gpFilePath, gpPackCount])
 
 
 # Read a project from disk and swap it into the active canvas.
 # 从磁盘读入工程并替换为当前活动画布。
+# File parsing/decoding is delegated to GPProjectIO; the graph-swap and UI refresh that
+# follow remain here because they touch the canvas, dock and selection state.
+# 文件解析/解码交给 GPProjectIO；其后的图切换与 UI 刷新仍在此处，因为它们涉及画布、停靠栏与选择状态。
 func _gpReadProject(gpPath: String) -> void:
-	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.READ)
-	if gpF == null:
-		_gpSetState("status.load_fail", [gpPath])
-		return
-	var gpText: String = gpF.get_as_text()
-	gpF.close()
-	var gpParsed: Variant = JSON.parse_string(gpText)
-	if gpParsed == null or not (gpParsed is Dictionary):
+	var gpNewGraph: GPPIDGraph = GPProjectIO.gpReadProject(gpPath)
+	if gpNewGraph == null:
 		_gpSetState("status.load_fail", [gpPath])
 		return
 	# Rebuild the graph; gpFromDict also reconciles embedded user packs into the
 	# live library so custom symbols are available again after reopening.
 	# 重建图；gpFromDict 同时把内嵌用户包调和进活动图元库，使重新打开后自定义图元再次可用。
-	var gpNewGraph: GPPIDGraph = GPPIDGraph.gpFromDict(gpParsed as Dictionary)
 	gpCenter.gpSetActiveGraph(gpNewGraph)
 	gpActiveCanvas().gpGraph = gpNewGraph
 	gpDefs = GPSymbolLibrary.gpDefaultDefs()
@@ -551,47 +608,15 @@ func _gpOpenSettings() -> void:
 	gpDlg.gpPopupOverHost()
 
 
-# Open the symbol-pack exporter wizard (new symbols only; existing glyphs are edited in place).
-# 打开图元包导出器向导（仅用于新建图元；已有字形改为就地编辑）。
-func _gpOpenSymbolEditor() -> void:
-	var gpEditor: GPSymbolEditor = load("res://scenes/symbol_editor.tscn").instantiate()
-	add_child(gpEditor)
-	gpEditor.gpPackExported.connect(_gpOnPackExported)
-	gpEditor.gpPopupOverHost()
-
-
-# Open the in-place isolation editor in CREATE mode: a blank glyph canvas where the user
-# draws the geometry (circle / line / polyline / rectangle / port), then right-clicks
-# "Create Symbol" or presses "Create" to register a brand-new symbol.
-# 以「新建」模式打开就地隔离编辑器：空白几何画板，用户绘制图形（圆/直线/折线/矩形/端口），
-# 然后右键「生成图元」或点「创建图元」注册一个全新图元。
-func _gpOpenNewSymbol(gpInitialTool: int = GPGlyphCanvas.GPTool.GP_SELECT) -> void:
-	var gpCanvas: GPCanvas2D = gpActiveCanvas()
-	if gpCanvas == null or gpCenter == null:
-		return
-	# If an isolation layer is already open, just switch its drawing tool instead of stacking a
-	# second layer on top of it.
-	# 若隔离层已打开，仅切换其绘图工具，避免在其上叠加第二个层。
-	var gpExisting: Node = gpCenter.gpBody.get_node_or_null("SymbolIsolationLayer")
-	if gpExisting != null and gpExisting is GPSymbolIsolationLayer:
-		gpExisting.gpGlyph.gpSetTool(gpInitialTool)
-		gpExisting.gpGlyph.grab_focus()
-		return
-	var gpLayer: GPSymbolIsolationLayer = GPSymbolIsolationLayer.gpOpenCreate(gpCenter.gpBody, gpCanvas, gpInitialTool)
-	if gpLayer == null:
-		return
-	gpLayer.gpSaved.connect(_gpOnSymbolSaved)
-
-
 # ============================ drawing toolbar ============================
 # ============================ 绘图工具栏 ============================
 # Build the toolbar row and insert it between the menu bar and the body in the root VBox.
 # 构建工具栏行并插入到根 VBox 的菜单栏与主体之间。
 # Drawing tools (line / circle / rectangle / polyline) switch the canvas into a direct-draw
-# mode — annotation shapes are drawn on the main canvas, NOT in the symbol editor. Only the
-# "New Symbol…" button opens the isolation editor (for advanced symbol authoring).
-# 绘图工具（直线 / 圆 / 矩形 / 折线）把画布切到直接绘制模式——注释图形画在主画布上，而非符号
-# 编辑器里。只有「新建图元…」按钮打开隔离编辑器（用于高级图元创作）。
+# mode — annotation shapes are drawn on the main canvas, and can then be promoted into a real
+# symbol (select → right-click "Make Symbol").
+# 绘图工具（直线 / 圆 / 矩形 / 折线）把画布切到直接绘制模式——注释图形画在主画布上，
+# 选中后可用右键「生成图元」提升为真正图元。
 func _gpBuildToolBar() -> void:
 	var gpVLayout: VBoxContainer = $VLayout
 	gpToolBar = HBoxContainer.new()
@@ -609,12 +634,10 @@ func _gpBuildToolBar() -> void:
 	_gpAddToolBtn("select", "symbol_lib.tool_select", true)
 	_gpAddToolBtn("connect", "symbol_lib.tool_connect", true)
 	_gpAddSep()
-	_gpAddToolBtn("line", "symed.tool_line", true)
-	_gpAddToolBtn("circle", "symed.tool_circle", true)
-	_gpAddToolBtn("rect", "symed.tool_rect", true)
-	_gpAddToolBtn("polyline", "symed.tool_polyline", true)
-	_gpAddSep()
-	_gpAddToolBtn("new", "menu.tool_new_symbol", false)
+	_gpAddToolBtn("line", "canvas.tool_line", true)
+	_gpAddToolBtn("circle", "canvas.tool_circle", true)
+	_gpAddToolBtn("rect", "canvas.tool_rect", true)
+	_gpAddToolBtn("polyline", "canvas.tool_polyline", true)
 	_gpSyncToolBar()
 
 
@@ -672,18 +695,20 @@ func _gpOnToolBarPressed(gpAction: String) -> void:
 			gpCanvas.gpPendingDef = null
 			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_POLYLINE)
 			_gpSetState("status.mode_polyline")
-		"new":
-			_gpOpenNewSymbol()
 	_gpSyncToolBar()
 
 
 # Highlight the toggle button matching the active canvas mode (select / connect / draw tools).
-# 高亮与当前画布模式匹配的开关按钮（选择 / 连线 / 绘图工具）。
-func _gpSyncToolBar() -> void:
+# The optional gpMode parameter lets this serve as the gpModeChanged signal callback (1 arg)
+# while remaining callable with 0 args elsewhere. When gpMode < 0 the live canvas mode is read.
+# 高亮与当前画布模式匹配的开关按钮（选择 / 连线 / 绘图工具）。可选 gpMode 参数使其既能作为
+# gpModeChanged 信号的 1 参回调，又能在别处 0 参调用；gpMode < 0 时读取画布实时模式。
+func _gpSyncToolBar(gpMode: int = -1) -> void:
 	if gpToolBar == null:
 		return
 	var gpCanvas: GPCanvas2D = gpActiveCanvas()
-	var gpMode: int = GPCanvas2D.GPMode.GP_SELECT if gpCanvas == null else gpCanvas.gpMode
+	if gpMode < 0:
+		gpMode = GPCanvas2D.GPMode.GP_SELECT if gpCanvas == null else gpCanvas.gpMode
 	for gpAct in gpToolBtns.keys():
 		var gpBtn: Button = gpToolBtns[gpAct]
 		var gpM: int = _gpModeForAction(gpAct)
@@ -713,38 +738,57 @@ func _gpModeForAction(gpAction: String) -> int:
 # ============================ 就地图元编辑 ============================
 # Open the isolation layer for one symbol type directly over the active canvas.
 # 为某个图元类型在活动画布正上方打开隔离层。
-# Open the isolation editor pre-loaded with the annotation-shape geometry the user promoted.
-# 打开已预装「被提升」注释图形几何的隔离编辑器。
+# Open the "Make Symbol" dialog pre-loaded with the annotation-shape geometry the user promoted
+# from the main canvas. On confirm it registers / persists a GPSymbolDef (same display-name ->
+# overwrite existing, else new) and refreshes the palette + canvas.
+# 打开「生成图元」对话框，预装主画布上被选中的注释图形几何。确定后注册并持久化一个
+# GPSymbolDef（显示名相同则覆盖已有图元，否则新建）并刷新图元库与画布。
 func _gpOnMakeSymbolFromShapes(gpDraft: Dictionary) -> void:
 	var gpCanvas: GPCanvas2D = gpActiveCanvas()
 	if gpCanvas == null or gpCenter == null:
 		return
-	# Avoid stacking a second isolation layer if one is already open.
-	# 若隔离层已打开则不再叠加第二个。
-	if gpCenter.gpBody.has_node("SymbolIsolationLayer"):
+	# gpOpen adds the dialog as a child Window, so hand it the actual main Window (not this Control).
+	# gpOpen 会把对话框作为子 Window 添加，故传入真正的主 Window（而非本 Control）。
+	var gpWin: Window = get_window()
+	if gpWin == null:
 		return
-	var gpLayer: GPSymbolIsolationLayer = GPSymbolIsolationLayer.gpOpenCreate(gpCenter.gpBody, gpCanvas, GPGlyphCanvas.GPTool.GP_SELECT, gpDraft)
-	if gpLayer == null:
+	_gpOpenMakeSymbolDialog(gpDraft, "", true)
+
+
+# Open the Make-Symbol dialog converged from the two handlers (promote-from-shapes and
+# edit-existing) that previously duplicated gpOpen + gpMadeSymbol.connect. gpOpen adds the
+# dialog as a child Window, so it is handed the actual main Window (not this Control). On confirm
+# the shared _gpOnSymbolSaved refreshes the palette + canvas.
+# 打开「生成图元」对话框的收敛助手——统一了「从图形提升」与「编辑已有图元」两个处理器此前重复的
+# gpOpen + gpMadeSymbol.connect 逻辑。gpOpen 把对话框作为子 Window 添加，故传入真正的主 Window
+# （而非本 Control）。确定后由共享的 _gpOnSymbolSaved 刷新图元库与画布。
+func _gpOpenMakeSymbolDialog(gpDraft: Dictionary, gpInitialName: String, gpAllowOverwrite: bool, gpInitialPorts: Array[GPPort] = [], gpInitialDisplay: String = "") -> void:
+	var gpWin: Window = get_window()
+	if gpWin == null or gpCenter == null:
 		return
-	gpLayer.gpSaved.connect(_gpOnSymbolSaved)
+	var gpDlg: GPMakeSymbolDialog = GPMakeSymbolDialog.gpOpen(gpWin, gpDraft, gpInitialName, gpAllowOverwrite, gpInitialPorts, gpInitialDisplay)
+	if gpDlg == null:
+		return
+	gpDlg.gpMadeSymbol.connect(_gpOnSymbolSaved)
 
 
 func _gpOnSymbolEditRequested(gpSymbolId: String) -> void:
+	# The in-place symbol editor was removed (P4 refactor). Editing an existing placed symbol now
+	# re-opens the Make-Symbol dialog seeded with that symbol's geometry; confirming under the same
+	# display name overwrites the def (built-ins derive a custom_ copy per decision D3).
+	# 就地图元编辑器已移除（P4 重构）。编辑已放置图元改为用「生成图元」对话框带入该图元几何；
+	# 以相同显示名确定即覆盖该 def（内置图元按决策 D3 派生 custom_ 副本）。
 	var gpCanvas: GPCanvas2D = gpActiveCanvas()
 	if gpCanvas == null or gpCenter == null:
-		return
-	# Avoid stacking a second isolation layer if one is already open (e.g. a second double-click).
-	# 若隔离层已打开则不再叠加第二个（例如编辑时再次双击）。
-	if gpCenter.gpBody.has_node("SymbolIsolationLayer"):
 		return
 	var gpDef: GPSymbolDef = _gpDefFor(gpSymbolId)
 	if gpDef == null:
 		return
-	# Decision D3: built-in symbols are read-only. Deriving a custom_<id> copy (re-normalized
-	# into the editor's canonical form so the save round-trip is lossless) lets the user edit
-	# without ever overwriting or re-fitting the original ISO symbol.
-	# 决策 D3：内置图元只读。派生 custom_<id> 副本（重新归一化为编辑器规范形式，使保存往返
-	# 无损）让用户可以编辑，而绝不会覆盖或重拟合原始 ISO 图元。
+	# D3: built-in symbols are read-only → derive a custom_<id> copy so the original ISO glyph is
+	# never overwritten or re-fit.
+	# 决策 D3：内置图元只读 → 派生 custom_<id> 副本，绝不覆盖/重拟合原始 ISO 图元。
+	var gpEditDef: GPSymbolDef = gpDef
+	var gpAllowOverwrite: bool = true
 	if gpDef.gpBuiltin:
 		var gpCanon: GPSymbolDef = GPSymbolNormalizer.gpNormalizeSymbol(
 			GPSymbolNormalizer.gpDenormalizeSymbol(gpDef), gpDef.gpCategory, {})
@@ -754,11 +798,29 @@ func _gpOnSymbolEditRequested(gpSymbolId: String) -> void:
 		gpDefs = GPSymbolLibrary.gpDefaultDefs()
 		gpLeftDock.gpPopulate(gpDefs)
 		gpCenter.gpSetDefs(gpDefs)
-		gpDef = gpCanon
-	var gpLayer: GPSymbolIsolationLayer = GPSymbolIsolationLayer.gpOpenOver(gpCenter.gpBody, gpCanvas, gpDef)
-	if gpLayer == null:
-		return
-	gpLayer.gpSaved.connect(_gpOnSymbolSaved)
+		gpEditDef = gpCanon
+		gpAllowOverwrite = false
+	# Convert the def's EDITABLE shape spec (raw control points + Bézier handles) into the dialog
+	# draft, so editing an existing curved symbol keeps its curve control points. gpShapeSpec() is
+	# the flattened render spec (painter); it would drop handles and degrade a curve to straight
+	# segments. gpEditSpec() is the lossless inverse of what the dialog re-imports via gpFromSpec.
+	# 把 def 的「可编辑」形状规格（原始控制点 + 贝塞尔手柄）转成对话框 draft，使编辑已有曲线图元时
+	# 保留其曲线控制点。gpShapeSpec() 是给 painter 打平的渲染 spec，会丢手柄、把曲线退化成直线；
+	# gpEditSpec() 是无损的，能被对话框经 gpFromSpec 无损还原。
+	var gpDraft: Dictionary = GPShapeSpec.gpEditSpec(gpEditDef.gpShapes)
+	gpDraft.erase("box")
+	# Carry the symbol's current ports into the editor so editing preserves connection points
+	# instead of silently dropping them (previously the dialog always started with zero ports).
+	# 把图元当前端口带入编辑器，使编辑保留连接点而非静默丢弃（此前对话框总是从零端口起步）。
+	# Seed the ID field with the symbol's real ID (uniqueness is judged by id, NOT display
+	# name) and prefill the display-name field separately. A built-in's display name is an
+	# i18n key (sym./iso. prefixed) — translate it so the derived copy stores human text.
+	# 标识框预填图元真实 id（唯一性以 id 判定，非显示名），显示名单独预填。内置图元的
+	# 显示名是 i18n 键（sym./iso. 前缀），先翻译，使派生副本保存为人类可读文本。
+	var gpEditDisplay: String = gpEditDef.gpDisplayName
+	if gpEditDisplay.begins_with("sym.") or gpEditDisplay.begins_with("iso."):
+		gpEditDisplay = I18n.gpTr(gpEditDisplay)
+	_gpOpenMakeSymbolDialog(gpDraft, gpEditDef.gpId, gpAllowOverwrite, gpEditDef.gpPorts, gpEditDisplay)
 
 
 # The edited geometry was re-registered under the SAME id, so every placed instance repaints.
@@ -776,16 +838,6 @@ func _gpOnSymbolSaved(gpSymbolId: String) -> void:
 		gpCanvas.queue_redraw()
 	_gpRefreshSelection()
 	_gpSetState("status.symbol_saved", [gpSymbolId])
-
-
-# A symbol pack was exported from the editor: fold it into the live library and refresh the
-# palette + canvas so the new symbol can be picked and placed at once.
-# 图元编辑器导出了图元包：并入活动图元库并刷新面板与画布，使新图元可立即拾取放置。
-func _gpOnPackExported(gpPack: GPSymbolPack) -> void:
-	gpDefs = GPSymbolLibrary.gpDefaultDefs()
-	gpLeftDock.gpPopulate(gpDefs)
-	gpActiveCanvas().gpDefs = gpDefs
-	_gpSetState("symed.pack_added", [gpPack.gpName])
 
 
 # Delete every selected node and any edges connected to them (menu 编辑 / 删除).
@@ -813,25 +865,56 @@ func _gpSetState(gpKey: String, gpArgs: Array = []) -> void:
 # ============================ HiDPI / multi-monitor ============================
 # ============================ HiDPI / 多显示器 ============================
 # Apply the OS screen scale to Godot's content scale factor and refresh fonts.
-# 将系统屏幕缩放比应用到 Godot 的 content_scale_factor 并刷新字体。
+# 将窗口内容缩放比固定为 1.0（正确适配 Retina/多显示器）并刷新字体。
 func _gpApplyDpiScale() -> void:
-	# Explicitly sync Godot's content-scale factor to the OS-reported screen scale.
-	# On Retina this is ~2.0; on a 1080p external monitor it is 1.0. Without this,
-	# the window backing store may stay at the creation-time scale and macOS will
-	# downsample it, making the whole UI (especially text) look blurry.
-	# 显式把 Godot 的 content_scale_factor 同步到系统报告的屏幕缩放比。Retina 约 2.0，
-	# 1080p 外接屏约 1.0；若不这样做，窗口缓冲可能停留在创建时的缩放比，macOS 会
-	# 降采样，导致整窗（尤其文字）发虚。
+	# KEEP content_scale_factor at 1.0. Godot 4 on macOS ALREADY reports window geometry in
+	# LOGICAL POINTS and renders the backing store at the display's native pixel ratio (2x on
+	# Retina). Forcing content_scale_factor = screen_get_scale() (=2.0 here) DOUBLE-COUNTS that
+	# Retina scale: Godot then treats the visible logical viewport as design/csf = 1600/2 = 800
+	# wide, so the whole 1600-wide UI is drawn 2x too large and clipped (measured: host window
+	# 3024x1890 px @ csf 2.0 yields a logical viewport of only ~800x500). With csf pinned to 1.0
+	# and stretch mode "canvas_items", the 1600x900 design canvas maps 1:1 in logical points and
+	# the engine scales it to fill the maximized window, so menu / docks / property / status bar
+	# keep correct proportions on ANY monitor / DPI. Text crispness is handled by the fonts'
+	# oversampling (4.0) in their .import settings, not by content_scale_factor.
+	# 把 content_scale_factor 固定为 1.0。Godot 4 在 macOS 上已用「逻辑点」报告窗口几何，并以显示器的
+	# 原生像素比（Retina 为 2x）渲染背板。若再把 content_scale_factor 设成 screen_get_scale()（此处
+	# =2.0），就会把 Retina 缩放算两遍：Godot 会把可见逻辑视口当作 design/csf = 1600/2 = 800 宽，
+	# 整幅 1600 宽的界面被放大 2 倍并裁切（实测：宿主窗 3024x1890px、csf 2.0 时逻辑视口仅约 800x500）。
+	# 把 csf 钉在 1.0 并配合 stretch 模式 canvas_items，1600x900 设计画布以 1:1 逻辑点映射，由引擎缩放到
+	# 铺满的最大化窗口，从而在任何显示器 / DPI 下菜单 / 停靠栏 / 属性 / 状态栏比例都正确。文字清晰由
+	# 字体的 oversampling(4.0)（见 .import）保证，而非 content_scale_factor。
 	var gpWin: Window = get_window()
 	if gpWin == null:
 		return
-	var gpScreen: int = gpWin.current_screen
-	var gpScale: float = DisplayServer.screen_get_scale(gpScreen)
-	if gpScale > 0.0 and not is_equal_approx(gpScale, gpWin.content_scale_factor):
-		gpWin.content_scale_factor = gpScale
+	# Pin content_scale_factor to 1.0 (pure decision in GPDpiWindow — see that module for the
+	# Retina double-scale rationale). 把 content_scale_factor 钉回 1.0（纯决策在 GPDpiWindow，
+	# Retina 双重缩放原因见该模块注释）。
+	GPDpiWindow.gpPinContentScale(gpWin)
 	# Re-apply the UI theme so controls relayout at the new monitor's density.
 	# 重新应用界面主题，使控件按新显示器密度重排。
 	Settings.gpApplyFontSize()
+
+
+# Open the main window maximized so the 1600x900 design canvas (stretch mode "canvas_items")
+# is scaled by the engine to fill the real window. Maximize rather than a hand-computed size so
+# the OS owns the geometry on every monitor / DPI combination: the window always fills the usable
+# screen and the UI scale therefore tracks the monitor. Re-maximizing after a cross-monitor drag
+# keeps it filling the newly-entered screen too.
+# 将主窗口最大化，使 1600x900 的设计画布（stretch 模式 canvas_items）由引擎缩放铺满真实窗口。
+# 用「最大化」而非手算尺寸，让操作系统在每台显示器 / 每种 DPI 组合下决定几何：窗口始终铺满
+# 可用屏幕，UI 缩放比随之跟随显示器。跨屏拖拽后再次最大化，也能让窗口继续铺满新进入的屏幕。
+func _gpOpenMaximized(gpWin: Window) -> void:
+	if gpWin == null:
+		return
+	# Only maximize when the window isn't already maximized / fullscreen (e.g. the OS restored a
+	# prior maximized state or the user is toggling fullscreen), to avoid fighting the OS. The
+	# decision is the pure predicate in GPDpiWindow.
+	# 仅在窗口尚未最大化 / 全屏时才最大化（例如 OS 已恢复上次最大化状态、或用户正切换全屏），
+	# 以免与操作系统争夺状态。判定收敛到 GPDpiWindow 的纯谓词。
+	if not GPDpiWindow.gpShouldMaximize(gpWin):
+		return
+	gpWin.mode = Window.MODE_MAXIMIZED
 
 
 # Detect when the window is dragged to another monitor.
@@ -845,6 +928,10 @@ func _gpOnWindowChanged() -> void:
 		return
 	gpLastScreen = gpScreen
 	_gpApplyDpiScale()
+	# After the window lands on a new monitor, re-maximize so it keeps filling that screen and the
+	# canvas_items stretch re-scales the design to the new monitor's size / DPI.
+	# 窗口落到新显示器后再次最大化，使其继续铺满该屏，canvas_items 拉伸随之按新屏尺寸 / DPI 重缩放。
+	_gpOpenMaximized(gpWin)
 
 
 # Responsive layout: when the window is resized we re-apply the splits so the
