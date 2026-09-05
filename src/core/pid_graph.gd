@@ -147,6 +147,49 @@ func gpRemoveNodeWithEdges(gpId: String) -> void:
 	gpGraphChanged.emit()
 
 
+# Count how many placed instances reference the given symbol id on this sheet.
+# 统计本图纸中引用该图元 id 的已放置实例数量。
+func gpCountSymbolInstances(gpSymbolId: String) -> int:
+	var gpCount: int = 0
+	for gpN in gpNodes:
+		if gpN.gpSymbolId == gpSymbolId:
+			gpCount += 1
+	return gpCount
+
+
+# Remove every placed instance of the given symbol (and every edge that touches one),
+# returning the number of instances removed. Called when a symbol is deleted from the
+# library so canvas instances do not become orphans referencing a missing definition.
+# 移除该图元的所有已放置实例（及其关联连线），返回移除的实例数。删除图元库图元时调用，
+# 以免画布实例成为引用缺失定义的孤儿。
+func gpRemoveSymbolInstances(gpSymbolId: String) -> int:
+	var gpRemovedIds: Array[String] = []
+	var gpKeepNodes: Array[GPPIDNode] = []
+	for gpN in gpNodes:
+		if gpN.gpSymbolId == gpSymbolId:
+			gpRemovedIds.append(gpN.gpInstanceId)
+			gpNodeRemoved.emit(gpN)
+		else:
+			gpKeepNodes.append(gpN)
+	var gpCount: int = gpRemovedIds.size()
+	if gpCount == 0:
+		return 0
+	gpNodes = gpKeepNodes
+	# Drop every edge attached to a removed instance (mirrors gpRemoveNodeWithEdges).
+	# 删除每个被移除实例的连线（与 gpRemoveNodeWithEdges 一致）。
+	var gpKeepEdges: Array[GPPIDEdge] = []
+	for gpE in gpEdges:
+		var gpFrom: String = gpE.gpFromRef.get("node_id", "")
+		var gpTo: String = gpE.gpToRef.get("node_id", "")
+		if gpFrom in gpRemovedIds or gpTo in gpRemovedIds:
+			gpEdgeRemoved.emit(gpE)
+		else:
+			gpKeepEdges.append(gpE)
+	gpEdges = gpKeepEdges
+	gpGraphChanged.emit()
+	return gpCount
+
+
 # Embed the user symbol packs (read from user://) into this graph before saving.
 # 存盘前把用户图元包（取自 user://）嵌入本图。
 # Pass GPSymbolLibrary.gpUserPacks() so the exported *.pid.json carries every custom

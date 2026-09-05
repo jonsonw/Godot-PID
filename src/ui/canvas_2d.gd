@@ -36,13 +36,6 @@ signal gpModeChanged(gpNewMode: int)
 # （paths / circles / rects），可直接载入隔离编辑器的几何画板。宿主打开预装好的编辑器。
 signal gpMakeSymbolRequested(gpDraft: Dictionary)
 
-# Emitted when the user asks to create a brand-new (blank) symbol straight from the canvas
-# context menu on empty space. Carries no payload — the host opens the isolation editor in
-# CREATE mode (the very same editor the toolbar "New Symbol…" button opens).
-# 用户在空白处右键菜单要求直接「创建图元」（空白新图元）时发出。无载荷——宿主以「新建」模式
-# 打开隔离编辑器（与工具栏「新建图元…」按钮打开的编辑器完全相同）。
-signal gpNewSymbolRequested
-
 # Minimum drag distance (screen px) before a press becomes a marquee instead of a click.
 # 按下后要成为框选（而非单击）所需的最小拖拽距离（屏幕像素）。
 const GP_MARQUEE_MIN: float = 4.0
@@ -58,23 +51,27 @@ const GP_CTX_SELECT_ALL: int = 3
 const GP_CTX_DESELECT: int = 4
 const GP_CTX_CONNECT: int = 5
 const GP_CTX_MAKE_SYMBOL: int = 6
-const GP_CTX_NEW_SYMBOL: int = 7
+# Vertex-only actions on the selected annotation polyline (only offered when the cursor sits on
+# a vertex / handle grip of a single selected polyline). Pulled out of the running 0..7 range so
+# they cannot collide with the shape/node actions above.
+# 仅针对折线顶点的操作（仅当光标位于「单选折线」的顶点 / 手柄抓取点上时提供）。取值避开 0..7，
+# 避免与上面的图形/图元动作冲突。
+const GP_CTX_SMOOTH_VERTEX: int = 12
+const GP_CTX_DELETE_VERTEX: int = 13
+const GP_CTX_CORNER_VERTEX: int = 14
 
 # Grip (handle) roles for annotation-shape editing — mirrors AutoCAD grips: a selected shape
 # shows small squares at its anchor / vertex points; dragging one reshapes or resizes it.
 # 注释图形编辑用的锚点（手柄）角色 —— 对齐 AutoCAD 夹点：选中图形后在其锚点 / 顶点处显示小方块，
 # 拖动即可重塑或缩放图形。
-const GP_GRIP_ENDPOINT: int = 1   # 直线端点 / line endpoint
-const GP_GRIP_CENTER: int = 2     # 圆心 / circle center (move)
-const GP_GRIP_RADIUS: int = 3     # 圆半径手柄 / circle radius handle
-const GP_GRIP_CORNER: int = 4     # 矩形角点 / rectangle corner (resize)
-const GP_GRIP_VERTEX: int = 5     # 折线顶点 / polyline vertex
+# Grip roles are defined once in GPShapeGripEditor (shared with the symbol editor).
+# 锚点角色统一在 GPShapeGripEditor 中定义（与符号编辑器共用）。
 
 # Interaction modes: select/move symbols, connect them with edges, or draw annotation shapes.
 # 交互模式：选择/移动图元、为图元连线，或直接绘制注释图形。
 # Drawing modes are appended last so the legacy SELECT/CONNECT values (0/1) stay unchanged.
 # 绘图模式置于末尾，使旧的选择/连线取值（0/1）保持不变。
-enum GPMode { GP_SELECT, GP_CONNECT, GP_DRAW_LINE, GP_DRAW_CIRCLE, GP_DRAW_RECT, GP_DRAW_POLYLINE }
+enum GPMode { GP_SELECT, GP_CONNECT, GP_DRAW_LINE, GP_DRAW_CIRCLE, GP_DRAW_RECT, GP_DRAW_POLYLINE, GP_DRAW_ARC }
 
 # Set the interaction mode and notify listeners (the toolbar) so highlights stay correct.
 # 设置交互模式并通知监听者（工具栏），使高亮保持正确。
@@ -114,13 +111,30 @@ var gpWorldRoot: Node2D = null
 
 # ---- camera ----
 # ---- 相机 ----
-# Canvas pixel offset of the world origin (0,0).
-# 世界原点 (0,0) 在画布上的像素偏移。
-var gpViewOffset: Vector2 = Vector2.ZERO
+# The camera is a pure pan/zoom module (GPCanvasCamera, core/) that owns the offset+zoom state
+# and the world<->screen transform / zoom-at-point math. gpViewOffset / gpViewZoom below are thin
+# proxy properties over it so the many direct reads in the drawing / grid / hit-test hot paths keep
+# working unchanged, while the actual math lives in one headless-testable place.
+# 相机是纯平移/缩放模块（GPCanvasCamera，core/），拥有 offset+zoom 状态与坐标变换/定点缩放数学。
+# 下方 gpViewOffset / gpViewZoom 是其代理属性，使绘制 / 网格 / 命中测试热路径里的众多直读保持不改，
+# 而真正数学收敛到一处可 headless 单测的地方。
+var _gpCam: GPCanvasCamera = GPCanvasCamera.new()
 
-# Current zoom factor (1.0 = 100%).
-# 当前缩放系数（1.0 = 100%）。
-var gpViewZoom: float = 1.0
+# Canvas pixel offset of the world origin (0,0) — proxies the camera.
+# 世界原点 (0,0) 在画布上的像素偏移 —— 代理相机。
+var gpViewOffset: Vector2:
+	get:
+		return _gpCam.gpOffset
+	set(gpV):
+		_gpCam.gpOffset = gpV
+
+# Current zoom factor (1.0 = 100%) — proxies the camera.
+# 当前缩放系数（1.0 = 100%）—— 代理相机。
+var gpViewZoom: float:
+	get:
+		return _gpCam.gpZoom
+	set(gpV):
+		_gpCam.gpZoom = gpV
 
 # ---- interaction state ----
 # ---- 交互状态 ----
@@ -132,16 +146,29 @@ var gpMode: int = GPMode.GP_SELECT
 # 等待下一次左键放置的图元定义。
 var gpPendingDef: GPSymbolDef = null
 
-# Ids of the currently selected nodes. This is the SINGLE source of truth for selection;
-# gpSelectedId below mirrors the primary entry so single-selection consumers (the inspector,
-# the status bar) keep working unchanged.
-# 当前选中节点的 id 集合。这是选择状态的唯一数据源；下面的 gpSelectedId 镜像主选项，
-# 使单选消费者（属性面板、状态栏）无需改动即可继续工作。
-var gpSelection: Array[String] = []
+# Authoritative selection-state owner (pure module, headless-testable). gpSelection / gpSelectedId
+# below are proxy properties into _gpSel so every existing read site (binder, inspector, status,
+# marquee) keeps compiling unchanged while the mutual-exclusion + primary-sync invariants live in
+# the tested module. gpShapeSel (annotation shapes) stays a direct array: its in-place mutations
+# are each an intentional single/multi/marquee/delete context, and proxying would silently break
+# the node<->shape mutual exclusion.
+# 权威选择状态源（纯模块，可 headless 单测）。下方 gpSelection / gpSelectedId 是 _gpSel 的代理属性，
+# 使既有读点（绑定层/属性面板/状态栏/框选）零改动编译，而互斥 + 主选项同步不变式落在已测模块中。
+# gpShapeSel（注释图形）保持直接数组：其就地变更各自是明确的单选/多选/框选/删除语境，代理会破坏节点<->图形互斥。
+var _gpSel: GPCanvasSelection = GPCanvasSelection.new()
 
-# Id of the currently selected node (primary entry of gpSelection, "" when none).
-# 当前选中节点的 id（gpSelection 的主选项，无选中时为空）。
-var gpSelectedId: String = ""
+# Ids of the currently selected nodes. Proxies into _gpSel.gpNodeIds.
+# 当前选中节点的 id 集合。代理到 _gpSel.gpNodeIds。
+var gpSelection: Array[String]:
+	get: return _gpSel.gpNodeIds
+	set(gpV): _gpSel.gpSetNodes(gpV)
+
+# Id of the currently selected node (primary entry of gpSelection, "" when none). Proxies into
+# _gpSel.gpPrimaryNodeId.
+# 当前选中节点的 id（gpSelection 的主选项，无选中时为空）。代理到 _gpSel.gpPrimaryNodeId。
+var gpSelectedId: String:
+	get: return _gpSel.gpPrimaryNodeId
+	set(gpV): _gpSel.gpSetPrimary(gpV)
 
 # Id of the node selected as the connection source.
 # 被选为连线起点的节点 id。
@@ -173,6 +200,11 @@ var _gpDragOrigins: Dictionary = {}
 # Node id the right-click menu was opened on ("" when the click missed everything).
 # 右键菜单打开时所处的节点 id（未命中任何节点时为空）。
 var _gpCtxHit: String = ""
+
+# Vertex index the right-click menu was opened on, for a single selected annotation polyline
+# (only meaningful when the cursor hit one of its vertex / handle grips). -1 = none.
+# 右键菜单打开时所处的「单选注释折线」顶点下标（仅当光标命中其顶点 / 手柄抓取点时才有意义）。-1 = 无。
+var _gpCtxVertex: int = -1
 
 # Whether the user is currently middle-button panning.
 # 用户是否正在中键平移。
@@ -301,8 +333,7 @@ func _gpEmitStatus() -> void:
 # Reset the camera to 100% zoom and center the world origin.
 # 将相机重置为 100% 缩放并把世界原点居中。
 func _gpResetView() -> void:
-	gpViewZoom = 1.0
-	gpViewOffset = size / 2.0
+	_gpCam.gpReset(size / 2.0)
 	_gpApplyCamera()
 
 
@@ -315,16 +346,16 @@ func _gpApplyCamera() -> void:
 	gpWorldRoot.scale = Vector2(gpViewZoom, gpViewZoom)
 
 
-# Convert a world coordinate to a screen coordinate.
-# 将世界坐标转换为屏幕坐标。
+# Convert a world coordinate to a screen coordinate (delegates to GPCanvasCamera).
+# 将世界坐标转换为屏幕坐标（委托 GPCanvasCamera）。
 func gpScreenFromWorld(w: Vector2) -> Vector2:
-	return w * gpViewZoom + gpViewOffset
+	return _gpCam.gpScreenFromWorld(w)
 
 
-# Convert a screen coordinate to a world coordinate.
-# 将屏幕坐标转换为世界坐标。
+# Convert a screen coordinate to a world coordinate (delegates to GPCanvasCamera).
+# 将屏幕坐标转换为世界坐标（委托 GPCanvasCamera）。
 func gpWorldFromScreen(gpS: Vector2) -> Vector2:
-	return (gpS - gpViewOffset) / gpViewZoom
+	return _gpCam.gpWorldFromScreen(gpS)
 
 
 # ============================ drawing (background only) ============================
@@ -646,6 +677,24 @@ func _gpOnLeftDown(gpScreen: Vector2, gpShift: bool, gpDouble: bool) -> void:
 		else:
 			_gpDragId = ""
 	else:
+		# Double-clicking a vertex / handle grip of the single selected annotation polyline toggles
+		# Bézier handles (corner <-> smooth). Intercept BEFORE the hit/move logic below so a double
+		# click edits the vertex instead of starting a whole-shape move.
+		# 双击「单选注释折线」的顶点 / 手柄抓取点：切换贝塞尔手柄（拐角 <-> 平滑）。须在下方命中/移动
+		# 逻辑之前拦截，使双击编辑顶点而非开始整枚图形的移动。
+		if gpDouble and _gpOnShapeGripDoubleClick(gpWorld):
+			return
+		# When a single shape is selected, try to grab one of ITS grips first. A pulled-out Bézier
+		# handle end often sits OUTSIDE the polyline stroke, so testing shape-line hit first would
+		# miss it and fall through to a marquee — making handles appear but not draggable. Testing the
+		# grips independently (regardless of whether the cursor is on the stroke) fixes that.
+		# 当单选一枚图形时，先尝试命中它自己的抓取点。拉出的贝塞尔手柄末端常位于折线墨线之外，若先按
+		# 线段命中，会漏判并落入框选——造成句柄可见却拖不动。独立命中抓取点（不要求光标在线段上）可修复。
+		if gpShapeSel.size() == 1:
+			var gpGripAny: Dictionary = _gpHitGrip(gpWorld, gpShapeSel[0])
+			if not gpGripAny.is_empty():
+				_gpStartGripDrag(gpGripAny)
+				return
 		# No symbol hit: try an annotation shape (grip editing has priority when one is selected).
 		# 未命中图元：改试注释图形（选中一枚时锚点编辑优先）。
 		var gpSh: int = _gpHitShape(gpWorld)
@@ -739,7 +788,7 @@ func _gpOnLeftUp(gpScreen: Vector2) -> void:
 # True when the canvas is in one of the free-shape drawing modes.
 # 画布处于某个自由图形绘图模式时返回真。
 func _gpIsDrawMode() -> bool:
-	return gpMode >= GPMode.GP_DRAW_LINE and gpMode <= GPMode.GP_DRAW_POLYLINE
+	return gpMode >= GPMode.GP_DRAW_LINE and gpMode <= GPMode.GP_DRAW_ARC
 
 
 # Press handler for the drawing tools. Two-point tools (line / circle / rect) anchor on press
@@ -748,7 +797,7 @@ func _gpIsDrawMode() -> bool:
 # 双击结束。
 func _gpOnDrawDown(gpWorld: Vector2, gpDouble: bool) -> void:
 	match gpMode:
-		GPMode.GP_DRAW_LINE, GPMode.GP_DRAW_CIRCLE, GPMode.GP_DRAW_RECT:
+		GPMode.GP_DRAW_LINE, GPMode.GP_DRAW_CIRCLE, GPMode.GP_DRAW_RECT, GPMode.GP_DRAW_ARC:
 			_gpDrawFrom = gpWorld
 			_gpDrawTo = gpWorld
 			_gpDrawActive = true
@@ -781,6 +830,13 @@ func _gpCommitDraw(gpTo: Vector2) -> int:
 			var gpR: Rect2 = Rect2(_gpDrawFrom, gpTo - _gpDrawFrom).abs()
 			if gpR.size.x >= 2.0 and gpR.size.y >= 2.0:
 				gpS = GPShape.gpRect(_gpDrawFrom, gpTo)
+		GPMode.GP_DRAW_ARC:
+			# A press-drag-release defines the arc's end points; the center is their midpoint so
+			# the result is the minor arc between them (half-circle when dragged straight).
+			# 按下拖到松开定义弧的起止点；圆心取二者中点，故结果为二者间的劣弧（竖直拖出为半圆）。
+			if _gpDrawFrom.distance_to(gpTo) >= 2.0:
+				var gpCtr: Vector2 = (_gpDrawFrom + gpTo) * 0.5
+				gpS = GPShape.gpArc(gpCtr, _gpDrawFrom, gpTo)
 	if gpS != null:
 		gpGraph.gpAddShape(gpS)
 		return gpGraph.gpShapes.size() - 1
@@ -826,11 +882,21 @@ func _gpDrawShapes() -> void:
 	if gpShapeSel.size() == 1:
 		var gpSelIdx: int = gpShapeSel[0]
 		if gpSelIdx >= 0 and gpSelIdx < gpGraph.gpShapes.size():
-			var gpGrips: Array[Dictionary] = _gpShapeGrips(gpGraph.gpShapes[gpSelIdx])
+			var gpGrips: Array[Dictionary] = GPShapeGripEditor.gpGrips(gpGraph.gpShapes[gpSelIdx])
 			var gpGs: float = 8.0
+			# Vertex grips first (drawn as plain squares); handle grips get a tie-line to their
+			# owning vertex drawn first so the squares sit on top of the line.
+			# 先处理顶点抓取点（普通方块）；手柄抓取点先画到所属顶点的连线，使方块盖在连线上。
 			for gpG in gpGrips:
 				var gpP: Vector2 = gpScreenFromWorld(gpG["pos"])
 				var gpRect: Rect2 = Rect2(gpP - Vector2(gpGs * 0.5, gpGs * 0.5), Vector2(gpGs, gpGs))
+				if int(gpG["role"]) == GPShapeGripEditor.GP_GRIP_HANDLE_IN or int(gpG["role"]) == GPShapeGripEditor.GP_GRIP_HANDLE_OUT:
+					# The handle grip is stored as a RELATIVE offset on its vertex, so the owner of the
+					# tie-line is the vertex itself (gpPoints[gi]); the grip position is the handle end.
+					# 手柄以「相对所属顶点的偏移」存储，故连线的所属端点就是顶点本身（gpPoints[gi]），
+					# 抓取点位置则是手柄末端。
+					var gpOwner: Vector2 = gpGraph.gpShapes[gpSelIdx].gpPoints[int(gpG["gi"])]
+					draw_line(gpScreenFromWorld(gpOwner), gpP, Color(gpSelCol, 0.5), 1.0)
 				draw_rect(gpRect, Color(1.0, 1.0, 1.0), true)
 				draw_rect(gpRect, Color(0.20, 0.50, 1.0), false, 1.5)
 	# In-progress rubber band for line / circle / rect.
@@ -873,13 +939,25 @@ func _gpDrawOneShape(gpS: GPShape, gpInk: Color) -> void:
 				var gpR: Rect2 = Rect2(gpScreenFromWorld(gpS.gpPoints[0]), (gpS.gpPoints[1] - gpS.gpPoints[0]).abs() * gpViewZoom)
 				draw_rect(gpR, gpInk, false, 2.0)
 		GPShape.GPKind.GP_POLYLINE:
+			# Sample the polyline (Bézier-handle aware) so pulled-out handles render as curves.
+			# 沿折线采样（感知贝塞尔手柄），使拉出的手柄渲染成曲线。
+			var gpSamp: PackedVector2Array = GPGeometry.gpRenderPoints(gpS, 8)
 			var gpV: PackedVector2Array = PackedVector2Array()
-			for gpP in gpS.gpPoints:
+			for gpP in gpSamp:
 				gpV.append(gpScreenFromWorld(gpP))
 			if gpS.gpClosed and gpV.size() >= 2:
 				gpV.append(gpV[0])
 			if gpV.size() >= 2:
 				draw_polyline(gpV, gpInk, 2.0)
+		GPShape.GPKind.GP_ARC:
+			# Sample the arc through the shared renderer (gpArcSample) so it matches the painter.
+			# 经共享渲染器（gpArcSample）采样圆弧，使主画布与符号绘制器表现一致。
+			var gpArcPts: PackedVector2Array = GPGeometry.gpRenderPoints(gpS, 8)
+			var gpArcV: PackedVector2Array = PackedVector2Array()
+			for gpP in gpArcPts:
+				gpArcV.append(gpScreenFromWorld(gpP))
+			if gpArcV.size() >= 2:
+				draw_polyline(gpArcV, gpInk, 2.0)
 
 
 # Hit-test: return the index of the topmost annotation shape under the world point, or -1.
@@ -897,82 +975,17 @@ func _gpHitShape(gpWorld: Vector2) -> int:
 # Does a world point fall on / inside one shape (within the hit tolerance)?
 # 世界坐标点是否落在某图形上 / 内（在命中容差内）？
 func _gpHitShapePrim(gpWorld: Vector2, gpS: GPShape, gpTol: float) -> bool:
-	match gpS.gpKind:
-		GPShape.GPKind.GP_CIRCLE:
-			if gpS.gpPoints.size() >= 1:
-				return gpWorld.distance_to(gpS.gpPoints[0]) <= gpS.gpRadius + gpTol
-		GPShape.GPKind.GP_RECT:
-			if gpS.gpPoints.size() >= 2:
-				return Rect2(gpS.gpPoints[0], (gpS.gpPoints[1] - gpS.gpPoints[0]).abs()).grow(gpTol).has_point(gpWorld)
-		_:
-			var gpPts: PackedVector2Array = gpS.gpPoints
-			for gpI in range(gpPts.size() - 1):
-				if _gpDistPointSeg(gpWorld, gpPts[gpI], gpPts[gpI + 1]) <= gpTol:
-					return true
-			if gpS.gpClosed and gpPts.size() >= 3:
-				if _gpDistPointSeg(gpWorld, gpPts[gpPts.size() - 1], gpPts[0]) <= gpTol:
-					return true
-	return false
+	return GPGeometry.gpShapeHit(gpWorld, gpS, gpTol)
 
 
-# Distance from point gpP to segment AB.
-# 点 gpP 到线段 AB 的距离。
-static func _gpDistPointSeg(gpP: Vector2, gpA: Vector2, gpB: Vector2) -> float:
-	if gpA.is_equal_approx(gpB):
-		return gpP.distance_to(gpA)
-	var gpAB: Vector2 = gpB - gpA
-	var gpLen2: float = gpAB.length_squared()
-	if gpLen2 < 1e-9:
-		return gpP.distance_to(gpA)
-	var gpT: float = clampf(gpAB.dot(gpP - gpA) / gpLen2, 0.0, 1.0)
-	return gpP.distance_to(gpA + gpAB * gpT)
 
 
 # ============================ annotation-shape grip editing ============================
 # ============================ 注释图形锚点编辑 ============================
-# Translate a point list by gpDelta (pure helper for whole-shape moves).
-# 把点列整体平移 gpDelta（整体移动用的纯助手）。
-static func _gpShiftPoints(gpPts: PackedVector2Array, gpDelta: Vector2) -> PackedVector2Array:
-	var gpOut: PackedVector2Array = PackedVector2Array()
-	for gpP in gpPts:
-		gpOut.append(gpP + gpDelta)
-	return gpOut
+# Grip compute / drag mutation now lives in GPShapeGripEditor; point shifts in GPGeometry.
+# 锚点计算 / 拖拽改写现统一在 GPShapeGripEditor；点列平移统一在 GPGeometry。
 
-# The 4 axis-aligned corners of a rect shape's bbox, in order TL, TR, BR, BL.
-# 矩形图形包围盒的四个轴对齐角点，顺序为 左上 / 右上 / 右下 / 左下。
-static func _gpRectCorners(gpS: GPShape) -> PackedVector2Array:
-	var gpB: Rect2 = gpS.gpBBox()
-	return PackedVector2Array([
-		gpB.position,
-		gpB.position + Vector2(gpB.size.x, 0.0),
-		gpB.end,
-		gpB.position + Vector2(0.0, gpB.size.y),
-	])
 
-# Compute the grip (handle) list for one shape. Each grip carries its world position, role and
-# index so a drag can mutate the right vertex / corner / radius.
-# 计算一枚图形的锚点（手柄）列表。每个锚点带有世界坐标、角色与序号，便于拖拽时修改正确的
-# 顶点 / 角点 / 半径。
-func _gpShapeGrips(gpS: GPShape) -> Array[Dictionary]:
-	var gpOut: Array[Dictionary] = []
-	match gpS.gpKind:
-		GPShape.GPKind.GP_LINE:
-			if gpS.gpPoints.size() >= 2:
-				gpOut.append({"pos": gpS.gpPoints[0], "role": GP_GRIP_ENDPOINT, "idx": 0})
-				gpOut.append({"pos": gpS.gpPoints[1], "role": GP_GRIP_ENDPOINT, "idx": 1})
-		GPShape.GPKind.GP_CIRCLE:
-			if gpS.gpPoints.size() >= 1:
-				var gpC: Vector2 = gpS.gpPoints[0]
-				gpOut.append({"pos": gpC, "role": GP_GRIP_CENTER, "idx": 0})
-				gpOut.append({"pos": gpC + Vector2(gpS.gpRadius, 0.0), "role": GP_GRIP_RADIUS, "idx": 1})
-		GPShape.GPKind.GP_RECT:
-			var gpCorners: PackedVector2Array = _gpRectCorners(gpS)
-			for gpI in range(4):
-				gpOut.append({"pos": gpCorners[gpI], "role": GP_GRIP_CORNER, "idx": gpI})
-		GPShape.GPKind.GP_POLYLINE:
-			for gpI in range(gpS.gpPoints.size()):
-				gpOut.append({"pos": gpS.gpPoints[gpI], "role": GP_GRIP_VERTEX, "idx": gpI})
-	return gpOut
 
 # Return the grip under the world point (within screen-tolerant distance), or an empty dict.
 # 返回世界坐标点下的锚点（在屏幕容差距离内），未命中返回空字典。
@@ -980,7 +993,7 @@ func _gpHitGrip(gpWorld: Vector2, gpShapeIdx: int) -> Dictionary:
 	if gpShapeIdx < 0 or gpShapeIdx >= gpGraph.gpShapes.size():
 		return {}
 	var gpTol: float = 6.0 / gpViewZoom
-	for gpG in _gpShapeGrips(gpGraph.gpShapes[gpShapeIdx]):
+	for gpG in GPShapeGripEditor.gpGrips(gpGraph.gpShapes[gpShapeIdx]):
 		if gpWorld.distance_to(gpG["pos"]) <= gpTol:
 			# Tag the hit grip with its owning shape index so the drag can address the model.
 			# 给命中的锚点标注所属图形下标，使拖拽能定位到模型。
@@ -1005,24 +1018,9 @@ func _gpOnGripMove(gpWorld: Vector2) -> void:
 	if gpIdx < 0 or gpIdx >= gpGraph.gpShapes.size():
 		return
 	var gpS: GPShape = gpGraph.gpShapes[gpIdx]
-	var gpRole: int = int(_gpGripDrag["role"])
-	var gpI: int = int(_gpGripDrag["idx"])
-	match gpRole:
-		GP_GRIP_ENDPOINT, GP_GRIP_VERTEX:
-			if gpI >= 0 and gpI < gpS.gpPoints.size():
-				gpS.gpPoints[gpI] = gpWorld
-		GP_GRIP_CENTER:
-			if gpS.gpPoints.size() >= 1:
-				gpS.gpPoints[0] = gpWorld
-		GP_GRIP_RADIUS:
-			if gpS.gpPoints.size() >= 1:
-				gpS.gpRadius = maxf(1.0, gpWorld.distance_to(gpS.gpPoints[0]))
-		GP_GRIP_CORNER:
-			# Keep the opposite corner fixed and rebuild the rect from the two opposite corners.
-			# 保持对顶角固定，由两对顶角重建矩形。
-			var gpCorners: PackedVector2Array = _gpRectCorners(gpS)
-			var gpFixed: Vector2 = gpCorners[(gpI + 2) % 4]
-			gpS.gpPoints = [gpFixed, gpWorld]
+	# Delegate the geometry mutation to the shared grip editor (same code as the symbol editor).
+	# 几何改写委托给共用的锚点编辑器（与符号编辑器同一份代码）。
+	GPShapeGripEditor.gpApplyGrip(gpS, _gpGripDrag, gpWorld)
 	queue_redraw()
 	_gpEmitStatus()
 
@@ -1033,11 +1031,147 @@ func _gpOnShapeMove(gpWorld: Vector2) -> void:
 		return
 	var gpDelta: Vector2 = gpWorld - _gpShapeDragStart
 	var gpS: GPShape = gpGraph.gpShapes[_gpShapeDragIdx]
-	gpS.gpPoints = _gpShiftPoints(_gpShapeDragOrigPts, gpDelta)
+	gpS.gpPoints = GPGeometry.gpShiftPoints(_gpShapeDragOrigPts, gpDelta)
 	# Circle radius is independent of translation (stored separately in gpRadius).
 	# 圆的半径与平移无关（单独存于 gpRadius）。
 	queue_redraw()
 	_gpEmitStatus()
+
+
+# ============================ annotation-polyline vertex / Bézier-handle editing ============================
+# ============================ 注释折线顶点 / 贝塞尔手柄编辑 ============================
+# Mirror of the symbol editor's glyph-level vertex editing, adapted to the main canvas model
+# where the selection is a list of shape indices (gpShapeSel) into gpGraph.gpShapes.
+# 符号编辑器「顶点级」编辑在主画布上的镜像实现，适配主画布模型——选择集为 gpShapeSel（gpGraph.gpShapes
+# 的下标列表）。
+
+
+# The single selected annotation shape, or null when zero / many are selected. Returns null unless
+# exactly one shape is picked, because vertex editing targets one polyline at a time.
+# 单选时返回那枚注释图形；零选 / 多选返回 null。顶点编辑一次只作用于一条折线，故要求严格单选。
+func _gpSingleSelectedShape() -> GPShape:
+	if gpShapeSel.size() != 1:
+		return null
+	var gpIdx: int = gpShapeSel[0]
+	if gpIdx < 0 or gpIdx >= gpGraph.gpShapes.size():
+		return null
+	return gpGraph.gpShapes[gpIdx]
+
+
+# Whether vertex gpGi of gpShape currently has any Bézier handle pulled out.
+# gpShape 的顶点 gpGi 当前是否有被拉出的贝塞尔手柄。
+func _gpVertexHasHandles(gpShape: GPShape, gpGi: int) -> bool:
+	if gpGi < 0 or gpGi >= gpShape.gpHandles.size():
+		return false
+	if gpShape.gpHandles[gpGi].size() < 2:
+		return false
+	return (not gpShape.gpHandles[gpGi][0].is_equal_approx(Vector2.ZERO)) or (not gpShape.gpHandles[gpGi][1].is_equal_approx(Vector2.ZERO))
+
+
+# Collapse both handles of vertex gpGi back onto the vertex (making it a corner node).
+# 把顶点 gpGi 的两侧手柄塌缩回顶点自身（使其成为拐角节点）。
+func _gpCollapseHandles(gpShape: GPShape, gpGi: int) -> void:
+	if gpShape == null or gpGi < 0 or gpGi >= gpShape.gpPoints.size():
+		return
+	gpShape.gpEnsureHandles()
+	gpShape.gpHandles[gpGi] = PackedVector2Array([Vector2.ZERO, Vector2.ZERO])
+	queue_redraw()
+	gpGraphChanged.emit()
+	_gpEmitStatus()
+
+
+# Pull BOTH Bézier handles out of vertex gpGi (AutoCAD-style "convert to smooth node"). The handles
+# are seeded along the average direction of the neighbouring vertices so the curve appears at once.
+# 从顶点 gpGi 拉出两侧贝塞尔手柄（AutoCAD 风格「转为平滑节点」）。手柄沿相邻顶点的平均方向初始化，
+# 使曲线立即显现。
+func _gpPullHandles(gpShape: GPShape, gpGi: int) -> void:
+	if gpShape == null or (gpShape.gpKind != GPShape.GPKind.GP_POLYLINE and gpShape.gpKind != GPShape.GPKind.GP_LINE):
+		return
+	if gpGi < 0 or gpGi >= gpShape.gpPoints.size():
+		return
+	gpShape.gpEnsureHandles()
+	var gpN: int = gpShape.gpPoints.size()
+	var gpPrev: Vector2 = gpShape.gpPoints[gpGi]
+	var gpNext: Vector2 = gpShape.gpPoints[gpGi]
+	if gpGi > 0:
+		gpPrev = gpShape.gpPoints[gpGi - 1]
+	elif gpShape.gpClosed and gpN >= 2:
+		gpPrev = gpShape.gpPoints[gpN - 1]
+	if gpGi + 1 < gpN:
+		gpNext = gpShape.gpPoints[gpGi + 1]
+	elif gpShape.gpClosed and gpN >= 2:
+		gpNext = gpShape.gpPoints[0]
+	var gpHere: Vector2 = gpShape.gpPoints[gpGi]
+	var gpDir: Vector2 = gpNext - gpPrev
+	if gpDir.length_squared() < 1e-6:
+		gpDir = Vector2(1.0, 0.0)
+	gpDir = gpDir.normalized()
+	var gpK: float = 0.3 * (gpNext - gpPrev).length()
+	if gpK < 8.0:
+		gpK = 8.0
+	gpShape.gpSetHandle(gpGi, 0, gpHere - gpDir * gpK)
+	gpShape.gpSetHandle(gpGi, 1, gpHere + gpDir * gpK)
+	queue_redraw()
+	gpGraphChanged.emit()
+	_gpEmitStatus()
+
+
+# Delete vertex gpGi of the selected polyline. When only two vertices remain, deleting one would
+# leave a single, non-drawable point — so we delete the whole polyline instead.
+# 删除选中折线的顶点 gpGi。当只剩两个顶点时，删除其一将留下无法绘制的单点，故改为删除整条折线。
+func _gpRemoveVertex(gpShape: GPShape, gpGi: int) -> void:
+	if gpShape == null or (gpShape.gpKind != GPShape.GPKind.GP_POLYLINE and gpShape.gpKind != GPShape.GPKind.GP_LINE):
+		return
+	if gpShape.gpPoints.size() <= 2:
+		_gpDeleteSelected()
+		return
+	gpShape.gpRemoveVertex(gpGi)
+	queue_redraw()
+	gpGraphChanged.emit()
+	_gpEmitStatus()
+
+
+# Double-click a grip of the single selected annotation polyline: toggle that vertex between a
+# corner node (handles collapsed) and a smooth node (handles pulled out). Double-clicking a handle
+# grip collapses it. Returns true when the gesture was consumed.
+# 双击「单选注释折线」的一个抓取点：在拐角（手柄塌缩）与平滑（手柄拉出）间切换。双击手柄抓取点则塌缩。
+# 手势被消费时返回 true。
+func _gpOnShapeGripDoubleClick(gpWorld: Vector2) -> bool:
+	var gpShape: GPShape = _gpSingleSelectedShape()
+	if gpShape == null or (gpShape.gpKind != GPShape.GPKind.GP_POLYLINE and gpShape.gpKind != GPShape.GPKind.GP_LINE):
+		return false
+	var gpGrip: Dictionary = _gpHitGrip(gpWorld, gpShapeSel[0])
+	if gpGrip.is_empty():
+		return false
+	var gpRole: int = int(gpGrip["role"])
+	var gpGi: int = int(gpGrip["gi"])
+	if gpRole == GPShapeGripEditor.GP_GRIP_VERTEX:
+		if _gpVertexHasHandles(gpShape, gpGi):
+			_gpCollapseHandles(gpShape, gpGi)
+		else:
+			_gpPullHandles(gpShape, gpGi)
+		return true
+	if gpRole == GPShapeGripEditor.GP_GRIP_HANDLE_IN or gpRole == GPShapeGripEditor.GP_GRIP_HANDLE_OUT:
+		_gpCollapseHandles(gpShape, gpGi)
+		return true
+	return false
+
+
+# The vertex grip (as a grip dict) under gpWorld for the single selected annotation polyline, or an
+# empty dict. Used by the right-click menu to offer vertex-only actions when the cursor sits on a
+# vertex grip of that polyline.
+# gpWorld 下「单选注释折线」的顶点抓取点（以抓取点字典形式），未命中返回空字典。右键菜单据此在光标
+# 位于折线顶点抓取点上时提供仅针对顶点的操作。
+func _gpHitPolylineVertexGrip(gpWorld: Vector2) -> Dictionary:
+	var gpShape: GPShape = _gpSingleSelectedShape()
+	if gpShape == null or (gpShape.gpKind != GPShape.GPKind.GP_POLYLINE and gpShape.gpKind != GPShape.GPKind.GP_LINE):
+		return {}
+	var gpGrip: Dictionary = _gpHitGrip(gpWorld, gpShapeSel[0])
+	if gpGrip.is_empty():
+		return {}
+	if int(gpGrip["role"]) != GPShapeGripEditor.GP_GRIP_VERTEX:
+		return {}
+	return gpGrip
 
 
 # Convert selected annotation shapes into an author-space shape dict (paths / circles / rects)
@@ -1063,12 +1197,20 @@ func _gpShapesToDraft(gpShapes: Array[GPShape]) -> Dictionary:
 							[gpS.gpPoints[1].x - gpMin.x, gpS.gpPoints[1].y - gpMin.y],
 						],
 						"closed": false,
+						# Carry Bézier handles (relative offsets) so a curved spline survives promotion.
+						# Relative offsets are translation-invariant, so -gpMin does not affect them.
+						# 携带贝塞尔手柄（相对偏移），使曲线样条经提升后仍可继续编辑；相对偏移与平移无关。
+						"handles": GPShapeSpec.gpEmitHandles(gpS),
 					})
 			GPShape.GPKind.GP_POLYLINE:
 				var gpPts: Array = []
 				for gpP in gpS.gpPoints:
 					gpPts.append([gpP.x - gpMin.x, gpP.y - gpMin.y])
-				gpPaths.append({"pts": gpPts, "closed": gpS.gpClosed})
+				var gpPathD: Dictionary = {"pts": gpPts, "closed": gpS.gpClosed}
+				# Preserve Bézier handles so a curved polyline is not flattened on promotion.
+				# 保留贝塞尔手柄，避免曲线折线在提升时被展平。
+				gpPathD["handles"] = GPShapeSpec.gpEmitHandles(gpS)
+				gpPaths.append(gpPathD)
 			GPShape.GPKind.GP_CIRCLE:
 				if gpS.gpPoints.size() >= 1:
 					gpCircles.append({"c": [gpS.gpPoints[0].x - gpMin.x, gpS.gpPoints[0].y - gpMin.y], "r": gpS.gpRadius})
@@ -1239,6 +1381,13 @@ func _gpOnKey(gpKey: InputEventKey) -> bool:
 			if gpCtrl:
 				_gpSelectAll()
 				return true
+		KEY_ENTER, KEY_KP_ENTER:
+			# Confirm the in-progress polyline (Enter is the discoverable confirm key; double
+			# click also works). No-op when fewer than two vertices exist yet.
+			# 确认正在绘制的折线（Enter 是直观的确认键；双击亦可用）。顶点不足 2 个时为空操作。
+			if not _gpPolyPts.is_empty():
+				_gpFinishPolyline()
+				return true
 		KEY_ESCAPE:
 			_gpOnEscape()
 			return true
@@ -1296,6 +1445,7 @@ func _gpOnEscape() -> void:
 # 先选中是让「删除」无歧义的原因 —— 用户能明确看到菜单将要作用于什么。
 func _gpOnRightDown(gpScreen: Vector2) -> void:
 	var gpWorld: Vector2 = gpWorldFromScreen(gpScreen)
+	_gpCtxVertex = -1
 	var gpHit: String = _gpHitTest(gpWorld)
 	if gpHit != "":
 		if not gpSelection.has(gpHit):
@@ -1310,6 +1460,14 @@ func _gpOnRightDown(gpScreen: Vector2) -> void:
 		if not gpShapeSel.has(gpSh):
 			gpShapeSel = [gpSh]
 			_gpSetSelection([])
+		# Remember which vertex of a single selected polyline was right-clicked so the menu can offer
+		# vertex-only actions (smooth / corner / delete this vertex). Right-click on the empty inside
+		# of the polyline leaves _gpCtxVertex = -1 (the shape-level menu shows instead).
+		# 记住「单选折线」被右键点击的是哪个顶点，使菜单能提供仅针对顶点的操作（平滑 / 拐角 / 删除此顶点）。
+		# 右键点在折线内部空白处时 _gpCtxVertex 保持 -1（显示图形级菜单）。
+		var gpVGrip: Dictionary = _gpHitPolylineVertexGrip(gpWorld)
+		if not gpVGrip.is_empty():
+			_gpCtxVertex = int(gpVGrip["gi"])
 		_gpCtxHit = ""
 		_gpShowContextMenu("")
 		return
@@ -1324,18 +1482,19 @@ func _gpOnRightDown(gpScreen: Vector2) -> void:
 func _gpShowContextMenu(gpNodeHit: String) -> void:
 	_gpCtxHit = gpNodeHit
 	var gpMenu: PopupMenu = PopupMenu.new()
-	# Empty canvas: offer to create a brand-new (blank) symbol directly — the same CREATE-mode
-	# editor the toolbar "New Symbol…" button opens. Only shown when neither a node nor an
-	# annotation shape is targeted, so it reads as a true "empty space" action.
-	# 空白处：提供直接「创建图元」（空白新图元）——与工具栏「新建图元…」按钮打开的「新建」模式
-	# 编辑器相同。仅在既不命中图元也不命中注释图形时显示，故读作纯粹的「空白处」动作。
-	if gpNodeHit == "" and gpShapeSel.is_empty():
-		gpMenu.add_item(I18n.gpTr("canvas.ctx_new_symbol"), GP_CTX_NEW_SYMBOL)
-		gpMenu.add_separator()
 	# Promote selected annotation shapes into a real symbol (only meaningful when shapes are picked).
 	# 把选中的注释图形提升为真正图元（仅当选中图形时才有意义）。
 	if not gpShapeSel.is_empty():
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_make_symbol"), GP_CTX_MAKE_SYMBOL)
+	# Vertex-only actions on the right-clicked vertex of a single selected polyline (Bézier handles).
+	# 对「单选折线」被右键顶点的顶点级操作（贝塞尔手柄）。镜像符号编辑器：平滑 = 拉手柄、拐角 = 收手柄。
+	if _gpCtxVertex >= 0:
+		var gpSelShape: GPShape = _gpSingleSelectedShape()
+		if gpSelShape != null and _gpVertexHasHandles(gpSelShape, _gpCtxVertex):
+			gpMenu.add_item(I18n.gpTr("canvas.ctx_corner_vertex"), GP_CTX_CORNER_VERTEX)
+		else:
+			gpMenu.add_item(I18n.gpTr("canvas.ctx_smooth_vertex"), GP_CTX_SMOOTH_VERTEX)
+		gpMenu.add_item(I18n.gpTr("canvas.ctx_delete_vertex"), GP_CTX_DELETE_VERTEX)
 	# Node-targeted actions need a node hit or an existing node selection.
 	# 针对图元的动作需要命中图元或已有图元选择。
 	var gpNodeCtx: bool = (gpNodeHit != "" or not gpSelection.is_empty())
@@ -1376,9 +1535,10 @@ func _gpShowContextMenu(gpNodeHit: String) -> void:
 	# .position 取「全局屏幕」坐标。get_viewport().get_mouse_position() 已返回「窗口内」像素坐标（已含
 	# 拉伸缩放），叠加主窗口屏幕位置即得到 OS 光标的真实屏幕坐标——此即 Godot-CAD 参考实现的做法；菜单
 	# 左上角锚定在指针、向右下展开（符合惯例）。(2,2) 微调让光标落在菜单角外侧。
-	var gpMouseWin: Vector2i = get_viewport().get_mouse_position()
-	gpMenu.position = Vector2i(get_window().position) + gpMouseWin + Vector2i(2, 2)
-	gpMenu.popup()
+	# Popup positioning is centralized in GPPopupHelper.gpPopupAtMouse (single source of truth for the
+	# window-screen formula that was previously duplicated and error-prone across three call sites).
+	# 菜单定位统一交由 GPPopupHelper.gpPopupAtMouse（窗口屏幕坐标公式的单一事实来源，此前在三处重复且易错）。
+	GPPopupHelper.gpPopupAtMouse(gpMenu, self)
 	# Free the menu after it closes; a leaked PopupMenu keeps its parent alive.
 	# 关闭后释放菜单；泄漏的 PopupMenu 会让其父节点无法释放。
 	gpMenu.popup_hide.connect(gpMenu.queue_free)
@@ -1388,8 +1548,6 @@ func _gpShowContextMenu(gpNodeHit: String) -> void:
 # 分发右键菜单动作。
 func _gpOnContext(gpId: int) -> void:
 	match gpId:
-		GP_CTX_NEW_SYMBOL:
-			gpNewSymbolRequested.emit()
 		GP_CTX_MAKE_SYMBOL:
 			_gpMakeSymbolFromShapes()
 		GP_CTX_EDIT:
@@ -1400,6 +1558,28 @@ func _gpOnContext(gpId: int) -> void:
 			_gpDuplicateSelected()
 		GP_CTX_DELETE:
 			_gpDeleteSelected()
+		GP_CTX_SMOOTH_VERTEX:
+			# Pull handles out of the right-clicked vertex (make it smooth). Only valid when a single
+			# polyline is selected and that vertex was the right-click target.
+			# 拉出被右键顶点的两侧手柄（转为平滑）。仅当单选折线且该顶点正是右键目标时有效。
+			var gpSmoothShape: GPShape = _gpSingleSelectedShape()
+			if gpSmoothShape != null and _gpCtxVertex >= 0:
+				_gpPullHandles(gpSmoothShape, _gpCtxVertex)
+			_gpCtxVertex = -1
+		GP_CTX_CORNER_VERTEX:
+			# Collapse the handles of the right-clicked vertex back onto it (make it a corner).
+			# 收起被右键顶点的两侧手柄（转为拐角）。
+			var gpCornerShape: GPShape = _gpSingleSelectedShape()
+			if gpCornerShape != null and _gpCtxVertex >= 0:
+				_gpCollapseHandles(gpCornerShape, _gpCtxVertex)
+			_gpCtxVertex = -1
+		GP_CTX_DELETE_VERTEX:
+			# Remove just the right-clicked vertex, keeping the rest of the polyline connected.
+			# 仅删除被右键的顶点，折线其余部分保持连接。
+			var gpDelShape: GPShape = _gpSingleSelectedShape()
+			if gpDelShape != null and _gpCtxVertex >= 0:
+				_gpRemoveVertex(gpDelShape, _gpCtxVertex)
+			_gpCtxVertex = -1
 		GP_CTX_SELECT_ALL:
 			_gpSelectAll()
 		GP_CTX_DESELECT:
@@ -1415,11 +1595,8 @@ func _gpOnContext(gpId: int) -> void:
 # Zoom in or out while keeping the world point under the cursor stable.
 # 以光标下的世界点为中心进行缩放。
 func _gpZoomAt(gpScreen: Vector2, gpFactor: float) -> void:
-	var gpWorldBefore: Vector2 = gpWorldFromScreen(gpScreen)
-	gpViewZoom *= (1.0 + 0.12 * gpFactor)
-	gpViewZoom = clampf(gpViewZoom, 0.25, 4.0)
-	var gpScreenAfter: Vector2 = gpScreenFromWorld(gpWorldBefore)
-	gpViewOffset += gpScreen - gpScreenAfter
+	if not _gpCam.gpZoomAt(gpScreen, gpFactor):
+		return
 	_gpApplyCamera()
 	queue_redraw()
 	_gpEmitStatus()

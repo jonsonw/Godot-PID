@@ -155,6 +155,19 @@ func gpActiveGraph() -> GPPIDGraph:
 	return gpTabs[gpActive]["graph"]
 
 
+# Return every sheet's canvas (not just the active one), so an operation can cascade
+# across all open sheets — e.g. removing every placed instance of a deleted symbol.
+# 返回每个图纸的画布（不只活动图纸），使操作能跨所有打开的图纸级联 —— 例如删除图元时
+# 移除其全部已放置实例。
+func gpAllCanvases() -> Array[GPCanvas2D]:
+	var gpOut: Array[GPCanvas2D] = []
+	for gpTab in gpTabs:
+		var gpC: GPCanvas2D = gpTab["canvas"]
+		if gpC != null and is_instance_valid(gpC):
+			gpOut.append(gpC)
+	return gpOut
+
+
 # Replace the active sheet's graph (used when opening a project file).
 # 替换活动图纸的图（打开工程文件时调用）。
 func gpSetActiveGraph(gpNewGraph: GPPIDGraph) -> void:

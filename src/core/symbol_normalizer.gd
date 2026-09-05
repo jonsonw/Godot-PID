@@ -60,8 +60,8 @@ static func gpNormalizeSymbol(gpRaw: Dictionary, gpCat: String, gpPackSizes: Dic
 	if gpBBox.size.x <= 0.0 and gpBBox.size.y <= 0.0:
 		# Nothing was drawn: keep an empty shape so the renderer falls back to a plain rectangle.
 		# 未绘制任何图形：保留空形状，渲染层回退为纯矩形。
-		gpDef.gpShape = {}
-		gpDef.gpPorts = GPSymbolCategories.gpStandardPorts(gpCat)
+		gpDef.gpShapes = []
+		gpDef.gpPorts = GPPortSpec.gpFromDicts(GPSymbolCategories.gpStandardPorts(gpCat))
 		return gpDef
 
 	# (2) Uniform fit into the 100x100 unit box, centered. Uniform (not per-axis) scaling is
@@ -69,16 +69,16 @@ static func gpNormalizeSymbol(gpRaw: Dictionary, gpCat: String, gpPackSizes: Dic
 	# (2) 均匀缩放塞入 100x100 单位框并居中。均匀（而非按轴）缩放才能让扁阀门仍扁、高储罐仍高。
 	var gpS: float = gpUnitScale(gpBBox)
 	var gpCtr: Vector2 = gpBBox.get_center()
-	gpDef.gpShape = _gpTransformShapes(gpShapes, gpS, gpCtr)
+	gpDef.gpShapes = GPShapeSpec.gpFromSpec(_gpTransformShapes(gpShapes, gpS, gpCtr))
 
 	# (3) Ports: author-placed ports go through the SAME geometry as the glyph, expressed as
 	# 0..1 of the nominal envelope. Otherwise fall back to the category standard anchors.
 	# (3) 端口：作者放置的端口与字形走同一套几何变换，并以标称包络的 0..1 表达；
 	#     否则回退为类别标准锚点。
 	if gpRawPorts.is_empty():
-		gpDef.gpPorts = GPSymbolCategories.gpStandardPorts(gpCat)
+		gpDef.gpPorts = GPPortSpec.gpFromDicts(GPSymbolCategories.gpStandardPorts(gpCat))
 	else:
-		gpDef.gpPorts = gpNormalizePorts(gpRawPorts, gpBBox, gpEnv)
+		gpDef.gpPorts = GPPortSpec.gpFromDicts(gpNormalizePorts(gpRawPorts, gpBBox, gpEnv))
 	return gpDef
 
 
@@ -106,9 +106,12 @@ static func gpDenormalizeSymbol(gpDef: GPSymbolDef) -> Dictionary:
 	var gpEnv: Vector2 = gpDef.gpDefaultSize
 
 	# Mirror the forward "nothing drawn" branch: empty geometry -> empty draft (ports re-derived).
+	# Check the def's typed editable shapes directly (NOT the lossy flattened gpShapeSpec() render
+	# spec) — the forward empty branch sets gpShapes = [], so is_empty() is the exact inverse.
 	# 与正向「未绘制」分支对齐：空几何 → 空草稿（端口由下次归一化重新推导）。
-	var gpBBox: Rect2 = gpComputeBBox(gpDef.gpShape)
-	if gpBBox.size.x <= 0.0 and gpBBox.size.y <= 0.0:
+	# 直接检查 def 的类型化可编辑形状（而非打平的 gpShapeSpec() 渲染 spec）——正向空分支把
+	# gpShapes 置为 []，故 is_empty() 是精确的逆条件。
+	if gpDef.gpShapes.is_empty():
 		return {
 			"id": gpDef.gpId,
 			"display_name": gpDef.gpDisplayName,
@@ -118,38 +121,25 @@ static func gpDenormalizeSymbol(gpDef: GPSymbolDef) -> Dictionary:
 			"attrs_schema": gpDef.gpAttrsSchema.duplicate(true),
 		}
 
-	# Author space == unit box: copy the unit coords as author pixels (scale-invariant frame).
-	# 作者空间 = 单位框：把单位坐标原样作为作者像素（缩放无关框架）。
-	var gpPaths: Array = []
-	for gpP in gpDef.gpShape.get("paths", []):
-		var gpPd: Dictionary = gpP as Dictionary
-		var gpNew: Array = []
-		for gpPt in (gpPd.get("pts", []) as Array):
-			gpNew.append([snappedf(float(gpPt[0]), 0.01), snappedf(float(gpPt[1]), 0.01)])
-		gpPaths.append({"pts": gpNew, "closed": bool(gpPd.get("closed", false))})
-
-	var gpCircles: Array = []
-	for gpC in gpDef.gpShape.get("circles", []):
-		var gpCd: Dictionary = gpC as Dictionary
-		gpCircles.append({
-			"c": [snappedf(float(gpCd["c"][0]), 0.01), snappedf(float(gpCd["c"][1]), 0.01)],
-			"r": snappedf(absf(float(gpCd["r"])), 0.01),
-		})
-
-	var gpRects: Array = []
-	for gpRd in gpDef.gpShape.get("rects", []):
-		var gpRr: Dictionary = gpRd as Dictionary
-		gpRects.append({
-			"pos": [snappedf(float(gpRr["pos"][0]), 0.01), snappedf(float(gpRr["pos"][1]), 0.01)],
-			"size": [snappedf(float(gpRr["size"][0]), 0.01), snappedf(float(gpRr["size"][1]), 0.01)],
-		})
-
+	# Author space == unit box: the def's unit-frame shapes ARE the author pixels
+	# (scale-invariant frame). gpEditSpec() derives a LOSSLESS editable spec (raw control
+	# points + Bézier handles, NOT the flattened render spec), so editing a curved symbol via
+	# the Make-Symbol dialog preserves its curve control points on re-normalize.
+	# 作者空间 = 单位框：def 的单位框形状即作者像素（缩放无关框架）。gpEditSpec() 派生出**无损可编辑**
+	# 规格（原始控制点 + 贝塞尔手柄，而非打平的渲染 spec），使经「生成图元」对话框编辑曲线图元时，
+	# 重归一化仍保留其曲线控制点。
+	var gpSpec: Dictionary = GPShapeSpec.gpEditSpec(gpDef.gpShapes)
+	# Bbox for port re-derivation, computed on the same lossless editable spec so the round-trip
+	# stays exact with what a later gpNormalizeSymbol would compute from this draft.
+	# 供端口还原的包围盒，基于同一无损可编辑 spec 计算，使往返与后续 gpNormalizeSymbol 从该草稿
+	# 重算的结果精确一致。
+	var gpBBox: Rect2 = gpComputeBBox(gpSpec)
 	return {
 		"id": gpDef.gpId,
 		"display_name": gpDef.gpDisplayName,
 		"category": gpCat,
-		"shapes": {"paths": gpPaths, "circles": gpCircles, "rects": gpRects},
-		"ports": _gpDenormalizePorts(gpDef.gpPorts, gpBBox, gpEnv),
+		"shapes": gpSpec,
+		"ports": _gpDenormalizePorts(GPPortSpec.gpToDicts(gpDef.gpPorts), gpBBox, gpEnv),
 		"attrs_schema": gpDef.gpAttrsSchema.duplicate(true),
 	}
 
@@ -164,7 +154,7 @@ static func gpDenormalizeSymbol(gpDef: GPSymbolDef) -> Dictionary:
 # round-trip is exact (the denormalized shape is the unit coords copied verbatim).
 # SEff 用与正向一致的 gpComputeBBox(gpShape)（重归一化时会从草稿形状重新算出），
 # 因此往返精确（反归一化的形状即原样复制的单位坐标）。
-static func _gpDenormalizePorts(gpPorts: Array[Dictionary], gpBBox: Rect2, gpEnv: Vector2) -> Array:
+static func _gpDenormalizePorts(gpPorts: Array, gpBBox: Rect2, gpEnv: Vector2) -> Array:
 	var gpSEff: float = gpEnvelopeScale(gpBBox, gpEnv)
 	if gpSEff <= 0.0:
 		gpSEff = 1.0
@@ -319,7 +309,15 @@ static func _gpTransformShapes(gpShapes: Dictionary, gpS: float, gpCtr: Vector2)
 		var gpNew: Array = []
 		for gpPt in gpPts:
 			gpNew.append(_gpToUnit(Vector2(float(gpPt[0]), float(gpPt[1])), gpS, gpCtr))
-		gpPaths.append({"pts": gpNew, "closed": bool(gpPd.get("closed", false))})
+		var gpPdOut: Dictionary = {"pts": gpNew, "closed": bool(gpPd.get("closed", false))}
+		# Bézier handles are RELATIVE offsets from each vertex, so uniform scaling + translation
+		# during normalization leave them unchanged — carry them through verbatim so a curved
+		# spline keeps its curve after being made into a symbol (was flattened to a polyline).
+		# 贝塞尔手柄是「相对各顶点的偏移」，归一化的等比缩放与平移不改变它 —— 原样透传，
+		# 使弯成弧线的样条在生成图元后仍是曲线（此前被展平成折线）。
+		if gpPd.has("handles"):
+			gpPdOut["handles"] = gpPd["handles"]
+		gpPaths.append(gpPdOut)
 
 	var gpCircles: Array = []
 	for gpC in gpShapes.get("circles", []):

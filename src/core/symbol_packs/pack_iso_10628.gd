@@ -52,6 +52,10 @@ static func _gpMk(gpId: String, gpChineseName: String, gpCat: String, gpPorts: A
 	gpD.gpDisplayName = gpChineseName
 	gpD.gpCategory = gpCat
 	gpD.gpDefaultSize = gpEnv
-	gpD.gpPorts = gpPorts
-	gpD.gpShape = gpShape
+	# P0 unified model: the generated dict specs are converted into the shared GPShape / GPPort
+	# types here, so the library, the editor and the canvas all consume one model.
+	# P0 统一模型：此处把生成的字典规格转换为共用的 GPShape / GPPort 类型，
+	# 使图元库、编辑器与画布共用同一模型。
+	gpD.gpPorts = GPPortSpec.gpFromDicts(gpPorts)
+	gpD.gpShapes = GPShapeSpec.gpFromSpec(gpShape)
 	return gpD

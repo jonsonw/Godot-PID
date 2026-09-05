@@ -48,8 +48,6 @@ const GP_MENUS: Dictionary = {
 		["menu.format_bg", "format_bg"],
 	],
 	"menu.tools": [
-		["menu.tool_new_symbol", "tool_new_symbol"],
-		["menu.tool_symbol_editor", "tool_symbol_editor"],
 		["menu.tool_ai_unitop", "tool_ai_unitop"],
 		["menu.tool_settings", "tool_settings"],
 	],

@@ -125,6 +125,47 @@ static func gpClearRegistered() -> void:
 	_gpCacheValid = true
 
 
+# Delete a user-authored symbol from the library entirely: drop it from the runtime
+# registrations AND delete its persisted pack file so it does not re-appear on restart.
+# 彻底删除一个用户自建图元：从运行期注册移除，并删除其持久化包文件，使其重启后不再出现。
+# Returns true only when a user symbol was actually removed; returns false if the id is
+# unknown or belongs to a built-in (read-only) symbol, which must never be deleted.
+# 仅当确有用户图元被移除时返回 true；若 id 未知或属于内置（只读）图元则返回 false（内置永不可删）。
+static func gpDeleteDef(gpId: String) -> bool:
+	if not _gpCacheValid:
+		_gpRebuildCache()
+	# Only user-authored defs are deletable. Built-ins (ISO 10628) are read-only per
+	# decision D3, and they have no persisted user pack file to remove anyway.
+	# 仅用户自建图元可删。内置（ISO 10628）按决策 D3 只读，且本无持久化用户包文件。
+	var gpExtraIdx: int = _gpIndexOfId(gpId)
+	if gpExtraIdx < 0:
+		return false
+	var gpDef: GPSymbolDef = _gpExtraDefs[gpExtraIdx]
+	if gpDef.gpBuiltin:
+		return false
+	# Remove in place from BOTH arrays, preserving their shared identity so every holder
+	# (main window, left palette, graph binder) transparently observes the removal — this
+	# is exactly the gpRegisterDefs surgery performed in reverse. Because gpDefaultDefs()
+	# hands out the SAME array identity, the toolbar's gpDefs list shrinks too.
+	# 同时原地移除两数组中的元素，保持共享身份不变，使所有持有者（主窗口、左图元库、
+	# 图绑定器）都能透明看到本次删除 —— 正是 gpRegisterDefs 的逆操作。由于 gpDefaultDefs()
+	# 始终交出同一数组身份，工具栏的 gpDefs 列表也随之缩减。
+	_gpExtraDefs.remove_at(gpExtraIdx)
+	_gpCachedDefs.remove_at(_gpBuiltinCount + gpExtraIdx)
+	_gpCacheValid = true
+	# Delete the persisted user pack file (user://symbol_packs/<id>.json). A single symbol
+	# is stored as one pack file, written by GPMakeSymbolDialog._gpPersist.
+	# 删除持久化的用户包文件（user://symbol_packs/<id>.json）。单个图元存为一个包文件，
+	# 由 GPMakeSymbolDialog._gpPersist 写入。
+	var gpPath: String = "%s/%s.json" % [GP_USER_PACKS_DIR, gpId]
+	if FileAccess.file_exists(gpPath):
+		var gpErr: Error = DirAccess.remove_absolute(gpPath)
+		if gpErr != OK:
+			push_warning("GPSymbolLibrary: failed to delete user pack %s (err %d)" % [gpPath, gpErr])
+			return false
+	return true
+
+
 # Read every persisted user pack from GP_USER_PACKS_DIR as GPSymbolPack objects.
 # 把 GP_USER_PACKS_DIR 下所有持久化的用户图元包以 GPSymbolPack 对象读出。
 # No registration: this is the shared reader used by both gpLoadUserPacks (which

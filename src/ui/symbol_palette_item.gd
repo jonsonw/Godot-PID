@@ -10,6 +10,17 @@ extends Control
 # 用户点击本条目时发出。
 signal gpPicked(type_id: String)
 
+# Emitted when the user requests deletion of this symbol via the context menu. The
+# actual deletion (and any cascade removal of canvas instances) is owned by the main
+# window, which holds the graphs; this item only forwards the user's intent.
+# 用户经右键菜单请求删除本图元时发出。真正的删除（及画布实例的级联清理）由持有图的主窗口
+# 负责，本条目只转发用户意图。
+signal gpDeleteRequested(gpId: String)
+
+# Context-menu action ids (only one today, but keep the enum form for future actions).
+# 右键菜单动作 id（目前仅一项，但保留枚举形式以便扩展）。
+const GP_CTX_DELETE: int = 0
+
 # Symbol definition rendered by this item.
 # 本条目所渲染的图元定义。
 var gpDef: GPSymbolDef = null
@@ -82,11 +93,52 @@ func _gpOnMouseExited() -> void:
 func _gui_input(gpEvent: InputEvent) -> void:
 	if gpEvent is InputEventMouseButton:
 		var gpMouseEvent: InputEventMouseButton = gpEvent as InputEventMouseButton
+		# Right-click opens the symbol-library context menu (delete, etc.).
+		# 右键打开图元库上下文菜单（删除等）。
+		if gpMouseEvent.button_index == MOUSE_BUTTON_RIGHT and gpMouseEvent.pressed:
+			accept_event()
+			_gpShowContextMenu()
+			return
 		if gpMouseEvent.button_index == MOUSE_BUTTON_LEFT and gpMouseEvent.pressed:
 			accept_event()
 			var gpTypeId: String = gpDef.gpId if gpDef != null else ""
 			gpPicked.emit(gpTypeId)
 			queue_redraw()
+
+
+# Build and pop up the context menu at the cursor. Only user-authored symbols can be
+# deleted; built-in ISO symbols are read-only (decision D3) and the item is disabled.
+# 在光标处构建并弹出上下文菜单。仅用户自建图元可删；内置 ISO 图元只读（决策 D3），条目禁用。
+func _gpShowContextMenu() -> void:
+	if gpDef == null:
+		return
+	var gpMenu: PopupMenu = PopupMenu.new()
+	gpMenu.add_item(I18n.gpTr("symbol_lib.ctx_delete"), GP_CTX_DELETE)
+	# Disable removal for built-in symbols so users cannot delete the shipped set.
+	# 内置图元禁用删除，避免误删随附图元集。
+	gpMenu.set_item_disabled(gpMenu.get_item_index(GP_CTX_DELETE), gpDef.gpBuiltin)
+	gpMenu.id_pressed.connect(_gpOnContext)
+	add_child(gpMenu)
+	# Position via the shared popup helper (global-screen formula, single source of truth).
+	# 经统一弹窗助手定位（全局屏幕坐标公式，单一事实来源）。
+	GPPopupHelper.gpPopupAtMouse(gpMenu, self)
+	# Free the menu after it closes; a leaked PopupMenu keeps this item (and its grid) alive.
+	# 关闭后释放菜单；泄漏的 PopupMenu 会让本条目（及所在网格）无法释放。
+	gpMenu.popup_hide.connect(gpMenu.queue_free)
+
+
+# Dispatch a context-menu action.
+# 分发右键菜单动作。
+func _gpOnContext(gpId: int) -> void:
+	if gpDef == null:
+		return
+	if gpId == GP_CTX_DELETE:
+		# Forward the delete intent to the main window, which owns the graphs and can
+		# cascade-remove any placed instances before dropping the symbol. The menu's
+		# "Delete" item is already disabled for built-in symbols, so gpDef here is user-owned.
+		# 把删除意图转发给主窗口：它持有图，可在移除图元前级联清理画布实例。内置图元的
+		# 「删除」项已被禁用，故此处 gpDef 必为用户自建。
+		gpDeleteRequested.emit(gpDef.gpId)
 
 
 # Draw the background, the symbol thumbnail and the label.
@@ -115,11 +167,11 @@ func _draw() -> void:
 
 	# Fallback rectangle for symbols that do not yet have a vector shape.
 	# 对尚无矢量形状的图元，用矩形兜底。
-	if gpDef.gpShape.is_empty():
+	if gpDef.gpShapes.is_empty():
 		draw_rect(gpThumbRect, gpFill, true)
 		draw_rect(gpThumbRect, gpStroke, false, gpBorder)
 	else:
-		GPSymbolPainter.gpDrawShape(self, gpDef.gpShape, gpThumbRect, gpFill, gpStroke, gpBorder)
+		GPSymbolPainter.gpDrawShape(self, gpDef.gpShapeSpec(), gpThumbRect, gpFill, gpStroke, gpBorder)
 
 	# Draw the localized display name directly below the thumbnail, centered across the cell.
 	# 在缩略图正下方、跨整个单元格居中绘制本地化的显示名。
