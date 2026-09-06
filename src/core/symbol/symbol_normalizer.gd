@@ -139,7 +139,7 @@ static func gpDenormalizeSymbol(gpDef: GPSymbolDef) -> Dictionary:
 		"display_name": gpDef.gpDisplayName,
 		"category": gpCat,
 		"shapes": gpSpec,
-		"ports": _gpDenormalizePorts(GPPortSpec.gpToDicts(gpDef.gpPorts), gpBBox, gpEnv),
+		"ports": gpDenormalizePorts(GPPortSpec.gpToDicts(gpDef.gpPorts), gpBBox, gpEnv),
 		"attrs_schema": gpDef.gpAttrsSchema.duplicate(true),
 	}
 
@@ -154,12 +154,24 @@ static func gpDenormalizeSymbol(gpDef: GPSymbolDef) -> Dictionary:
 # round-trip is exact (the denormalized shape is the unit coords copied verbatim).
 # SEff 用与正向一致的 gpComputeBBox(gpShape)（重归一化时会从草稿形状重新算出），
 # 因此往返精确（反归一化的形状即原样复制的单位坐标）。
-static func _gpDenormalizePorts(gpPorts: Array, gpBBox: Rect2, gpEnv: Vector2) -> Array:
+#
+# Why the centre is gpBBox.get_center() and not the literal 50.0 / 为何用包围盒中心而非字面 50.0：
+# the literal was a hidden ASSUMPTION that gpBBox is a unit-frame box (centre 50,50). That holds
+# for gpDenormalizeSymbol (its shapes are already unit-frame), but NOT for the Make-Symbol
+# dialog, which denormalizes ports over a freshly drawn, arbitrarily placed author bbox. Writing
+# the general form removes the assumption without changing gpDenormalizeSymbol's behaviour —
+# for a unit-frame box the centre is 50 anyway, and the 0.01 snapping absorbs the fp residue.
+# 字面量 50.0 隐含假设了 gpBBox 是单位框（中心 50,50）。该假设对 gpDenormalizeSymbol 成立
+# （其形状已是单位框），但对「生成图元」对话框不成立——后者要在刚绘制、位置任意的作者包围盒上
+# 反归一化端口。写成一般形式去掉了这一假设，且不改变 gpDenormalizeSymbol 的行为：对单位框而言
+# 中心本就是 50，0.01 量化亦会吸收浮点残差。
+static func gpDenormalizePorts(gpPorts: Array, gpBBox: Rect2, gpEnv: Vector2) -> Array:
 	var gpSEff: float = gpEnvelopeScale(gpBBox, gpEnv)
 	if gpSEff <= 0.0:
 		gpSEff = 1.0
 	var gpEnvW: float = maxf(gpEnv.x, 0.001)
 	var gpEnvH: float = maxf(gpEnv.y, 0.001)
+	var gpCtr: Vector2 = gpBBox.get_center()
 	var gpOut: Array = []
 	for gpI in range(gpPorts.size()):
 		var gpP: Dictionary = gpPorts[gpI] as Dictionary
@@ -169,8 +181,8 @@ static func _gpDenormalizePorts(gpPorts: Array, gpBBox: Rect2, gpEnv: Vector2) -
 		gpOut.append({
 			"name": str(gpP.get("name", "p%d" % (gpI + 1))),
 			"pos": [
-				snappedf(50.0 + (gpNx - 0.5) * gpEnvW / gpSEff, 0.01),
-				snappedf(50.0 + (gpNy - 0.5) * gpEnvH / gpSEff, 0.01),
+				snappedf(gpCtr.x + (gpNx - 0.5) * gpEnvW / gpSEff, 0.01),
+				snappedf(gpCtr.y + (gpNy - 0.5) * gpEnvH / gpSEff, 0.01),
 			],
 			"dir": gpP.get("dir", gpEdgeNormal(Vector2(gpNx, gpNy))),
 		})
