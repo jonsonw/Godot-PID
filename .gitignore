@@ -2,7 +2,11 @@
 .godot/
 android/
 ios/
-export/
+# 仅忽略仓库根的导出构建产物目录；务必保留前导斜杠，
+# 否则会误伤源码目录 src/export/（导出器脚本，历史事故：三个导出器因此从未入库）。
+# Only ignore the export build output dir at the repo root; the leading slash is required,
+# otherwise it also matches the source dir src/export/ (exporters were silently untracked).
+/export/
 *.translation
 
 # ===== OS / 编辑器 =====

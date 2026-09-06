@@ -75,7 +75,7 @@ const GP_MAX_LOGICAL: Vector2i = Vector2i(470, 530)
 
 # Preloaded rather than referenced by class_name (script load order safety).
 # 用 preload 而非 class_name 引用（规避脚本加载顺序问题）。
-const GP_WINDOW_FIT := preload("res://src/ui/window_fit.gd")
+const GP_WINDOW_FIT := preload("res://src/ui/dialogs/window_fit.gd")
 
 
 # The window that owns this dialog (the main app window); the dialog pops up over it.
