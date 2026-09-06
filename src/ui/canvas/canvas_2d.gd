@@ -36,9 +36,9 @@ signal gpModeChanged(gpNewMode: int)
 # （paths / circles / rects），可直接载入隔离编辑器的几何画板。宿主打开预装好的编辑器。
 signal gpMakeSymbolRequested(gpDraft: Dictionary)
 
-# Minimum drag distance (screen px) before a press becomes a marquee instead of a click.
-# 按下后要成为框选（而非单击）所需的最小拖拽距离（屏幕像素）。
-const GP_MARQUEE_MIN: float = 4.0
+# (Minimum marquee drag distance now lives on GPCanvasMarquee.GP_MIN_DRAG, next to the
+# window/crossing rule it belongs with.)
+# （框选最小拖拽距离现位于 GPCanvasMarquee.GP_MIN_DRAG，与它所属的窗口/交叉规则放在一起。）
 
 # Context-menu action ids. Ids (not positions) keep the handlers correct when optional
 # items are inserted, because PopupMenu ids do not shift the way indices do.
@@ -71,21 +71,25 @@ const GP_CTX_CORNER_VERTEX: int = 14
 # 交互模式：选择/移动图元、为图元连线，或直接绘制注释图形。
 # Drawing modes are appended last so the legacy SELECT/CONNECT values (0/1) stay unchanged.
 # 绘图模式置于末尾，使旧的选择/连线取值（0/1）保持不变。
-enum GPMode { GP_SELECT, GP_CONNECT, GP_DRAW_LINE, GP_DRAW_CIRCLE, GP_DRAW_RECT, GP_DRAW_POLYLINE, GP_DRAW_ARC }
+#
+# The enum itself now lives on GPCanvasInteractState (core/view) so the P2 tool layer can receive
+# it without importing this Control. This alias keeps the public `GPCanvas2D.GPMode.GP_*`
+# spelling used by the shell compiling unchanged.
+# 枚举现定义于 GPCanvasInteractState（core/view），使 P2 工具层无需引入本 Control 即可使用。
+# 本别名保持外壳所用的 `GPCanvas2D.GPMode.GP_*` 写法继续编译通过。
+const GPMode = GPCanvasInteractState.GPMode
 
 # Set the interaction mode and notify listeners (the toolbar) so highlights stay correct.
 # 设置交互模式并通知监听者（工具栏），使高亮保持正确。
 func gpSetMode(gpM: int) -> void:
-	if gpM != gpMode:
-		gpMode = gpM
-		# Entering a drawing tool clears any node selection so a left click draws instead of
-		# re-selecting a symbol; the shape selection is left intact for marquee-style editing.
-		# 进入绘图工具时清空图元选择，使左键变为绘制而非再次选中图元；图形选择保留以便框选式编辑。
-		if gpM >= GPMode.GP_DRAW_LINE:
-			gpSelection.clear()
-			gpSelectedId = ""
-		gpModeChanged.emit(gpMode)
-		queue_redraw()
+	# The mode switch itself (including "entering a drawing tool clears the node selection") is a
+	# state invariant owned by GPCanvasInteractState; this shell only re-emits and repaints.
+	# 模式切换本身（含「进入绘图工具清空节点选择」）是 GPCanvasInteractState 持有的状态不变式；
+	# 本外壳只负责转发信号与重绘。
+	if not _gpState.gpSetMode(gpM):
+		return
+	gpModeChanged.emit(gpMode)
+	queue_redraw()
 
 # The topology graph this canvas displays and edits.
 # 本画布显示并编辑的拓扑图。
@@ -99,9 +103,20 @@ var gpDefs: Array[GPSymbolDef] = []
 # 持有增量视图缓存与同步逻辑的图绑定器（组合子节点）。
 var gpBinder: GPGraphBinder = null
 
-# Monotonically increasing id counter for new nodes and edges.
-# 新节点与新边的单调递增 id 计数器。
-var gpNextId: int = 1
+# ---- shared interaction state ----
+# ---- 共享交互状态 ----
+# Composition root for everything the canvas remembers between events: camera, selection,
+# marquee, id counter, mode and the pending symbol. Grouping them under one RefCounted is what
+# lets P2 hand "the canvas state" to a tool object without leaking this Control.
+# 画布在事件之间所记住的一切的组合根：相机、选择集、框选、id 计数器、模式与待放置图元。
+# 把它们归拢到一个 RefCounted 之下，正是 P2 能把「画布状态」交给工具对象而不泄漏本 Control 的前提。
+var _gpState: GPCanvasInteractState = GPCanvasInteractState.new()
+
+# Monotonically increasing id counter for new nodes and edges — proxies GPIdGen via the state.
+# 新节点与新边的单调递增 id 计数器 —— 经状态对象代理 GPIdGen。
+var gpNextId: int:
+	get: return _gpState.gpIds.gpCounter
+	set(gpV): _gpState.gpIds.gpCounter = gpV
 
 # ---- world root ----
 # ---- 世界根节点 ----
@@ -113,12 +128,14 @@ var gpWorldRoot: Node2D = null
 # ---- 相机 ----
 # The camera is a pure pan/zoom module (GPCanvasCamera, core/) that owns the offset+zoom state
 # and the world<->screen transform / zoom-at-point math. gpViewOffset / gpViewZoom below are thin
-# proxy properties over it so the many direct reads in the drawing / grid / hit-test hot paths keep
-# working unchanged, while the actual math lives in one headless-testable place.
-# 相机是纯平移/缩放模块（GPCanvasCamera，core/），拥有 offset+zoom 状态与坐标变换/定点缩放数学。
-# 下方 gpViewOffset / gpViewZoom 是其代理属性，使绘制 / 网格 / 命中测试热路径里的众多直读保持不改，
-# 而真正数学收敛到一处可 headless 单测的地方。
-var _gpCam: GPCanvasCamera = GPCanvasCamera.new()
+# ...but it is now owned by GPCanvasInteractState and exposed here as a read-only proxy, so the
+# many direct reads in the drawing / grid / hit-test hot paths keep working unchanged while the
+# math stays in one headless-testable place.
+# 相机是纯平移/缩放模块（GPCanvasCamera，core/），拥有 offset+zoom 状态与坐标变换/定点缩放数学；
+# 现由 GPCanvasInteractState 持有并在此以只读代理暴露，使绘制 / 网格 / 命中测试热路径里的众多
+# 直读保持不改，而数学收敛到一处可 headless 单测的地方。
+var _gpCam: GPCanvasCamera:
+	get: return _gpState.gpCam
 
 # Canvas pixel offset of the world origin (0,0) — proxies the camera.
 # 世界原点 (0,0) 在画布上的像素偏移 —— 代理相机。
@@ -136,26 +153,33 @@ var gpViewZoom: float:
 	set(gpV):
 		_gpCam.gpZoom = gpV
 
-# ---- interaction state ----
-# ---- 交互状态 ----
-# Current interaction mode.
-# 当前交互模式。
-var gpMode: int = GPMode.GP_SELECT
+# ---- interaction state (mode / pending symbol) ----
+# ---- 交互状态（模式 / 待放置图元） ----
+# Current interaction mode. Proxies GPCanvasInteractState so the mode has one owner even though
+# ~20 call sites read it as a plain field.
+# 当前交互模式。代理到 GPCanvasInteractState，使模式即便被约 20 处当作普通字段读取也只有一个持有者。
+var gpMode: int:
+	get: return _gpState.gpMode
+	set(gpV): _gpState.gpMode = gpV
 
 # Symbol definition waiting to be placed by the next left click.
 # 等待下一次左键放置的图元定义。
-var gpPendingDef: GPSymbolDef = null
+var gpPendingDef: GPSymbolDef:
+	get: return _gpState.gpPendingDef
+	set(gpV): _gpState.gpPendingDef = gpV
 
-# Authoritative selection-state owner (pure module, headless-testable). gpSelection / gpSelectedId
-# below are proxy properties into _gpSel so every existing read site (binder, inspector, status,
-# marquee) keeps compiling unchanged while the mutual-exclusion + primary-sync invariants live in
-# the tested module. gpShapeSel (annotation shapes) stays a direct array: its in-place mutations
-# are each an intentional single/multi/marquee/delete context, and proxying would silently break
-# the node<->shape mutual exclusion.
-# 权威选择状态源（纯模块，可 headless 单测）。下方 gpSelection / gpSelectedId 是 _gpSel 的代理属性，
-# 使既有读点（绑定层/属性面板/状态栏/框选）零改动编译，而互斥 + 主选项同步不变式落在已测模块中。
-# gpShapeSel（注释图形）保持直接数组：其就地变更各自是明确的单选/多选/框选/删除语境，代理会破坏节点<->图形互斥。
-var _gpSel: GPCanvasSelection = GPCanvasSelection.new()
+# Authoritative selection-state owner (pure module, headless-testable), now reached through
+# GPCanvasInteractState. gpSelection / gpSelectedId below are proxy properties into it so every
+# existing read site (binder, inspector, status, marquee) keeps compiling unchanged while the
+# mutual-exclusion + primary-sync invariants live in the tested module. gpShapeSel (annotation
+# shapes) stays a direct array: its in-place mutations are each an intentional single/multi/
+# marquee/delete context, and proxying would silently break the node<->shape mutual exclusion.
+# 权威选择状态源（纯模块，可 headless 单测），现经 GPCanvasInteractState 访问。下方 gpSelection /
+# gpSelectedId 是它的代理属性，使既有读点（绑定层/属性面板/状态栏/框选）零改动编译，而互斥 +
+# 主选项同步不变式落在已测模块中。gpShapeSel（注释图形）保持直接数组：其就地变更各自是明确的
+# 单选/多选/框选/删除语境，代理会破坏节点<->图形互斥。
+var _gpSel: GPCanvasSelection:
+	get: return _gpState.gpSel
 
 # Ids of the currently selected nodes. Proxies into _gpSel.gpNodeIds.
 # 当前选中节点的 id 集合。代理到 _gpSel.gpNodeIds。
@@ -174,18 +198,13 @@ var gpSelectedId: String:
 # 被选为连线起点的节点 id。
 var gpConnectFrom: String = ""
 
-# Whether a marquee selection is in progress.
-# 是否正在进行框选。
-var _gpMarqueeing: bool = false
-
-# Marquee endpoints in SCREEN space (drawn directly; converted to world on commit).
-# 框选端点，屏幕空间（直接绘制；提交时换算到世界空间）。
-var _gpMarqueeFrom: Vector2 = Vector2.ZERO
-var _gpMarqueeTo: Vector2 = Vector2.ZERO
-
-# Whether the in-progress marquee adds to the current selection (Shift held).
-# 进行中的框选是否为追加模式（按住 Shift）。
-var _gpMarqueeAdd: bool = false
+# The rubber-band marquee (active flag, endpoints in SCREEN space, additive flag) is owned by
+# GPCanvasMarquee via the state; the window/crossing rule lives there too, so the drawer and the
+# commit path can never disagree about which one they applied.
+# 橡皮筋框选（进行中标记、屏幕空间端点、追加标记）经状态对象由 GPCanvasMarquee 持有；
+# 窗口 / 交叉规则也在其中，使绘制路径与提交路径永不会在「应用了哪条规则」上分歧。
+var _gpMarq: GPCanvasMarquee:
+	get: return _gpState.gpMarquee
 
 # World position where the current multi-node drag started.
 # 当前多节点拖拽开始时的世界坐标。
@@ -378,13 +397,12 @@ func _draw() -> void:
 # 绘制橡皮筋框选框。CAD 惯例：左→右为窗口模式（仅选中完全包含的图元，蓝色）；
 # 右→左为交叉模式（碰到即选中，绿色）。
 func _gpDrawMarquee() -> void:
-	if not _gpMarqueeing:
+	if not _gpMarq.gpActive:
 		return
-	var gpA: Vector2 = _gpMarqueeFrom.min(_gpMarqueeTo)
-	var gpB: Vector2 = _gpMarqueeFrom.max(_gpMarqueeTo)
-	var gpRect: Rect2 = Rect2(gpA, gpB - gpA)
-	var gpWindow: bool = _gpMarqueeTo.x >= _gpMarqueeFrom.x
-	var gpCol: Color = Color(0.30, 0.65, 1.0) if gpWindow else Color(0.30, 1.0, 0.50)
+	var gpRect: Rect2 = _gpMarq.gpScreenRect()
+	# Direction decides both the colour here and the hit rule on commit — one rule, one owner.
+	# 拖动方向同时决定此处颜色与提交时的命中规则 —— 一条规则、一个持有者。
+	var gpCol: Color = _gpMarq.gpColor()
 	draw_rect(gpRect, Color(gpCol.r, gpCol.g, gpCol.b, 0.15), true)
 	draw_rect(gpRect, gpCol, false, 1.0)
 
@@ -552,8 +570,8 @@ func _gui_input(gpEvent: InputEvent) -> void:
 			return
 		# Marquee in progress: track the rubber band.
 		# 正在框选：跟踪橡皮筋。
-		if _gpMarqueeing:
-			_gpMarqueeTo = gpMotion.position
+		if _gpMarq.gpActive:
+			_gpMarq.gpUpdate(gpMotion.position)
 			queue_redraw()
 			accept_event()
 			return
@@ -613,8 +631,7 @@ func _gpOnLeftDown(gpScreen: Vector2, gpShift: bool, gpDouble: bool) -> void:
 	# If a symbol is pending from the palette, place it now.
 	# 如果调色板有等待放置的图元，立即放置。
 	if gpPendingDef != null:
-		var gpNid: String = "n%d" % gpNextId
-		gpNextId += 1
+		var gpNid: String = _gpState.gpIds.gpNext("n")
 		# Leave the label empty so the canvas renders the localized type name and
 		# it switches with the UI language. The user can still type a custom label.
 		# 标签留空，使画布显示本地化的类型名并随界面语言切换；用户仍可在属性面板填自定义标签。
@@ -644,8 +661,7 @@ func _gpOnLeftDown(gpScreen: Vector2, gpShift: bool, gpDouble: bool) -> void:
 				gpConnectFrom = gpHit
 			else:
 				if gpConnectFrom != gpHit:
-					var gpEid: String = "e%d" % gpNextId
-					gpNextId += 1
+					var gpEid: String = _gpState.gpIds.gpNext("e")
 					gpGraph.gpAddEdge(gpGraph.gpNewEdge(gpEid, gpConnectFrom, gpHit, {}))
 					gpGraphChanged.emit()
 				gpConnectFrom = ""
@@ -726,10 +742,7 @@ func _gpOnLeftDown(gpScreen: Vector2, gpShift: bool, gpDouble: bool) -> void:
 		if not gpShift:
 			_gpSetSelection([])
 			gpShapeSel.clear()
-		_gpMarqueeing = true
-		_gpMarqueeFrom = gpScreen
-		_gpMarqueeTo = gpScreen
-		_gpMarqueeAdd = gpShift
+		_gpMarq.gpBegin(gpScreen, gpShift)
 	queue_redraw()
 	_gpEmitStatus()
 
@@ -767,11 +780,12 @@ func _gpOnLeftUp(gpScreen: Vector2) -> void:
 		gpGraphChanged.emit()
 		_gpEmitStatus()
 		return
-	if _gpMarqueeing:
-		_gpMarqueeing = false
-		# A press/release without movement is a plain click, already handled on press.
+	if _gpMarq.gpActive:
+		# gpFinish() reports whether the band was dragged far enough to be a real marquee;
+		# a press/release without movement is a plain click, already handled on press.
+		# gpFinish() 报告选框是否被拖到足以构成真正的框选；
 		# 未产生位移的按下/释放只是普通单击，已在按下时处理过。
-		if gpScreen.distance_to(_gpMarqueeFrom) > GP_MARQUEE_MIN:
+		if _gpMarq.gpFinish():
 			_gpCommitMarquee()
 		queue_redraw()
 		_gpEmitStatus()
@@ -1261,27 +1275,24 @@ func _gpOnDragMove(gpScreen: Vector2) -> void:
 # Apply the finished marquee to the selection set.
 # 把完成的框选应用到选择集。
 func _gpCommitMarquee() -> void:
-	var gpA: Vector2 = gpWorldFromScreen(_gpMarqueeFrom)
-	var gpB: Vector2 = gpWorldFromScreen(_gpMarqueeTo)
+	var gpA: Vector2 = gpWorldFromScreen(_gpMarq.gpFrom)
+	var gpB: Vector2 = gpWorldFromScreen(_gpMarq.gpTo)
 	var gpRect: Rect2 = Rect2(gpA.min(gpB), (gpA - gpB).abs())
-	# Left -> right is WINDOW (enclose); right -> left is CROSSING (touch). See _gpDrawMarquee.
-	# 左→右为窗口（完全包含）；右→左为交叉（碰到即可）。见 _gpDrawMarquee。
-	var gpEnclose: bool = gpB.x >= gpA.x
+	# Left -> right is WINDOW (enclose); right -> left is CROSSING (touch). Same predicate the
+	# drawer used for the band colour, so what you see is what you get.
+	# 左→右为窗口（完全包含）；右→左为交叉（碰到即可）。与绘制选框颜色所用的同一判据，所见即所得。
+	var gpWindow: bool = _gpMarq.gpIsWindow()
 	var gpPicked: Array[String] = []
 	for gpN in gpGraph.gpNodes:
-		var gpR: Rect2 = _gpNodeRect(gpN.gpInstanceId)
-		var gpIn: bool = gpRect.encloses(gpR) if gpEnclose else gpRect.intersects(gpR)
-		if gpIn:
+		if GPCanvasMarquee.gpPicks(gpWindow, gpRect, _gpNodeRect(gpN.gpInstanceId)):
 			gpPicked.append(gpN.gpInstanceId)
 	# Annotation shapes are selected by the same marquee (Window/Crossing) rule.
 	# 注释图形按相同的框选（包含/相交）规则被选中。
 	var gpShapePicked: Array[int] = []
 	for gpI in range(gpGraph.gpShapes.size()):
-		var gpBBox: Rect2 = gpGraph.gpShapes[gpI].gpBBox()
-		var gpInS: bool = gpRect.encloses(gpBBox) if gpEnclose else gpRect.intersects(gpBBox)
-		if gpInS:
+		if GPCanvasMarquee.gpPicks(gpWindow, gpRect, gpGraph.gpShapes[gpI].gpBBox()):
 			gpShapePicked.append(gpI)
-	if _gpMarqueeAdd:
+	if _gpMarq.gpAdditive:
 		for gpId in gpPicked:
 			if not gpSelection.has(gpId):
 				gpSelection.append(gpId)
@@ -1350,8 +1361,7 @@ func _gpDuplicateSelected() -> void:
 		var gpN: GPPIDNode = gpGraph.gpGetNode(gpId)
 		if gpN == null:
 			continue
-		var gpNid: String = "n%d" % gpNextId
-		gpNextId += 1
+		var gpNid: String = _gpState.gpIds.gpNext("n")
 		var gpCopy: GPPIDNode = gpGraph.gpNewNode(
 			gpNid, gpN.gpSymbolId, gpN.gpTag,
 			gpN.gpPosition + Vector2(24.0, 24.0),
@@ -1423,8 +1433,8 @@ func _gpOnEscape() -> void:
 		_gpShapeDragOrigR = 0.0
 		queue_redraw()
 		return
-	if _gpMarqueeing:
-		_gpMarqueeing = false
+	if _gpMarq.gpActive:
+		_gpMarq.gpCancel()
 		queue_redraw()
 		return
 	if gpConnectFrom != "":
@@ -1611,7 +1621,7 @@ func gpDeleteSelection() -> void:
 # Public: drop the selection set (used before swapping in another graph).
 # 公开：清空选择集（用于换入另一张图之前）。
 func gpClearSelection() -> void:
-	_gpMarqueeing = false
+	_gpMarq.gpCancel()
 	_gpDragId = ""
 	_gpDragOrigins.clear()
 	gpShapeSel.clear()

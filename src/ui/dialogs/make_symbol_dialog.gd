@@ -427,46 +427,38 @@ func _gpInitModel() -> void:
 
 # ---- coordinate mapping (preview-local <-> author-space, and normalized ports) ----
 # 坐标映射（预览本地 <-> 作者空间，及归一化端口）
-# The painter fits the glyph's unit box into the preview rect with uniform scale + centering;
-# these helpers reproduce that exact transform so clicks land where the glyph is drawn.
-# 渲染器以均匀缩放 + 居中把字形单位框塞入预览矩形；下列助手复现同一变换，使点击落点即图形绘制处。
+# The painter fits the glyph's unit box into the preview rect with uniform scale + centering.
+# That mapping is now a pure module — GPPreviewTransform (core/geometry) — so the exact
+# round-trip is headless-testable; the helpers below are thin wrappers that keep every call
+# site in this file compiling unchanged.
+# 渲染器以均匀缩放 + 居中把字形单位框塞入预览矩形。该映射现为纯模块 —— GPPreviewTransform
+# （core/geometry）—— 使精确往返可在 headless 下断言；下列助手只是薄封装，使本文件各调用点保持不变。
+var _gpXf: GPPreviewTransform = GPPreviewTransform.new()
+
+
+# Refresh the transform from the live preview size and working shapes. Called at the top of every
+# mapping helper ON PURPOSE: caching it would require an invalidation at every mutation site,
+# which is exactly how "the click landed somewhere other than the glyph" bugs get introduced.
+# 依实时预览尺寸与工作图形刷新变换。刻意在每个映射助手开头调用：若要缓存，就必须在每处变更点
+# 使其失效——「点击落在图形之外」这类缺陷正是这样引入的。
+func _gpSyncXf() -> void:
+	_gpXf.gpViewSize = _gpPreview.size if _gpPreview != null else GP_PREVIEW_SIZE
+	_gpXf.gpBox = GPPreviewTransform.gpBoxOf(_gpShapes)
+
 
 func _gpViewRect(gpC: Control) -> Rect2:
-	return Rect2(Vector2(4.0, 4.0), gpC.size - Vector2(8.0, 8.0))
-
-
-func _gpFitBox() -> Rect2:
-	var gpSpec: Dictionary = GPShapeSpec.gpBuild(_gpShapes)
-	var gpArr: Array = gpSpec.get("box", [])
-	if gpArr.size() >= 4 and float(gpArr[2]) > 0.0 and float(gpArr[3]) > 0.0:
-		return Rect2(Vector2(float(gpArr[0]), float(gpArr[1])), Vector2(float(gpArr[2]), float(gpArr[3])))
-	# No geometry yet: fall back to the canonical 100x100 unit box so clicks still map.
-	# 尚无几何：回退为规范 100x100 单位框，使点击仍可映射。
-	return Rect2(Vector2.ZERO, Vector2(100.0, 100.0))
-
-
-func _gpFitK() -> float:
-	var gpView: Rect2 = _gpViewRect(_gpPreview)
-	var gpBox: Rect2 = _gpFitBox()
-	return minf(gpView.size.x / gpBox.size.x, gpView.size.y / gpBox.size.y)
+	_gpXf.gpViewSize = gpC.size
+	return _gpXf.gpViewRect()
 
 
 func _gpLocalToAuthor(gpLocal: Vector2) -> Vector2:
-	var gpView: Rect2 = _gpViewRect(_gpPreview)
-	var gpBox: Rect2 = _gpFitBox()
-	var gpK: float = _gpFitK()
-	var gpCtr: Vector2 = gpView.get_center()
-	var gpBoxCtr: Vector2 = gpBox.get_center()
-	return Vector2(gpBoxCtr.x + (gpLocal.x - gpCtr.x) / gpK, gpBoxCtr.y + (gpLocal.y - gpCtr.y) / gpK)
+	_gpSyncXf()
+	return _gpXf.gpLocalToAuthor(gpLocal)
 
 
 func _gpAuthorToLocal(gpAuthor: Vector2) -> Vector2:
-	var gpView: Rect2 = _gpViewRect(_gpPreview)
-	var gpBox: Rect2 = _gpFitBox()
-	var gpK: float = _gpFitK()
-	var gpCtr: Vector2 = gpView.get_center()
-	var gpBoxCtr: Vector2 = gpBox.get_center()
-	return Vector2(gpCtr.x + (gpAuthor.x - gpBoxCtr.x) * gpK, gpCtr.y + (gpAuthor.y - gpBoxCtr.y) * gpK)
+	_gpSyncXf()
+	return _gpXf.gpAuthorToLocal(gpAuthor)
 
 
 # Normalized port (0..1) -> preview-local pixel. The full preview rect is the envelope, matching
@@ -474,16 +466,13 @@ func _gpAuthorToLocal(gpAuthor: Vector2) -> Vector2:
 # 归一化端口（0..1）-> 预览本地像素。整幅预览矩形即包络，与画布上 GPSymbolView 相对图元标称
 # 包络绘制端口的方式一致。
 func _gpPortLocal(gpN: Vector2) -> Vector2:
-	var gpView: Rect2 = _gpViewRect(_gpPreview)
-	return gpView.get_center() + (gpN - Vector2(0.5, 0.5)) * gpView.size
+	_gpSyncXf()
+	return _gpXf.gpPortLocal(gpN)
 
 
 func _gpLocalToNorm(gpLocal: Vector2) -> Vector2:
-	var gpView: Rect2 = _gpViewRect(_gpPreview)
-	var gpN: Vector2 = (gpLocal - gpView.get_center()) / gpView.size + Vector2(0.5, 0.5)
-	gpN.x = clampf(gpN.x, 0.0, 1.0)
-	gpN.y = clampf(gpN.y, 0.0, 1.0)
-	return gpN
+	_gpSyncXf()
+	return _gpXf.gpLocalToNorm(gpLocal)
 
 
 # ---- drawing ----
@@ -671,9 +660,16 @@ func _gpHitPort(gpLocal: Vector2) -> int:
 
 func _gpHitShape(gpLocal: Vector2) -> int:
 	var gpA: Vector2 = _gpLocalToAuthor(gpLocal)
+	# GPGeometry.gpShapeHit replaces the old bbox test: a bbox "hit" selects a shape when the
+	# click lands in empty space inside its bounding rectangle, and it cannot tell a curved
+	# polyline from its straight control polygon. The shared routine tests the real outline
+	# (flattening curves and arcs) within a tolerance, matching the main canvas exactly.
+	# 改用 GPGeometry.gpShapeHit 取代旧的包围盒判据：包围盒判据在点击落在矩形内空白处时也算命中，
+	# 且无法区分曲线折线与其直线控制多边形。共享例程按容差测试真实轮廓（展平曲线与圆弧），
+	# 与主画布完全一致。
+	var gpTol: float = GP_MIN_LEN
 	for gpI in range(_gpShapes.size() - 1, -1, -1):
-		var gpB: Rect2 = _gpShapes[gpI].gpBBox().grow(GP_MIN_LEN)
-		if gpB.has_point(gpA):
+		if GPGeometry.gpShapeHit(gpA, _gpShapes[gpI], gpTol):
 			return gpI
 	return -1
 
@@ -750,8 +746,10 @@ func _gpTranslateShape(gpIdx: int, gpDelta: Vector2) -> void:
 	if gpIdx < 0 or gpIdx >= _gpShapes.size():
 		return
 	var gpS: GPShape = _gpShapes[gpIdx]
-	for gpI in range(gpS.gpPoints.size()):
-		gpS.gpPoints[gpI] = gpS.gpPoints[gpI] + gpDelta
+	# Whole-shape translation is GPGeometry.gpShiftPoints — the same routine the main canvas
+	# uses, so a shape dragged here and there cannot drift apart in behaviour.
+	# 整体平移即 GPGeometry.gpShiftPoints —— 与主画布同一例程，使图形在此处与彼处拖动行为不会分歧。
+	gpS.gpPoints = GPGeometry.gpShiftPoints(gpS.gpPoints, gpDelta)
 
 
 # ---- port / shape panel sync ----
@@ -849,26 +847,21 @@ func _gpAuthorPorts() -> Array:
 	var gpShapesDict: Dictionary = GPShapeSpec.gpEditSpec(_gpShapes)
 	var gpBBox: Rect2 = GPSymbolNormalizer.gpComputeBBox(gpShapesDict)
 	var gpEnv: Vector2 = GPSymbolCategories.gpSizeFor(_gpCurrentCat())
-	var gpSEff: float = GPSymbolNormalizer.gpEnvelopeScale(gpBBox, gpEnv)
-	if gpSEff <= 0.0:
-		gpSEff = 1.0
-	var gpCtr: Vector2 = gpBBox.get_center()
-	var gpEnvW: float = maxf(gpEnv.x, 0.001)
-	var gpEnvH: float = maxf(gpEnv.y, 0.001)
-	var gpOut: Array = []
-	for gpI in range(_gpPorts.size()):
-		var gpP: GPPort = _gpPorts[gpI]
-		var gpPos: Vector2 = gpP.gpPos
-		var gpName: String = gpP.gpName if gpP.gpName != "" else ("p%d" % (gpI + 1))
-		gpOut.append({
-			"name": gpName,
-			"pos": [
-				snappedf(gpCtr.x + (gpPos.x - 0.5) * gpEnvW / gpSEff, 0.01),
-				snappedf(gpCtr.y + (gpPos.y - 0.5) * gpEnvH / gpSEff, 0.01),
-			],
-			"dir": [gpP.gpDir.x, gpP.gpDir.y],
-		})
-	return gpOut
+	# The inverse mapping now lives in one place (GPSymbolNormalizer.gpDenormalizePorts), shared
+	# with gpDenormalizeSymbol. Previously this function re-spelled the same algebra, so any
+	# future correction to the round-trip would have had to be made twice.
+	# 逆映射现收敛到一处（GPSymbolNormalizer.gpDenormalizePorts），与 gpDenormalizeSymbol 共用。
+	# 此前本函数把同一套代数又写了一遍，将来任何往返修正都得改两处。
+	var gpPortDicts: Array = GPPortSpec.gpToDicts(_gpPorts)
+	for gpI in range(gpPortDicts.size()):
+		var gpD: Dictionary = gpPortDicts[gpI] as Dictionary
+		# An unnamed port still needs a stable name; gpDenormalizePorts only defaults when the
+		# key is ABSENT, and GPPort always serializes it (possibly as "").
+		# 未命名端口仍需稳定名称；gpDenormalizePorts 仅在键「缺失」时才取默认值，
+		# 而 GPPort 总会序列化该键（可能为空串）。
+		if str(gpD.get("name", "")) == "":
+			gpD["name"] = "p%d" % (gpI + 1)
+	return GPSymbolNormalizer.gpDenormalizePorts(gpPortDicts, gpBBox, gpEnv)
 
 
 # Create a labeled LineEdit row inside gpParent; returns the LineEdit.
@@ -1032,36 +1025,27 @@ func _gpOnOk() -> void:
 
 
 # Filesystem-safe id from a name (CJK kept); non-alphanumerics collapse to "_".
-# The SAME normalization that _gpUniqueId and _gpFindExisting rely on, so the id typed
-# by the user is the id matched in the library.
-# 由名称生成文件系统安全 id（中文保留）；非字母数字折叠为 "_"。与 _gpUniqueId、
-# _gpFindExisting 使用同一套归一化，保证用户输入的标识即库中匹配的标识。
+# Delegates to GPIdGen.gpSanitize: the SAME normalization that _gpUniqueId and _gpFindExisting
+# rely on, so the id typed by the user is the id matched in the library. Keeping one
+# implementation matters because W21/W22 will create ids for documents and cross-references
+# from other entry points too.
+# 由名称生成文件系统安全 id（中文保留）；非字母数字折叠为 "_"。委托 GPIdGen.gpSanitize：
+# 与 _gpUniqueId、_gpFindExisting 使用同一套归一化，保证用户输入的标识即库中匹配的标识。
+# 保持单一实现很重要，因为 W21/W22 还会从别的入口为文档与跨图引用生成 id。
 func _gpIdFromName(gpName: String) -> String:
-	var gpOut: String = ""
-	for gpI in range(gpName.length()):
-		var gpC: String = gpName.substr(gpI, 1)
-		var gpU: int = gpC.unicode_at(0)
-		var gpCJK: bool = (gpU >= 0x3400 and gpU <= 0x4DBF) or (gpU >= 0x4E00 and gpU <= 0x9FFF)
-		if gpCJK or (gpU >= 48 and gpU <= 57) or (gpU >= 65 and gpU <= 90) or (gpU >= 97 and gpU <= 122) or gpC == "_":
-			gpOut += gpC
-		else:
-			gpOut += "_"
-	if gpOut == "":
-		gpOut = "symbol"
-	return gpOut
+	return GPIdGen.gpSanitize(gpName)
 
 
 # Unique id for creation: normalize the name, then dedupe against the live library with a
 # numeric suffix. This is what guarantees id uniqueness on the New path.
 # 新建路径的唯一 id：归一化名称后与活动库去重（数字后缀）。此即新建路径的唯一性保障。
 func _gpUniqueId(gpName: String) -> String:
-	var gpOut: String = _gpIdFromName(gpName)
-	var gpCandidate: String = gpOut
-	var gpN: int = 2
-	while GPSymbolLibrary.gpFindById(gpCandidate) != null:
-		gpCandidate = "%s_%d" % [gpOut, gpN]
-		gpN += 1
-	return gpCandidate
+	# The predicate is passed as a Callable so the library is queried lazily — no need to
+	# materialize every id for the common "free on first try" case.
+	# 谓词以 Callable 传入，使图元库被惰性查询——「首次即空闲」的常见情形无需物化全部 id。
+	var gpIsTaken: Callable = func(gpCandidate: String) -> bool:
+		return GPSymbolLibrary.gpFindById(gpCandidate) != null
+	return GPIdGen.gpEnsureUnique(GPIdGen.gpSanitize(gpName), gpIsTaken)
 
 
 # Persist a def as a single-symbol user pack under user://symbol_packs/<id>.json.
