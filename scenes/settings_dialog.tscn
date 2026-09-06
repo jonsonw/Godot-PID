@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://bpsettings1"]
 
-[ext_resource type="Script" uid="uid://cfw20kufgk0kt" path="res://src/ui/settings_dialog.gd" id="1"]
+[ext_resource type="Script" uid="uid://cfw20kufgk0kt" path="res://src/ui/dialogs/settings_dialog.gd" id="1"]
 
 [node name="SettingsDialog" type="Window" unique_id=147814352]
 oversampling_override = 1.0

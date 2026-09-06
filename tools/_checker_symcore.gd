@@ -4,10 +4,10 @@ extends SceneTree
 # normalize -> pack -> JSON path the wizard relies on.
 # W2 导出核心的精简模型层校验（不预加载 UI/库，它们在编辑器内验证）。强制
 # categories/def/normalizer/pack 编译，并往返测试向导依赖的归一化 -> 打包 -> JSON 路径。
-const C := preload("res://src/core/symbol_categories.gd")
-const D := preload("res://src/core/symbol_def.gd")
-const N := preload("res://src/core/symbol_normalizer.gd")
-const P := preload("res://src/model/symbol_pack.gd")
+const C := preload("res://src/core/symbol/symbol_categories.gd")
+const D := preload("res://src/core/model/symbol_def.gd")
+const N := preload("res://src/core/symbol/symbol_normalizer.gd")
+const P := preload("res://src/core/model/symbol_pack.gd")
 
 func _initialize() -> void:
 	printerr("CORE0 compile ok")

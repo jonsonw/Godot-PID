@@ -10,9 +10,9 @@ extends SceneTree
 
 # Preload the model scripts so the compiler parses them (no autoload refs inside).
 # 预加载模型脚本以强制编译（内部不引用 autoload）。
-const GPPIDGraph := preload("res://src/core/pid_graph.gd")
-const GPPIDNode := preload("res://src/core/pid_node.gd")
-const GPPIDEdge := preload("res://src/core/pid_edge.gd")
+const GPPIDGraph := preload("res://src/core/model/pid_graph.gd")
+const GPPIDNode := preload("res://src/core/model/pid_node.gd")
+const GPPIDEdge := preload("res://src/core/model/pid_edge.gd")
 const GPTestPIDGraph := preload("res://tests/test_pid_graph.gd")
 
 

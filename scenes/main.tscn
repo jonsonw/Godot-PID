@@ -1,10 +1,10 @@
 [gd_scene format=3 uid="uid://bpidcanvas2d1"]
 
-[ext_resource type="Script" uid="uid://bdoaykku0msu7" path="res://src/ui/main_window.gd" id="1_main"]
-[ext_resource type="Script" uid="uid://b3ayy6hfswvr8" path="res://src/ui/menu_bar.gd" id="2_menu"]
-[ext_resource type="Script" uid="uid://bll6tv3v6dfoj" path="res://src/ui/toolbar.gd" id="3_tool"]
-[ext_resource type="Script" uid="uid://ci382atp5x3al" path="res://src/ui/inspector.gd" id="5_insp"]
-[ext_resource type="Script" uid="uid://bsibdts7q8g56" path="res://src/ui/center_area.gd" id="6_center"]
+[ext_resource type="Script" uid="uid://bdoaykku0msu7" path="res://src/ui/shell/main_window.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://b3ayy6hfswvr8" path="res://src/ui/shell/menu_bar.gd" id="2_menu"]
+[ext_resource type="Script" uid="uid://bll6tv3v6dfoj" path="res://src/ui/panels/toolbar.gd" id="3_tool"]
+[ext_resource type="Script" uid="uid://ci382atp5x3al" path="res://src/ui/panels/inspector.gd" id="5_insp"]
+[ext_resource type="Script" uid="uid://bsibdts7q8g56" path="res://src/ui/panels/center_area.gd" id="6_center"]
 
 [node name="Main" type="Control" unique_id=326015921]
 layout_mode = 3
