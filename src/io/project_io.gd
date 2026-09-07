@@ -40,6 +40,18 @@ static func gpWriteProject(gpGraph: GPPIDGraph, gpPath: String) -> int:
 	return OK
 
 
+# Result-typed variant of gpWriteProject: reports WHY a write failed instead of a bare int.
+# gpWriteProject 的结果类型版本：说明写入「为何」失败，而非仅返回裸 int。
+# The legacy int API is preserved verbatim and reused, so no existing caller changes.
+# 旧 int API 原样保留并被复用，故既有调用方无需改动。
+static func gpWriteProjectResult(gpGraph: GPPIDGraph, gpPath: String) -> GPIOResult:
+	var gpFilePath: String = gpEnsurePidExt(gpPath)
+	var gpErr: int = gpWriteProject(gpGraph, gpPath)
+	if gpErr != OK:
+		return GPIOResult.gpFailure("io.write_failed", "status.save_fail", gpFilePath)
+	return GPIOResult.gpSuccess("io.saved", gpFilePath)
+
+
 # Read and reconstruct a project graph from gpPath. Returns null on any failure
 # (missing file, malformed JSON, or a non-dictionary root).
 # 从 gpPath 读取并重建工程图。任意失败（文件缺失、JSON 损坏、根非字典）均返回 null。
@@ -58,3 +70,18 @@ static func gpReadProject(gpPath: String) -> GPPIDGraph:
 	if gpParsed == null or not (gpParsed is Dictionary):
 		return null
 	return GPPIDGraph.gpFromDict(gpParsed as Dictionary)
+
+
+# Result-typed variant of gpReadProject: distinguishes "file missing/unreadable" from
+# "malformed JSON" and returns the reconstructed graph in gpPayload on success.
+# gpReadProject 的结果类型版本：区分「文件缺失/不可读」与「JSON 损坏」，
+# 并在成功时把重建出的图放入 gpPayload。
+# The legacy GPPIDGraph API is preserved and reused, so no existing caller changes.
+# 旧 GPPIDGraph API 原样保留并被复用，故既有调用方无需改动。
+static func gpReadProjectResult(gpPath: String) -> GPIOResult:
+	if not FileAccess.file_exists(gpPath):
+		return GPIOResult.gpFailure("io.open_failed", "status.load_fail", gpPath)
+	var gpGraph: GPPIDGraph = gpReadProject(gpPath)
+	if gpGraph == null:
+		return GPIOResult.gpFailure("io.parse_failed", "status.load_fail", gpPath)
+	return GPIOResult.gpSuccessWith(gpGraph, "io.loaded", gpPath)
