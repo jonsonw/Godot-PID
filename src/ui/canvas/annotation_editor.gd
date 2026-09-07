@@ -10,21 +10,64 @@ extends RefCounted
 # 瞬态拖拽状态的编排，故移至此文件属纯搬迁，行为零变更。
 #
 # Why a canvas delegate (not a free-standing pure module) / 为何是画布委托（而非独立纯模块）：
-# the grip/vertex edits mutate gpGraph.gpShapes IN PLACE and emit gpGraphChanged, and they share
-# the canvas's transient drag state (_gpGripDrag / _gpShapeDragIdx / _gpShapeDragStart /
-# _gpShapeDragOrigPts). Keeping the canvas as the single state owner and delegating the verb logic
-# here preserves the exact ordering of emit/redraw/status that the original code relied on.
-# 锚点 / 顶点编辑就地改写 gpGraph.gpShapes 并发出 gpGraphChanged，且共用画布的瞬态拖拽状态
-# （_gpGripDrag / _gpShapeDragIdx / _gpShapeDragStart / _gpShapeDragOrigPts）。让画布作为唯一状态
-# 持有者、此处只委派「动词逻辑」，可精确保留原代码所依赖的 emit/重绘/状态 顺序。
+# grip/vertex edits mutate gpGraph.gpShapes IN PLACE and emit gpGraphChanged, so they still need
+# the canvas to redraw and broadcast. M3 change: the transient drag state itself now lives HERE
+# rather than on the canvas. It was previously shared by four parties (select tool starts it, grip
+# tool executes it, the canvas dispatches on it, and this editor consumes it) — the one party that
+# actually USES the data is this editor, so it now owns it and exposes start/move/end/query instead.
+# 锚点 / 顶点编辑就地改写 gpGraph.gpShapes 并发出 gpGraphChanged，故仍需画布重绘与广播。
+# M3 变更：瞬态拖拽状态本身改由本类持有而非画布。此前它由四方共享（选择工具发起、抓取工具执行、
+# 画布据此分派、本编辑器消费）——真正「使用」这些数据的一方是本编辑器，故由它持有，并对外暴露
+# 开始 / 移动 / 结束 / 查询 四类操作，而非把内部字段敞开。
 
-# The canvas we edit on (also the owner of the transient drag state we read/write).
-# 被编辑的画布（也是我们所读写瞬态拖拽状态的持有者）。
+# The canvas we edit on. / 被编辑的画布。
 var gpCv: GPCanvas2D
+
+# ---- Transient drag state owned by this editor (M3) ----
+# ---- 本编辑器自持的瞬态拖拽状态（M3）----
+# Active grip (handle) drag: {"shape": int, "role": int, "idx": int}; empty dict = none.
+# 进行中的锚点（手柄）拖拽：{"shape": 下标, "role": 角色, "idx": 顶点/角点序号}；空字典表示无。
+var _gpGrip: Dictionary = {}
+
+# Index of the annotation shape being moved as a whole (-1 = none).
+# 正被整体移动的注释图形下标（-1 表示无）。
+var _gpShapeIdx: int = -1
+
+# World position where the whole-shape move started (to measure the drag delta).
+# 整体移动开始时的世界坐标（用于测量拖拽位移）。
+var _gpShapeStart: Vector2 = Vector2.ZERO
+
+# Snapshot of the dragged shape's points at drag start, so the move replays rigidly with no drift.
+# 拖拽开始时图形点位的快照，使整体移动无漂移地重放。
+var _gpShapeOrigPts: PackedVector2Array = PackedVector2Array()
 
 
 func _init(gpCanvas: GPCanvas2D) -> void:
 	gpCv = gpCanvas
+
+
+# ---- Drag lifecycle: the port this editor exposes to tools and the canvas (M3) ----
+# ---- 拖拽生命周期：本编辑器对工具与画布暴露的端口（M3）----
+# True while either a grip drag or a whole-shape move is in flight.
+# 锚点拖拽或整图形移动正在进行时返回真。
+func gpIsDragging() -> bool:
+	return (not _gpGrip.is_empty()) or _gpShapeIdx >= 0
+
+
+func gpHasGripDrag() -> bool:
+	return not _gpGrip.is_empty()
+
+
+func gpHasShapeDrag() -> bool:
+	return _gpShapeIdx >= 0
+
+
+# Abandon any in-flight drag without applying anything (ESC / cancel path).
+# 放弃进行中的拖拽，不应用任何改动（ESC / 取消路径）。
+func gpEndDrag() -> void:
+	_gpGrip = {}
+	_gpShapeIdx = -1
+	_gpShapeOrigPts = PackedVector2Array()
 
 
 # Return the grip under the world point (within screen-tolerant distance), or an empty dict.
@@ -46,39 +89,64 @@ func gpHitGrip(gpWorld: Vector2, gpShapeIdx: int) -> Dictionary:
 # Begin dragging the given grip (clears any whole-shape move so only the grip acts).
 # 开始拖拽给定锚点（清除整图形移动，使仅锚点生效）。
 func gpStartGripDrag(gpGrip: Dictionary) -> void:
-	gpCv._gpGripDrag = gpGrip.duplicate()
-	gpCv._gpShapeDragIdx = -1
+	_gpGrip = gpGrip.duplicate()
+	_gpShapeIdx = -1
 	gpCv.queue_redraw()
+
+
+# Begin moving a whole annotation shape, snapshotting its geometry for a rigid replay (M3).
+# 开始整体移动一枚注释图形，快照其几何以便无漂移重放（M3）。
+# [param gpShapeIdx] index into gpGraph.gpShapes / gpGraph.gpShapes 中的下标。
+# [param gpWorld] world position of the press, used to measure the delta / 按下处的世界坐标，用于测量位移。
+func gpStartShapeDrag(gpShapeIdx: int, gpWorld: Vector2) -> void:
+	gpEndDrag()
+	if gpShapeIdx < 0 or gpShapeIdx >= gpCv.gpGraph.gpShapes.size():
+		return
+	_gpShapeIdx = gpShapeIdx
+	_gpShapeStart = gpWorld
+	_gpShapeOrigPts = gpCv.gpGraph.gpShapes[gpShapeIdx].gpPoints.duplicate()
+
+
+# Finish a grip drag / whole-shape move. Geometry was already mutated live during the drag, so
+# there is nothing to apply here — only the transient state is released (M3).
+# 结束锚点拖拽 / 整图形移动。几何已在拖拽过程中实时变更，故此处无需应用改动，只释放瞬态状态（M3）。
+func gpEndGripDrag() -> void:
+	_gpGrip = {}
+
+
+func gpEndShapeDrag() -> void:
+	_gpShapeIdx = -1
+	_gpShapeOrigPts = PackedVector2Array()
 
 
 # Live-update the shape geometry while a grip is being dragged.
 # 拖拽锚点期间实时更新图形几何。
 func gpOnGripMove(gpWorld: Vector2) -> void:
-	if gpCv._gpGripDrag.is_empty():
+	if _gpGrip.is_empty():
 		return
-	var gpIdx: int = int(gpCv._gpGripDrag["shape"])
+	var gpIdx: int = int(_gpGrip["shape"])
 	if gpIdx < 0 or gpIdx >= gpCv.gpGraph.gpShapes.size():
 		return
 	var gpS: GPShape = gpCv.gpGraph.gpShapes[gpIdx]
 	# Delegate the geometry mutation to the shared grip editor (same code as the symbol editor).
 	# 几何改写委托给共用的锚点编辑器（与符号编辑器同一份代码）。
-	GPShapeGripEditor.gpApplyGrip(gpS, gpCv._gpGripDrag, gpWorld)
+	GPShapeGripEditor.gpApplyGrip(gpS, _gpGrip, gpWorld)
 	gpCv.queue_redraw()
-	gpCv._gpEmitStatus()
+	gpCv.gpEmitStatus()
 
 
 # Live-update a whole-shape move by replaying from the start snapshot.
 # 由起始快照重放，实时更新整枚图形的移动。
 func gpOnShapeMove(gpWorld: Vector2) -> void:
-	if gpCv._gpShapeDragIdx < 0 or gpCv._gpShapeDragIdx >= gpCv.gpGraph.gpShapes.size():
+	if _gpShapeIdx < 0 or _gpShapeIdx >= gpCv.gpGraph.gpShapes.size():
 		return
-	var gpDelta: Vector2 = gpWorld - gpCv._gpShapeDragStart
-	var gpS: GPShape = gpCv.gpGraph.gpShapes[gpCv._gpShapeDragIdx]
-	gpS.gpPoints = GPGeometry.gpShiftPoints(gpCv._gpShapeDragOrigPts, gpDelta)
+	var gpDelta: Vector2 = gpWorld - _gpShapeStart
+	var gpS: GPShape = gpCv.gpGraph.gpShapes[_gpShapeIdx]
+	gpS.gpPoints = GPGeometry.gpShiftPoints(_gpShapeOrigPts, gpDelta)
 	# Circle radius is independent of translation (stored separately in gpRadius).
 	# 圆的半径与平移无关（单独存于 gpRadius）。
 	gpCv.queue_redraw()
-	gpCv._gpEmitStatus()
+	gpCv.gpEmitStatus()
 
 
 # The single selected annotation shape, or null when zero / many are selected. Returns null unless
@@ -112,7 +180,7 @@ func gpCollapseHandles(gpShape: GPShape, gpGi: int) -> void:
 	gpShape.gpHandles[gpGi] = PackedVector2Array([Vector2.ZERO, Vector2.ZERO])
 	gpCv.queue_redraw()
 	gpCv.gpGraphChanged.emit()
-	gpCv._gpEmitStatus()
+	gpCv.gpEmitStatus()
 
 
 # Pull BOTH Bézier handles out of vertex gpGi (AutoCAD-style "convert to smooth node"). The handles
@@ -148,7 +216,7 @@ func gpPullHandles(gpShape: GPShape, gpGi: int) -> void:
 	gpShape.gpSetHandle(gpGi, 1, gpHere + gpDir * gpK)
 	gpCv.queue_redraw()
 	gpCv.gpGraphChanged.emit()
-	gpCv._gpEmitStatus()
+	gpCv.gpEmitStatus()
 
 
 # Delete vertex gpGi of the selected polyline. When only two vertices remain, deleting one would
@@ -158,12 +226,12 @@ func gpRemoveVertex(gpShape: GPShape, gpGi: int) -> void:
 	if gpShape == null or (gpShape.gpKind != GPShape.GPKind.GP_POLYLINE and gpShape.gpKind != GPShape.GPKind.GP_LINE):
 		return
 	if gpShape.gpPoints.size() <= 2:
-		gpCv._gpDeleteSelected()
+		gpCv.gpRequestDeleteSelected()
 		return
 	gpShape.gpRemoveVertex(gpGi)
 	gpCv.queue_redraw()
 	gpCv.gpGraphChanged.emit()
-	gpCv._gpEmitStatus()
+	gpCv.gpEmitStatus()
 
 
 # Double-click a grip of the single selected annotation polyline: toggle that vertex between a

@@ -20,6 +20,14 @@ var gpCv: GPCanvas2D
 # 跨工具共享的交互状态（模式 / 选择集 / 相机 / 待放置 / id 计数器）。
 var gpState: GPCanvasInteractState
 
+# Annotation-shape editing collaborator (M3). Read lazily from the canvas: the context is built
+# during _ready(), so a snapshot taken in _init() would silently freeze if the delegate were ever
+# created afterwards. Reaching the collaborator through the context keeps tools off gpCv.* internals.
+# 注释图形编辑协作者（M3）。惰性取自画布：上下文在 _ready() 中构造，若委托将来改为之后创建，
+# 在 _init() 里取快照会静默冻结。经上下文取协作者可让工具远离 gpCv.* 内部实现。
+var gpAnno: GPAnnotationEditor:
+	get: return gpCv.gpAnno
+
 func _init(gpCanvas: GPCanvas2D) -> void:
 	gpCv = gpCanvas
-	gpState = gpCanvas._gpState
+	gpState = gpCanvas.gpState
