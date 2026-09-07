@@ -12,11 +12,15 @@ extends RefCounted
 # Why a delegate instead of free functions / why the canvas reference / 为何用委托而非自由函数、为何持有画布引用：
 # Godot's draw_* family is a method on CanvasItem, so the only natural home for the drawing is
 # "something that has a CanvasItem". Passing the canvas in and calling gpCv.draw_* keeps the
-# coordinate transform (gpScreenFromWorld) and the live drag state (_gpDrawActive / _gpPolyPts)
-# in one place, so the split is a pure relocation with no behaviour change.
+# coordinate transform (gpScreenFromWorld) and the live marquee state (gpMarq) in one place, so
+# the split is a pure relocation with no behaviour change.
 # Godot 的 draw_* 是 CanvasItem 的方法，绘制唯一自然的归宿是「持有 CanvasItem 的对象」。把画布传入
-# 并调用 gpCv.draw_*，使坐标变换（gpScreenFromWorld）与实时拖拽状态（_gpDrawActive / _gpPolyPts）
-# 仍在一处，拆分即纯搬迁，行为零变更。
+# 并调用 gpCv.draw_*，使坐标变换（gpScreenFromWorld）与实时框选状态（gpMarq）仍在一处，拆分即纯
+# 搬迁，行为零变更。
+# M3: the draw-tool visuals (rubber band / polyline preview) no longer live here — see
+# GPDrawShapeTool.gpDrawOverlay. This file now paints only what is genuinely shared.
+# M3：绘图工具的视觉（橡皮筋 / 折线预览）不再位于此处——见 GPDrawShapeTool.gpDrawOverlay。
+# 本文件现在只绘制真正共享的内容。
 
 # Mirror of GPCanvas2D.GPMode so the literal GPMode.GP_* spellings keep compiling here.
 # 镜像 GPCanvas2D.GPMode，使本文件内的 GPMode.GP_* 写法继续编译。
@@ -48,12 +52,12 @@ func gpDraw() -> void:
 # 绘制橡皮筋框选框。CAD 惯例：左→右为窗口模式（仅选中完全包含的图元，蓝色）；
 # 右→左为交叉模式（碰到即选中，绿色）。
 func _gpDrawMarquee() -> void:
-	if not gpCv._gpMarq.gpActive:
+	if not gpCv.gpMarq.gpActive:
 		return
-	var gpRect: Rect2 = gpCv._gpMarq.gpScreenRect()
+	var gpRect: Rect2 = gpCv.gpMarq.gpScreenRect()
 	# Direction decides both the colour here and the hit rule on commit — one rule, one owner.
 	# 拖动方向同时决定此处颜色与提交时的命中规则 —— 一条规则、一个持有者。
-	var gpCol: Color = gpCv._gpMarq.gpColor()
+	var gpCol: Color = gpCv.gpMarq.gpColor()
 	gpCv.draw_rect(gpRect, Color(gpCol.r, gpCol.g, gpCol.b, 0.15), true)
 	gpCv.draw_rect(gpRect, gpCol, false, 1.0)
 
@@ -86,7 +90,7 @@ func _gpDrawGrid() -> void:
 func _gpDrawConnectPreview() -> void:
 	if gpCv.gpMode != GPMode.GP_CONNECT or gpCv.gpConnectFrom == "":
 		return
-	var gpC: Vector2 = gpCv._gpNodeCenter(gpCv.gpConnectFrom)
+	var gpC: Vector2 = gpCv.gpNodeCenter(gpCv.gpConnectFrom)
 	if gpC == Vector2.INF:
 		return
 	gpCv.draw_line(gpCv.gpScreenFromWorld(gpC), gpCv.get_local_mouse_position(), Color(0.30, 1.0, 0.40), 1.5)
@@ -133,29 +137,11 @@ func _gpDrawShapes() -> void:
 					gpCv.draw_line(gpCv.gpScreenFromWorld(gpOwner), gpP, Color(gpSelCol, 0.5), 1.0)
 				gpCv.draw_rect(gpRect, Color(1.0, 1.0, 1.0), true)
 				gpCv.draw_rect(gpRect, Color(0.20, 0.50, 1.0), false, 1.5)
-	# In-progress rubber band for line / circle / rect.
-	# 直线/圆/矩形的进行中橡皮筋。
-	if gpCv._gpDrawActive:
-		var gpA: Vector2 = gpCv.gpScreenFromWorld(gpCv._gpDrawFrom)
-		var gpB: Vector2 = gpCv.gpScreenFromWorld(gpCv._gpDrawTo)
-		match gpCv.gpMode:
-			GPMode.GP_DRAW_LINE:
-				gpCv.draw_line(gpA, gpB, Color(1.0, 0.82, 0.25), 1.5)
-			GPMode.GP_DRAW_CIRCLE:
-				gpCv.draw_circle(gpA, gpA.distance_to(gpB), Color(1.0, 0.82, 0.25, 0.7), false, 1.0)
-			GPMode.GP_DRAW_RECT:
-				gpCv.draw_rect(Rect2(gpA, gpB - gpA).abs(), Color(1.0, 0.82, 0.25, 0.7), false, 1.0)
-	# In-progress polyline: committed vertices + rubber band to the cursor.
-	# 进行中的折线：已落定顶点 + 到光标的橡皮筋。
-	if not gpCv._gpPolyPts.is_empty():
-		var gpV: PackedVector2Array = PackedVector2Array()
-		for gpP in gpCv._gpPolyPts:
-			gpV.append(gpCv.gpScreenFromWorld(gpP))
-		if gpV.size() >= 2:
-			gpCv.draw_polyline(gpV, Color(1.0, 0.82, 0.25), 1.5)
-		gpCv.draw_line(gpCv.gpScreenFromWorld(gpCv._gpPolyPts.back()), gpCv.get_local_mouse_position(), Color(1.0, 0.82, 0.25, 0.6), 1.0)
-		for gpP in gpCv._gpPolyPts:
-			gpCv.draw_circle(gpCv.gpScreenFromWorld(gpP), 3.0, Color(1.0, 0.82, 0.25))
+	# M3: the in-progress rubber band (line / circle / rect) and the in-progress polyline preview
+	# moved to GPDrawShapeTool.gpDrawOverlay — they are that tool's own state, so it paints them.
+	# The canvas calls the hook right after gpDraw(), so the z-order is unchanged.
+	# M3：进行中的橡皮筋（直线/圆/矩形）与折线预览已迁至 GPDrawShapeTool.gpDrawOverlay——它们属于
+	# 该工具自己的状态，故由其绘制。画布在 gpDraw() 之后立即调用该钩子，层序不变。
 
 
 # Draw one annotation shape in screen space (world coords transformed by the camera).

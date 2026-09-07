@@ -17,11 +17,11 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 	# Leave the label empty so the canvas renders the localized type name and it switches with the
 	# UI language. The user can still type a custom label.
 	# 标签留空，使画布显示本地化的类型名并随界面语言切换；用户仍可在属性面板填自定义标签。
-	var gpNid: String = gpCv._gpState.gpIds.gpNext("n")
+	var gpNid: String = gpCtx.gpState.gpIds.gpNext("n")
 	gpCv.gpGraph.gpAddNode(gpCv.gpGraph.gpNewNode(gpNid, gpCv.gpPendingDef.gpId, "", gpWorld, {}))
 	gpCv.gpPendingDef = null
-	gpCv._gpSetSelection([gpNid])
+	gpCv.gpSetSelection([gpNid])
 	gpCv.queue_redraw()
 	gpCv.gpGraphChanged.emit()
-	gpCv._gpEmitStatus()
+	gpCv.gpEmitStatus()
 	return true

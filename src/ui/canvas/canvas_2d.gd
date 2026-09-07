@@ -130,6 +130,13 @@ var gpBinder: GPGraphBinder = null
 # 把它们归拢到一个 RefCounted 之下，正是 P2 能把「画布状态」交给工具对象而不泄漏本 Control 的前提。
 var _gpState: GPCanvasInteractState = GPCanvasInteractState.new()
 
+# Public port: the shared interaction state (mode / selection / camera / marquee / id counter).
+# Exposed read-only so delegates and tools reach it without touching this private field.
+# 公开端口：共享交互状态（模式 / 选择 / 相机 / 框选 / id 计数器）。只读暴露，使委托与工具
+# 无需触碰本私有字段即可取用。
+var gpState: GPCanvasInteractState:
+	get: return _gpState
+
 # Drawing delegate (P2 split): owns the background overlay paint, reads live state from this
 # canvas. Created in _ready() once the canvas is a valid CanvasItem.
 # 绘制委托（P2 拆分）：持有背景覆盖层绘制逻辑，从本画布读取实时状态。在 _ready() 中创建。
@@ -139,7 +146,11 @@ var _gpOverlay: GPCanvasOverlay = null
 # "promote shapes to symbol". Created in _ready() with this canvas as its state owner.
 # 注释图形编辑委托（P2 拆分）：锚点 / 整图形 / 顶点 / 贝塞尔编辑与「提升为图元」。在 _ready() 中
 # 以本画布作为状态持有者创建。
-var _gpAnno: GPAnnotationEditor = null
+# M3: public because it is a shared collaborator — tools (via gpCtx.gpAnno) and the context menu
+# both drive it. Exposing the collaborator beats exposing the canvas internals it touches.
+# M3：公开，因为它是共享协作者——工具（经 gpCtx.gpAnno）与右键菜单都要驱动它。暴露协作者优于
+# 暴露它所触碰的画布内部实现。
+var gpAnno: GPAnnotationEditor = null
 
 # Right-click context-menu delegate (P2 split): hit-test / menu build / action dispatch, plus the
 # menu's hit state (_gpCtxHit / _gpCtxVertex, now owned by GPCanvasContextMenu). Created in _ready()
@@ -152,7 +163,7 @@ var _gpCtx: GPCanvasContextMenu = null
 # through _gpRegistry by GPMode. Each tool reads/writes live canvas state via gpCtx.gpCv; the canvas
 # keeps all transient drag state + orchestration. See docs/架构优化方案 §5.
 # 画布交互工具（P2 拆分）：每种交互模式一个 RefCounted 委托，经 _gpRegistry 按 GPMode 分派。
-# 各工具经 gpCtx.gpCv 读写画布实时状态；画布保留全部瞬态拖拽状态与编排逻辑。见 docs/架构优化方案 §5。
+# 各工具经 gpCtx.gpCv 读写画布实时状态；瞬态拖拽状态现由工具自持，画布仅保留组合编排逻辑。见 docs/架构优化方案 §5。
 var _gpToolCtx: GPCanvasToolContext = null
 var _gpRegistry: GPCanvasToolRegistry = null
 var _gpSelectTool: GPSelectTool = null
@@ -251,18 +262,8 @@ var gpConnectFrom: String = ""
 # commit path can never disagree about which one they applied.
 # 橡皮筋框选（进行中标记、屏幕空间端点、追加标记）经状态对象由 GPCanvasMarquee 持有；
 # 窗口 / 交叉规则也在其中，使绘制路径与提交路径永不会在「应用了哪条规则」上分歧。
-var _gpMarq: GPCanvasMarquee:
+var gpMarq: GPCanvasMarquee:
 	get: return _gpState.gpMarquee
-
-# World position where the current multi-node drag started.
-# 当前多节点拖拽开始时的世界坐标。
-var _gpDragStartWorld: Vector2 = Vector2.ZERO
-
-# Original world position of every dragged node, captured once at drag start. Replaying from
-# these (instead of accumulating per-frame deltas) keeps the group from drifting.
-# 每个被拖拽节点的原始世界坐标，在拖拽开始时一次性记下。由这些原始值重放（而非逐帧累加
-# 增量）可避免整组漂移。
-var _gpDragOrigins: Dictionary = {}
 
 
 # Whether the user is currently middle-button panning.
@@ -277,54 +278,32 @@ var _gpPanStart: Vector2 = Vector2.ZERO
 # 开始平移时的视图偏移。
 var _gpPanOffsetStart: Vector2 = Vector2.ZERO
 
-# Id of the node being dragged.
-# 正在被拖拽的节点 id。
-var _gpDragId: String = ""
-
-# Offset from node center to mouse when dragging started.
-# 开始拖拽时节点中心到鼠标的偏移。
-var _gpDragOffset: Vector2 = Vector2.ZERO
 
 # Indices of the currently selected annotation shapes (mirror of gpSelection for the node layer).
 # 当前选中注释图形的下标（与图元层的 gpSelection 对应的镜像）。
 var gpShapeSel: Array[int] = []
 
-# Anchor point (world) of the in-progress line / circle / rect drag.
-# 进行中的直线/圆/矩形拖拽的锚点（世界坐标）。
-var _gpDrawFrom: Vector2 = Vector2.ZERO
-
-# Live cursor (world) of the in-progress shape drag, for the rubber-band preview.
-# 进行中图形拖拽的实时光标（世界坐标），用于橡皮筋预览。
-var _gpDrawTo: Vector2 = Vector2.ZERO
-
-# Whether a line / circle / rect drag is active. Polyline uses _gpPolyPts instead.
-# 直线/圆/矩形拖拽是否进行中。折线用 _gpPolyPts 而非此标记。
-var _gpDrawActive: bool = false
-
-# Committed-so-far polyline vertices (world) for the polyline drawing tool.
-# 折线绘图工具已落定的顶点（世界坐标）。
-var _gpPolyPts: Array[Vector2] = []
+# M3: the drawing transient state (_gpDrawFrom / _gpDrawTo / _gpDrawActive / _gpPolyPts) and the
+# three drawing verbs (_gpOnDrawDown / _gpCommitDraw / _gpFinishPolyline) moved into GPDrawShapeTool,
+# which now also paints its own rubber band via the gpDrawOverlay hook (declared in P2, never wired).
+# M3：绘图瞬态状态（_gpDrawFrom / _gpDrawTo / _gpDrawActive / _gpPolyPts）与三个绘图动作
+# （_gpOnDrawDown / _gpCommitDraw / _gpFinishPolyline）已迁入 GPDrawShapeTool；该工具现亦经
+# gpDrawOverlay 钩子自绘橡皮筋（此钩子 P2 即已声明，但从未接线）。
 
 # Last known mouse position in world coordinates.
 # 最近一次鼠标在世界坐标系中的位置。
 var _gpLastMouseWorld: Vector2 = Vector2.ZERO
 
-# Index of the annotation shape currently being moved as a whole (SELECT mode, -1 = none).
-# 当前正被整体拖动的注释图形下标（选择模式，-1 表示无）。
-var _gpShapeDragIdx: int = -1
-
-# World position where a whole-shape move started (to measure the drag delta).
-# 整体拖动开始时的世界坐标（用于测量拖拽位移）。
-var _gpShapeDragStart: Vector2 = Vector2.ZERO
-
-# Snapshot of the dragged shape's points/radius at drag start, so the move replays rigidly.
-# 拖拽开始时图形点位 / 半径的快照，使整体移动无漂移地重放。
-var _gpShapeDragOrigPts: PackedVector2Array = PackedVector2Array()
-var _gpShapeDragOrigR: float = 0.0
-
-# Active grip (handle) drag: {"shape": int, "role": int, "idx": int}; empty dict = none.
-# 进行中的锚点（手柄）拖拽：{"shape": 下标, "role": 角色, "idx": 顶点/角点序号}；空字典表示无。
-var _gpGripDrag: Dictionary = {}
+# M3: the annotation grip / whole-shape drag state (_gpShapeDragIdx / _gpShapeDragStart /
+# _gpShapeDragOrigPts / _gpShapeDragOrigR / _gpGripDrag) moved OUT of the canvas into
+# GPAnnotationEditor, which is the only party that consumes it. It is reached through the
+# gpIsDragging / gpStartShapeDrag / gpEnd*Drag port declared there.
+# M3：注释锚点 / 整图形拖拽状态（_gpShapeDragIdx / _gpShapeDragStart / _gpShapeDragOrigPts /
+# _gpShapeDragOrigR / _gpGripDrag）已迁出画布，改由 GPAnnotationEditor 持有——它是唯一消费该
+# 状态的一方。外部经该文件声明的 gpIsDragging / gpStartShapeDrag / gpEnd*Drag 端口访问。
+# Note: _gpShapeDragOrigR was write-only (set and cleared, never read) — circle radius does not
+# change under translation — so it was dropped rather than moved.
+# 注：_gpShapeDragOrigR 只写不读（平移不改变圆半径），故删除而非搬迁。
 
 
 
@@ -362,7 +341,7 @@ func _ready() -> void:
 	_gpOverlay = GPCanvasOverlay.new(self)
 	# Create the annotation-shape editing delegate (P2 split), owner = this canvas.
 	# 创建注释图形编辑委托（P2 拆分），状态持有者为本画布。
-	_gpAnno = GPAnnotationEditor.new(self)
+	gpAnno = GPAnnotationEditor.new(self)
 	# Create the right-click context-menu delegate (P2 split), owner = this canvas.
 	# 创建右键上下文菜单委托（P2 拆分），状态持有者为本画布。
 	_gpCtx = GPCanvasContextMenu.new(self)
@@ -454,7 +433,7 @@ func _gpOnSymbolStyleChanged() -> void:
 
 # Build and emit a status snapshot for the status bar.
 # 构造并发送状态栏快照。
-func _gpEmitStatus() -> void:
+func gpEmitStatus() -> void:
 	var gpInfo: Dictionary = {
 		"selection": gpSelectedId,
 		"count": gpSelection.size(),
@@ -509,6 +488,12 @@ func _draw() -> void:
 	# same draw order, so the visual result is byte-for-byte identical.
 	# 背景覆盖层绘制委托给 GPCanvasOverlay（P2 拆分）——同一套数学、同一绘制顺序，观感完全一致。
 	_gpOverlay.gpDraw()
+	# M3: the active tool paints its OWN transient visuals (draw rubber band, in-progress polyline)
+	# after the shared overlay, preserving the previous z-order — the band was already the last
+	# thing GPCanvasOverlay drew. The hook existed since P2 but was never wired.
+	# M3：活动工具在共享覆盖层之后绘制「自己的」瞬态视觉（绘图橡皮筋、进行中的折线），沿用原有
+	# 层序——橡皮筋此前本就是 GPCanvasOverlay 最后绘制的内容。此钩子自 P2 起即已声明，但从未接线。
+	_gpActiveTool().gpDrawOverlay(self)
 
 
 # The background overlay paint (grid / shapes / grips / marquee / connect-preview) now lives in
@@ -540,7 +525,7 @@ func _gpRefreshSymbols() -> void:
 # ============================ 查找 ============================
 # Find the world center of a node by id.
 # 按 id 查找节点的世界中心。
-func _gpNodeCenter(gpId: String) -> Vector2:
+func gpNodeCenter(gpId: String) -> Vector2:
 	for gpN in gpGraph.gpNodes:
 		if gpN.gpInstanceId == gpId:
 			return gpN.gpPosition
@@ -549,7 +534,7 @@ func _gpNodeCenter(gpId: String) -> Vector2:
 
 # World-space bounding rectangle of a node, from its definition's nominal envelope.
 # 节点在世界坐标系中的包围矩形，取自其定义的标称包络。
-func _gpNodeRect(gpId: String) -> Rect2:
+func gpNodeRect(gpId: String) -> Rect2:
 	if gpGraph == null or gpBinder == null:
 		return Rect2()
 	for gpN in gpGraph.gpNodes:
@@ -562,12 +547,12 @@ func _gpNodeRect(gpId: String) -> Rect2:
 
 # Hit-test: return the id of the topmost node under the given world point.
 # 命中测试：返回指定世界坐标点下最上层节点的 id。
-func _gpHitTest(gpWorld: Vector2) -> String:
+func gpHitTest(gpWorld: Vector2) -> String:
 	if gpGraph == null:
 		return ""
 	var gpBest: String = ""
 	for gpN in gpGraph.gpNodes:
-		if _gpNodeRect(gpN.gpInstanceId).has_point(gpWorld):
+		if gpNodeRect(gpN.gpInstanceId).has_point(gpWorld):
 			gpBest = gpN.gpInstanceId
 	return gpBest
 
@@ -648,25 +633,19 @@ func _gui_input(gpEvent: InputEvent) -> void:
 			gpViewOffset = _gpPanOffsetStart + (gpMotion.position - _gpPanStart)
 			_gpApplyCamera()
 			queue_redraw()
-			_gpEmitStatus()
+			gpEmitStatus()
 			accept_event()
 			return
 		# Marquee in progress: track the rubber band.
 		# 正在框选：跟踪橡皮筋。
-		if _gpMarq.gpActive:
-			_gpMarq.gpUpdate(gpMotion.position)
+		if gpMarq.gpActive:
+			gpMarq.gpUpdate(gpMotion.position)
 			queue_redraw()
-			accept_event()
-			return
-		# Dragging the whole selection.
-		# 正在拖拽整个选择集。
-		if _gpDragId != "":
-			_gpOnDragMove(gpMotion.position)
 			accept_event()
 			return
 		# Grip / whole-shape drag is owned by GPGripTool (P2 split).
 		# 锚点 / 整图形拖拽由 GPGripTool 负责（P2 拆分）。
-		if not _gpGripDrag.is_empty() or _gpShapeDragIdx >= 0:
+		if gpAnno.gpIsDragging():
 			_gpGripTool.gpOnMove(gpWorldFromScreen(gpMotion.position))
 			accept_event()
 			return
@@ -698,9 +677,9 @@ func _gpOnLeftDown(gpScreen: Vector2, gpShift: bool, gpDouble: bool) -> void:
 
 # Return the interaction tool for the current dispatch target: a pending palette placement wins
 # over the mode; otherwise the registry maps GPMode -> tool (CONNECT shares the select tool). The
-# canvas keeps all transient drag state; tools read/write it through gpCtx.gpCv.
+# canvas exposes only public ports now that transient drag state lives in each tool.
 # 返回当前分派目标的交互工具：调色板待放置优先于模式；否则注册表按 GPMode 映射（CONNECT 复用
-# 选择工具）。画布保留全部瞬态拖拽状态，工具经 gpCtx.gpCv 读写。
+# 选择工具）。瞬态拖拽状态现由各工具自持，画布仅经 gpCtx.gpCv 暴露公开端口。
 func _gpActiveTool() -> GPCanvasTool:
 	if gpPendingDef != null:
 		return _gpPlaceTool
@@ -710,7 +689,7 @@ func _gpOnLeftUp(gpScreen: Vector2) -> void:
 	var gpWorld: Vector2 = gpWorldFromScreen(gpScreen)
 	# Grip / whole-shape drag belongs to GPGripTool (P2 split).
 	# 锚点 / 整图形拖拽由 GPGripTool 负责（P2 拆分）。
-	if not _gpGripDrag.is_empty() or _gpShapeDragIdx >= 0:
+	if gpAnno.gpIsDragging():
 		_gpGripTool.gpOnRelease(gpWorld)
 		return
 	# Everything else (draw commit / marquee / group drag) is dispatched to the active tool.
@@ -725,71 +704,16 @@ func _gpIsDrawMode() -> bool:
 	return gpMode >= GPMode.GP_DRAW_LINE and gpMode <= GPMode.GP_DRAW_ARC
 
 
-# Press handler for the drawing tools. Two-point tools (line / circle / rect) anchor on press
-# and commit on release; the polyline appends a vertex per click and finishes on double click.
-# 绘图工具的按下处理。两点工具（直线/圆/矩形）按下锚定、松开提交；折线每次点击追加一个顶点，
-# 双击结束。
-func _gpOnDrawDown(gpWorld: Vector2, gpDouble: bool) -> void:
-	match gpMode:
-		GPMode.GP_DRAW_LINE, GPMode.GP_DRAW_CIRCLE, GPMode.GP_DRAW_RECT, GPMode.GP_DRAW_ARC:
-			_gpDrawFrom = gpWorld
-			_gpDrawTo = gpWorld
-			_gpDrawActive = true
-			queue_redraw()
-		GPMode.GP_DRAW_POLYLINE:
-			if gpDouble:
-				_gpFinishPolyline()
-			else:
-				_gpPolyPts.append(gpWorld)
-				_gpDrawTo = gpWorld
-				queue_redraw()
+# M3: _gpOnDrawDown / _gpCommitDraw / _gpFinishPolyline moved into GPDrawShapeTool together with
+# the state they operate on. The canvas now reaches them only through the GPCanvasTool interface
+# (press / move / release / key / overlay) and the gpCancel() port used by the ESC path.
+# M3：_gpOnDrawDown / _gpCommitDraw / _gpFinishPolyline 已连同其所操作的状态迁入 GPDrawShapeTool。
+# 画布现仅经 GPCanvasTool 接口（按下 / 移动 / 释放 / 按键 / 覆盖层）与 ESC 路径所用的 gpCancel()
+# 端口访问它们。
 
 
-# Commit the in-progress line / circle / rect drag as a new annotation shape.
-# 把进行中的直线/圆/矩形拖拽提交为一枚新的注释图形。
-# Commit the in-progress line / circle / rect drag as a new annotation shape. Returns the new
-# shape's index (or -1 when the drag was too small to be a real primitive).
-# 把进行中的直线/圆/矩形拖拽提交为一枚新的注释图形。返回新图形的下标（过小则 -1）。
-func _gpCommitDraw(gpTo: Vector2) -> int:
-	var gpS: GPShape = null
-	match gpMode:
-		GPMode.GP_DRAW_LINE:
-			if _gpDrawFrom.distance_to(gpTo) >= 2.0:
-				gpS = GPShape.gpLine(_gpDrawFrom, gpTo)
-		GPMode.GP_DRAW_CIRCLE:
-			var gpR: float = _gpDrawFrom.distance_to(gpTo)
-			if gpR >= 2.0:
-				gpS = GPShape.gpCircle(_gpDrawFrom, gpR)
-		GPMode.GP_DRAW_RECT:
-			var gpR: Rect2 = Rect2(_gpDrawFrom, gpTo - _gpDrawFrom).abs()
-			if gpR.size.x >= 2.0 and gpR.size.y >= 2.0:
-				gpS = GPShape.gpRect(_gpDrawFrom, gpTo)
-		GPMode.GP_DRAW_ARC:
-			# A press-drag-release defines the arc's end points; the center is their midpoint so
-			# the result is the minor arc between them (half-circle when dragged straight).
-			# 按下拖到松开定义弧的起止点；圆心取二者中点，故结果为二者间的劣弧（竖直拖出为半圆）。
-			if _gpDrawFrom.distance_to(gpTo) >= 2.0:
-				var gpCtr: Vector2 = (_gpDrawFrom + gpTo) * 0.5
-				gpS = GPShape.gpArc(gpCtr, _gpDrawFrom, gpTo)
-	if gpS != null:
-		gpGraph.gpAddShape(gpS)
-		return gpGraph.gpShapes.size() - 1
-	return -1
 
 
-# Finish a polyline drag: commit it as a new annotation shape when it has 2+ vertices.
-# 结束折线拖拽：当顶点数 ≥ 2 时提交为一枚新的注释图形。
-func _gpFinishPolyline() -> void:
-	if _gpPolyPts.size() >= 2:
-		gpGraph.gpAddShape(GPShape.gpPolyline(_gpPolyPts.duplicate(), false))
-		var gpIdx: int = gpGraph.gpShapes.size() - 1
-		gpShapeSel = [gpIdx]
-		_gpSetSelection([])
-		gpSetMode(GPMode.GP_SELECT)
-		gpGraphChanged.emit()
-	_gpPolyPts.clear()
-	queue_redraw()
-	_gpEmitStatus()
 
 
 # _gpDrawShapes / _gpDrawOneShape moved to GPCanvasOverlay (P2 split). They are invoked through
@@ -800,7 +724,7 @@ func _gpFinishPolyline() -> void:
 
 # Hit-test: return the index of the topmost annotation shape under the world point, or -1.
 # 命中测试：返回世界坐标点下最上层注释图形的下标，未命中返回 -1。
-func _gpHitShape(gpWorld: Vector2) -> int:
+func gpHitShape(gpWorld: Vector2) -> int:
 	if gpGraph == null:
 		return -1
 	var gpTol: float = 6.0 / gpViewZoom
@@ -820,9 +744,9 @@ func _gpHitShapePrim(gpWorld: Vector2, gpS: GPShape, gpTol: float) -> bool:
 
 
 # Annotation-shape editing (grip / whole-shape / vertex / bezier / promote-to-symbol) now lives
-# in GPAnnotationEditor (P2 split). The canvas delegates to it via _gpAnno (created in _ready()).
+# in GPAnnotationEditor (P2 split). The canvas delegates to it via gpAnno (created in _ready()).
 # 注释图形编辑（锚点 / 整图形 / 顶点 / 贝塞尔 / 提升为图元）现位于 GPAnnotationEditor（P2 拆分），
-# 画布经 _ready() 中创建的 _gpAnno 委托给它。
+# 画布经 _ready() 中创建的 gpAnno 委托给它。
 
 
 
@@ -832,62 +756,12 @@ func _gpHitShapePrim(gpWorld: Vector2, gpS: GPShape, gpTol: float) -> bool:
 # Replaying from captured origins (instead of accumulating per-frame deltas) keeps the group
 # rigid and free of rounding drift.
 # 由记下的原始位置重放（而非逐帧累加增量）可保持整组刚性且无舍入漂移。
-func _gpOnDragMove(gpScreen: Vector2) -> void:
-	var gpDelta: Vector2 = gpWorldFromScreen(gpScreen) - _gpDragStartWorld
-	for gpId in _gpDragOrigins.keys():
-		var gpN: GPPIDNode = gpGraph.gpGetNode(gpId)
-		if gpN == null:
-			continue
-		gpN.gpPosition = (_gpDragOrigins[gpId] as Vector2) + gpDelta
-		var gpV: GPSymbolView = gpBinder.gpGetSymbolView(gpId)
-		if gpV != null:
-			gpV.gpUpdateTransform()
-	# Edge views depend on node positions, so redraw them too.
-	# 边视图依赖节点位置，因此也重绘它们。
-	_gpRefreshEdges()
-	queue_redraw()
-	_gpEmitStatus()
-
-
-# Apply the finished marquee to the selection set.
-# 把完成的框选应用到选择集。
-func _gpCommitMarquee() -> void:
-	var gpA: Vector2 = gpWorldFromScreen(_gpMarq.gpFrom)
-	var gpB: Vector2 = gpWorldFromScreen(_gpMarq.gpTo)
-	var gpRect: Rect2 = Rect2(gpA.min(gpB), (gpA - gpB).abs())
-	# Left -> right is WINDOW (enclose); right -> left is CROSSING (touch). Same predicate the
-	# drawer used for the band colour, so what you see is what you get.
-	# 左→右为窗口（完全包含）；右→左为交叉（碰到即可）。与绘制选框颜色所用的同一判据，所见即所得。
-	var gpWindow: bool = _gpMarq.gpIsWindow()
-	var gpPicked: Array[String] = []
-	for gpN in gpGraph.gpNodes:
-		if GPCanvasMarquee.gpPicks(gpWindow, gpRect, _gpNodeRect(gpN.gpInstanceId)):
-			gpPicked.append(gpN.gpInstanceId)
-	# Annotation shapes are selected by the same marquee (Window/Crossing) rule.
-	# 注释图形按相同的框选（包含/相交）规则被选中。
-	var gpShapePicked: Array[int] = []
-	for gpI in range(gpGraph.gpShapes.size()):
-		if GPCanvasMarquee.gpPicks(gpWindow, gpRect, gpGraph.gpShapes[gpI].gpBBox()):
-			gpShapePicked.append(gpI)
-	if _gpMarq.gpAdditive:
-		for gpId in gpPicked:
-			if not gpSelection.has(gpId):
-				gpSelection.append(gpId)
-		_gpSetSelection(gpSelection)
-		for gpI in gpShapePicked:
-			if not gpShapeSel.has(gpI):
-				gpShapeSel.append(gpI)
-	else:
-		_gpSetSelection(gpPicked)
-		gpShapeSel = gpShapePicked
-	queue_redraw()
-
 
 # ============================ selection ============================
 # ============================ 选择 ============================
 # Replace the selection set and keep gpSelectedId (the primary entry) in sync.
 # 替换选择集，并同步 gpSelectedId（主选项）。
-func _gpSetSelection(gpIds: Array[String]) -> void:
+func gpSetSelection(gpIds: Array[String]) -> void:
 	gpSelection = gpIds.duplicate()
 	gpSelectedId = gpSelection[0] if not gpSelection.is_empty() else ""
 	queue_redraw()
@@ -897,23 +771,23 @@ func _gpSetSelection(gpIds: Array[String]) -> void:
 	# M2：选择重新成为一等事件。过去它被塞进状态快照，由 main_window 比对 "selection"
 	# 字符串来决定是否刷新属性面板；订阅者现在直接响应本事件。
 	gpEvents.gpSelectionChanged.emit(gpSelection)
-	_gpEmitStatus()
+	gpEmitStatus()
 
 
 # Select every node on the sheet (Ctrl/Cmd+A).
 # 选中图纸上的所有节点（Ctrl/Cmd+A）。
-func _gpSelectAll() -> void:
+func gpRequestSelectAll() -> void:
 	if gpGraph == null:
 		return
 	var gpAll: Array[String] = []
 	for gpN in gpGraph.gpNodes:
 		gpAll.append(gpN.gpInstanceId)
-	_gpSetSelection(gpAll)
+	gpSetSelection(gpAll)
 
 
 # Delete every selected node together with the edges attached to it.
 # 删除所有选中节点及其附着的连线。
-func _gpDeleteSelected() -> void:
+func gpRequestDeleteSelected() -> void:
 	if gpGraph == null:
 		return
 	# Remove selected annotation shapes (descending index so earlier ones stay valid).
@@ -929,14 +803,14 @@ func _gpDeleteSelected() -> void:
 	if not gpSelection.is_empty():
 		for gpId in gpSelection:
 			gpGraph.gpRemoveNodeWithEdges(gpId)
-		_gpSetSelection([])
+		gpSetSelection([])
 	queue_redraw()
 	gpGraphChanged.emit()
 
 
 # Copy every selected node to a small offset, keeping its attributes and orientation.
 # 把所有选中节点复制到小幅偏移处，保留其属性与朝向。
-func _gpDuplicateSelected() -> void:
+func gpRequestDuplicateSelected() -> void:
 	if gpGraph == null or gpSelection.is_empty():
 		return
 	var gpCopies: Array[String] = []
@@ -955,7 +829,7 @@ func _gpDuplicateSelected() -> void:
 		gpCopies.append(gpNid)
 	# Select the copies, not the originals: the natural next action is to drag them into place.
 	# 选中副本而非原件：下一步自然是把它们拖到目标位置。
-	_gpSetSelection(gpCopies)
+	gpSetSelection(gpCopies)
 	queue_redraw()
 	gpGraphChanged.emit()
 
@@ -968,11 +842,11 @@ func _gpOnKey(gpKey: InputEventKey) -> bool:
 	var gpCtrl: bool = gpKey.ctrl_pressed or gpKey.meta_pressed
 	match gpKey.keycode:
 		KEY_DELETE, KEY_BACKSPACE:
-			_gpDeleteSelected()
+			gpRequestDeleteSelected()
 			return true
 		KEY_A:
 			if gpCtrl:
-				_gpSelectAll()
+				gpRequestSelectAll()
 				return true
 		KEY_ESCAPE:
 			_gpOnEscape()
@@ -989,28 +863,22 @@ func _gpOnEscape() -> void:
 		gpPendingDef = null
 		queue_redraw()
 		return
-	if _gpDrawActive:
-		_gpDrawActive = false
+	# M3: the draw tool owns its half-finished state, so cancelling is one port call instead of
+	# the canvas poking two private fields it no longer owns.
+	# M3：绘图工具持有自己的半成品状态，故取消只需一次端口调用，而非画布去改两个已不属于它的字段。
+	if _gpDrawTool.gpCancel():
 		queue_redraw()
 		return
-	if not _gpPolyPts.is_empty():
-		# Cancel the half-drawn polyline (do not commit); start fresh next click.
-		# 取消半截折线（不提交）；下次点击从头开始。
-		_gpPolyPts.clear()
+	if gpAnno.gpIsDragging():
+		gpAnno.gpEndDrag()
 		queue_redraw()
 		return
-	if not _gpGripDrag.is_empty():
-		_gpGripDrag.clear()
+	if gpMarq.gpActive:
+		gpMarq.gpCancel()
 		queue_redraw()
 		return
-	if _gpShapeDragIdx >= 0:
-		_gpShapeDragIdx = -1
-		_gpShapeDragOrigPts = PackedVector2Array()
-		_gpShapeDragOrigR = 0.0
-		queue_redraw()
-		return
-	if _gpMarq.gpActive:
-		_gpMarq.gpCancel()
+	if _gpSelectTool != null and _gpSelectTool.gpIsDragging():
+		_gpSelectTool.gpCancelDrag()
 		queue_redraw()
 		return
 	if gpConnectFrom != "":
@@ -1018,7 +886,7 @@ func _gpOnEscape() -> void:
 		queue_redraw()
 		return
 	if not gpSelection.is_empty() or not gpShapeSel.is_empty():
-		_gpSetSelection([])
+		gpSetSelection([])
 		gpShapeSel.clear()
 
 
@@ -1032,23 +900,23 @@ func _gpZoomAt(gpScreen: Vector2, gpFactor: float) -> void:
 		return
 	_gpApplyCamera()
 	queue_redraw()
-	_gpEmitStatus()
+	gpEmitStatus()
 
 
 # Public: delete the current selection together with its edges (menu 编辑 / 删除).
 # 公开：删除当前选择集及其关联的边（菜单「编辑 / 删除」）。
 func gpDeleteSelection() -> void:
-	_gpDeleteSelected()
+	gpRequestDeleteSelected()
 
 
 # Public: drop the selection set (used before swapping in another graph).
 # 公开：清空选择集（用于换入另一张图之前）。
 func gpClearSelection() -> void:
-	_gpMarq.gpCancel()
-	_gpDragId = ""
-	_gpDragOrigins.clear()
+	gpMarq.gpCancel()
+	if _gpSelectTool != null:
+		_gpSelectTool.gpCancelDrag()
 	gpShapeSel.clear()
-	_gpSetSelection([])
+	gpSetSelection([])
 
 
 # Public: zoom by a step centered on the canvas (menu "放大/缩小").
@@ -1057,12 +925,37 @@ func gpZoomStep(gpFactor: float) -> void:
 	_gpZoomAt(size / 2.0, gpFactor)
 
 
+# Public read port: a consistent snapshot of the canvas interaction state for tools / external
+# consumers. Replaces ad-hoc peeking at private fields with one stable call.
+# 公开只读端口：对外暴露画布交互状态的一致快照，取代对各私有字段的零散窥探。
+# M3: part of the canvas port API (gpRequest* / gpSnapshot).
+# M3：画布端口 API 的一部分（gpRequest* / gpSnapshot）。
+func gpSnapshot() -> Dictionary:
+	var gpSnap: Dictionary = {
+		"mode": gpMode,
+		"selection": gpSelection.duplicate(),
+		"shape_sel": gpShapeSel.duplicate(),
+		"connect_from": gpConnectFrom,
+		"view_offset": gpViewOffset,
+		"view_zoom": gpViewZoom,
+		"marquee_active": gpMarq.gpActive,
+		"has_pending_def": gpPendingDef != null,
+	}
+	if gpGraph != null:
+		gpSnap["node_count"] = gpGraph.gpNodes.size()
+		gpSnap["shape_count"] = gpGraph.gpShapes.size()
+	else:
+		gpSnap["node_count"] = 0
+		gpSnap["shape_count"] = 0
+	return gpSnap
+
+
 # Public: reset view to 100% centered (menu "适应窗口").
 # 公开：重置视图为 100% 居中（菜单「适应窗口」）。
 func gpResetView() -> void:
 	_gpResetView()
 	queue_redraw()
-	_gpEmitStatus()
+	gpEmitStatus()
 
 
 # Clean up cached references when the canvas leaves the tree.

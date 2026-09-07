@@ -66,26 +66,26 @@ func _init(gpCanvas: GPCanvas2D) -> void:
 func gpOnRightDown(gpScreen: Vector2) -> void:
 	var gpWorld: Vector2 = gpCv.gpWorldFromScreen(gpScreen)
 	_gpCtxVertex = -1
-	var gpHit: String = gpCv._gpHitTest(gpWorld)
+	var gpHit: String = gpCv.gpHitTest(gpWorld)
 	if gpHit != "":
 		if not gpCv.gpSelection.has(gpHit):
-			gpCv._gpSetSelection([gpHit])
+			gpCv.gpSetSelection([gpHit])
 		_gpCtxHit = gpHit
 		gpShowContextMenu(gpHit)
 		return
 	# No symbol hit: try an annotation shape instead.
 	# 未命中图元：改试注释图形。
-	var gpSh: int = gpCv._gpHitShape(gpWorld)
+	var gpSh: int = gpCv.gpHitShape(gpWorld)
 	if gpSh >= 0:
 		if not gpCv.gpShapeSel.has(gpSh):
 			gpCv.gpShapeSel = [gpSh]
-			gpCv._gpSetSelection([])
+			gpCv.gpSetSelection([])
 		# Remember which vertex of a single selected polyline was right-clicked so the menu can offer
 		# vertex-only actions (smooth / corner / delete this vertex). Right-click on the empty inside
 		# of the polyline leaves _gpCtxVertex = -1 (the shape-level menu shows instead).
 		# 记住「单选折线」被右键点击的是哪个顶点，使菜单能提供仅针对顶点的操作（平滑 / 拐角 / 删除此顶点）。
 		# 右键点在折线内部空白处时 _gpCtxVertex 保持 -1（显示图形级菜单）。
-		var gpVGrip: Dictionary = gpCv._gpAnno.gpHitPolylineVertexGrip(gpWorld)
+		var gpVGrip: Dictionary = gpCv.gpAnno.gpHitPolylineVertexGrip(gpWorld)
 		if not gpVGrip.is_empty():
 			_gpCtxVertex = int(gpVGrip["gi"])
 		_gpCtxHit = ""
@@ -109,8 +109,8 @@ func gpShowContextMenu(gpNodeHit: String) -> void:
 	# Vertex-only actions on the right-clicked vertex of a single selected polyline (Bézier handles).
 	# 对「单选折线」被右键顶点的顶点级操作（贝塞尔手柄）。镜像符号编辑器：平滑 = 拉手柄、拐角 = 收手柄。
 	if _gpCtxVertex >= 0:
-		var gpSelShape: GPShape = gpCv._gpAnno.gpSingleSelectedShape()
-		if gpSelShape != null and gpCv._gpAnno.gpVertexHasHandles(gpSelShape, _gpCtxVertex):
+		var gpSelShape: GPShape = gpCv.gpAnno.gpSingleSelectedShape()
+		if gpSelShape != null and gpCv.gpAnno.gpVertexHasHandles(gpSelShape, _gpCtxVertex):
 			gpMenu.add_item(I18n.gpTr("canvas.ctx_corner_vertex"), GP_CTX_CORNER_VERTEX)
 		else:
 			gpMenu.add_item(I18n.gpTr("canvas.ctx_smooth_vertex"), GP_CTX_SMOOTH_VERTEX)
@@ -165,41 +165,41 @@ func gpShowContextMenu(gpNodeHit: String) -> void:
 func gpOnContext(gpId: int) -> void:
 	match gpId:
 		GP_CTX_MAKE_SYMBOL:
-			gpCv._gpAnno.gpMakeSymbolFromShapes()
+			gpCv.gpAnno.gpMakeSymbolFromShapes()
 		GP_CTX_EDIT:
 			var gpN: GPPIDNode = gpCv.gpGraph.gpGetNode(_gpCtxHit) if gpCv.gpGraph != null else null
 			if gpN != null:
 				gpCv.gpSymbolEditRequested.emit(gpN.gpSymbolId)
 		GP_CTX_DUPLICATE:
-			gpCv._gpDuplicateSelected()
+			gpCv.gpRequestDuplicateSelected()
 		GP_CTX_DELETE:
-			gpCv._gpDeleteSelected()
+			gpCv.gpRequestDeleteSelected()
 		GP_CTX_SMOOTH_VERTEX:
 			# Pull handles out of the right-clicked vertex (make it smooth). Only valid when a single
 			# polyline is selected and that vertex was the right-click target.
 			# 拉出被右键顶点的两侧手柄（转为平滑）。仅当单选折线且该顶点正是右键目标时有效。
-			var gpSmoothShape: GPShape = gpCv._gpAnno.gpSingleSelectedShape()
+			var gpSmoothShape: GPShape = gpCv.gpAnno.gpSingleSelectedShape()
 			if gpSmoothShape != null and _gpCtxVertex >= 0:
-				gpCv._gpAnno.gpPullHandles(gpSmoothShape, _gpCtxVertex)
+				gpCv.gpAnno.gpPullHandles(gpSmoothShape, _gpCtxVertex)
 			_gpCtxVertex = -1
 		GP_CTX_CORNER_VERTEX:
 			# Collapse the handles of the right-clicked vertex back onto it (make it a corner).
 			# 收起被右键顶点的两侧手柄（转为拐角）。
-			var gpCornerShape: GPShape = gpCv._gpAnno.gpSingleSelectedShape()
+			var gpCornerShape: GPShape = gpCv.gpAnno.gpSingleSelectedShape()
 			if gpCornerShape != null and _gpCtxVertex >= 0:
-				gpCv._gpAnno.gpCollapseHandles(gpCornerShape, _gpCtxVertex)
+				gpCv.gpAnno.gpCollapseHandles(gpCornerShape, _gpCtxVertex)
 			_gpCtxVertex = -1
 		GP_CTX_DELETE_VERTEX:
 			# Remove just the right-clicked vertex, keeping the rest of the polyline connected.
 			# 仅删除被右键的顶点，折线其余部分保持连接。
-			var gpDelShape: GPShape = gpCv._gpAnno.gpSingleSelectedShape()
+			var gpDelShape: GPShape = gpCv.gpAnno.gpSingleSelectedShape()
 			if gpDelShape != null and _gpCtxVertex >= 0:
-				gpCv._gpAnno.gpRemoveVertex(gpDelShape, _gpCtxVertex)
+				gpCv.gpAnno.gpRemoveVertex(gpDelShape, _gpCtxVertex)
 			_gpCtxVertex = -1
 		GP_CTX_SELECT_ALL:
-			gpCv._gpSelectAll()
+			gpCv.gpRequestSelectAll()
 		GP_CTX_DESELECT:
-			gpCv._gpSetSelection([])
+			gpCv.gpSetSelection([])
 			gpCv.gpShapeSel.clear()
 			gpCv.queue_redraw()
 		GP_CTX_CONNECT:

@@ -14,34 +14,37 @@
 class_name GPGripTool
 extends GPCanvasTool
 
+# M3: "is a drag in flight?" is now answered by the drag's owner (GPAnnotationEditor), not by
+# peeking at canvas fields.
+# M3：「是否有拖拽在进行」改由拖拽的持有者（GPAnnotationEditor）回答，而非窥探画布字段。
 func gpOnMove(gpWorld: Vector2) -> bool:
-	var gpCv := gpCtx.gpCv
+	var gpAnno := gpCtx.gpAnno
 	# Dragging a grip (handle) of the selected annotation shape reshapes / resizes it.
 	# 拖动选中注释图形的锚点（手柄）以重塑 / 缩放图形。
-	if not gpCv._gpGripDrag.is_empty():
-		gpCv._gpAnno.gpOnGripMove(gpWorld)
+	if gpAnno.gpHasGripDrag():
+		gpAnno.gpOnGripMove(gpWorld)
 	# Dragging the whole selected annotation shape moves it.
 	# 拖动整枚选中的注释图形以移动之。
-	elif gpCv._gpShapeDragIdx >= 0:
-		gpCv._gpAnno.gpOnShapeMove(gpWorld)
+	elif gpAnno.gpHasShapeDrag():
+		gpAnno.gpOnShapeMove(gpWorld)
 	return true
+
 
 func gpOnRelease(gpWorld: Vector2) -> bool:
 	var gpCv := gpCtx.gpCv
+	var gpAnno := gpCtx.gpAnno
 	# Finish a grip (handle) drag — geometry already mutated live during the drag.
 	# 结束锚点（手柄）拖拽——几何已在拖拽过程中实时变更。
-	if not gpCv._gpGripDrag.is_empty():
-		gpCv._gpGripDrag.clear()
+	if gpAnno.gpHasGripDrag():
+		gpAnno.gpEndGripDrag()
 		gpCv.gpGraphChanged.emit()
-		gpCv._gpEmitStatus()
+		gpCv.gpEmitStatus()
 		return true
 	# Finish a whole-shape move.
 	# 结束整枚图形的移动。
-	if gpCv._gpShapeDragIdx >= 0:
-		gpCv._gpShapeDragIdx = -1
-		gpCv._gpShapeDragOrigPts = PackedVector2Array()
-		gpCv._gpShapeDragOrigR = 0.0
+	if gpAnno.gpHasShapeDrag():
+		gpAnno.gpEndShapeDrag()
 		gpCv.gpGraphChanged.emit()
-		gpCv._gpEmitStatus()
+		gpCv.gpEmitStatus()
 		return true
 	return false
