@@ -77,10 +77,10 @@ var gpZoomLabel: Label
 # 状态栏标签：显示当前应用状态。
 var gpStateLabel: Label
 
-# Last selected node id, used to detect selection changes.
-# 上一次选中的节点 id，用于检测选中变化。
-var gpLastSel: String = ""
-
+# (M2) gpLastSel removed: the host no longer diffs a selection string; the canvas emits
+# gpSelectionChanged directly, so this cached id has no consumer left.
+# （M2）已删除 gpLastSel：宿主不再比对选中字符串，画布直接发射 gpSelectionChanged，
+# 这个缓存 id 已无使用方。
 # Last status snapshot received from the canvas.
 # 从画布接收到的上一个状态快照。
 var gpLastStatus: Dictionary = {"selection": "", "zoom": 1.0, "world": Vector2.ZERO}
@@ -264,17 +264,27 @@ func gpActiveGraph() -> GPPIDGraph:
 # 切换标签时重复接线。
 func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 	gpCanvas.gpDefs = gpDefs
-	gpCanvas.gpGraphChanged.connect(_gpOnGraphChanged)
-	gpCanvas.gpStatusUpdated.connect(_gpOnStatus)
+	# M2: subscribe to the sheet's app event bus instead of the canvas signals. The canvas
+	# keeps emitting its legacy signals (public API stays stable), but the host now listens
+	# on ONE explicit channel: state broadcasts travel on the bus, host-directed requests
+	# (open editor / promote shapes) stay on signals.
+	# M2：订阅本图纸的应用事件总线而非画布信号。画布仍发射旧信号（公共 API 保持稳定），
+	# 但宿主现在只监听一条显式通道：状态广播走总线，宿主定向请求（打开编辑器 / 提升图形）仍走信号。
+	var gpBus: GPEventBus = gpCanvas.gpEvents
+	gpBus.gpGraphChanged.connect(_gpOnGraphChanged)
+	gpBus.gpSelectionChanged.connect(_gpOnSelectionChanged)
+	gpBus.gpStatusUpdated.connect(_gpOnStatus)
+	gpBus.gpModeChanged.connect(_gpSyncToolBar)
 	# Double click / context menu on a symbol asks for in-place geometry editing.
 	# 图元上的双击 / 右键菜单会请求就地编辑几何。
 	gpCanvas.gpSymbolEditRequested.connect(_gpOnSymbolEditRequested)
 	# Promote selected annotation shapes into a real symbol: open the Make-Symbol dialog.
 	# 把选中的注释图形提升为真正图元：打开「生成图元」对话框。
 	gpCanvas.gpMakeSymbolRequested.connect(_gpOnMakeSymbolFromShapes)
-	# Keep the drawing toolbar highlight in sync when the mode changes (e.g. via context menu).
-	# 模式变化时（如右键菜单）同步绘图工具栏高亮。
-	gpCanvas.gpModeChanged.connect(_gpSyncToolBar)
+	# (M2) gpModeChanged is now a bus event; the legacy canvas connection above would
+	# fire the toolbar sync twice, so it is intentionally not connected here.
+	# （M2）模式变化已改为总线事件；上面若再连旧画布信号会导致工具栏同步触发两次，
+	# 故此处有意不再连接。
 
 
 # The active sheet changed (add / switch / close): refresh the inspector for the
@@ -384,7 +394,11 @@ func _gpCascadeDeleteSymbol(gpId: String) -> void:
 			if gpRemoved > 0:
 				gpC.gpClearSelection()
 				gpC.queue_redraw()
-				gpC.gpGraphChanged.emit()
+				# (M2) No manual emit any more: gpRemoveSymbolInstances emits the core graph
+				# signal, and the canvas now binds that signal and funnels it to the bus.
+				# Previously the UI had to remember to emit "on behalf of" the data layer.
+				# （M2）不再手动发射：gpRemoveSymbolInstances 会发射 core 图信号，画布已绑定
+				# 该信号并汇入总线。此前 UI 必须记得「代数据层」发射一次。
 	_gpDeleteSymbolAndRefresh(gpId)
 
 
@@ -401,7 +415,16 @@ func _gpDeleteSymbolAndRefresh(gpId: String) -> void:
 # ============================ 画布变化 ============================
 # React to graph changes by refreshing the inspector for the current selection.
 # 图变化时刷新当前选中的属性面板。
-func _gpOnGraphChanged() -> void:
+func _gpOnGraphChanged(_gpGraph: GPPIDGraph = null) -> void:
+	_gpRefreshSelection()
+
+
+# M2: selection is a first-class event again. Previously it was smuggled to the host inside
+# the status snapshot, and _gpOnStatus had to diff the "selection" string to guess whether
+# the inspector needed a refresh. The canvas now emits gpSelectionChanged explicitly.
+# M2：选择重新成为一等事件。此前它被塞进状态快照，_gpOnStatus 必须比对 "selection"
+# 字符串来猜测是否需要刷新属性面板；现在画布显式发射 gpSelectionChanged。
+func _gpOnSelectionChanged(_gpIds: Array[String] = []) -> void:
 	_gpRefreshSelection()
 
 
@@ -422,10 +445,11 @@ func _gpOnStatus(gpInfo: Dictionary) -> void:
 
 	var gpZoom: float = gpInfo.get("zoom", 1.0)
 	gpZoomLabel.text = I18n.gpTr("status.zoom") % [int(gpZoom * 100.0)]
-
-	if gpSel != gpLastSel:
-		gpLastSel = gpSel
-		_gpRefreshSelection()
+	# (M2) The old "diff the selection string, then refresh the inspector" block is gone:
+	# selection changes now arrive as their own gpSelectionChanged event, so this handler
+	# is once again ONLY about the status bar (its actual single responsibility).
+	# （M2）原先「比对选中字符串再刷新属性面板」的代码块已删除：选中变化由独立的
+	# gpSelectionChanged 事件送达，本处理函数恢复为只负责状态栏（真正的单一职责）。
 
 
 # ============================ selection / inspector ============================

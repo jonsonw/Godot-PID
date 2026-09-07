@@ -70,11 +70,48 @@ func gpSetMode(gpM: int) -> void:
 	if not _gpState.gpSetMode(gpM):
 		return
 	gpModeChanged.emit(gpMode)
+	# M2: mode is a state broadcast like any other, so it travels on the bus as well.
+	# M2：模式与其他状态广播一样，同样走总线。
+	gpEvents.gpModeChanged.emit(gpMode)
+	# Entering a drawing tool clears the node selection inside GPCanvasInteractState, which
+	# writes the selection object directly and therefore never passes _gpSetSelection.
+	# Announce it here, otherwise subscribers (inspector) keep showing a node that is no
+	# longer selected — a stale-UI bug that the explicit event channel now makes visible.
+	# 进入绘图工具会在 GPCanvasInteractState 内部清空节点选中，它直写选择对象、
+	# 不经过 _gpSetSelection。此处补发事件，否则订阅者（属性面板）仍显示已取消选中的节点
+	# —— 这个界面陈旧缺陷正是被显式事件通道暴露出来的。
+	if _gpState.gpIsDrawMode():
+		gpEvents.gpSelectionChanged.emit(gpSelection)
 	queue_redraw()
 
+# App-layer event channel for THIS sheet (M2). One bus per canvas: a single global bus
+# would make every open sheet react to another sheet's change.
+# 本图纸的应用层事件通道（M2）。每画布一条总线：全局单条会让所有图纸互相串扰。
+# Initialised at construction (property initialiser) on purpose: the host assigns `gpGraph`
+# BEFORE `add_child()` runs `_ready()` (see GPCenterArea._gpAddTabWith), so the bus must
+# already exist when the graph setter binds the core signal.
+# 刻意用属性初始化器在构造期创建：宿主在 `add_child()`（触发 `_ready`）之前就赋值 `gpGraph`
+# （见 GPCenterArea._gpAddTabWith），故总线必须在图 setter 绑定 core 信号时已存在。
+# M6 (document_manager) will move ownership of this bus out of the canvas.
+# M6（document_manager）会把总线所有权移出画布。
+var gpEvents: GPEventBus = GPEventBus.new()
+
+# Backing field for the gpGraph property. Kept explicit so the setter cannot recurse.
+# gpGraph 属性的后备字段。显式保留以避免 setter 递归。
+var _gpGraphRef: GPPIDGraph
+
 # The topology graph this canvas displays and edits.
+# Assigning it (re)binds the core gpGraphChanged signal so programmatic mutations
+# (add/remove node, add shape, cascade delete) reach the UI through the same channel
+# as interactive ones. Before M2 that core signal was emitted 7x with zero subscribers.
 # 本画布显示并编辑的拓扑图。
-var gpGraph: GPPIDGraph
+# 赋值时会（重新）绑定 core 的 gpGraphChanged 信号，使程序化改动（增删节点、加图形、
+# 级联删除）与交互改动走同一通道。M2 之前该 core 信号发射 7 处却零订阅者。
+var gpGraph: GPPIDGraph:
+	get:
+		return _gpGraphRef
+	set(gpValue):
+		_gpSetGraph(gpValue)
 
 # Available symbol definitions used to create new nodes.
 # 用于创建新节点的可用图元定义。
@@ -363,7 +400,44 @@ func _ready() -> void:
 	var _gpSettings: Object = get_node_or_null("/root/Settings")
 	if _gpSettings != null and _gpSettings.has_signal("gpSymbolStyleChanged"):
 		_gpSettings.gpSymbolStyleChanged.connect(_gpOnSymbolStyleChanged)
+	# Bridge the canvas signal into the app event bus (M2): a single funnel, so the tool
+	# layer keeps emitting `gpGraphChanged` unchanged while every new subscriber listens
+	# on the bus. Collapse this bridge once M6 lets the document emit the bus directly.
+	# 把画布信号桥接到应用事件总线（M2）：单一漏斗，工具层继续照旧发射 `gpGraphChanged`，
+	# 而新订阅者统一监听总线。待 M6 让文档对象直接发射总线后可移除此桥。
+	gpGraphChanged.connect(_gpForwardGraphChanged)
+	# Re-assert the core-graph binding (idempotent; covers a graph assigned before _ready).
+	# 重申 core 图绑定（幂等，覆盖在 _ready 之前就被赋值的图）。
+	if _gpGraphRef != null and not _gpGraphRef.gpGraphChanged.is_connected(_gpOnGraphDataChanged):
+		_gpGraphRef.gpGraphChanged.connect(_gpOnGraphDataChanged)
 	_gpResetView()
+
+
+# (Re)bind the core graph's change signal. Called from the gpGraph setter.
+# 由 gpGraph 的 setter 调用，用于（重新）绑定 core 图的变化信号。
+func _gpSetGraph(gpValue: GPPIDGraph) -> void:
+	if _gpGraphRef == gpValue:
+		return
+	if _gpGraphRef != null and _gpGraphRef.gpGraphChanged.is_connected(_gpOnGraphDataChanged):
+		_gpGraphRef.gpGraphChanged.disconnect(_gpOnGraphDataChanged)
+	_gpGraphRef = gpValue
+	if _gpGraphRef != null and not _gpGraphRef.gpGraphChanged.is_connected(_gpOnGraphDataChanged):
+		_gpGraphRef.gpGraphChanged.connect(_gpOnGraphDataChanged)
+
+
+# Core graph mutated programmatically (gpAddNode / gpRemoveNodeWithEdges /
+# gpRemoveSymbolInstances / gpAddShape ...). Funnel it into the canvas signal so that
+# interactive and programmatic changes reach listeners through ONE path.
+# core 图被程序化改动（gpAddNode / gpRemoveNodeWithEdges / gpRemoveSymbolInstances /
+# gpAddShape 等）。汇入画布信号，使交互改动与程序化改动走同一路径。
+func _gpOnGraphDataChanged() -> void:
+	gpGraphChanged.emit()
+
+
+# Forward canvas graph changes onto the app event bus (M2 bridge).
+# 把画布的图变化转发到应用事件总线（M2 桥接）。
+func _gpForwardGraphChanged() -> void:
+	gpEvents.gpGraphChanged.emit(_gpGraphRef)
 
 
 # React to language change by refreshing symbol labels.
@@ -381,12 +455,16 @@ func _gpOnSymbolStyleChanged() -> void:
 # Build and emit a status snapshot for the status bar.
 # 构造并发送状态栏快照。
 func _gpEmitStatus() -> void:
-	gpStatusUpdated.emit({
+	var gpInfo: Dictionary = {
 		"selection": gpSelectedId,
 		"count": gpSelection.size(),
 		"zoom": gpViewZoom,
 		"world": _gpLastMouseWorld,
-	})
+	}
+	gpStatusUpdated.emit(gpInfo)
+	# M2: same snapshot on the app bus; new subscribers listen here, not on the signal.
+	# M2：同一份快照也发到应用总线；新订阅者监听这里而非画布信号。
+	gpEvents.gpStatusUpdated.emit(gpInfo)
 
 
 # ============================ camera / transform ============================
@@ -813,6 +891,12 @@ func _gpSetSelection(gpIds: Array[String]) -> void:
 	gpSelection = gpIds.duplicate()
 	gpSelectedId = gpSelection[0] if not gpSelection.is_empty() else ""
 	queue_redraw()
+	# M2: selection is a first-class event again. It used to be smuggled to the host inside
+	# the status snapshot, where main_window diffed the "selection" string to decide whether
+	# to refresh the inspector. Subscribers now react to this directly.
+	# M2：选择重新成为一等事件。过去它被塞进状态快照，由 main_window 比对 "selection"
+	# 字符串来决定是否刷新属性面板；订阅者现在直接响应本事件。
+	gpEvents.gpSelectionChanged.emit(gpSelection)
 	_gpEmitStatus()
 
 
