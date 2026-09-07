@@ -35,6 +35,14 @@ var gpMessageKey: String = ""
 # 可选的附加细节（如文件路径），原样追加，不做翻译。
 var gpDetail: String = ""
 
+# Optional payload carried by the result, e.g. a loaded GPPIDGraph on a successful read.
+# 结果携带的可选数据，例如读取成功时载入的 GPPIDGraph。
+# Typed as Variant so every consumer (io / validation / connection) can attach its own
+# domain object without this class needing to know about it.
+# 类型为 Variant，使各类使用方（io / 校验 / 连接）都能挂载自己的领域对象，
+# 而本类无需知晓这些类型。
+var gpPayload: Variant = null
+
 # Build a success result, optionally with a message key (e.g. "io.saved").
 # 构造成功结果，可附消息键（如 "io.saved"）。
 static func gpSuccess(gpMessageKey: String = "", gpDetail: String = "") -> GPIOResult:
@@ -54,6 +62,22 @@ static func gpFailure(gpCode: String, gpMessageKey: String, gpDetail: String = "
 	gpR.gpCode = gpCode
 	gpR.gpMessageKey = gpMessageKey
 	gpR.gpDetail = gpDetail
+	return gpR
+
+
+# Build a success result that also carries a domain payload (e.g. a loaded graph).
+# 构造同时携带领域数据（如已载入的图）的成功结果。
+# Used by operations whose useful output is a value rather than a mere acknowledgement —
+# e.g. GPProjectIO.gpReadProjectResult() returns the reconstructed GPPIDGraph here.
+# 供「有效输出是某个值、而非仅仅确认」的操作使用——
+# 例如 GPProjectIO.gpReadProjectResult() 在此返回重建出的 GPPIDGraph。
+static func gpSuccessWith(gpPayloadVal: Variant, gpMessageKey: String = "", gpDetail: String = "") -> GPIOResult:
+	var gpR: GPIOResult = GPIOResult.new()
+	gpR.gpOk = true
+	gpR.gpCode = ""
+	gpR.gpMessageKey = gpMessageKey
+	gpR.gpDetail = gpDetail
+	gpR.gpPayload = gpPayloadVal
 	return gpR
 
 

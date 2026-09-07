@@ -561,8 +561,12 @@ func _gpWriteProject(gpPath: String) -> void:
 	# 嵌入用户自定义图元包，使文件自包含（数据主权）。
 	gpActiveGraph().gpEmbedUserPacks(GPSymbolLibrary.gpUserPacks())
 	var gpFilePath: String = GPProjectIO.gpEnsurePidExt(gpPath)
-	var gpErr: int = GPProjectIO.gpWriteProject(gpActiveGraph(), gpFilePath)
-	if gpErr != OK:
+	# Prefer the GPIOResult API: it carries a machine-readable code plus an i18n reason key,
+	# so the shell can explain WHY a save failed instead of only knowing that it did.
+	# 优先使用 GPIOResult API：它携带机器可读码与 i18n 原因键，使外壳能解释保存「为何」失败，
+	# 而不只是知道失败了。
+	var gpWriteResult: GPIOResult = GPProjectIO.gpWriteProjectResult(gpActiveGraph(), gpFilePath)
+	if not gpWriteResult.gpIsOk():
 		_gpSetState("status.save_fail", [gpFilePath])
 		return
 	gpCurrentPath = gpFilePath
@@ -576,10 +580,15 @@ func _gpWriteProject(gpPath: String) -> void:
 # follow remain here because they touch the canvas, dock and selection state.
 # 文件解析/解码交给 GPProjectIO；其后的图切换与 UI 刷新仍在此处，因为它们涉及画布、停靠栏与选择状态。
 func _gpReadProject(gpPath: String) -> void:
-	var gpNewGraph: GPPIDGraph = GPProjectIO.gpReadProject(gpPath)
-	if gpNewGraph == null:
+	# GPIOResult distinguishes a missing file from malformed JSON; the shell shows the same
+	# localized failure state either way and the graph arrives in gpPayload.
+	# GPIOResult 区分「文件缺失」与「JSON 损坏」；外壳两者都显示同一本地化失败态，
+	# 成功时图由 gpPayload 带回。
+	var gpReadResult: GPIOResult = GPProjectIO.gpReadProjectResult(gpPath)
+	if not gpReadResult.gpIsOk():
 		_gpSetState("status.load_fail", [gpPath])
 		return
+	var gpNewGraph: GPPIDGraph = gpReadResult.gpPayload as GPPIDGraph
 	# Rebuild the graph; gpFromDict also reconciles embedded user packs into the
 	# live library so custom symbols are available again after reopening.
 	# 重建图；gpFromDict 同时把内嵌用户包调和进活动图元库，使重新打开后自定义图元再次可用。
