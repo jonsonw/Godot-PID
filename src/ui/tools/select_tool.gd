@@ -55,6 +55,17 @@ func gpCancelDrag() -> void:
 	_gpDragOrigins.clear()
 
 
+# ESC path (M4 续): report whether a group drag was abandoned, so the canvas can cancel
+# through the generic tool port instead of holding this tool's concrete type.
+# ESC 路径（M4 续）：报告是否放弃了整组拖拽，使画布可经通用工具端口取消，
+# 而不必持有本工具的具体类型。
+func gpCancel() -> bool:
+	if _gpDragId == "":
+		return false
+	gpCancelDrag()
+	return true
+
+
 # Live-apply a group drag: replay every selected node from its start snapshot by the same delta, so
 # a drag never accumulates rounding drift. Moved from the canvas (M3).
 # 实时应用整组拖拽：按同一位移从起始快照重放每个被选节点，使拖拽不累积舍入漂移。由画布迁来（M3）。
@@ -89,9 +100,11 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 				gpCv.gpConnectFrom = gpHit
 			else:
 				if gpCv.gpConnectFrom != gpHit:
-					var gpEid: String = gpCtx.gpState.gpIds.gpNext("e")
-					gpCv.gpGraph.gpAddEdge(gpCv.gpGraph.gpNewEdge(gpEid, gpCv.gpConnectFrom, gpHit, {}))
-					gpCv.gpGraphChanged.emit()
+					# M4 续：连线改经画布端口进入命令层，从而可撤销（此前直接调 gpAddEdge，
+					# 无法撤销且绕过了共享 id 生成器之外的全部约定）。
+					# M4 cont: connecting now goes through a canvas port into the command layer
+					# so it becomes undoable (it used to call gpAddEdge directly).
+					gpCv.gpRequestConnect(gpCv.gpConnectFrom, gpHit)
 				gpCv.gpConnectFrom = ""
 			gpCv.queue_redraw()
 		return true
@@ -183,12 +196,25 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 		gpCv.queue_redraw()
 		gpCv.gpEmitStatus()
 		return true
-	# Finish a group drag (geometry already mutated live during the drag).
-	# 结束整组拖拽（几何已在拖拽过程中实时变更）。
+	# Finish a group drag. Geometry was mutated live for feedback; to make the move undoable
+	# we rewind every node to its pre-drag position and let the command re-apply the SAME
+	# delta — one undo step per drag, never applied twice.
+	# 结束整组拖拽。几何此前为实时反馈已被改写；为使这次移动可撤销，先把每个节点回退到拖拽前
+	# 位置，再由命令重新应用「同一位移量」——每次拖拽合成一个撤销步，且绝不会被叠加两次。
 	if _gpDragId != "":
 		_gpDragId = ""
+		var gpIds: Array[String] = []
+		var gpDelta: Vector2 = gpWorld - _gpDragStartWorld
+		for gpId in _gpDragOrigins.keys():
+			var gpN: GPPIDNode = gpCv.gpGraph.gpGetNode(gpId)
+			if gpN == null:
+				continue
+			gpN.gpPosition = (_gpDragOrigins[gpId] as Vector2)
+			gpIds.append(gpId)
+		gpCv.gpRequestMoveNodes(gpIds, gpDelta)
 		_gpDragOrigins.clear()
 		gpCv.gpGraphChanged.emit()
+		gpCv.queue_redraw()
 		gpCv.gpEmitStatus()
 		return true
 	return false

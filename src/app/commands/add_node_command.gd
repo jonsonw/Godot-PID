@@ -28,6 +28,13 @@ var gpPos: Vector2 = Vector2.ZERO
 var _gpNode: GPPIDNode = null
 
 
+# Id of the created node, for the caller to select it right after placing. Empty before
+# gpExecute has run.
+# 所创建节点的 id，供调用方在放置后立即选中它。gpExecute 未运行时为空。
+var gpCreatedId: String:
+	get: return _gpNode.gpInstanceId if _gpNode != null else ""
+
+
 # Build the command. gpInSymbolId selects the symbol, gpInPos is the world position,
 # gpInTag is the optional tag text.
 # 构造命令：gpInSymbolId 选择图元，gpInPos 为世界坐标，gpInTag 为可选位号。
@@ -44,7 +51,11 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	if gpCtx == null or not gpCtx.gpIsReady():
 		return false
 	if _gpNode == null:
-		var gpId: String = gpCtx.gpIds.gpNext("N")
+		# "n" (lower case) is the project-wide node-id prefix: the canvas's own placement path
+		# and every saved file use it. An upper-case "N" here silently forks the id namespace.
+		# "n"（小写）是全项目统一的节点 id 前缀：画布自身的放置路径与所有存档文件都用它。
+		# 此处若用大写 "N" 会静默地分叉 id 命名空间。
+		var gpId: String = gpCtx.gpIds.gpNext("n")
 		_gpNode = gpCtx.gpGraph.gpNewNode(gpId, gpSymbolId, gpTag, gpPos)
 	gpCtx.gpGraph.gpAddNode(_gpNode)
 	return true

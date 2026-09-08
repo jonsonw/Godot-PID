@@ -176,8 +176,11 @@ func _gpCommitDraw(gpTo: Vector2) -> int:
 				var gpCtr: Vector2 = (_gpFrom + gpTo) * 0.5
 				gpS = GPShape.gpArc(gpCtr, _gpFrom, gpTo)
 	if gpS != null:
-		gpCv.gpGraph.gpAddShape(gpS)
-		return gpCv.gpGraph.gpShapes.size() - 1
+		# M4 续：提交经画布端口进入命令层（GPEditService → GPAddShapeCommand），
+		# 于是「画一条线」也是一步可撤销的编辑。
+		# M4 cont: the commit goes through a canvas port into the command layer, so drawing a
+		# line becomes one undoable step too.
+		return gpCv.gpRequestAddShape(gpS)
 	return -1
 
 
@@ -186,8 +189,7 @@ func _gpCommitDraw(gpTo: Vector2) -> int:
 func _gpFinishPolyline() -> void:
 	var gpCv := gpCtx.gpCv
 	if _gpPolyPts.size() >= 2:
-		gpCv.gpGraph.gpAddShape(GPShape.gpPolyline(_gpPolyPts.duplicate(), false))
-		var gpIdx: int = gpCv.gpGraph.gpShapes.size() - 1
+		var gpIdx: int = gpCv.gpRequestAddShape(GPShape.gpPolyline(_gpPolyPts.duplicate(), false))
 		gpCv.gpShapeSel = [gpIdx]
 		gpCv.gpSetSelection([])
 		gpCv.gpSetMode(GPMode.GP_SELECT)

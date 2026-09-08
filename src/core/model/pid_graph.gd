@@ -147,6 +147,49 @@ func gpRemoveNodeWithEdges(gpId: String) -> void:
 	gpGraphChanged.emit()
 
 
+# Insert an annotation shape at a position (default: append). Used by undo to put a deleted
+# shape back at the index it came from.
+# 在指定位置插入一枚注释图形（默认追加）。供撤销把已删图形放回其原始下标。
+func gpInsertShape(gpShape: GPShape, gpAt: int = -1) -> void:
+	if gpShape == null:
+		return
+	gpShapes.insert(gpAt if gpAt >= 0 else gpShapes.size(), gpShape)
+	gpGraphChanged.emit()
+
+
+# Remove an annotation shape by object identity. Returns whether it was found.
+# Going through the model (instead of splicing gpShapes from a command) keeps "every
+# topology mutation notifies from one place" true — see gpRemoveEdge.
+# 按对象同一性移除一枚注释图形，返回是否找到。
+# 经由模型（而非由命令直接拼接 gpShapes）可保持「拓扑的每次改动都从一处通知」成立
+# —— 参见 gpRemoveEdge。
+func gpRemoveShape(gpShape: GPShape) -> bool:
+	var gpAt: int = gpShapes.find(gpShape)
+	if gpAt < 0:
+		return false
+	gpShapes.remove_at(gpAt)
+	gpGraphChanged.emit()
+	return true
+
+
+# Remove an edge by id. Returns whether it was actually removed.
+# Added for M4: undoing a connect must be able to take the edge back out, and doing it
+# here (rather than by splicing gpEdges from a command) keeps every mutation of the
+# topology emitting from one place.
+# 按 id 删除边，返回是否成功删除。
+# 为 M4 新增：撤销一次连线需要把边取回；把这件事放在此处（而非由命令直接拼接 gpEdges）
+# 可让拓扑的每次改动都从同一处发射信号。
+func gpRemoveEdge(gpId: String) -> bool:
+	for gpI in range(gpEdges.size()):
+		if gpEdges[gpI].gpInstanceId == gpId:
+			var gpE: GPPIDEdge = gpEdges[gpI]
+			gpEdges.remove_at(gpI)
+			gpEdgeRemoved.emit(gpE)
+			gpGraphChanged.emit()
+			return true
+	return false
+
+
 # Count how many placed instances reference the given symbol id on this sheet.
 # 统计本图纸中引用该图元 id 的已放置实例数量。
 func gpCountSymbolInstances(gpSymbolId: String) -> int:
