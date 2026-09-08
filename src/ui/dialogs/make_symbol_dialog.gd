@@ -9,13 +9,12 @@ extends Window
 # OVERWRITES an existing user symbol whose display name matches, or CREATES a new one.
 # On confirm it emits gpMadeSymbol(symbolId) so the caller can place/refresh.
 #
-# Beyond the original read-only preview, the dialog is now an INTERACTIVE editor:
-#   - Connection ports (endpoints) can be ADDED by clicking, MOVED by dragging, and the
-#     selected port can be RENAMED / re-aimed (direction) / DELETED.
-#   - Simple glyph editing: add Line / Rectangle / Circle / Polyline primitives by
-#     drawing on the preview, SELECT + MOVE an existing primitive, or DELETE it.
-# The working model is two strongly-typed arrays, _gpShapes (Array[GPShape]) and
-# _gpPorts (Array[GPPort]); everything is re-serialized to the save dict on confirm.
+# The dialog is an INTERACTIVE symbol editor: it previews the selected annotation geometry
+# (normalized thumbnail, matching the symbol palette), lets the user pick a category, a name and a
+# display name, then either OVERWRITES an existing user symbol or CREATES a new one. All geometry
+# editing (ports + primitives) is DELEGATED to GPSymbolEditor (src/ui/dialogs/symbol_editor/), so
+# every add / delete / move is undoable via its GPCommandStack, exactly like the main canvas. On
+# confirm it emits gpMadeSymbol(symbolId) so the caller can place / refresh.
 #
 # 一站式「生成图元」对话框（取代旧的 glyph 隔离编辑器）。
 #
@@ -61,25 +60,13 @@ var gpInitialPorts: Array[GPPort] = []
 # 编辑已有图元时显示名框的预填文本。
 var gpInitialDisplay: String = ""
 
-# -- editor tool state / 编辑工具状态 --
-enum GPTool { GP_SELECT, GP_PORT, GP_LINE, GP_RECT, GP_CIRCLE, GP_POLY }
-# Drag sub-state while the mouse is held: -1 none, 0 port, 1 shape, 2 newline, 3 newrect,
-# 4 newcircle, 5 newpoly.
-# 鼠标按住时的拖拽子状态：-1 无，0 端点，1 图形，2 新直线，3 新矩形，4 新圆，5 新折线。
-const GP_PORT_HIT: float = 9.0
-const GP_MIN_LEN: float = 3.0
-
-var _gpTool: int = GPTool.GP_SELECT
-var _gpShapes: Array[GPShape] = []            # working geometry model / 工作几何模型
-var _gpPorts: Array[GPPort] = []              # working ports, normalized 0..1 / 工作端口（归一化）
-var _gpSelPort: int = -1
-var _gpSelShape: int = -1
-var _gpDragKind: int = -1
-var _gpDragLast: Vector2 = Vector2.ZERO
-var _gpDraftShape: GPShape = null             # shape currently being drawn / 正在绘制的图形
-var _gpPolyPts: PackedVector2Array = PackedVector2Array()
-var _gpPolyCursor: Vector2 = Vector2.ZERO
-# Outward-normal direction choices for a port / 端口可选朝向（向外法线）。
+# -- geometry editor (delegated) / 几何编辑器（委托） --
+# The dialog no longer owns the working model; GPSymbolEditor holds _gpShapes / _gpPorts, the active
+# tool and the undo/redo history (GPCommandStack). The dialog only wires its UI to the editor.
+# 对话框不再持有工作模型；GPSymbolEditor 持有 _gpShapes / _gpPorts、当前工具与撤销 / 重做历史
+# （GPCommandStack）。对话框仅把 UI 接到编辑器。
+var _gpEditor: GPSymbolEditor = null
+# Outward-normal direction choices for a port (UI dropdown -> Vector2). / 端口可选朝向（UI 下拉 -> 向量）。
 var _gpDirs: Array[Vector2] = [Vector2.ZERO, Vector2(-1.0, 0.0), Vector2(1.0, 0.0), Vector2(0.0, -1.0), Vector2(0.0, 1.0)]
 
 # -- internal widgets / 内部控件 --
@@ -131,6 +118,12 @@ func _ready() -> void:
 # shapes panel + new/overwrite + actions.
 # 构建对话框主体：预览 + 编辑工具条 + 类别 + 名称/显示名 + 端点面板 + 几何面板 + 新建/覆盖 + 操作按钮。
 func _gpBuild() -> void:
+	# Geometry editing is delegated to GPSymbolEditor: own the editor, wire its change / tool
+	# signals to the UI, then build the rest of the dialog around it.
+	# 几何编辑委托给 GPSymbolEditor：持有编辑器、把变更 / 工具信号接到 UI，再围绕它搭建其余对话框。
+	_gpEditor = GPSymbolEditor.new()
+	_gpEditor.gpChanged.connect(_gpOnEditorChanged)
+	_gpEditor.gpToolChanged.connect(_gpOnToolChanged)
 	var gpRoot: VBoxContainer = VBoxContainer.new()
 	gpRoot.name = "Root"
 	gpRoot.add_theme_constant_override("separation", 8)
@@ -259,17 +252,17 @@ func _gpBuild() -> void:
 	gpOk.pressed.connect(_gpOnOk)
 	_gpNameEdit.text_changed.connect(func(_gpT: String) -> void: _gpRefreshState())
 	_gpDisplayEdit.text_changed.connect(func(_gpT: String) -> void: _gpRefreshState())
-	_gpCatBtn.item_selected.connect(func(_gpI: int) -> void: _gpRefreshState(); _gpPreview.queue_redraw())
+	_gpCatBtn.item_selected.connect(func(_gpI: int) -> void: _gpRefreshState(); _gpEditor.gpSetCategory(_gpCurrentCat()))
 	# Window's own close signal (not a gp-prefixed member): pressing the OS close button cancels.
 	# Window 自带关闭信号（非 gp 前缀成员）：点系统关闭按钮即取消。
 	close_requested.connect(_gpOnCancel)
 
-	# Materialize the working model from the incoming draft + ports before first paint.
-	# 首次绘制前，由传入草稿 + 端口具象化工作模型。
+	# Materialize the working model from the incoming draft + ports before first paint. The editor
+	# emits gpChanged during gpInit (and again on gpSetTool), driving both the repaint and the panel
+	# sync through _gpOnEditorChanged — so no manual panel sync is needed here.
+	# 首次绘制前，由传入草稿 + 端口具象化工作模型。编辑器在 gpInit（及 gpSetTool）时发出 gpChanged，
+	# 经 _gpOnEditorChanged 同时驱动重绘与面板同步——此处无需手动同步面板。
 	_gpInitModel()
-	_gpSetTool(GPTool.GP_SELECT)
-	_gpSyncPortPanel()
-	_gpSyncShapePanel()
 	_gpRefreshState()
 	# Focus the name field only when the dialog is already inside the tree (headless runs
 	# and pre-popup builds would otherwise error with "!is_inside_tree").
@@ -288,8 +281,12 @@ func _gpNewPreview() -> Control:
 	gpC.custom_minimum_size = GP_PREVIEW_SIZE
 	gpC.clip_contents = true
 	gpC.mouse_filter = Control.MOUSE_FILTER_STOP
-	gpC.draw.connect(func() -> void: _gpDrawPreview(gpC))
-	gpC.gui_input.connect(_gpOnPreviewInput)
+	# Geometry drawing + input are owned by GPSymbolEditor now. The preview only forwards its
+	# draw / gui_input to the editor; the editor paints the glyph + ports + tool overlays.
+	# 几何绘制与输入现由 GPSymbolEditor 负责。预览只把 draw / gui_input 转发给编辑器，
+	# 编辑器绘制字形 + 端口 + 工具覆盖层。
+	gpC.draw.connect(func() -> void: _gpEditor.gpDraw(gpC))
+	gpC.gui_input.connect(func(gpEv: InputEvent) -> void: _gpEditor.gpOnInput(gpEv))
 	return gpC
 
 
@@ -315,7 +312,7 @@ func _gpNewToolRow() -> HBoxContainer:
 		# Bind the loop index by value so every button keeps its own tool (a captured loop
 		# variable would otherwise collapse all buttons to the last index).
 		# 用 .bind 把循环索引按值固定，使每个按钮保留各自的工具（捕获循环变量会令所有按钮塌缩为末位）。
-		gpB.pressed.connect(_gpSetTool.bind(gpI))
+		gpB.pressed.connect(_gpEditor.gpSetTool.bind(gpI))
 		_gpToolBtns.append(gpB)
 		gpRow.add_child(gpB)
 	return gpRow
@@ -414,342 +411,32 @@ func _gpNewShapePanel() -> PanelContainer:
 # caller-supplied initial ports (or an empty list when creating from scratch).
 # 具象化工作模型：把草稿解析进 _gpShapes，并用调用方提供的初始端口（或新建时的空列表）播种 _gpPorts。
 func _gpInitModel() -> void:
-	_gpShapes = GPShapeSpec.gpFromSpec(gpDraft)
-	# gpFromSpec ignores a stray "box" key and handles paths/circles/rects/arcs uniformly.
-	# gpFromSpec 会忽略多余的 "box" 键，并统一处理 paths/circles/rects/arcs。
-	# Deep-copy the incoming ports via the dict round-trip so editing never aliases the live
-	# library's port objects (which would mutate other placed instances of the symbol).
-	# 经字典往返深拷贝传入端口，使编辑绝不会别名到活动图元库的端口对象（否则会改到其他已放置实例）。
-	_gpPorts = GPPortSpec.gpFromDicts(GPPortSpec.gpToDicts(gpInitialPorts))
-	_gpSelPort = -1
-	_gpSelShape = -1
+	# Parse the draft into the editor's working geometry, and seed its ports from the caller-supplied
+	# initial ports (or an empty list when creating from scratch). Both are pushed IN PLACE so the
+	# editor's command stack keeps valid references; the history is cleared by gpInit.
+	# 把草稿解析进编辑器的工作几何，并用调用方提供的初始端口（或新建时的空列表）播种端口。
+	# 两者均原地推送，使编辑器的命令栈持有有效引用；历史由 gpInit 清空。
+	var gpS: Array[GPShape] = GPShapeSpec.gpFromSpec(gpDraft)
+	var gpP: Array[GPPort] = GPPortSpec.gpFromDicts(GPPortSpec.gpToDicts(gpInitialPorts))
+	_gpEditor.gpInit(gpS, gpP)
 
 
-# ---- coordinate mapping (preview-local <-> author-space, and normalized ports) ----
-# 坐标映射（预览本地 <-> 作者空间，及归一化端口）
-# The painter fits the glyph's unit box into the preview rect with uniform scale + centering.
-# That mapping is now a pure module — GPPreviewTransform (core/geometry) — so the exact
-# round-trip is headless-testable; the helpers below are thin wrappers that keep every call
-# site in this file compiling unchanged.
-# 渲染器以均匀缩放 + 居中把字形单位框塞入预览矩形。该映射现为纯模块 —— GPPreviewTransform
-# （core/geometry）—— 使精确往返可在 headless 下断言；下列助手只是薄封装，使本文件各调用点保持不变。
-var _gpXf: GPPreviewTransform = GPPreviewTransform.new()
+# ---- delegation glue (UI <-> GPSymbolEditor) ----
+# 委托胶水层（UI <-> GPSymbolEditor）
 
-
-# Refresh the transform from the live preview size and working shapes. Called at the top of every
-# mapping helper ON PURPOSE: caching it would require an invalidation at every mutation site,
-# which is exactly how "the click landed somewhere other than the glyph" bugs get introduced.
-# 依实时预览尺寸与工作图形刷新变换。刻意在每个映射助手开头调用：若要缓存，就必须在每处变更点
-# 使其失效——「点击落在图形之外」这类缺陷正是这样引入的。
-func _gpSyncXf() -> void:
-	_gpXf.gpViewSize = _gpPreview.size if _gpPreview != null else GP_PREVIEW_SIZE
-	_gpXf.gpBox = GPPreviewTransform.gpBoxOf(_gpShapes)
-
-
-func _gpViewRect(gpC: Control) -> Rect2:
-	_gpXf.gpViewSize = gpC.size
-	return _gpXf.gpViewRect()
-
-
-func _gpLocalToAuthor(gpLocal: Vector2) -> Vector2:
-	_gpSyncXf()
-	return _gpXf.gpLocalToAuthor(gpLocal)
-
-
-func _gpAuthorToLocal(gpAuthor: Vector2) -> Vector2:
-	_gpSyncXf()
-	return _gpXf.gpAuthorToLocal(gpAuthor)
-
-
-# Normalized port (0..1) -> preview-local pixel. The full preview rect is the envelope, matching
-# how GPSymbolView draws ports relative to the symbol's nominal envelope on the canvas.
-# 归一化端口（0..1）-> 预览本地像素。整幅预览矩形即包络，与画布上 GPSymbolView 相对图元标称
-# 包络绘制端口的方式一致。
-func _gpPortLocal(gpN: Vector2) -> Vector2:
-	_gpSyncXf()
-	return _gpXf.gpPortLocal(gpN)
-
-
-func _gpLocalToNorm(gpLocal: Vector2) -> Vector2:
-	_gpSyncXf()
-	return _gpXf.gpLocalToNorm(gpLocal)
-
-
-# ---- drawing ----
-# 绘制
-func _gpDrawPreview(gpC: Control) -> void:
-	var gpRect: Rect2 = _gpViewRect(gpC)
-	# Pale panel fill / 淡色面板底
-	gpC.draw_rect(gpRect, Color(0.12, 0.13, 0.16, 1.0), true)
-	gpC.draw_rect(gpRect, Color(0.35, 0.38, 0.44, 1.0), false, 1.0)
-
-	# Glyph shapes / 图元几何
-	if not _gpShapes.is_empty():
-		var gpSpec: Dictionary = GPShapeSpec.gpBuild(_gpShapes)
-		var gpStroke: Color = GPSymbolPainter.gpCategoryColor(_gpCurrentCat())
-		GPSymbolPainter.gpDrawShape(gpC, gpSpec, gpRect, Color(0.08, 0.09, 0.11, 1.0), gpStroke, 2.0)
-
-	# Shape currently being drawn / 正在绘制的图形
-	if _gpDraftShape != null:
-		var gpDraftSpec: Dictionary = GPShapeSpec.gpBuild([_gpDraftShape])
-		GPSymbolPainter.gpDrawShape(gpC, gpDraftSpec, gpRect, Color(0.08, 0.09, 0.11, 1.0), Color(0.6, 0.9, 1.0), 1.5)
-
-	# Polyline in progress (placed vertices + rubber-band to cursor) / 进行中的折线（已落点 + 到光标的橡皮筋）
-	if not _gpPolyPts.is_empty():
-		var gpVecs: PackedVector2Array = PackedVector2Array()
-		for gpP in _gpPolyPts:
-			gpVecs.append(_gpAuthorToLocal(gpP))
-		if _gpTool == GPTool.GP_POLY:
-			gpVecs.append(_gpAuthorToLocal(_gpPolyCursor))
-		gpC.draw_polyline(gpVecs, Color(0.6, 0.9, 1.0), 1.5)
-		for gpP in _gpPolyPts:
-			gpC.draw_circle(_gpAuthorToLocal(gpP), 3.0, Color(0.6, 0.9, 1.0))
-
-	# Selection highlight around the selected primitive / 选中图形的高亮框
-	if _gpSelShape >= 0 and _gpSelShape < _gpShapes.size():
-		var gpB: Rect2 = _gpShapes[_gpSelShape].gpBBox().grow(GP_MIN_LEN)
-		var gpA0: Vector2 = _gpAuthorToLocal(gpB.position)
-		var gpA1: Vector2 = _gpAuthorToLocal(gpB.position + gpB.size)
-		gpC.draw_rect(Rect2(gpA0, gpA1 - gpA0).abs(), Color(1.0, 0.85, 0.2), false, 1.5)
-
-	# Ports (connection points) / 连接端点
-	for gpI in range(_gpPorts.size()):
-		var gpP: GPPort = _gpPorts[gpI]
-		var gpL: Vector2 = _gpPortLocal(gpP.gpPos)
-		var gpCol: Color = Color(1.0, 1.0, 1.0) if gpI == _gpSelPort else Color(0.4, 0.9, 1.0)
-		gpC.draw_circle(gpL, 4.0, gpCol)
-		if gpP.gpDir != Vector2.ZERO:
-			gpC.draw_line(gpL, gpL + gpP.gpDir * 12.0, gpCol, 1.5)
-
-
-# ---- input ----
-# 输入
-func _gpOnPreviewInput(gpEv: InputEvent) -> void:
-	if gpEv is InputEventMouseButton:
-		var gpMb: InputEventMouseButton = gpEv as InputEventMouseButton
-		if gpMb.button_index == MOUSE_BUTTON_LEFT:
-			if gpMb.pressed:
-				_gpOnPress(gpMb.position)
-			else:
-				_gpOnRelease(gpMb.position)
-	elif gpEv is InputEventMouseMotion:
-		_gpOnMotion((gpEv as InputEventMouseMotion).position)
-	elif gpEv is InputEventKey:
-		var gpK: InputEventKey = gpEv as InputEventKey
-		if gpK.pressed:
-			_gpOnKey(gpK)
-
-
-func _gpOnPress(gpLocal: Vector2) -> void:
-	match _gpTool:
-		GPTool.GP_SELECT:
-			var gpPi: int = _gpHitPort(gpLocal)
-			if gpPi >= 0:
-				_gpSelPort = gpPi
-				_gpSelShape = -1
-				_gpDragKind = 0
-				_gpSyncPortPanel()
-				_gpPreview.queue_redraw()
-				return
-			var gpSi: int = _gpHitShape(gpLocal)
-			if gpSi >= 0:
-				_gpSelShape = gpSi
-				_gpSelPort = -1
-				_gpDragKind = 1
-				_gpDragLast = gpLocal
-				_gpSyncShapePanel()
-				_gpPreview.queue_redraw()
-				return
-			_gpSelPort = -1
-			_gpSelShape = -1
-			_gpSyncPortPanel()
-			_gpSyncShapePanel()
-			_gpPreview.queue_redraw()
-		GPTool.GP_PORT:
-			var gpN: Vector2 = _gpLocalToNorm(gpLocal)
-			var gpP: GPPort = GPPort.new()
-			gpP.gpName = "p%d" % (_gpPorts.size() + 1)
-			gpP.gpPos = gpN
-			var gpEdge: Array = GPSymbolNormalizer.gpEdgeNormal(gpN)
-			gpP.gpDir = Vector2(float(gpEdge[0]), float(gpEdge[1]))
-			_gpPorts.append(gpP)
-			_gpSelPort = _gpPorts.size() - 1
-			_gpSelShape = -1
-			_gpSyncPortPanel()
-			_gpPreview.queue_redraw()
-		GPTool.GP_LINE:
-			_gpStartNew(GPShape.GPKind.GP_LINE, gpLocal)
-		GPTool.GP_RECT:
-			_gpStartNew(GPShape.GPKind.GP_RECT, gpLocal)
-		GPTool.GP_CIRCLE:
-			_gpStartNew(GPShape.GPKind.GP_CIRCLE, gpLocal)
-		GPTool.GP_POLY:
-			var gpA: Vector2 = _gpLocalToAuthor(gpLocal)
-			if _gpPolyPts.size() >= 2 and _gpAuthorToLocal(_gpPolyPts[0]).distance_to(gpLocal) < 8.0:
-				_gpFinishPoly()
-				return
-			_gpPolyPts.append(gpA)
-			_gpPolyCursor = gpA
-			_gpPreview.queue_redraw()
-
-
-func _gpOnMotion(gpLocal: Vector2) -> void:
-	match _gpDragKind:
-		0:  # dragging a port / 拖拽端点
-			if _gpSelPort >= 0 and _gpSelPort < _gpPorts.size():
-				_gpPorts[_gpSelPort].gpPos = _gpLocalToNorm(gpLocal)
-				_gpPreview.queue_redraw()
-		1:  # dragging a shape / 拖拽图形
-			var gpDeltaA: Vector2 = _gpLocalToAuthor(gpLocal) - _gpLocalToAuthor(_gpDragLast)
-			_gpDragLast = gpLocal
-			_gpTranslateShape(_gpSelShape, gpDeltaA)
-			_gpPreview.queue_redraw()
-		2:  # drawing a line / 绘制直线
-			if _gpDraftShape != null and _gpDraftShape.gpPoints.size() >= 2:
-				_gpDraftShape.gpPoints = PackedVector2Array([_gpDraftShape.gpPoints[0], _gpLocalToAuthor(gpLocal)])
-				_gpPreview.queue_redraw()
-		3:  # drawing a rectangle / 绘制矩形
-			if _gpDraftShape != null and _gpDraftShape.gpPoints.size() >= 2:
-				_gpDraftShape.gpPoints = PackedVector2Array([_gpDraftShape.gpPoints[0], _gpLocalToAuthor(gpLocal)])
-				_gpPreview.queue_redraw()
-		4:  # drawing a circle / 绘制圆
-			if _gpDraftShape != null and _gpDraftShape.gpPoints.size() >= 1:
-				_gpDraftShape.gpRadius = _gpDraftShape.gpPoints[0].distance_to(_gpLocalToAuthor(gpLocal))
-				_gpPreview.queue_redraw()
-		5:  # drawing a polyline / 绘制折线
-			_gpPolyCursor = _gpLocalToAuthor(gpLocal)
-			_gpPreview.queue_redraw()
-
-
-func _gpOnRelease(gpLocal: Vector2) -> void:
-	match _gpDragKind:
-		2:
-			_gpCommitLine()
-		3:
-			_gpCommitRect()
-		4:
-			_gpCommitCircle()
-	_gpDragKind = -1
-	_gpDraftShape = null
-	_gpPreview.queue_redraw()
-
-
-func _gpOnKey(gpK: InputEventKey) -> void:
-	if gpK.keycode == KEY_ENTER or gpK.keycode == KEY_KP_ENTER:
-		if _gpTool == GPTool.GP_POLY and _gpPolyPts.size() >= 2:
-			_gpFinishPoly()
-	elif gpK.keycode == KEY_ESCAPE:
-		if _gpTool == GPTool.GP_POLY:
-			_gpPolyPts = PackedVector2Array()
-			_gpPreview.queue_redraw()
-	elif gpK.keycode == KEY_DELETE or gpK.keycode == KEY_BACKSPACE:
-		if _gpSelPort >= 0:
-			_gpDeletePort()
-		elif _gpSelShape >= 0:
-			_gpDeleteShape()
-
-
-# ---- hit testing ----
-# 命中测试
-func _gpHitPort(gpLocal: Vector2) -> int:
-	for gpI in range(_gpPorts.size()):
-		if _gpPortLocal(_gpPorts[gpI].gpPos).distance_to(gpLocal) < GP_PORT_HIT:
-			return gpI
-	return -1
-
-
-func _gpHitShape(gpLocal: Vector2) -> int:
-	var gpA: Vector2 = _gpLocalToAuthor(gpLocal)
-	# GPGeometry.gpShapeHit replaces the old bbox test: a bbox "hit" selects a shape when the
-	# click lands in empty space inside its bounding rectangle, and it cannot tell a curved
-	# polyline from its straight control polygon. The shared routine tests the real outline
-	# (flattening curves and arcs) within a tolerance, matching the main canvas exactly.
-	# 改用 GPGeometry.gpShapeHit 取代旧的包围盒判据：包围盒判据在点击落在矩形内空白处时也算命中，
-	# 且无法区分曲线折线与其直线控制多边形。共享例程按容差测试真实轮廓（展平曲线与圆弧），
-	# 与主画布完全一致。
-	var gpTol: float = GP_MIN_LEN
-	for gpI in range(_gpShapes.size() - 1, -1, -1):
-		if GPGeometry.gpShapeHit(gpA, _gpShapes[gpI], gpTol):
-			return gpI
-	return -1
-
-
-# ---- shape creation / commit ----
-# 图形创建 / 提交
-func _gpStartNew(gpKind: int, gpLocal: Vector2) -> void:
-	var gpA: Vector2 = _gpLocalToAuthor(gpLocal)
-	_gpDragLast = gpLocal
-	if gpKind == GPShape.GPKind.GP_LINE:
-		_gpDragKind = 2
-		_gpDraftShape = GPShape.gpLine(gpA, gpA)
-	elif gpKind == GPShape.GPKind.GP_RECT:
-		_gpDragKind = 3
-		_gpDraftShape = GPShape.gpRect(gpA, gpA)
-	elif gpKind == GPShape.GPKind.GP_CIRCLE:
-		_gpDragKind = 4
-		_gpDraftShape = GPShape.gpCircle(gpA, 0.0)
-	_gpPreview.queue_redraw()
-
-
-func _gpCommitLine() -> void:
-	if _gpDraftShape == null or _gpDraftShape.gpPoints.size() < 2:
-		return
-	var gpA: Vector2 = _gpDraftShape.gpPoints[0]
-	var gpB: Vector2 = _gpDraftShape.gpPoints[1]
-	if gpA.distance_to(gpB) >= GP_MIN_LEN:
-		_gpShapes.append(_gpDraftShape)
-		_gpSelShape = _gpShapes.size() - 1
-		_gpSelPort = -1
-		_gpSetTool(GPTool.GP_SELECT)
-		_gpSyncShapePanel()
-
-
-func _gpCommitRect() -> void:
-	if _gpDraftShape == null or _gpDraftShape.gpPoints.size() < 2:
-		return
-	var gpA: Vector2 = _gpDraftShape.gpPoints[0]
-	var gpB: Vector2 = _gpDraftShape.gpPoints[1]
-	var gpSz: Vector2 = (gpB - gpA).abs()
-	if gpSz.x >= GP_MIN_LEN and gpSz.y >= GP_MIN_LEN:
-		_gpShapes.append(_gpDraftShape)
-		_gpSelShape = _gpShapes.size() - 1
-		_gpSelPort = -1
-		_gpSetTool(GPTool.GP_SELECT)
-		_gpSyncShapePanel()
-
-
-func _gpCommitCircle() -> void:
-	if _gpDraftShape == null:
-		return
-	if _gpDraftShape.gpRadius >= GP_MIN_LEN:
-		_gpShapes.append(_gpDraftShape)
-		_gpSelShape = _gpShapes.size() - 1
-		_gpSelPort = -1
-		_gpSetTool(GPTool.GP_SELECT)
-		_gpSyncShapePanel()
-
-
-func _gpFinishPoly() -> void:
-	if _gpPolyPts.size() >= 2:
-		var gpArr: Array[Vector2] = []
-		for gpP in _gpPolyPts:
-			gpArr.append(gpP)
-		_gpShapes.append(GPShape.gpPolyline(gpArr, false))
-		_gpSelShape = _gpShapes.size() - 1
-		_gpSelPort = -1
-	_gpPolyPts = PackedVector2Array()
-	_gpSetTool(GPTool.GP_SELECT)
+# Repaint + re-sync the port / shape panels whenever the editor model or selection changes.
+# 编辑器模型或选择变更时重绘并重新同步端点 / 图元面板。
+func _gpOnEditorChanged() -> void:
+	if _gpPreview != null:
+		_gpPreview.queue_redraw()
+	_gpSyncPortPanel()
 	_gpSyncShapePanel()
 
 
-func _gpTranslateShape(gpIdx: int, gpDelta: Vector2) -> void:
-	if gpIdx < 0 or gpIdx >= _gpShapes.size():
-		return
-	var gpS: GPShape = _gpShapes[gpIdx]
-	# Whole-shape translation is GPGeometry.gpShiftPoints — the same routine the main canvas
-	# uses, so a shape dragged here and there cannot drift apart in behaviour.
-	# 整体平移即 GPGeometry.gpShiftPoints —— 与主画布同一例程，使图形在此处与彼处拖动行为不会分歧。
-	gpS.gpPoints = GPGeometry.gpShiftPoints(gpS.gpPoints, gpDelta)
+# Reflect the active tool on the tool-button row. / 在工具按钮行上反映当前工具。
+func _gpOnToolChanged(gpKind: int) -> void:
+	for gpI in range(_gpToolBtns.size()):
+		_gpToolBtns[gpI].button_pressed = (gpI == gpKind)
 
 
 # ---- port / shape panel sync ----
@@ -762,10 +449,10 @@ func _gpDirIndex(gpDir: Vector2) -> int:
 
 
 func _gpSyncPortPanel() -> void:
-	if _gpPortName == null:
+	if _gpPortName == null or _gpEditor == null:
 		return
-	if _gpSelPort >= 0 and _gpSelPort < _gpPorts.size():
-		var gpP: GPPort = _gpPorts[_gpSelPort]
+	if _gpEditor.gpSelPort >= 0 and _gpEditor.gpSelPort < _gpEditor.gpPorts.size():
+		var gpP: GPPort = _gpEditor.gpPorts[_gpEditor.gpSelPort]
 		_gpPortName.text = gpP.gpName
 		_gpPortName.editable = true
 		_gpPortDir.selected = _gpDirIndex(gpP.gpDir)
@@ -780,54 +467,43 @@ func _gpSyncPortPanel() -> void:
 
 
 func _gpSyncShapePanel() -> void:
-	if _gpDelShape == null:
+	if _gpDelShape == null or _gpEditor == null:
 		return
-	if _gpSelShape >= 0 and _gpSelShape < _gpShapes.size():
+	if _gpEditor.gpSelShape >= 0 and _gpEditor.gpSelShape < _gpEditor.gpShapes.size():
 		_gpDelShape.disabled = false
-		_gpShapeHint.text = I18n.gpTr("make_symbol.shape_selected") % (_gpSelShape + 1)
+		_gpShapeHint.text = I18n.gpTr("make_symbol.shape_selected") % (_gpEditor.gpSelShape + 1)
 	else:
 		_gpDelShape.disabled = true
-		_gpShapeHint.text = I18n.gpTr("make_symbol.no_shape_selected") % _gpShapes.size()
+		_gpShapeHint.text = I18n.gpTr("make_symbol.no_shape_selected") % _gpEditor.gpShapes.size()
 
 
 func _gpOnPortName(gpT: String) -> void:
-	if _gpSelPort < 0 or _gpSelPort >= _gpPorts.size():
+	if _gpEditor == null:
 		return
-	_gpPorts[_gpSelPort].gpName = gpT
+	_gpEditor.gpSetPortName(gpT)
 
 
 func _gpOnPortDir(gpI: int) -> void:
-	if _gpSelPort < 0 or _gpSelPort >= _gpPorts.size():
+	if _gpEditor == null:
 		return
-	_gpPorts[_gpSelPort].gpDir = _gpDirs[gpI]
-	_gpPreview.queue_redraw()
+	_gpEditor.gpSetPortDir(_gpDirs[gpI])
 
 
 func _gpDeletePort() -> void:
-	if _gpSelPort < 0 or _gpSelPort >= _gpPorts.size():
+	if _gpEditor == null:
 		return
-	_gpPorts.remove_at(_gpSelPort)
-	_gpSelPort = -1
-	_gpSyncPortPanel()
-	_gpPreview.queue_redraw()
+	_gpEditor.gpDeleteSelectedPort()
 
 
 func _gpDeleteShape() -> void:
-	if _gpSelShape < 0 or _gpSelShape >= _gpShapes.size():
+	if _gpEditor == null:
 		return
-	_gpShapes.remove_at(_gpSelShape)
-	_gpSelShape = -1
-	_gpSyncShapePanel()
-	_gpPreview.queue_redraw()
+	_gpEditor.gpDeleteSelectedShape()
 
 
 func _gpSetTool(gpTool: int) -> void:
-	_gpTool = gpTool
-	for gpI in range(_gpToolBtns.size()):
-		_gpToolBtns[gpI].button_pressed = (gpI == gpTool)
-	if gpTool != GPTool.GP_POLY:
-		_gpPolyPts = PackedVector2Array()
-	_gpPreview.queue_redraw()
+	if _gpEditor != null:
+		_gpEditor.gpSetTool(gpTool)
 
 
 # ---- helpers ----
@@ -843,25 +519,10 @@ func _gpCurrentCat() -> String:
 # the normalizer will recompute from the saved shapes, so the round-trip is exact.
 # 把工作端口（归一化 0..1）换算为保存字典所需的作者空间像素。这里用与 GPSymbolNormalizer
 # 从已保存图形重算时「同一 bbox + 包络」的 gpNormalizePorts 逆运算，使往返精确无漂移。
-func _gpAuthorPorts() -> Array:
-	var gpShapesDict: Dictionary = GPShapeSpec.gpEditSpec(_gpShapes)
-	var gpBBox: Rect2 = GPSymbolNormalizer.gpComputeBBox(gpShapesDict)
-	var gpEnv: Vector2 = GPSymbolCategories.gpSizeFor(_gpCurrentCat())
-	# The inverse mapping now lives in one place (GPSymbolNormalizer.gpDenormalizePorts), shared
-	# with gpDenormalizeSymbol. Previously this function re-spelled the same algebra, so any
-	# future correction to the round-trip would have had to be made twice.
-	# 逆映射现收敛到一处（GPSymbolNormalizer.gpDenormalizePorts），与 gpDenormalizeSymbol 共用。
-	# 此前本函数把同一套代数又写了一遍，将来任何往返修正都得改两处。
-	var gpPortDicts: Array = GPPortSpec.gpToDicts(_gpPorts)
-	for gpI in range(gpPortDicts.size()):
-		var gpD: Dictionary = gpPortDicts[gpI] as Dictionary
-		# An unnamed port still needs a stable name; gpDenormalizePorts only defaults when the
-		# key is ABSENT, and GPPort always serializes it (possibly as "").
-		# 未命名端口仍需稳定名称；gpDenormalizePorts 仅在键「缺失」时才取默认值，
-		# 而 GPPort 总会序列化该键（可能为空串）。
-		if str(gpD.get("name", "")) == "":
-			gpD["name"] = "p%d" % (gpI + 1)
-	return GPSymbolNormalizer.gpDenormalizePorts(gpPortDicts, gpBBox, gpEnv)
+func _gpAuthorPorts(gpCat: String = "") -> Array:
+	if _gpEditor == null:
+		return []
+	return _gpEditor.gpAuthorPorts(gpCat)
 
 
 # Create a labeled LineEdit row inside gpParent; returns the LineEdit.
@@ -1013,7 +674,7 @@ func _gpOnOk() -> void:
 		"id": gpId,
 		"display_name": gpDisplay,
 		"category": gpCat,
-		"shapes": GPShapeSpec.gpEditSpec(_gpShapes),
+		"shapes": GPShapeSpec.gpEditSpec(_gpEditor.gpShapes),
 		"ports": _gpAuthorPorts(),
 		"attrs_schema": {},
 	}
