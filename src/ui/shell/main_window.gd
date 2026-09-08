@@ -198,6 +198,9 @@ func _ready() -> void:
 	# ---- menu ----
 	# ---- 菜单 ----
 	gpMenuBar.gpActionTriggered.connect(_gpOnMenu)
+	# Ask the host to refresh enabled states right before a popup opens.
+	# 菜单展开前向宿主请求刷新启用状态。
+	gpMenuBar.gpMenuOpening.connect(_gpOnMenuOpening)
 
 	# ---- drawing toolbar row under the menu bar ----
 	# ---- 菜单栏下方的绘图工具栏行 ----
@@ -285,6 +288,9 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 	# fire the toolbar sync twice, so it is intentionally not connected here.
 	# （M2）模式变化已改为总线事件；上面若再连旧画布信号会导致工具栏同步触发两次，
 	# 故此处有意不再连接。
+	# A brand-new sheet has an empty undo stack: make the 编辑 menu agree with it right away.
+	# 新建图纸的撤销栈为空：让「编辑」菜单立即与之保持一致。
+	_gpRefreshEditMenu()
 
 
 # The active sheet changed (add / switch / close): refresh the inspector for the
@@ -536,10 +542,60 @@ func _gpOnMenu(gpAction: String) -> void:
 		"edit_delete":
 			if gpActiveCanvas().gpSelectedId != "":
 				_gpDeleteSelected()
+		"edit_undo":
+			_gpMenuUndo()
+		"edit_redo":
+			_gpMenuRedo()
 		"tool_settings":
 			_gpOpenSettings()
 		_:
 			_gpSetState("status.feature_todo", [gpAction])
+
+
+# Refresh 编辑 menu items against the live undo stack, called just before the popup
+# opens. The menu bar itself never learns what a canvas is; it only asks.
+# 在菜单展开前依据实时撤销栈刷新「编辑」菜单项。菜单栏本身不需要知道画布是什么，
+# 它只是发问。
+func _gpOnMenuOpening(gpTitleKey: String) -> void:
+	if gpTitleKey != "menu.edit":
+		return
+	_gpRefreshEditMenu()
+
+
+# Sync 撤销 / 重做 enabled state with the active sheet. No sheet means nothing to undo.
+# 同步「撤销 / 重做」的可用状态与活动图纸。没有图纸即无可撤销。
+func _gpRefreshEditMenu() -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	var gpCanUndo: bool = gpCanvas != null and gpCanvas.gpCanUndo()
+	var gpCanRedo: bool = gpCanvas != null and gpCanvas.gpCanRedo()
+	gpMenuBar.gpSetActionEnabled("edit_undo", gpCanUndo)
+	gpMenuBar.gpSetActionEnabled("edit_redo", gpCanRedo)
+
+
+# Menu 编辑 / 撤销. The canvas owns the stack, so all this does is ask and report.
+# 菜单「编辑 / 撤销」。撤销栈归画布所有，故此处只负责发问与报告。
+func _gpMenuUndo() -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null:
+		return
+	if gpCanvas.gpUndo():
+		_gpSetState("status.undone")
+	else:
+		_gpSetState("status.nothing_to_undo")
+	_gpRefreshEditMenu()
+
+
+# Menu 编辑 / 重做.
+# 菜单「编辑 / 重做」。
+func _gpMenuRedo() -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null:
+		return
+	if gpCanvas.gpRedo():
+		_gpSetState("status.redone")
+	else:
+		_gpSetState("status.nothing_to_redo")
+	_gpRefreshEditMenu()
 
 
 # ============================ project save / open ============================

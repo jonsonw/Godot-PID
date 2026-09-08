@@ -828,14 +828,25 @@ func gpRequestDeleteSelected() -> void:
 
 # Undo the most recent user edit (Ctrl+Z). Returns false when there is nothing to undo.
 # 撤销最近一次用户编辑（Ctrl+Z）。无可撤销时返回 false。
+# Undo can remove the very things the selection still points at (undoing a place drops a
+# node; undoing a shape insert shifts every later index). Pruning here means every caller
+# — shortcut, menu, or a future script — gets a consistent selection for free.
+# 撤销可能移除选择集仍指向的对象（撤销放置会移除节点；撤销插入图形会让后续下标整体前移）。
+# 在此修剪，意味着所有调用方——快捷键、菜单或今后的脚本——都自动获得一致的选择集。
 func gpUndo() -> bool:
-	return gpActions.gpUndo()
+	if not gpActions.gpUndo():
+		return false
+	_gpPruneSelection()
+	return true
 
 
 # Redo the most recently undone edit (Ctrl+Y / Ctrl+Shift+Z). Returns false when empty.
 # 重做最近被撤销的编辑（Ctrl+Y / Ctrl+Shift+Z）。无可重做时返回 false。
 func gpRedo() -> bool:
-	return gpActions.gpRedo()
+	if not gpActions.gpRedo():
+		return false
+	_gpPruneSelection()
+	return true
 
 
 # Whether an undo step is available (for enabling host menu items).
@@ -848,6 +859,27 @@ func gpCanUndo() -> bool:
 # 是否存在可重做步骤。
 func gpCanRedo() -> bool:
 	return gpActions.gpCanRedo()
+
+
+# Drop selection entries that no longer resolve in the graph. Without this, undoing a place
+# leaves gpSelection pointing at a node that is gone, and the inspector edits a ghost.
+# 剔除图中已无法解析的选择项。否则撤销一次放置后，gpSelection 仍指向已消失的节点，
+# 属性面板会去编辑一个幽灵对象。
+func _gpPruneSelection() -> void:
+	if gpGraph == null:
+		return
+	var gpKeep: Array[String] = []
+	for gpId in gpSelection:
+		if gpGraph.gpGetNode(gpId) != null:
+			gpKeep.append(gpId)
+	var gpShapeKeep: Array[int] = []
+	for gpI in gpShapeSel:
+		if gpI >= 0 and gpI < gpGraph.gpShapes.size():
+			gpShapeKeep.append(gpI)
+	if gpKeep.size() == gpSelection.size() and gpShapeKeep.size() == gpShapeSel.size():
+		return
+	gpShapeSel = gpShapeKeep
+	gpSetSelection(gpKeep)
 
 
 # Copy every selected node to a small offset, keeping its attributes and orientation.
