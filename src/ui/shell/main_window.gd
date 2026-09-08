@@ -27,6 +27,12 @@ var gpFileDialog: FileDialog
 # 当前文件对话框的用途：save 或 open。
 var gpPendingFileAction: String = ""
 
+# Application-layer document manager (M6). The composition root owns it; it holds the event
+# bus, the active graph and the unsaved-dirty flag, replacing the old GPAppState autoload stub.
+# 应用层文档管理器（M6）。组合根持有它；它持有事件总线、当前图与未保存脏标记，
+# 取代旧 GPAppState 自动加载桩。
+var gpDocManager: GPAppDocumentManager = GPAppDocumentManager.new()
+
 # ---- static node references (frozen in the scene) ----·
 # ---- 静态节点引用（固化于场景） ----
 # Top menu bar.
@@ -267,6 +273,12 @@ func gpActiveGraph() -> GPPIDGraph:
 # 切换标签时重复接线。
 func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 	gpCanvas.gpDefs = gpDefs
+	# M6: the composition root owns the document manager + bus; hand it to the canvas BEFORE
+	# reading gpEvents so the host subscribes to the manager's bus (not the fallback). The
+	# canvas forwards every graph / selection / status / mode event onto that bus.
+	# M6：组合根持有文档管理器与总线；在读取 gpEvents 之前先交给画布，使宿主订阅的是
+	# 管理器的总线（而非回退总线）。画布将图/选中/状态/模式事件统一转发到该总线。
+	gpCanvas.gpBindDocument(gpDocManager)
 	# M2: subscribe to the sheet's app event bus instead of the canvas signals. The canvas
 	# keeps emitting its legacy signals (public API stays stable), but the host now listens
 	# on ONE explicit channel: state broadcasts travel on the bus, host-directed requests
@@ -278,6 +290,10 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 	gpBus.gpSelectionChanged.connect(_gpOnSelectionChanged)
 	gpBus.gpStatusUpdated.connect(_gpOnStatus)
 	gpBus.gpModeChanged.connect(_gpSyncToolBar)
+	# Announce the document already loaded onto this canvas so bus subscribers (title bar,
+	# project tree) bind to the correct graph in one place, and the dirty flag resets.
+	# 通告本画布已载入的文档，使总线订阅者（标题栏、工程树）在一处绑定到正确的图，并重置脏标记。
+	gpDocManager.gpSetGraph(gpCanvas.gpGraph)
 	# Double click / context menu on a symbol asks for in-place geometry editing.
 	# 图元上的双击 / 右键菜单会请求就地编辑几何。
 	gpCanvas.gpSymbolEditRequested.connect(_gpOnSymbolEditRequested)
@@ -650,6 +666,9 @@ func _gpWriteProject(gpPath: String) -> void:
 		_gpSetState("status.save_fail", [gpFilePath])
 		return
 	gpCurrentPath = gpFilePath
+	# M6: a successful save clears the unsaved-dirty flag so the title bar / project tree update.
+	# M6：保存成功清除未保存脏标记，使标题栏/工程树同步。
+	gpDocManager.gpClearDirty()
 	var gpPackCount: int = gpActiveGraph().gpUserSymbolPacks.size()
 	_gpSetState("status.saved_with_packs", [gpFilePath, gpPackCount])
 
@@ -674,6 +693,9 @@ func _gpReadProject(gpPath: String) -> void:
 	# 重建图；gpFromDict 同时把内嵌用户包调和进活动图元库，使重新打开后自定义图元再次可用。
 	gpCenter.gpSetActiveGraph(gpNewGraph)
 	gpActiveCanvas().gpGraph = gpNewGraph
+	# M6: swap the active document in the manager (resets dirty, announces the change on the bus).
+	# M6：在管理器中切换当前文档（重置脏标记并总线通告变更）。
+	gpDocManager.gpSetGraph(gpNewGraph)
 	gpDefs = GPSymbolLibrary.gpDefaultDefs()
 	gpLeftDock.gpPopulate(gpDefs)
 	gpActiveCanvas().gpDefs = gpDefs

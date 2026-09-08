@@ -87,14 +87,24 @@ func gpSetMode(gpM: int) -> void:
 # App-layer event channel for THIS sheet (M2). One bus per canvas: a single global bus
 # would make every open sheet react to another sheet's change.
 # 本图纸的应用层事件通道（M2）。每画布一条总线：全局单条会让所有图纸互相串扰。
-# Initialised at construction (property initialiser) on purpose: the host assigns `gpGraph`
-# BEFORE `add_child()` runs `_ready()` (see GPCenterArea._gpAddTabWith), so the bus must
-# already exist when the graph setter binds the core signal.
-# 刻意用属性初始化器在构造期创建：宿主在 `add_child()`（触发 `_ready`）之前就赋值 `gpGraph`
-# （见 GPCenterArea._gpAddTabWith），故总线必须在图 setter 绑定 core 信号时已存在。
-# M6 (document_manager) will move ownership of this bus out of the canvas.
-# M6（document_manager）会把总线所有权移出画布。
-var gpEvents: GPEventBus = GPEventBus.new()
+# Since M6 the bus is OWNED by the GPAppDocumentManager (the composition root injects it via
+# gpBindDocument); the canvas only borrows it. A private fallback keeps the canvas usable when
+# no manager is bound yet (standalone tool tests, the construction window before bind).
+# 自 M6 起总线由 GPAppDocumentManager 持有（组合根经 gpBindDocument 注入）；画布只借用。
+# 私有回退使画布在无管理器绑定时仍可用（独立工具测试、绑定前的构造期）。
+var _gpEventBusFallback: GPEventBus = GPEventBus.new()
+var _gpDocMgr: GPAppDocumentManager = null
+var gpEvents: GPEventBus:
+	get:
+		if _gpDocMgr != null and _gpDocMgr.gpBus != null:
+			return _gpDocMgr.gpBus
+		return _gpEventBusFallback
+
+# Bind the document manager (M6). From now on the canvas forwards graph / selection / status /
+# mode events onto the manager's bus, and marks the document dirty on edits.
+# 绑定文档管理器（M6）。此后画布将图/选中/状态/模式事件转发到管理器的总线，并在编辑时标记脏。
+func gpBindDocument(gpMgr: GPAppDocumentManager) -> void:
+	_gpDocMgr = gpMgr
 
 # Application editing service (M4 续): the canvas asks it for every user edit (delete /
 # duplicate / place / connect / draw-commit / move) and gets plain values back. It owns the
@@ -431,6 +441,11 @@ func _gpSetGraph(gpValue: GPPIDGraph) -> void:
 # gpAddShape 等）。汇入画布信号，使交互改动与程序化改动走同一路径。
 func _gpOnGraphDataChanged() -> void:
 	gpGraphChanged.emit()
+	# M6: any model mutation means there is unsaved work; let the document manager own the
+	# dirty flag rather than a global singleton. No-op until a manager is bound.
+	# M6：任何模型改动都意味着未保存；让文档管理器持有脏标记，而非全局单例。未绑定时为空操作。
+	if _gpDocMgr != null:
+		_gpDocMgr.gpMarkDirty()
 	# M4: a programmatic model change must repaint too. Without this, any command that
 	# mutates the graph (delete, move) updates the model but leaves stale pixels on
 	# screen whenever the caller forgets an explicit queue_redraw().

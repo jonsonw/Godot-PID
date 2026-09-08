@@ -24,7 +24,6 @@ config/features=PackedStringArray("4.7", "Forward Plus")
 
 I18n="*res://src/autoload/i18n.gd"
 Settings="*res://src/autoload/settings.gd"
-GPAppState="*res://src/autoload/app_state.gd"
 
 [debug]
 

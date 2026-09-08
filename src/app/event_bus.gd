@@ -50,6 +50,19 @@ signal gpStatusUpdated(gpInfo: Dictionary)
 # 交互模式变化（选择 / 连线 / 绘图），供工具栏高亮同步。
 signal gpModeChanged(gpNewMode: int)
 
+# Active document swapped (open / new / switch sheet). Carries the new graph so subscribers
+# can re-bind the correct sheet in ONE place. Owned/emitted by GPAppDocumentManager (M6).
+# 当前文档切换（打开 / 新建 / 切换图纸）。携带新图，使订阅者在一处重新绑定正确的图纸。
+# 由 GPAppDocumentManager（M6）持有并发射。
+signal gpDocChanged(gpGraph: GPPIDGraph)
+
+# Unsaved-changes flag flipped. Carries the new dirty state so the title bar / project tree
+# can show a "needs save" marker without polling private state. Owned/emitted by
+# GPAppDocumentManager (M6).
+# 未保存改动标记翻转。携带新的脏标记状态，使标题栏/工程树无需轮询私有态即可显示保存提示。
+# 由 GPAppDocumentManager（M6）持有并发射。
+signal gpDirtyChanged(gpDirty: bool)
+
 
 # Number of connected callables for a given signal name. Used by tests to assert that
 # a subscriber really detached (a leaked connection is the classic event-bus bug).
