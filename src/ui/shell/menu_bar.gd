@@ -13,6 +13,17 @@ extends HBoxContainer
 # 菜单动作触发时发出，携带动作 id（如 "file_save"）。
 signal gpActionTriggered(gpId: String)
 
+# Raised just before a popup opens, so the host can enable/disable items against live
+# state (e.g. 撤销 is only enabled when the undo stack is non-empty). This keeps the bar
+# ignorant of the canvas: it reports "a menu is opening", the host decides what is valid.
+# 弹出菜单展开前发出，便于宿主依据实时状态启用 / 禁用菜单项（例如撤销栈非空才启用「撤销」）。
+# 这样菜单栏无需认识画布：它只报告「某菜单要展开了」，由宿主判断什么可用。
+signal gpMenuOpening(gpTitleKey: String)
+
+# Title i18n key -> PopupMenu, so enabled state can be set by action id across all menus.
+# 标题 i18n 键 -> PopupMenu，便于按动作 id 跨菜单设置启用状态。
+var _gpPopups: Dictionary = {}
+
 # Menu definitions: i18n title key -> array of [label_i18n_key, actionId].
 # Use null entry for a separator.
 # 菜单定义：i18n 标题键 -> [[标签 i18n 键, 动作 id], ...]。null 表示分隔线。
@@ -73,6 +84,10 @@ func _gpRebuild(gpLocale: String = "") -> void:
 	for gpC in get_children():
 		remove_child(gpC)
 		gpC.queue_free()
+	# Rebuilding drops every popup, so the registry must be dropped with them (a stale
+	# PopupMenu would be a freed object).
+	# 重建会丢弃所有弹出菜单，故注册表必须一并丢弃（残留的 PopupMenu 已是已释放对象）。
+	_gpPopups = {}
 	for gpTitleKey in GP_MENUS.keys():
 		_gpAddMenu(gpTitleKey, GP_MENUS[gpTitleKey])
 
@@ -95,6 +110,10 @@ func _gpAddMenu(gpTitleKey: String, gpItems: Array) -> void:
 		gpPopup.set_item_metadata(gpIdx, gpAction)
 		gpIdx += 1
 	gpPopup.id_pressed.connect(_gpOnPressed.bind(gpPopup))
+	# Announce the opening so the host can refresh enabled states first.
+	# 宣告展开，使宿主先刷新启用状态。
+	gpPopup.about_to_popup.connect(_gpOnOpening.bind(gpTitleKey))
+	_gpPopups[gpTitleKey] = gpPopup
 	add_child(gpBtn)
 
 
@@ -103,3 +122,24 @@ func _gpAddMenu(gpTitleKey: String, gpItems: Array) -> void:
 func _gpOnPressed(gpIndex: int, gpPopup: PopupMenu) -> void:
 	var gpAction: String = gpPopup.get_item_metadata(gpIndex)
 	gpActionTriggered.emit(gpAction)
+
+
+# Forward a popup opening to the host.
+# 把菜单展开转发给宿主。
+func _gpOnOpening(gpTitleKey: String) -> void:
+	gpMenuOpening.emit(gpTitleKey)
+
+
+# Enable or disable every item carrying the given action id. Items default to enabled,
+# so the host only has to speak about the ones that can become unavailable.
+# 启用或禁用所有携带指定动作 id 的菜单项。菜单项默认可用，故宿主只需关心那些会变为
+# 不可用的项。
+func gpSetActionEnabled(gpAction: String, gpEnabled: bool) -> void:
+	for gpTitleKey in _gpPopups.keys():
+		var gpPopup: PopupMenu = _gpPopups[gpTitleKey]
+		for gpI in range(gpPopup.item_count):
+			# Separators carry null metadata and never match an action id.
+			# 分隔线的 metadata 为 null，永不匹配动作 id。
+			if gpPopup.get_item_metadata(gpI) != gpAction:
+				continue
+			gpPopup.set_item_disabled(gpI, not gpEnabled)
