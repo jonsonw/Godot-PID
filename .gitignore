@@ -27,3 +27,8 @@ pdf_text.txt
 # 注意：docs/ 现按《开发指南》纳入仓库（ARCHITECTURE.md / samples / knowledge 镜像）。
 # 仅排除根目录零散的规划类 HTML（本仓库内不含此类文件，保留规则以防误入）。
 *.html
+
+# ===== GUT 测试产物 =====
+# CI 每轮生成的 JUnit 报告（-gjunit_xml_file=res://gut_junit.xml），不入库。
+# GUT JUnit report generated each CI run; never commit it.
+gut_junit.xml

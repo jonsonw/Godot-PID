@@ -1,0 +1,20 @@
+{
+	"_comment": [
+		"GUT 9.6.1 configuration for G-PID. / G-PID 的 GUT 9.6.1 配置。",
+		"dirs: scan res://tests (GPGTest suites live there; GUT-native tests under res://tests/gut).",
+		"include_subdirs: true so res://tests/gut/test_gp_suites.gd (the GPGTest bridge) is picked up.",
+		"prefix/suffix: only test_*.gd are GUT scripts; gp_test_*.gd are driven by the bridge instead.",
+		"CLI flags override these values, e.g. -gjunit_xml_file=... in CI. / CI 中的命令行参数可覆盖本文件。"
+	],
+	"dirs": [
+		"res://tests"
+	],
+	"include_subdirs": true,
+	"prefix": "test_",
+	"suffix": ".gd",
+	"should_exit": true,
+	"log_level": 1,
+	"junit_xml_file": "",
+	"ignore_pause": true,
+	"compact_mode": false
+}
