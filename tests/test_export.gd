@@ -1,31 +1,42 @@
-# GUT test stub for exporters (Dev Guide §4.1 / §4.6.2).
-# 导出器的 GUT 测试桩（开发指南 §4.1 / §4.6.2）。
-# Intended runner is GUT. Until it is installed, this uses the built-in assert() so the
-# script parses and can be run standalone. Once GUT is added, change `extends Node` back to
-# `extends GutTest` and swap assert() for assert_eq()/assert_true().
-# 预期测试运行器为 GUT。在 GUT 安装前，本脚本用内置 assert() 以便解析并能独立运行。
-# 待 GUT 接入后，将 `extends Node` 改回 `extends GutTest`，并把 assert() 换回 assert_eq()/assert_true()。
-extends Node
+extends GutTest
+# GUT tests for the exporter stubs (Dev Guide §4.1 / §4.6.2).
+# 导出器桩的 GUT 测试（开发指南 §4.1 / §4.6.2）。
+#
+# History / 变更说明：
+#   本文件最初是在 GUT 尚未安装时写下的「桩的桩」——`extends Node` + 内置 assert()，
+#   以便脚本可解析、可独立运行。GUT 9.6.1 安装后按其原始注释要求改造为 `extends GutTest`，
+#   方法名由 gpTest* 改为 GUT 约定的 test_*，断言换用 assert_true / assert_false。
+#
+# Contract under test / 被测契约：
+#   GPDxfExporter.gpExport(gpDoc, gpPath) -> bool
+#   GPPdfExporter.gpExport(gpDoc, gpPath) -> bool
+#   GPListBasic.gpExportLists(gpDoc, gpDir) -> Dictionary
+#   三者当前均为未实现桩（恒返回 false / 空字典）。测试锁定「桩契约」，
+#   待导出器真正落地后需同步更新断言（届时返回值不再为 false）。
 
-# Ensure DxfExporter returns a boolean (stub contract).
-# 验证 DxfExporter 返回布尔值（桩契约）。
-func gpTestDxfExportReturnsBool() -> void:
+
+# DxfExporter must return a bool; the stub returns false until implemented.
+# DxfExporter 必须返回 bool；未实现前桩返回 false。
+func test_dxf_export_returns_bool() -> void:
 	var gpEx: GPDxfExporter = GPDxfExporter.new()
 	var gpResult: bool = gpEx.gpExport(null, "res://test_out.dxf")
-	assert(gpResult is bool, "DxfExporter.export should return bool")
+	assert_true(gpResult is bool, "GPDxfExporter.gpExport 应返回 bool")
+	assert_false(gpResult, "DXF 导出尚未实现，桩应返回 false")
 
 
-# Ensure PdfExporter returns a boolean (stub contract).
-# 验证 PdfExporter 返回布尔值（桩契约）。
-func gpTestPdfExportReturnsBool() -> void:
+# PdfExporter must return a bool; the stub returns false until implemented.
+# PdfExporter 必须返回 bool；未实现前桩返回 false。
+func test_pdf_export_returns_bool() -> void:
 	var gpEx: GPPdfExporter = GPPdfExporter.new()
 	var gpResult: bool = gpEx.gpExport(null, "res://test_out.pdf")
-	assert(gpResult is bool, "PdfExporter.export should return bool")
+	assert_true(gpResult is bool, "GPPdfExporter.gpExport 应返回 bool")
+	assert_false(gpResult, "PDF 导出尚未实现，桩应返回 false")
 
 
-# Ensure ListBasic.export_lists returns a Dictionary (stub contract).
-# 验证 ListBasic.export_lists 返回字典（桩契约）。
-func gpTestExportListsReturnsDict() -> void:
+# ListBasic.export_lists must return a Dictionary; the stub returns an empty one.
+# ListBasic.export_lists 必须返回 Dictionary；桩返回空字典。
+func test_export_lists_returns_dict() -> void:
 	var gpLb: GPListBasic = GPListBasic.new()
 	var gpOut: Dictionary = gpLb.gpExportLists(null, "user://")
-	assert(gpOut is Dictionary, "ListBasic.export_lists should return Dictionary")
+	assert_true(gpOut is Dictionary, "GPListBasic.gpExportLists 应返回 Dictionary")
+	assert_eq(gpOut.size(), 0, "清单导出尚未实现，桩应返回空字典")

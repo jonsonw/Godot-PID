@@ -1,8 +1,17 @@
 # GitHub Actions CI for G-PID
 # G-PID 的 GitHub Actions 持续集成配置
+#
+# Gates / 门禁顺序（任一失败即 CI 红）：
+#   1. import      — 生成 .uid 与全局类索引。GUT 的 GutTest 等 class_name 依赖此步；
+#                    缺失时 gut_cmdln.gd 会报 "Some GUT class_names have not been imported"。
+#   2. compile     — 编辑器解析全工程，任何脚本编译错误即失败。
+#   3. core-tests  — 自研 GPGTest 运行器（tests/run_core_tests.gd），443 条断言，不依赖插件。
+#   4. gut-tests   — GUT 9.6.1。含 GPGTest 桥接（tests/gut/test_gp_suites.gd，驱动既有 21 套）
+#                    与 GUT 原生测试（tests/test_export.gd 等）。
+#
+# Godot 版本与本地开发保持一致（4.7）；升级只需改 GODOT_TAG。
+# 直接下载官方 release 二进制而非依赖第三方 action，避免 action 版本解析滞后于引擎发布。
 
-# Run GUT unit tests on every push / PR.
-# 每次 push / PR 运行 GUT 单元测试。
 name: CI
 
 on:
@@ -10,20 +19,64 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Allow a manual run without pushing. / 支持不推送手动触发。
+  workflow_dispatch:
+
+# Only keep the newest run for a given branch/PR.
+# 同一分支 / PR 只保留最新一次运行。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_TAG: "4.7-stable"
 
 jobs:
-  gut-tests:
-    # Use the official Godot CI image to run headless tests.
-    # 使用官方 Godot CI 镜像以无头方式运行测试。
+  test:
+    name: Godot 4.7 · GUT + GPGTest
     runs-on: ubuntu-latest
-    container:
-      image: barnabsa/godot-ci:4.3
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run GUT tests
-        # GUT must be installed as an addon; this launches the headless editor and runs tests/.
-        # 需将 GUT 作为插件安装；以下以无头编辑器运行 tests/ 目录。
+      - name: Install Godot (headless, linux x86_64)
         run: |
-          godot --headless --quit-after 1 --script res://addons/gut/gut_cmdln.gd -gdir=res://tests -gexit
+          set -euo pipefail
+          curl -fsSL -o /tmp/godot.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_TAG}/Godot_v${GODOT_TAG}_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d /tmp/godot-bin
+          # Binary name varies slightly across releases; locate it instead of hardcoding.
+          # 不同版本解压出的可执行文件名略有差异，用 find 定位而非写死。
+          GODOT_BIN="$(find /tmp/godot-bin -maxdepth 1 -type f -name 'Godot*' | head -n 1)"
+          test -n "$GODOT_BIN" || { echo "Godot binary not found in archive"; exit 1; }
+          chmod +x "$GODOT_BIN"
+          sudo mv "$GODOT_BIN" /usr/local/bin/godot
+          godot --version
+
+      - name: Import project (registers GUT class_names)
+        run: godot --headless --import
+
+      - name: Compile scan (all scripts parse)
+        run: godot --headless --editor --quit
+
+      - name: Run G-PID core tests (GPGTest runner, 443 asserts)
+        run: godot --headless --script res://tests/run_core_tests.gd
+
+      - name: Run GUT (GPGTest bridge + GUT-native tests)
+        run: |
+          godot --headless --script res://addons/gut/gut_cmdln.gd \
+            -gdir=res://tests \
+            -ginclude_subdirs \
+            -gprefix=test_ \
+            -gsuffix=.gd \
+            -gjunit_xml_file=res://gut_junit.xml \
+            -gexit
+
+      - name: Upload GUT JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gut-junit-${{ github.run_number }}
+          path: gut_junit.xml
+          if-no-files-found: warn

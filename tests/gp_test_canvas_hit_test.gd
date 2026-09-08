@@ -35,6 +35,7 @@ func gpTestNodeRectUsesDefSize() -> void:
 	var r: Rect2 = GPCanvasHitTest.gpNodeRect(g, b, "N1")
 	gpEq(r.position, Vector2(10 - 40, 10 - 20), "rect top-left = center - half size")
 	gpEq(r.size, Vector2(80, 40), "rect size from def envelope")
+	b.free()  # GPGraphBinder 是 Node，不计引用，须显式释放以免 GUT 报 orphan
 
 
 func gpTestNodeRectFallbackWhenDefMissing() -> void:
@@ -42,6 +43,7 @@ func gpTestNodeRectFallbackWhenDefMissing() -> void:
 	var b: GPGraphBinder = GPGraphBinder.new()  # no defs -> gpDefFor returns null
 	var r: Rect2 = GPCanvasHitTest.gpNodeRect(g, b, "N1")
 	gpEq(r.size, Vector2(64, 48), "missing def falls back to 64x48")
+	b.free()  # GPGraphBinder 是 Node，不计引用，须显式释放以免 GUT 报 orphan
 
 
 func gpTestNodeRectNullBinderIsEmpty() -> void:
@@ -55,6 +57,7 @@ func gpTestHitNode() -> void:
 	var b: GPGraphBinder = _mkBinder()
 	gpEq(GPCanvasHitTest.gpHitNode(g, b, Vector2(10, 10)), "N1", "point on node hits it")
 	gpEq(GPCanvasHitTest.gpHitNode(g, b, Vector2(9999, 9999)), "", "far point hits nothing")
+	b.free()  # GPGraphBinder 是 Node，不计引用，须显式释放以免 GUT 报 orphan
 
 
 func gpTestHitShape() -> void:
