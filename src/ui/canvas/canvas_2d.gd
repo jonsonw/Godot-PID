@@ -113,8 +113,10 @@ func gpBindDocument(gpMgr: GPAppDocumentManager) -> void:
 # 应用编辑服务（M4 续）：画布向它请求每一项用户编辑（删除 / 复制 / 放置 / 连线 / 提交绘图 /
 # 移动），只拿回普通值。它持有「每文档」的命令上下文与撤销栈，画布自身不再持有任何命令
 # 机制 —— 只负责转发意图并处理视图侧后果。
-# M6 (PIDDocumentManager) will move ownership out of the canvas.
-# M6（PIDDocumentManager）会把所有权移出画布。
+# Per-sheet editing collaborator. It stays on the canvas because the canvas is the one that
+# issues edit intents; the document manager (M6) owns the graph / bus / dirty state, not the service.
+# 每图纸的编辑协作者。它留在画布上，因为正是画布发出编辑意图；文档管理器（M6）持有图 / 总线 /
+# 脏标记状态，而非这个服务。
 var gpActions: GPEditService = GPEditService.new()
 
 # Backing field for the gpGraph property. Kept explicit so the setter cannot recurse.
@@ -193,8 +195,7 @@ var _gpPlaceTool: GPPlaceTool = null
 var _gpDrawTool: GPDrawShapeTool = null
 var _gpGripTool: GPGripTool = null
 
-# Monotonically increasing id counter for new nodes and edges — proxies GPIdGen via the state.
-# 新节点与新边的单调递增 id 计数器 —— 经状态对象代理 GPIdGen。
+# Id counter for new nodes/edges — proxy to state.gpIds (GPIdGen). / 新节点/边 id 计数器 —— 代理 state.gpIds。
 var gpNextId: int:
 	get: return _gpState.gpIds.gpCounter
 	set(gpV): _gpState.gpIds.gpCounter = gpV
@@ -207,27 +208,18 @@ var gpWorldRoot: Node2D = null
 
 # ---- camera ----
 # ---- 相机 ----
-# The camera is a pure pan/zoom module (GPCanvasCamera, core/) that owns the offset+zoom state
-# and the world<->screen transform / zoom-at-point math. gpViewOffset / gpViewZoom below are thin
-# ...but it is now owned by GPCanvasInteractState and exposed here as a read-only proxy, so the
-# many direct reads in the drawing / grid / hit-test hot paths keep working unchanged while the
-# math stays in one headless-testable place.
-# 相机是纯平移/缩放模块（GPCanvasCamera，core/），拥有 offset+zoom 状态与坐标变换/定点缩放数学；
-# 现由 GPCanvasInteractState 持有并在此以只读代理暴露，使绘制 / 网格 / 命中测试热路径里的众多
-# 直读保持不改，而数学收敛到一处可 headless 单测的地方。
+# Camera proxy: math lives in GPCanvasCamera (core/view); reads stay hot-path friendly. / 相机代理：数学在 GPCanvasCamera，直读保持热路径友好。
 var _gpCam: GPCanvasCamera:
 	get: return _gpState.gpCam
 
-# Canvas pixel offset of the world origin (0,0) — proxies the camera.
-# 世界原点 (0,0) 在画布上的像素偏移 —— 代理相机。
+# World-origin pixel offset — proxy to camera. / 世界原点像素偏移 —— 代理相机。
 var gpViewOffset: Vector2:
 	get:
 		return _gpCam.gpOffset
 	set(gpV):
 		_gpCam.gpOffset = gpV
 
-# Current zoom factor (1.0 = 100%) — proxies the camera.
-# 当前缩放系数（1.0 = 100%）—— 代理相机。
+# Zoom factor (1.0 = 100%) — proxy to camera. / 缩放系数（1.0 = 100%）—— 代理相机。
 var gpViewZoom: float:
 	get:
 		return _gpCam.gpZoom
@@ -236,9 +228,7 @@ var gpViewZoom: float:
 
 # ---- interaction state (mode / pending symbol) ----
 # ---- 交互状态（模式 / 待放置图元） ----
-# Current interaction mode. Proxies GPCanvasInteractState so the mode has one owner even though
-# ~20 call sites read it as a plain field.
-# 当前交互模式。代理到 GPCanvasInteractState，使模式即便被约 20 处当作普通字段读取也只有一个持有者。
+# Interaction mode — proxy to state. / 交互模式 —— 代理 state。
 var gpMode: int:
 	get: return _gpState.gpMode
 	set(gpV): _gpState.gpMode = gpV
@@ -249,28 +239,19 @@ var gpPendingDef: GPSymbolDef:
 	get: return _gpState.gpPendingDef
 	set(gpV): _gpState.gpPendingDef = gpV
 
-# Authoritative selection-state owner (pure module, headless-testable), now reached through
-# GPCanvasInteractState. gpSelection / gpSelectedId below are proxy properties into it so every
-# existing read site (binder, inspector, status, marquee) keeps compiling unchanged while the
-# mutual-exclusion + primary-sync invariants live in the tested module. gpShapeSel (annotation
-# shapes) stays a direct array: its in-place mutations are each an intentional single/multi/
-# marquee/delete context, and proxying would silently break the node<->shape mutual exclusion.
-# 权威选择状态源（纯模块，可 headless 单测），现经 GPCanvasInteractState 访问。下方 gpSelection /
-# gpSelectedId 是它的代理属性，使既有读点（绑定层/属性面板/状态栏/框选）零改动编译，而互斥 +
-# 主选项同步不变式落在已测模块中。gpShapeSel（注释图形）保持直接数组：其就地变更各自是明确的
-# 单选/多选/框选/删除语境，代理会破坏节点<->图形互斥。
+# Selection state owner (pure, headless-testable) reached via GPCanvasInteractState. gpSelection /
+# gpSelectedId are proxies into it; gpShapeSel stays a direct array (node<->shape mutual exclusion).
+# 选择状态源（纯模块，可 headless 单测）经 GPCanvasInteractState 访问。gpSelection / gpSelectedId 为
+# 代理；gpShapeSel 保持直接数组（节点<->图形互斥，代理会破坏）。
 var _gpSel: GPCanvasSelection:
 	get: return _gpState.gpSel
 
-# Ids of the currently selected nodes. Proxies into _gpSel.gpNodeIds.
-# 当前选中节点的 id 集合。代理到 _gpSel.gpNodeIds。
+# Selected node ids — proxy to selection. / 选中节点 id 集合 —— 代理选择。
 var gpSelection: Array[String]:
 	get: return _gpSel.gpNodeIds
 	set(gpV): _gpSel.gpSetNodes(gpV)
 
-# Id of the currently selected node (primary entry of gpSelection, "" when none). Proxies into
-# _gpSel.gpPrimaryNodeId.
-# 当前选中节点的 id（gpSelection 的主选项，无选中时为空）。代理到 _gpSel.gpPrimaryNodeId。
+# Primary selected node id ("" when none) — proxy to selection. / 主选项 id（无则 ""）—— 代理选择。
 var gpSelectedId: String:
 	get: return _gpSel.gpPrimaryNodeId
 	set(gpV): _gpSel.gpSetPrimary(gpV)
@@ -279,11 +260,8 @@ var gpSelectedId: String:
 # 被选为连线起点的节点 id。
 var gpConnectFrom: String = ""
 
-# The rubber-band marquee (active flag, endpoints in SCREEN space, additive flag) is owned by
-# GPCanvasMarquee via the state; the window/crossing rule lives there too, so the drawer and the
-# commit path can never disagree about which one they applied.
-# 橡皮筋框选（进行中标记、屏幕空间端点、追加标记）经状态对象由 GPCanvasMarquee 持有；
-# 窗口 / 交叉规则也在其中，使绘制路径与提交路径永不会在「应用了哪条规则」上分歧。
+# Rubber-band marquee (owned by GPCanvasMarquee via state): active flag + screen endpoints + rule.
+# 橡皮筋框选（经状态由 GPCanvasMarquee 持有）：进行中标记 + 屏幕端点 + 窗口/交叉规则。
 var gpMarq: GPCanvasMarquee:
 	get: return _gpState.gpMarquee
 
@@ -405,11 +383,13 @@ func _ready() -> void:
 	var _gpSettings: Object = get_node_or_null("/root/Settings")
 	if _gpSettings != null and _gpSettings.has_signal("gpSymbolStyleChanged"):
 		_gpSettings.gpSymbolStyleChanged.connect(_gpOnSymbolStyleChanged)
-	# Bridge the canvas signal into the app event bus (M2): a single funnel, so the tool
-	# layer keeps emitting `gpGraphChanged` unchanged while every new subscriber listens
-	# on the bus. Collapse this bridge once M6 lets the document emit the bus directly.
-	# 把画布信号桥接到应用事件总线（M2）：单一漏斗，工具层继续照旧发射 `gpGraphChanged`，
-	# 而新订阅者统一监听总线。待 M6 让文档对象直接发射总线后可移除此桥。
+	# Bridge the canvas's own gpGraphChanged funnel into the app event bus (M2): one channel, so
+	# the tool layer keeps emitting unchanged while new subscribers listen on the bus. The core
+	# GPPIDGraph emits a raw signal; the canvas is the single place that maps it onto the bus
+	# (now owned by the document manager, M6). The funnel stays — the graph does not emit the bus.
+	# 把画布自身的 gpGraphChanged 漏斗桥入应用事件总线（M2）：单一通道，工具层照旧发射，
+	# 新订阅者监听总线。core 的 GPPIDGraph 发射的是原始信号；画布是把它映射到总线的唯一位置
+	# （总线现由文档管理器持有，M6）。漏斗保留——图本身不发射总线。
 	gpGraphChanged.connect(_gpForwardGraphChanged)
 	# Re-assert the core-graph binding (idempotent; covers a graph assigned before _ready).
 	# 重申 core 图绑定（幂等，覆盖在 _ready 之前就被赋值的图）。
@@ -496,13 +476,10 @@ func _gpResetView() -> void:
 	_gpApplyCamera()
 
 
-# Apply gpViewOffset and gpViewZoom to the world root.
-# 将 gpViewOffset 与 gpViewZoom 应用到世界根节点。
+# Apply the camera (offset + zoom) to the world root; the transform math lives in GPCanvasCamera.
+# 将相机（偏移 + 缩放）应用到世界根节点；变换数学位于 GPCanvasCamera。
 func _gpApplyCamera() -> void:
-	if gpWorldRoot == null:
-		return
-	gpWorldRoot.position = gpViewOffset
-	gpWorldRoot.scale = Vector2(gpViewZoom, gpViewZoom)
+	_gpCam.gpApplyTo(gpWorldRoot)
 
 
 # Convert a world coordinate to a screen coordinate (delegates to GPCanvasCamera).
@@ -564,38 +541,16 @@ func _gpRefreshSymbols() -> void:
 
 # ============================ lookup ============================
 # ============================ 查找 ============================
-# Find the world center of a node by id.
-# 按 id 查找节点的世界中心。
+# --- lookup ports delegate to GPCanvasHitTest (P5 extraction) ---
+# --- 查找端口委托给 GPCanvasHitTest（P5 抽取）---
 func gpNodeCenter(gpId: String) -> Vector2:
-	for gpN in gpGraph.gpNodes:
-		if gpN.gpInstanceId == gpId:
-			return gpN.gpPosition
-	return Vector2.INF
+	return GPCanvasHitTest.gpNodeCenter(gpGraph, gpId)
 
-
-# World-space bounding rectangle of a node, from its definition's nominal envelope.
-# 节点在世界坐标系中的包围矩形，取自其定义的标称包络。
 func gpNodeRect(gpId: String) -> Rect2:
-	if gpGraph == null or gpBinder == null:
-		return Rect2()
-	for gpN in gpGraph.gpNodes:
-		if gpN.gpInstanceId == gpId:
-			var gpDef: GPSymbolDef = gpBinder.gpDefFor(gpN.gpSymbolId)
-			var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef != null else Vector2(64.0, 48.0)
-			return Rect2(gpN.gpPosition - gpSz / 2.0, gpSz)
-	return Rect2()
+	return GPCanvasHitTest.gpNodeRect(gpGraph, gpBinder, gpId)
 
-
-# Hit-test: return the id of the topmost node under the given world point.
-# 命中测试：返回指定世界坐标点下最上层节点的 id。
 func gpHitTest(gpWorld: Vector2) -> String:
-	if gpGraph == null:
-		return ""
-	var gpBest: String = ""
-	for gpN in gpGraph.gpNodes:
-		if gpNodeRect(gpN.gpInstanceId).has_point(gpWorld):
-			gpBest = gpN.gpInstanceId
-	return gpBest
+	return GPCanvasHitTest.gpHitNode(gpGraph, gpBinder, gpWorld)
 
 
 # Update the position of a graph node in-place.
@@ -764,22 +719,11 @@ func _gpOnLeftUp(gpScreen: Vector2) -> void:
 # _gpOverlay.gpDraw() 调用，画布不再自行绘制覆盖层。
 
 
-# Hit-test: return the index of the topmost annotation shape under the world point, or -1.
-# 命中测试：返回世界坐标点下最上层注释图形的下标，未命中返回 -1。
+# Hit-test: index of the topmost annotation shape under the world point, or -1. Delegates to
+# GPCanvasHitTest (P5 extraction); tolerance scales with zoom (6px at 100%).
+# 命中测试：世界点下最上层注释图形下标，未命中 -1。委托 GPCanvasHitTest（P5 抽取）；容差随缩放（100% 时 6px）。
 func gpHitShape(gpWorld: Vector2) -> int:
-	if gpGraph == null:
-		return -1
-	var gpTol: float = 6.0 / gpViewZoom
-	for gpI in range(gpGraph.gpShapes.size() - 1, -1, -1):
-		if _gpHitShapePrim(gpWorld, gpGraph.gpShapes[gpI], gpTol):
-			return gpI
-	return -1
-
-
-# Does a world point fall on / inside one shape (within the hit tolerance)?
-# 世界坐标点是否落在某图形上 / 内（在命中容差内）？
-func _gpHitShapePrim(gpWorld: Vector2, gpS: GPShape, gpTol: float) -> bool:
-	return GPGeometry.gpShapeHit(gpWorld, gpS, gpTol)
+	return GPCanvasHitTest.gpHitShape(gpGraph, gpWorld, gpViewZoom)
 
 
 
