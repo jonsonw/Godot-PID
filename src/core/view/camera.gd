@@ -70,3 +70,14 @@ func gpZoomAt(gpScreen: Vector2, gpFactor: float) -> bool:
 # 按屏幕增量平移相机（拖动）。世界内容相对指针反向移动。
 func gpPanBy(gpDelta: Vector2) -> void:
 	gpOffset += gpDelta
+
+
+# Push the current offset/zoom onto a Node2D world root. The canvas calls this after every camera
+# change so the view follows; keeping it here means all camera math lives in one headless module.
+# 将当前 offset/zoom 应用到 Node2D 世界根。画布在每次相机变化后调用，令视图跟随；置于此处使全部
+# 相机数学收敛到同一可 headless 模块。
+func gpApplyTo(gpWorldRoot: Node2D) -> void:
+	if gpWorldRoot == null:
+		return
+	gpWorldRoot.position = gpOffset
+	gpWorldRoot.scale = Vector2(gpZoom, gpZoom)
