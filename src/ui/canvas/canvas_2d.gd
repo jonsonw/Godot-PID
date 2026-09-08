@@ -96,15 +96,16 @@ func gpSetMode(gpM: int) -> void:
 # M6（document_manager）会把总线所有权移出画布。
 var gpEvents: GPEventBus = GPEventBus.new()
 
-# Command history (M4). The canvas owns it until M6 moves it into PIDDocumentManager.
-# 命令历史（M4）。在 M6 移入 PIDDocumentManager 之前由画布持有。
-var gpCommands: GPCommandStack = GPCommandStack.new()
-
-# What every command receives: the graph plus the SHARED id generator, so an id minted
-# by a command can never collide with one minted interactively. Rebuilt on graph swap.
-# 每条命令拿到的东西：图 + 共享的 id 生成器，故命令生成的 id 绝不会与交互生成的撞号。
-# 更换图纸时重建。
-var gpCmdCtx: GPCommandContext = null
+# Application editing service (M4 续): the canvas asks it for every user edit (delete /
+# duplicate / place / connect / draw-commit / move) and gets plain values back. It owns the
+# per-document command context and undo stack, so the canvas itself holds no command
+# machinery — it only forwards intent and applies the view-side consequences.
+# 应用编辑服务（M4 续）：画布向它请求每一项用户编辑（删除 / 复制 / 放置 / 连线 / 提交绘图 /
+# 移动），只拿回普通值。它持有「每文档」的命令上下文与撤销栈，画布自身不再持有任何命令
+# 机制 —— 只负责转发意图并处理视图侧后果。
+# M6 (PIDDocumentManager) will move ownership out of the canvas.
+# M6（PIDDocumentManager）会把所有权移出画布。
+var gpActions: GPEditService = GPEditService.new()
 
 # Backing field for the gpGraph property. Kept explicit so the setter cannot recurse.
 # gpGraph 属性的后备字段。显式保留以避免 setter 递归。
@@ -167,6 +168,7 @@ var gpAnno: GPAnnotationEditor = null
 # with this canvas as its state owner.
 # 右键上下文菜单委托（P2 拆分）：命中判定 / 菜单构建 / 动作分发，以及菜单命中状态（现由
 # GPCanvasContextMenu 持有）。在 _ready() 中以本画布作为状态持有者创建。
+var _gpShortcuts: GPCanvasShortcuts = null
 var _gpCtx: GPCanvasContextMenu = null
 
 # Canvas interaction tools (P2 split): one RefCounted delegate per interaction mode, dispatched
@@ -355,6 +357,10 @@ func _ready() -> void:
 	# Create the right-click context-menu delegate (P2 split), owner = this canvas.
 	# 创建右键上下文菜单委托（P2 拆分），状态持有者为本画布。
 	_gpCtx = GPCanvasContextMenu.new(self)
+	# Create the keyboard-shortcut delegate (M4 续). Shared shortcuts and the progressive-ESC
+	# chain used to be inline methods of this canvas.
+	# 创建键盘快捷键委托（M4 续）。共享快捷键与渐进式 ESC 链原先是本画布的内联方法。
+	_gpShortcuts = GPCanvasShortcuts.new(self)
 	# Create the interaction-tool registry and the four mode tools (P2 split). The context wraps
 	# this canvas; every tool reads/writes live state through it. CONNECT shares the select tool.
 	# 创建交互工具注册表与四种模式工具（P2 拆分）。上下文封装本画布，各工具经其读写实时状态；
@@ -415,8 +421,7 @@ func _gpSetGraph(gpValue: GPPIDGraph) -> void:
 	# Rebuild the command context for the new graph and drop the old history: undo must
 	# never reach back into a graph that is no longer displayed.
 	# 为新图重建命令上下文并丢弃旧历史：撤销绝不能回到已不再显示的图。
-	gpCmdCtx = GPCommandContext.new(_gpGraphRef, _gpState.gpIds)
-	gpCommands.gpClear()
+	gpActions.gpBindGraph(_gpGraphRef, _gpState.gpIds)
 
 
 # Core graph mutated programmatically (gpAddNode / gpRemoveNodeWithEdges /
@@ -641,7 +646,7 @@ func _gui_input(gpEvent: InputEvent) -> void:
 			if _gpActiveTool().gpOnKey(gpKey):
 				accept_event()
 				return
-			if _gpOnKey(gpKey):
+			if _gpShortcuts.gpHandleKey(gpKey):
 				accept_event()
 				return
 
@@ -717,12 +722,13 @@ func _gpOnLeftUp(gpScreen: Vector2) -> void:
 	# 其余（提交绘图 / 框选 / 整组拖拽）分派给活动工具。
 	_gpActiveTool().gpOnRelease(gpWorld)
 
+# _gpIsDrawMode() removed here: GPCanvasInteractState.gpIsDrawMode() already owns that rule
+# (gpSetMode calls it), and the canvas copy became unreachable once the keyboard section
+# moved to GPCanvasShortcuts.
+# 此处删除 _gpIsDrawMode()：GPCanvasInteractState.gpIsDrawMode() 已持有该规则（gpSetMode 调用它），
+# 键盘段迁到 GPCanvasShortcuts 后画布这份再无调用者。
+
 # ============================ drawing annotation shapes ============================
-# ============================ 绘制注释图形 ============================
-# True when the canvas is in one of the free-shape drawing modes.
-# 画布处于某个自由图形绘图模式时返回真。
-func _gpIsDrawMode() -> bool:
-	return gpMode >= GPMode.GP_DRAW_LINE and gpMode <= GPMode.GP_DRAW_ARC
 
 
 # M3: _gpOnDrawDown / _gpCommitDraw / _gpFinishPolyline moved into GPDrawShapeTool together with
@@ -811,52 +817,37 @@ func gpRequestSelectAll() -> void:
 func gpRequestDeleteSelected() -> void:
 	if gpGraph == null:
 		return
-	# Remove selected annotation shapes (descending index so earlier ones stay valid).
-	# 删除选中的注释图形（按下标降序，使较低下标保持有效）。
-	if not gpShapeSel.is_empty():
-		var gpIdxs: Array[int] = gpShapeSel.duplicate()
-		gpIdxs.sort()
-		gpIdxs.reverse()
-		for gpI in gpIdxs:
-			if gpI >= 0 and gpI < gpGraph.gpShapes.size():
-				gpGraph.gpShapes.remove_at(gpI)
-		gpShapeSel.clear()
-	if not gpSelection.is_empty():
-		# M4: route the delete through the command stack so it becomes undoable.
-		# The command issues the very same gpRemoveNodeWithEdges calls as before.
-		# M4：删除改经命令栈，从而可撤销。命令内部发出与原先完全相同的 gpRemoveNodeWithEdges 调用。
-		var gpCmd: GPDeleteNodesCommand = GPDeleteNodesCommand.new(gpSelection)
-		gpCommands.gpDo(gpCmd, _gpEnsureCmdCtx())
-		gpSetSelection([])
+	# Nodes AND shapes go in one request, so a mixed marquee delete stays ONE undo step.
+	# 节点与图形同在一次请求中提交，故混合框选的删除仍是一个撤销步。
+	if not gpActions.gpDeleteSelection(gpSelection, gpShapeSel):
+		return
+	gpShapeSel.clear()
+	gpSetSelection([])
 	queue_redraw()
-	gpGraphChanged.emit()
 
 
-# Undo the most recent command. Returns false when there is nothing to undo.
-# M4 skeleton: the stack is live, the Ctrl+Z shortcut lands with the W5 undo UI.
-# 撤销最近一条命令。无可撤销时返回 false。
-# M4 骨架：栈已生效，Ctrl+Z 快捷键随 W5 撤销界面落地。
+# Undo the most recent user edit (Ctrl+Z). Returns false when there is nothing to undo.
+# 撤销最近一次用户编辑（Ctrl+Z）。无可撤销时返回 false。
 func gpUndo() -> bool:
-	if gpGraph == null:
-		return false
-	return gpCommands.gpUndo(_gpEnsureCmdCtx())
+	return gpActions.gpUndo()
 
 
-# Redo the most recently undone command. Returns false when there is nothing to redo.
-# 重做最近被撤销的命令。无可重做时返回 false。
+# Redo the most recently undone edit (Ctrl+Y / Ctrl+Shift+Z). Returns false when empty.
+# 重做最近被撤销的编辑（Ctrl+Y / Ctrl+Shift+Z）。无可重做时返回 false。
 func gpRedo() -> bool:
-	if gpGraph == null:
-		return false
-	return gpCommands.gpRedo(_gpEnsureCmdCtx())
+	return gpActions.gpRedo()
 
 
-# Lazily build the command context. The normal path is the gpGraph setter; this guards
-# the edge case where a command runs before a graph was ever assigned.
-# 惰性构建命令上下文。正常路径是 gpGraph 的 setter；此处兜住「图尚未赋值就执行命令」的边界。
-func _gpEnsureCmdCtx() -> GPCommandContext:
-	if gpCmdCtx == null or gpCmdCtx.gpGraph != gpGraph:
-		gpCmdCtx = GPCommandContext.new(gpGraph, _gpState.gpIds)
-	return gpCmdCtx
+# Whether an undo step is available (for enabling host menu items).
+# 是否存在可撤销步骤（供宿主菜单项启用与否）。
+func gpCanUndo() -> bool:
+	return gpActions.gpCanUndo()
+
+
+# Whether a redo step is available.
+# 是否存在可重做步骤。
+func gpCanRedo() -> bool:
+	return gpActions.gpCanRedo()
 
 
 # Copy every selected node to a small offset, keeping its attributes and orientation.
@@ -864,81 +855,54 @@ func _gpEnsureCmdCtx() -> GPCommandContext:
 func gpRequestDuplicateSelected() -> void:
 	if gpGraph == null or gpSelection.is_empty():
 		return
-	var gpCopies: Array[String] = []
-	for gpId in gpSelection:
-		var gpN: GPPIDNode = gpGraph.gpGetNode(gpId)
-		if gpN == null:
-			continue
-		var gpNid: String = _gpState.gpIds.gpNext("n")
-		var gpCopy: GPPIDNode = gpGraph.gpNewNode(
-			gpNid, gpN.gpSymbolId, gpN.gpTag,
-			gpN.gpPosition + Vector2(24.0, 24.0),
-			gpN.gpAttrValues.duplicate(true))
-		gpCopy.gpRotationDeg = gpN.gpRotationDeg
-		gpCopy.gpFlipped = gpN.gpFlipped
-		gpGraph.gpAddNode(gpCopy)
-		gpCopies.append(gpNid)
+	var gpCopies: Array[String] = gpActions.gpDuplicateSelection(gpSelection)
+	if gpCopies.is_empty():
+		return
 	# Select the copies, not the originals: the natural next action is to drag them into place.
 	# 选中副本而非原件：下一步自然是把它们拖到目标位置。
 	gpSetSelection(gpCopies)
 	queue_redraw()
-	gpGraphChanged.emit()
 
 
-# ============================ keyboard ============================
-# ============================ 键盘 ============================
-# Handle a keyboard shortcut. Returns true when the event was consumed.
-# 处理键盘快捷键。事件被消费时返回 true。
-func _gpOnKey(gpKey: InputEventKey) -> bool:
-	var gpCtrl: bool = gpKey.ctrl_pressed or gpKey.meta_pressed
-	match gpKey.keycode:
-		KEY_DELETE, KEY_BACKSPACE:
-			gpRequestDeleteSelected()
-			return true
-		KEY_A:
-			if gpCtrl:
-				gpRequestSelectAll()
-				return true
-		KEY_ESCAPE:
-			_gpOnEscape()
-			return true
-	return false
+# ============================ 编辑意图端口（M4 续） ============================
+# ============================ edit intent ports (M4 cont) ============================
+# Every user edit that changes the model goes through one of these ports. The canvas adds
+# nothing to them: GPEditService turns the intent into a command, records it, and mutates
+# the model. The view follows via GPPIDGraph.gpGraphChanged, already bridged (M2).
+# 每一项改动模型的用户编辑都经这些端口之一。画布不附加任何逻辑：GPEditService 把意图变成
+# 命令、记录它并改动模型；视图经 GPPIDGraph.gpGraphChanged（已在 M2 桥接）自动跟随。
+
+# Place one symbol instance (palette click). Returns the new node id, "" on failure.
+# 放置一个图元实例（调色板点击）。返回新节点 id，失败返回 ""。
+func gpRequestPlaceNode(gpSymbolId: String, gpWorld: Vector2) -> String:
+	return gpActions.gpPlaceNode(gpSymbolId, gpWorld)
 
 
-# Progressive ESC: cancel the innermost pending action first, and only clear the selection
-# when nothing else is pending. Returning early is what keeps a half-drawn state recoverable.
-# 渐进式 ESC：先取消最内层的待处理动作，只有在别无待处理项时才清空选择。提前返回正是
-# 让半完成状态可回退的原因。
-func _gpOnEscape() -> void:
-	if gpPendingDef != null:
-		gpPendingDef = null
-		queue_redraw()
-		return
-	# M3: the draw tool owns its half-finished state, so cancelling is one port call instead of
-	# the canvas poking two private fields it no longer owns.
-	# M3：绘图工具持有自己的半成品状态，故取消只需一次端口调用，而非画布去改两个已不属于它的字段。
-	if _gpDrawTool.gpCancel():
-		queue_redraw()
-		return
-	if gpAnno.gpIsDragging():
-		gpAnno.gpEndDrag()
-		queue_redraw()
-		return
-	if gpMarq.gpActive:
-		gpMarq.gpCancel()
-		queue_redraw()
-		return
-	if _gpSelectTool != null and _gpSelectTool.gpIsDragging():
-		_gpSelectTool.gpCancelDrag()
-		queue_redraw()
-		return
-	if gpConnectFrom != "":
-		gpConnectFrom = ""
-		queue_redraw()
-		return
-	if not gpSelection.is_empty() or not gpShapeSel.is_empty():
-		gpSetSelection([])
-		gpShapeSel.clear()
+# Connect two nodes with an edge. Returns false for a self-connection or a missing graph.
+# 在两个节点之间连线。自连接或缺图时返回 false。
+func gpRequestConnect(gpFromId: String, gpToId: String) -> bool:
+	return gpActions.gpConnect(gpFromId, gpToId)
+
+
+# Commit a finished annotation shape. Returns its index in gpShapes, or -1 on failure.
+# 提交一枚绘制完成的注释图形。返回它在 gpShapes 中的下标，失败返回 -1。
+func gpRequestAddShape(gpShape: GPShape) -> int:
+	return gpActions.gpAddShape(gpShape)
+
+
+# Record a finished group drag as one undo step. The caller rewinds the nodes to their
+# pre-drag positions first, so the command re-applies the move instead of doubling it.
+# 把一次完成的整组拖拽记录为一个撤销步。调用方先把节点回退到拖拽前位置，
+# 使命令重新应用这次移动而非叠加一次。
+func gpRequestMoveNodes(gpNodeIds: Array[String], gpDelta: Vector2) -> bool:
+	return gpActions.gpMoveNodes(gpNodeIds, gpDelta)
+
+
+# Ask the active interaction tool to abandon its half-finished state (ESC path). One
+# generic port, so the canvas never needs to know which tool is currently mounted.
+# 请求活动交互工具放弃其半成品状态（ESC 路径）。一个通用端口，使画布无需知道当前挂的是哪个工具。
+func gpCancelActiveTool() -> bool:
+	return _gpActiveTool().gpCancel()
 
 
 # ============================ context menu ============================
