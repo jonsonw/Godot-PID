@@ -96,6 +96,16 @@ func gpSetMode(gpM: int) -> void:
 # M6（document_manager）会把总线所有权移出画布。
 var gpEvents: GPEventBus = GPEventBus.new()
 
+# Command history (M4). The canvas owns it until M6 moves it into PIDDocumentManager.
+# 命令历史（M4）。在 M6 移入 PIDDocumentManager 之前由画布持有。
+var gpCommands: GPCommandStack = GPCommandStack.new()
+
+# What every command receives: the graph plus the SHARED id generator, so an id minted
+# by a command can never collide with one minted interactively. Rebuilt on graph swap.
+# 每条命令拿到的东西：图 + 共享的 id 生成器，故命令生成的 id 绝不会与交互生成的撞号。
+# 更换图纸时重建。
+var gpCmdCtx: GPCommandContext = null
+
 # Backing field for the gpGraph property. Kept explicit so the setter cannot recurse.
 # gpGraph 属性的后备字段。显式保留以避免 setter 递归。
 var _gpGraphRef: GPPIDGraph
@@ -402,6 +412,11 @@ func _gpSetGraph(gpValue: GPPIDGraph) -> void:
 	_gpGraphRef = gpValue
 	if _gpGraphRef != null and not _gpGraphRef.gpGraphChanged.is_connected(_gpOnGraphDataChanged):
 		_gpGraphRef.gpGraphChanged.connect(_gpOnGraphDataChanged)
+	# Rebuild the command context for the new graph and drop the old history: undo must
+	# never reach back into a graph that is no longer displayed.
+	# 为新图重建命令上下文并丢弃旧历史：撤销绝不能回到已不再显示的图。
+	gpCmdCtx = GPCommandContext.new(_gpGraphRef, _gpState.gpIds)
+	gpCommands.gpClear()
 
 
 # Core graph mutated programmatically (gpAddNode / gpRemoveNodeWithEdges /
@@ -411,6 +426,12 @@ func _gpSetGraph(gpValue: GPPIDGraph) -> void:
 # gpAddShape 等）。汇入画布信号，使交互改动与程序化改动走同一路径。
 func _gpOnGraphDataChanged() -> void:
 	gpGraphChanged.emit()
+	# M4: a programmatic model change must repaint too. Without this, any command that
+	# mutates the graph (delete, move) updates the model but leaves stale pixels on
+	# screen whenever the caller forgets an explicit queue_redraw().
+	# M4：程序化改模型同样必须重绘。否则命令（删除、移动）改了模型却留下残影，
+	# 只要调用方忘了显式 queue_redraw()，画面就是旧的。
+	queue_redraw()
 
 
 # Forward canvas graph changes onto the app event bus (M2 bridge).
@@ -801,11 +822,41 @@ func gpRequestDeleteSelected() -> void:
 				gpGraph.gpShapes.remove_at(gpI)
 		gpShapeSel.clear()
 	if not gpSelection.is_empty():
-		for gpId in gpSelection:
-			gpGraph.gpRemoveNodeWithEdges(gpId)
+		# M4: route the delete through the command stack so it becomes undoable.
+		# The command issues the very same gpRemoveNodeWithEdges calls as before.
+		# M4：删除改经命令栈，从而可撤销。命令内部发出与原先完全相同的 gpRemoveNodeWithEdges 调用。
+		var gpCmd: GPDeleteNodesCommand = GPDeleteNodesCommand.new(gpSelection)
+		gpCommands.gpDo(gpCmd, _gpEnsureCmdCtx())
 		gpSetSelection([])
 	queue_redraw()
 	gpGraphChanged.emit()
+
+
+# Undo the most recent command. Returns false when there is nothing to undo.
+# M4 skeleton: the stack is live, the Ctrl+Z shortcut lands with the W5 undo UI.
+# 撤销最近一条命令。无可撤销时返回 false。
+# M4 骨架：栈已生效，Ctrl+Z 快捷键随 W5 撤销界面落地。
+func gpUndo() -> bool:
+	if gpGraph == null:
+		return false
+	return gpCommands.gpUndo(_gpEnsureCmdCtx())
+
+
+# Redo the most recently undone command. Returns false when there is nothing to redo.
+# 重做最近被撤销的命令。无可重做时返回 false。
+func gpRedo() -> bool:
+	if gpGraph == null:
+		return false
+	return gpCommands.gpRedo(_gpEnsureCmdCtx())
+
+
+# Lazily build the command context. The normal path is the gpGraph setter; this guards
+# the edge case where a command runs before a graph was ever assigned.
+# 惰性构建命令上下文。正常路径是 gpGraph 的 setter；此处兜住「图尚未赋值就执行命令」的边界。
+func _gpEnsureCmdCtx() -> GPCommandContext:
+	if gpCmdCtx == null or gpCmdCtx.gpGraph != gpGraph:
+		gpCmdCtx = GPCommandContext.new(gpGraph, _gpState.gpIds)
+	return gpCmdCtx
 
 
 # Copy every selected node to a small offset, keeping its attributes and orientation.
