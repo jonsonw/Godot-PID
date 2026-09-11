@@ -45,6 +45,10 @@ var gpTagCoord: GPTagRuleCoordinator = null
 # 架构优化 §3.2：GPLayoutCoordinator（分隔条比例、DPI 缩放、窗口尺寸响应与最大化）。
 # Splitter ratios, DPI scaling, window resize handling and maximised start-up.
 var gpLayoutCoord: GPLayoutCoordinator = null
+
+# 架构优化 §3.2：GPMenuCoordinator（菜单分发、撤销/重做与设置对话框；文件类动作转发给 GPFileCoordinator）。
+# Menu dispatch, undo/redo and the settings dialog; file actions are forwarded to GPFileCoordinator.
+var gpMenuCoord: GPMenuCoordinator = null
 var gpFileDialog: FileDialog
 
 # What the in-flight file dialog is for: "save" / "open" / "import" / "export_<kind>".
@@ -217,6 +221,8 @@ func _ready() -> void:
 	gpTagCoord.gpHost = self
 	gpLayoutCoord = GPLayoutCoordinator.new()
 	gpLayoutCoord.gpHost = self
+	gpMenuCoord = GPMenuCoordinator.new()
+	gpMenuCoord.gpHost = self
 	get_window().close_requested.connect(gpFileCoord.gpOnCloseRequested)
 
 	# Restore any symbol packs the user exported in a previous session so they
@@ -285,10 +291,10 @@ func _ready() -> void:
 
 	# ---- menu ----
 	# ---- 菜单 ----
-	gpMenuBar.gpActionTriggered.connect(_gpOnMenu)
+	gpMenuBar.gpActionTriggered.connect(gpMenuCoord.gpOnMenu)
 	# Ask the host to refresh enabled states right before a popup opens.
 	# 菜单展开前向宿主请求刷新启用状态。
-	gpMenuBar.gpMenuOpening.connect(_gpOnMenuOpening)
+	gpMenuBar.gpMenuOpening.connect(gpMenuCoord.gpOnMenuOpening)
 
 	# ---- Ribbon command bar under the menu bar (P0 / ADR-UI-01) ----
 	# ---- 菜单栏下方的 Ribbon 命令栏（P0 / ADR-UI-01） ----
@@ -389,7 +395,7 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 	# 故此处有意不再连接。
 	# A brand-new sheet has an empty undo stack: make the 编辑 menu agree with it right away.
 	# 新建图纸的撤销栈为空：让「编辑」菜单立即与之保持一致。
-	_gpRefreshEditMenu()
+	gpMenuCoord.gpRefreshEditMenu()
 
 
 # The active sheet changed (add / switch / close): refresh the inspector for the
@@ -493,59 +499,7 @@ func _gpOnCleanOrphans(gpNodeId: String) -> void:
 func _gpOnEdgeAttrChanged(gpEdgeId: String, gpKey: String, gpVal) -> void:
 	gpSelCoord.gpOnEdgeAttrChanged(gpEdgeId, gpKey, gpVal)
 func _gpOnMenu(gpAction: String) -> void:
-	match gpAction:
-		"file_new", "edit_clear":
-			gpActiveGraph().gpNodes.clear()
-			gpActiveGraph().gpEdges.clear()
-			gpActiveGraph().gpShapes.clear()
-			gpActiveCanvas().gpNextId = 1
-			gpActiveCanvas().gpClearSelection()
-			gpActiveCanvas().gpConnectFrom = ""
-			gpActiveCanvas().gpPendingDef = null
-			gpActiveCanvas().queue_redraw()
-			_gpSetState("status.cleared")
-		"file_save":
-			gpFileCoord.gpSaveProject(false)
-		"file_save_as":
-			gpFileCoord.gpSaveProject(true)
-		"file_open":
-			gpFileCoord.gpOpenProject()
-		"file_import":
-			gpFileCoord.gpImportProject()
-		"file_quit":
-			# Route through the SAME close guard as the OS window-close button so the
-			# unsaved-changes dialog behaves identically whether the user clicks the red X
-			# or picks Quit from the menu. Used to diagnose whether the red X reaches
-			# NOTIFICATION_WM_CLOSE_REQUEST at all.
-			# 走与 OS 关闭按钮**完全相同**的关闭护栏，使未保存对话框在「点红 X」与
-			# 「菜单退出」两种入口下表现一致。用于排查红 X 是否真的触发了关闭通知。
-			gpFileCoord.gpOnCloseRequested()
-		"export_project":
-			gpFileCoord.gpPickExportPath("project")
-		"export_library":
-			gpFileCoord.gpPickExportPath("library")
-		"export_config":
-			gpFileCoord.gpPickExportPath("config")
-		"view_zoom_in":
-			gpActiveCanvas().gpZoomStep(1.0)
-		"view_zoom_out":
-			gpActiveCanvas().gpZoomStep(-1.0)
-		"view_fit":
-			gpActiveCanvas().gpResetView()
-			_gpSetState("status.view_reset")
-		"edit_delete":
-			if gpActiveCanvas().gpSelectedId != "":
-				_gpDeleteSelected()
-		"edit_undo":
-			_gpMenuUndo()
-		"edit_redo":
-			_gpMenuRedo()
-		"tool_settings":
-			_gpOpenSettings()
-		"project_tag_rules":
-			gpTagCoord.gpOpenTagRuleDialog()
-		_:
-			_gpSetState("status.feature_todo", [gpAction])
+	gpMenuCoord.gpOnMenu(gpAction)
 
 
 func _gpOpenTagRuleDialog() -> void:
@@ -563,68 +517,19 @@ func _gpConfirmRenumberTags() -> void:
 func _gpDoRenumberTags() -> void:
 	gpTagCoord.gpDoRenumberTags()
 func _gpOnMenuOpening(gpTitleKey: String) -> void:
-	if gpTitleKey != "menu.edit":
-		return
-	_gpRefreshEditMenu()
+	gpMenuCoord.gpOnMenuOpening(gpTitleKey)
 
 
-# Sync 撤销 / 重做 enabled state with the active sheet. No sheet means nothing to undo.
-# 同步「撤销 / 重做」的可用状态与活动图纸。没有图纸即无可撤销。
 func _gpRefreshEditMenu() -> void:
-	var gpCanvas: GPCanvas2D = gpActiveCanvas()
-	var gpCanUndo: bool = gpCanvas != null and gpCanvas.gpCanUndo()
-	var gpCanRedo: bool = gpCanvas != null and gpCanvas.gpCanRedo()
-	gpMenuBar.gpSetActionEnabled("edit_undo", gpCanUndo)
-	gpMenuBar.gpSetActionEnabled("edit_redo", gpCanRedo)
+	gpMenuCoord.gpRefreshEditMenu()
 
 
-# Menu 编辑 / 撤销. The canvas owns the stack, so all this does is ask and report.
-# 菜单「编辑 / 撤销」。撤销栈归画布所有，故此处只负责发问与报告。
 func _gpMenuUndo() -> void:
-	var gpCanvas: GPCanvas2D = gpActiveCanvas()
-	if gpCanvas == null:
-		return
-	if gpCanvas.gpUndo():
-		_gpSetState("status.undone")
-	else:
-		_gpSetState("status.nothing_to_undo")
-	_gpRefreshEditMenu()
+	gpMenuCoord.gpMenuUndo()
 
 
-# Menu 编辑 / 重做.
-# 菜单「编辑 / 重做」。
 func _gpMenuRedo() -> void:
-	var gpCanvas: GPCanvas2D = gpActiveCanvas()
-	if gpCanvas == null:
-		return
-	if gpCanvas.gpRedo():
-		_gpSetState("status.redone")
-	else:
-		_gpSetState("status.nothing_to_redo")
-	_gpRefreshEditMenu()
-
-
-# ============================ close guard ============================
-# ============================ 关闭拦截 ============================
-# Intercept the window close so an unsaved drawing is never lost silently.
-# 拦截窗口关闭，使未保存的图纸永不静默丢失。
-# WHY THIS IS NEEDED / 为何需要：saving is explicit (ADR-7: Ctrl+S is the only save path),
-# which means a user who simply forgets to press it would lose everything with no warning.
-# The guard is the safety net that makes an explicit-save model safe to adopt.
-# 保存是显式的（ADR-7：Ctrl+S 是唯一保存路径），这意味着仅仅**忘记按**的用户会
-# 毫无警告地丢失全部内容。这道护栏正是让「显式保存」模型可以被安全采用的安全网。
-#
-# NOTE / 注：the close is intercepted through get_window().close_requested (wired in
-# _ready), NOT _notification(NOTIFICATION_WM_CLOSE_REQUEST). On a Control scene root the
-# WM notification is not reliably delivered in Godot 4, so the dialog would silently fail
-# to appear. The signal fires on the real Window and is the canonical interception point.
-# 关闭经由 get_window().close_requested（在 _ready 接线）拦截，而非
-# _notification(NOTIFICATION_WM_CLOSE_REQUEST)。在 Control 场景根上该 WM 通知在 Godot 4
-# 中不可靠地送达，对话框会静默不出现。信号在真正的 Window 上触发，是权威拦截点。
-
-
-# Close path: clean -> quit immediately; dirty -> ask, never decide for the user.
-# 关闭路径：干净 -> 立即退出；脏 -> 询问，绝不替用户决定。
+	gpMenuCoord.gpMenuRedo()
 func _gpOnCloseRequested() -> void:
 	gpFileCoord.gpOnCloseRequested()
 func _gpAskUnsaved() -> void:
@@ -652,13 +557,7 @@ func _gpDoImport(gpPath: String) -> void:
 func _gpDoExport(gpPath: String, gpKind: String) -> void:
 	gpFileCoord.gpDoExport(gpPath, gpKind)
 func _gpOpenSettings() -> void:
-	var gpDlg: GPSettingsDialog = (load("res://scenes/settings_dialog.tscn") as PackedScene).instantiate()
-	add_child(gpDlg)
-	# gpPopupOverHost() sizes the dialog against the area that actually contains it; the bare
-	# popup_centered() ignores `size` and can place an oversized dialog at a negative position.
-	# gpPopupOverHost() 依据真正容纳它的区域取尺寸；裸 popup_centered() 会忽略 `size`，
-	# 并可能把超大对话框放到负坐标。
-	gpDlg.gpPopupOverHost()
+	gpMenuCoord.gpOpenSettings()
 
 
 func _gpBuildRibbon() -> void:
@@ -702,16 +601,7 @@ func _gpOnSymbolEditRequested(gpSymbolId: String) -> void:
 func _gpOnSymbolSaved(gpSymbolId: String) -> void:
 	gpSymbolLibCoord.gpOnSymbolSaved(gpSymbolId)
 func _gpDeleteSelected() -> void:
-	var gpCanvas: GPCanvas2D = gpActiveCanvas()
-	if gpCanvas == null:
-		return
-	gpCanvas.gpDeleteSelection()
-
-
-# ============================ state helper ============================
-# ============================ 状态栏辅助 ============================
-# Set the status bar text by i18n key and optional format arguments.
-# 通过 i18n 键与可选格式化参数设置状态栏文本。
+	gpMenuCoord.gpDeleteSelected()
 func _gpSetState(gpKey: String, gpArgs: Array = []) -> void:
 	gpStateKey = gpKey
 	gpStateArgs = gpArgs
