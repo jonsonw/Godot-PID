@@ -46,6 +46,14 @@ static func gpNormalizeSymbol(gpRaw: Dictionary, gpCat: String, gpPackSizes: Dic
 	gpDef.gpDisplayName = str(gpRaw.get("display_name", gpDef.gpId))
 	gpDef.gpCategory = gpCat
 	gpDef.gpAttrsSchema = (gpRaw.get("attrs_schema", {}) as Dictionary).duplicate(true)
+	# M8: the typed property schema belongs to the TYPE layer, so it is carried through
+	# normalization as well. It runs IN PARALLEL with the legacy gpAttrsSchema (old packs
+	# still load), and GPPropertyResolver prefers gpSchema when both are present.
+	# M8：类型化属性 schema 属类型层，故归一化时一并透传。它与历史 gpAttrsSchema **并行保留**
+	# （旧图元包仍可载入），两者并存时 GPPropertyResolver 优先 gpSchema。
+	var gpRawSchema: Array = gpRaw.get("schema", [])
+	if not gpRawSchema.is_empty():
+		gpDef.gpSchema = _gpSchemaFromDicts(gpRawSchema)
 
 	# (1) Nominal envelope comes from the category, never from the drawing — that is what makes
 	# every member of a family render equal-sized.
@@ -119,6 +127,7 @@ static func gpDenormalizeSymbol(gpDef: GPSymbolDef) -> Dictionary:
 			"shapes": {},
 			"ports": [],
 			"attrs_schema": gpDef.gpAttrsSchema.duplicate(true),
+			"schema": _gpSchemaToDicts(gpDef.gpSchema),
 		}
 
 	# Author space == unit box: the def's unit-frame shapes ARE the author pixels
@@ -141,6 +150,7 @@ static func gpDenormalizeSymbol(gpDef: GPSymbolDef) -> Dictionary:
 		"shapes": gpSpec,
 		"ports": gpDenormalizePorts(GPPortSpec.gpToDicts(gpDef.gpPorts), gpBBox, gpEnv),
 		"attrs_schema": gpDef.gpAttrsSchema.duplicate(true),
+		"schema": _gpSchemaToDicts(gpDef.gpSchema),
 	}
 
 
@@ -375,3 +385,32 @@ static func _gpTransformShapes(gpShapes: Dictionary, gpS: float, gpCtr: Vector2)
 static func _gpToUnit(gpPt: Vector2, gpS: float, gpCtr: Vector2) -> Array:
 	var gpU: Vector2 = (gpPt - gpCtr) * gpS + GP_UNIT_CENTER
 	return [snappedf(gpU.x, 0.01), snappedf(gpU.y, 0.01)]
+
+
+# Internal: build a typed GPPropertySchema from an array of field dictionaries.
+# 内部：由字段字典数组构造类型化 GPPropertySchema。
+# Tolerant on purpose: a field with no key is skipped rather than fatal, so a hand-written
+# partial schema still loads (same philosophy as GPPropertyDef.gpFromDict).
+# 刻意宽容：无 key 的字段被跳过而非致命错误，使手写的残缺 schema 仍能载入
+# （与 GPPropertyDef.gpFromDict 同一哲学）。
+static func _gpSchemaFromDicts(gpFields: Array) -> GPPropertySchema:
+	var gpSc: GPPropertySchema = GPPropertySchema.new()
+	for gpF in gpFields:
+		if not (gpF is Dictionary):
+			continue
+		var gpPd: GPPropertyDef = GPPropertyDef.new()
+		gpPd.gpFromDict(gpF)
+		if gpPd.gpKey != "":
+			gpSc.gpFields.append(gpPd)
+	return gpSc
+
+
+# Internal: inverse of _gpSchemaFromDicts (null schema -> empty array).
+# 内部：_gpSchemaFromDicts 的逆操作（schema 为 null 时返回空数组）。
+static func _gpSchemaToDicts(gpSc: GPPropertySchema) -> Array:
+	var gpOut: Array = []
+	if gpSc == null:
+		return gpOut
+	for gpF in gpSc.gpFields:
+		gpOut.append(gpF.gpToDict())
+	return gpOut

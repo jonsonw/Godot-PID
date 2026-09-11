@@ -320,3 +320,77 @@ func gpTestIdGenDocIdAndGlobalUid() -> void:
 	gpEq(gpUid, "%s-n1" % gpG.gpDocId, "global uid is docId-prefix + short id")
 	gpEq(gpG.gpNextGlobal("e"), "%s-e2" % gpG.gpDocId, "node and edge uids share one counter")
 	gpEq(gpG.gpNext("n"), "n3", "the plain local id still works unchanged")
+
+
+# ---- 10. the schema is WIRED UP for factory symbols (阶段 1A：通电) ----
+# 出厂图元的 schema 已通电
+#
+# Before this, GPSymbolDef.gpSchema existed and the resolver / list exporter consumed it, but
+# NOTHING in production ever assigned it — so the inspector had no fields to show for factory
+# symbols and "edit the library, every project follows" only held inside the tests.
+# 在此之前，GPSymbolDef.gpSchema 已存在、解析器与清单导出也在消费它，但生产侧**从未赋值** ——
+# 出厂图元在属性面板里无字段可显示，「改库即全项目同步」只在测试里成立。
+
+
+func gpTestFactorySymbolsCarryTypedSchema() -> void:
+	var gpDefs: Array[GPSymbolDef] = GPSymbolPackIso_10628.gpDefs()
+	gpCheck(gpDefs.size() > 0, "the ISO pack produced definitions")
+	var gpNulls: int = 0
+	for gpD in gpDefs:
+		if gpD.gpSchema == null:
+			gpNulls += 1
+	gpEq(gpNulls, 0, "every factory symbol carries a typed gpSchema (was: built but never assigned)")
+
+
+func gpTestEquipmentSchemasHaveEnoughFields() -> void:
+	var gpDefs: Array[GPSymbolDef] = GPSymbolPackIso_10628.gpDefs()
+	var gpThin: int = 0
+	for gpD in gpDefs:
+		# "general" holds line-type symbols (process line, instrument line); one field is
+		# correct for them. Real equipment must offer a usable panel.
+		# general 类别是线型符号（工艺线、仪表线），一个字段即合理；真实设备须给出可用面板。
+		if gpD.gpCategory == "general":
+			continue
+		if gpD.gpSchema == null or gpD.gpSchema.gpFields.size() < 3:
+			gpThin += 1
+	gpEq(gpThin, 0, "every equipment category exposes at least 3 property fields")
+
+
+func _gpFirstOfCategory(gpCat: String) -> GPSymbolDef:
+	for gpD in GPSymbolPackIso_10628.gpDefs():
+		if gpD.gpCategory == gpCat:
+			return gpD
+	return null
+
+
+func gpTestPumpSchemaDrivesTheResolver() -> void:
+	var gpPump: GPSymbolDef = _gpFirstOfCategory("pump")
+	gpCheck(gpPump != null, "the pack contains a pump")
+	if gpPump == null:
+		return
+	var gpEff: Dictionary = GPPropertyResolver.gpEffectiveProps(gpPump.gpSchema, {})
+	gpCheck(gpEff.size() >= 3, "the resolver renders >=3 fields for a pump with no overrides")
+	gpCheck(gpEff.has("rated_flow"), "the pump schema exposes rated_flow to the panel")
+
+
+func gpTestSchemaFingerprintIsStable() -> void:
+	var gpValve: GPSymbolDef = _gpFirstOfCategory("valve")
+	gpCheck(gpValve != null, "the pack contains a valve")
+	if gpValve == null:
+		return
+	gpEq(gpValve.gpSchema.gpFingerprint(), gpValve.gpSchema.gpFingerprint(),
+		"the fingerprint is stable across recomputation (the panel must not reshuffle)")
+
+
+func gpTestNormalizerRoundTripsTypedSchema() -> void:
+	var gpPump: GPSymbolDef = _gpFirstOfCategory("pump")
+	if gpPump == null:
+		return
+	var gpDraft: Dictionary = GPSymbolNormalizer.gpDenormalizeSymbol(gpPump)
+	gpCheck((gpDraft.get("schema", []) as Array).size() >= 3,
+		"denormalize emits the typed schema back into the author draft")
+	var gpBack: GPSymbolDef = GPSymbolNormalizer.gpNormalizeSymbol(gpDraft, "pump")
+	gpCheck(gpBack.gpSchema != null, "re-normalizing the draft restores gpSchema")
+	if gpBack.gpSchema != null:
+		gpEq(gpBack.gpSchema.gpKeys().size(), gpPump.gpSchema.gpKeys().size(),
+			"the schema survives the round-trip with the same field count")
