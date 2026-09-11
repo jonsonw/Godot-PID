@@ -18,7 +18,7 @@ const GP_SUITE_PREFIX: String = "gp_test_"
 const GP_METHOD_PREFIX: String = "gpTest"
 # Expected suite count; bump when a new gp_test_*.gd is added.
 # 预期套件数量；新增 gp_test_*.gd 时同步 +1。
-const GP_EXPECTED_SUITES: int = 49
+const GP_EXPECTED_SUITES: int = 50
 
 # Engine errors the legacy suites are *expected* to emit. GUT fails any test that leaves an
 # error unhandled, so these are marked handled explicitly (see _gpHandleExpectedErrors).
