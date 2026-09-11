@@ -189,7 +189,21 @@ static func gpDriftedSymbols(gpLive: Dictionary, gpStored: Dictionary) -> Array[
 	var gpOut: Array[String] = []
 	for gpId in gpStored:
 		var gpS: String = str(gpId)
-		if not gpLive.has(gpS) or str(gpLive[gpS]) != str(gpStored[gpS]):
+		var gpWas: String = str(gpStored[gpS])
+		# MIGRATION / 迁移：an EMPTY stored fingerprint means this drawing was saved before the
+		# typed schema was wired up, back when gpSchema was always null and every fingerprint
+		# was "". There is no baseline to compare against, so it must NOT count as drift —
+		# otherwise wiring the schema up flags every symbol of every existing drawing at once.
+		# 空指纹意味着该图纸保存于类型化 schema 通电之前 —— 当时 gpSchema 恒为 null、指纹全是 ""。
+		# 没有可比的基线，故不得计为漂移；否则通电会让所有存量图纸的全部图元同时报警。
+		# Trade-off / 取舍：a symbol that has vanished from the library is likewise not reported
+		# while its stored fingerprint is ""; it is caught on the next save, which stores real
+		# values. We accept missing that one case rather than crying wolf on every old drawing.
+		# 取舍：指纹为 "" 的图元即便已从库中消失也暂不报出；下次保存（写入真实值）会捕获它。
+		# 宁可漏掉这一例，也不对所有存量图纸狼来了。
+		if gpWas == "":
+			continue
+		if not gpLive.has(gpS) or str(gpLive[gpS]) != gpWas:
 			gpOut.append(gpS)
 	gpOut.sort()
 	return gpOut

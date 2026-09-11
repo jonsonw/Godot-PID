@@ -478,10 +478,10 @@ def _process_pack(pack_dir, pack_id, nominal_sizes):
     lines.append("\tvar gpOut: Array[GPSymbolDef] = []")
     for e in entries:
         env_expr = "Vector2(%s, %s)" % (_fmt(e["env"][0]), _fmt(e["env"][1]))
-        lines.append("\tgpOut.append(_gpMk(%s, %s, %s, %s, %s, %s, %s))" % (
+        lines.append("\tgpOut.append(_gpMk(%s, %s, %s, %s, %s, %s, %s, %s))" % (
             _to_gd(e["id"]), _to_gd(e["chinese_name"]), _to_gd(e["category"]),
             _to_gd(e["ports"]), _to_gd(e["shape"]), env_expr,
-            _to_gd(e.get("tag_prefix", ""))))
+            _to_gd(e.get("tag_prefix", "")), _to_gd(_schema_for(e["category"]))))
     lines.append("\treturn gpOut")
     lines.append("")
     lines.append("")
@@ -489,7 +489,8 @@ def _process_pack(pack_dir, pack_id, nominal_sizes):
     lines.append("# 内部辅助：从解析数据构造一个 SymbolDef。")
     lines.append("static func _gpMk(gpId: String, gpChineseName: String, gpCat: String, "
                 "gpPorts: Array[Dictionary], gpShape: Dictionary, gpEnv: Vector2, "
-                "gpTagPrefix: String = \"\") -> GPSymbolDef:")
+                "gpTagPrefix: String = \"\", "
+                "gpSchemaFields: Array[Dictionary] = []) -> GPSymbolDef:")
     lines.append("\tvar gpD: GPSymbolDef = GPSymbolDef.new()")
     lines.append("\tgpD.gpId = gpId")
     lines.append("\tgpD.gpDisplayName = gpChineseName")
@@ -506,6 +507,18 @@ def _process_pack(pack_dir, pack_id, nominal_sizes):
     lines.append("\t# 使图元库、编辑器与画布共用同一模型。")
     lines.append("\tgpD.gpPorts = GPPortSpec.gpFromDicts(gpPorts)")
     lines.append("\tgpD.gpShapes = GPShapeSpec.gpFromSpec(gpShape)")
+    lines.append("\t# M8: wire the typed property schema. It was BUILT but never ASSIGNED, so the")
+    lines.append("\t# inspector had no fields to show for factory symbols — this is the missing")
+    lines.append("\t# half of \"edit the library, every project follows\".")
+    lines.append("\t# M8：接上类型化属性 schema。它此前「已建成但未赋值」，导致出厂图元在属性面板里")
+    lines.append("\t# 无字段可显示 —— 这正是「改库即全项目同步」缺失的那一半。")
+    lines.append("\tif not gpSchemaFields.is_empty():")
+    lines.append("\t\tvar gpSc: GPPropertySchema = GPPropertySchema.new()")
+    lines.append("\t\tfor gpF in gpSchemaFields:")
+    lines.append("\t\t\tvar gpPd: GPPropertyDef = GPPropertyDef.new()")
+    lines.append("\t\t\tgpPd.gpFromDict(gpF as Dictionary)")
+    lines.append("\t\t\tgpSc.gpFields.append(gpPd)")
+    lines.append("\t\tgpD.gpSchema = gpSc")
     lines.append("\treturn gpD")
     lines.append("")
 
@@ -523,6 +536,106 @@ def _process_pack(pack_dir, pack_id, nominal_sizes):
         "out_path": out_path,
     }
     return pack_meta, entries, out_path
+
+
+# ---------------------------------------------------------------------------
+# Typed property schemas per category (M8 "通电" / wiring the built schema up).
+# 按类别的类型化属性 schema（M8：把已建成的 schema 通上电）。
+#
+# WHY HERE / 为何放在生成器：field DEFINITIONS belong to the TYPE layer, and the factory
+# pack is generated — so the schema is emitted into pack_*.gd instead of being hand-written
+# per symbol. Editing one category here propagates to every symbol of that category.
+# 字段**定义**属类型层，而出厂图元包是生成的 —— 故 schema 由生成器写入 pack_*.gd，
+# 而非逐图元手写。此处改一个类别，该类别所有图元随之生效。
+#
+# kind ints mirror GPPropertyDef.GPKind:
+#   0 STRING / 1 INT / 2 FLOAT / 3 BOOL / 4 ENUM / 5 TEXT / 6 MULTILANG
+#
+# label_key is deliberately left EMPTY: gpLabel carries the Chinese fallback, so we do not
+# have to touch the i18n tables and gp_test_i18n_keys stays green. Adding i18n keys later is
+# a pure additive change (set label_key, add the key to the i18n source).
+# label_key 故意留空：由 gpLabel 提供中文回落，故无需改动 i18n 表，gp_test_i18n_keys 保持绿。
+# 后续补 i18n 是纯增量改动（填 label_key + 在 i18n 源加键）。
+CATEGORY_SCHEMA = {
+    "pump": [
+        {"key": "rated_flow", "label": "额定流量", "kind": 2, "unit": "m3/h",
+         "group": "工艺", "order": 10},
+        {"key": "rated_head", "label": "额定扬程", "kind": 2, "unit": "m",
+         "group": "工艺", "order": 20},
+        {"key": "motor_power", "label": "电机功率", "kind": 2, "unit": "kW",
+         "group": "电气", "order": 30},
+        {"key": "seal_type", "label": "密封型式", "kind": 4,
+         "group": "机械", "order": 40,
+         "options": ["机械密封", "填料密封", "磁力驱动"]},
+        {"key": "material", "label": "过流部件材质", "kind": 4,
+         "group": "材料", "order": 50,
+         "options": ["铸铁", "碳钢", "304不锈钢", "316L不锈钢", "双相钢"]},
+        {"key": "remark", "label": "备注", "kind": 5, "group": "工艺", "order": 90},
+    ],
+    "valve": [
+        {"key": "nominal_size", "label": "公称通径", "kind": 2, "unit": "mm",
+         "group": "工艺", "order": 10},
+        {"key": "pressure_rating", "label": "压力等级", "kind": 4,
+         "group": "工艺", "order": 20,
+         "options": ["PN10", "PN16", "PN25", "PN40", "Class150", "Class300"]},
+        {"key": "body_material", "label": "阀体材质", "kind": 4,
+         "group": "材料", "order": 30,
+         "options": ["铸铁", "碳钢", "304不锈钢", "316L不锈钢", "衬氟"]},
+        {"key": "actuator_type", "label": "执行机构", "kind": 4,
+         "group": "仪表", "order": 40,
+         "options": ["手动", "气动", "电动", "液动", "无"]},
+        {"key": "fail_action", "label": "故障安全位", "kind": 4,
+         "group": "仪表", "order": 50,
+         "options": ["FC 故障关", "FO 故障开", "FL 故障保位", "不适用"]},
+        {"key": "remark", "label": "备注", "kind": 5, "group": "工艺", "order": 90},
+    ],
+    "tank": [
+        {"key": "volume", "label": "容积", "kind": 2, "unit": "m3",
+         "group": "工艺", "order": 10},
+        {"key": "design_pressure", "label": "设计压力", "kind": 2, "unit": "MPa",
+         "group": "工艺", "order": 20},
+        {"key": "design_temp", "label": "设计温度", "kind": 2, "unit": "℃",
+         "group": "工艺", "order": 30},
+        {"key": "material", "label": "材质", "kind": 4, "group": "材料", "order": 40,
+         "options": ["碳钢", "304不锈钢", "316L不锈钢", "衬胶", "FRP"]},
+        {"key": "remark", "label": "备注", "kind": 5, "group": "工艺", "order": 90},
+    ],
+    "heat": [
+        {"key": "heat_area", "label": "换热面积", "kind": 2, "unit": "m2",
+         "group": "工艺", "order": 10},
+        {"key": "duty", "label": "热负荷", "kind": 2, "unit": "kW",
+         "group": "工艺", "order": 20},
+        {"key": "design_pressure", "label": "设计压力", "kind": 2, "unit": "MPa",
+         "group": "工艺", "order": 30},
+        {"key": "design_temp", "label": "设计温度", "kind": 2, "unit": "℃",
+         "group": "工艺", "order": 40},
+        {"key": "material", "label": "材质", "kind": 4, "group": "材料", "order": 50,
+         "options": ["碳钢", "304不锈钢", "316L不锈钢", "钛"]},
+        {"key": "remark", "label": "备注", "kind": 5, "group": "工艺", "order": 90},
+    ],
+    "instrument": [
+        {"key": "measure_range", "label": "量程", "kind": 0,
+         "group": "仪表", "order": 10},
+        {"key": "signal_type", "label": "信号类型", "kind": 4,
+         "group": "仪表", "order": 20,
+         "options": ["4-20mA", "4-20mA+HART", "Profibus PA",
+                     "Foundation Fieldbus", "开关量"]},
+        {"key": "accuracy", "label": "精度", "kind": 0, "group": "仪表", "order": 30},
+        {"key": "power_supply", "label": "供电", "kind": 4, "group": "电气", "order": 40,
+         "options": ["24VDC", "220VAC", "无源"]},
+        {"key": "remark", "label": "备注", "kind": 5, "group": "仪表", "order": 90},
+    ],
+    "general": [
+        {"key": "description", "label": "描述", "kind": 5, "group": "工艺", "order": 10},
+    ],
+}
+
+
+def _schema_for(cat):
+    # Per-category typed schema; unknown categories get none (gpSchema stays null and the
+    # runtime falls back to gpAttrsSchema).
+    # 按类别取类型化 schema；未知类别返回空（gpSchema 保持 null，运行期回落 gpAttrsSchema）。
+    return CATEGORY_SCHEMA.get(cat, [])
 
 
 def _chinese_name(pack_id, base_id):
