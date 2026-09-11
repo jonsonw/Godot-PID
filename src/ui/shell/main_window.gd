@@ -25,6 +25,10 @@ var gpCurrentPath: String = ""
 # 架构优化 §3.2：文件生命周期协调者（保存/打开/导入/导出/关闭拦截）。
 # File lifecycle coordinator (save/open/import/export/close guard).
 var gpFileCoord: GPFileCoordinator = null
+
+# 架构优化 §3.2：GPRibbonCoordinator（Ribbon 与工具栏的构建、样式、模式映射与工具选中转发）。
+# Ribbon and toolbar construction, styling, mode mapping and tool-selection forwarding.
+var gpRibbonCoord: GPRibbonCoordinator = null
 var gpFileDialog: FileDialog
 
 # What the in-flight file dialog is for: "save" / "open" / "import" / "export_<kind>".
@@ -154,9 +158,9 @@ var gpToolBar: HBoxContainer = null
 var gpToolBtns: Dictionary = {}
 
 # Ribbon command bar (P0 / ADR-UI-01). Replaces the old flat DrawToolBar in the
-# same VBox slot; emits gpActionTriggered, which routes to _gpOnToolBarPressed.
+# same VBox slot; emits gpActionTriggered, which routes to gpRibbonCoord.gpOnToolBarPressed.
 # Ribbon 命令栏（P0 / ADR-UI-01），在原 DrawToolBar 同位置取代它；发射 gpActionTriggered
-# 并路由到 _gpOnToolBarPressed。回退只需恢复 _gpBuildToolBar 调用（见下方注释）。
+# 并路由到 gpRibbonCoord.gpOnToolBarPressed。回退只需恢复 _gpBuildToolBar 调用（见下方注释）。
 var gpRibbon: GPPIDRibbon = null
 
 
@@ -187,6 +191,8 @@ func _ready() -> void:
 	# The file lifecycle now lives in GPFileCoordinator; the root only assembles.
 	gpFileCoord = GPFileCoordinator.new()
 	gpFileCoord.gpHost = self
+	gpRibbonCoord = GPRibbonCoordinator.new()
+	gpRibbonCoord.gpHost = self
 	get_window().close_requested.connect(gpFileCoord.gpOnCloseRequested)
 
 	# Restore any symbol packs the user exported in a previous session so they
@@ -231,8 +237,8 @@ func _ready() -> void:
 	# ---- left palette: inject symbol buttons ----
 	# ---- 左侧图元库：注入图元按钮 ----
 	gpLeftDock.gpPopulate(gpDefs)
-	gpLeftDock.gpSymbolPicked.connect(_gpOnSymbolPicked)
-	gpLeftDock.gpToolSelected.connect(_gpOnToolSelected)
+	gpLeftDock.gpSymbolPicked.connect(gpRibbonCoord.gpOnSymbolPicked)
+	gpLeftDock.gpToolSelected.connect(gpRibbonCoord.gpOnToolSelected)
 	# Symbol deletion is owned here: scan every sheet, cascade-remove canvas instances if
 	# the symbol is in use, then drop it from the live library and re-render the palette.
 	# 图元删除在此负责：扫描所有图纸，若图元在用则级联清理画布实例，再从活动库移除并重渲染。
@@ -262,8 +268,8 @@ func _ready() -> void:
 
 	# ---- Ribbon command bar under the menu bar (P0 / ADR-UI-01) ----
 	# ---- 菜单栏下方的 Ribbon 命令栏（P0 / ADR-UI-01） ----
-	_gpBuildRibbon()
-	_gpStyleChrome()
+	gpRibbonCoord.gpBuildRibbon()
+	gpRibbonCoord.gpStyleChrome()
 
 	# ---- file dialog (open / save-as) ----
 	# ---- 文件对话框（打开 / 另存为） ----
@@ -342,7 +348,7 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 	gpBus.gpGraphChanged.connect(_gpOnGraphChanged)
 	gpBus.gpSelectionChanged.connect(_gpOnSelectionChanged)
 	gpBus.gpStatusUpdated.connect(_gpOnStatus)
-	gpBus.gpModeChanged.connect(_gpSyncToolBar)
+	gpBus.gpModeChanged.connect(gpRibbonCoord.gpSyncToolBar)
 	# Announce the document already loaded onto this canvas so bus subscribers (title bar,
 	# project tree) bind to the correct graph in one place, and the dirty flag resets.
 	# 通告本画布已载入的文档，使总线订阅者（标题栏、工程树）在一处绑定到正确的图，并重置脏标记。
@@ -367,7 +373,7 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 # 活动图纸已切换（新建 / 切换 / 关闭）：刷新新活动页的选中属性。
 func _gpOnActiveTabChanged() -> void:
 	_gpRefreshSelection()
-	_gpSyncToolBar()
+	gpRibbonCoord.gpSyncToolBar()
 
 
 # Fullscreen toggle from the center header: hide/show the side docks so the canvas
@@ -398,38 +404,12 @@ func _gpRefreshStaticText() -> void:
 	_gpSetState(gpStateKey, gpStateArgs)
 
 
-# ============================ left palette ============================
-# ============================ 左侧图元库 ============================
-# A symbol was picked from the left palette: switch to placement mode.
-# 从左侧图元库选中图元：切换到放置模式。
 func _gpOnSymbolPicked(gpTypeId: String) -> void:
-	gpActiveCanvas().gpPendingDef = _gpDefFor(gpTypeId)
-	gpActiveCanvas().gpSetMode(GPCanvas2D.GPMode.GP_SELECT)
-	gpActiveCanvas().gpConnectFrom = ""
-	var gpDef: GPSymbolDef = _gpDefFor(gpTypeId)
-	var gpName: String = gpDef.gpDisplayName if gpDef else gpTypeId
-	_gpSetState("status.symbol_picked", [gpName])
+	gpRibbonCoord.gpOnSymbolPicked(gpTypeId)
 
 
-# A tool button was pressed: select / connect / custom.
-# 工具按钮被按下：选择 / 连线 / 自定义。
 func _gpOnToolSelected(gpType: String) -> void:
-	if gpType == "select":
-		gpActiveCanvas().gpSetMode(GPCanvas2D.GPMode.GP_SELECT)
-		gpActiveCanvas().gpConnectFrom = ""
-		_gpSetState("status.mode_select")
-	elif gpType == "connect":
-		gpActiveCanvas().gpSetMode(GPCanvas2D.GPMode.GP_CONNECT)
-		_gpSetState("status.mode_connect")
-	elif gpType == "custom":
-		_gpSetState("status.custom_pending")
-
-
-# A symbol was requested for deletion from the left library. The symbol may be placed on
-# ANY sheet, so scan every canvas: if it is in use, ask for confirmation and cascade-remove
-# the placed instances; otherwise delete it from the library directly.
-# 左侧图元库请求删除某图元。该图元可能位于任意图纸，故扫描所有画布：若正在使用则确认后
-# 级联清理画布实例；否则直接从图元库删除。
+	gpRibbonCoord.gpOnToolSelected(gpType)
 func _gpOnSymbolDeleteRequested(gpId: String) -> void:
 	var gpTotal: int = 0
 	for gpC in gpCenter.gpAllCanvases():
@@ -987,200 +967,32 @@ func _gpOpenSettings() -> void:
 	gpDlg.gpPopupOverHost()
 
 
-# ============================ drawing toolbar ============================
-# ============================ 绘图工具栏 ============================
-# Build the Ribbon command bar and insert it between the menu bar and the body in the
-# root VBox (the same slot the old DrawToolBar occupied). The Ribbon emits
-# gpActionTriggered, which we route to the existing toolbar handler. To REVERT to the
-# previous flat toolbar, rename this back to _gpBuildToolBar and restore that builder.
-# 构建 Ribbon 命令栏并插入根 VBox 的菜单栏与主体之间（即原 DrawToolBar 的位置）。
-# Ribbon 发射 gpActionTriggered，我们将其路由到既有的工具栏处理器。要回退旧平铺工具栏，
-# 把本函数改回 _gpBuildToolBar 并恢复其构建体即可。
 func _gpBuildRibbon() -> void:
-	var gpVLayout: VBoxContainer = $VLayout
-	gpRibbon = GPPIDRibbon.new()
-	gpRibbon.name = "Ribbon"
-	gpRibbon.gpActionTriggered.connect(_gpOnToolBarPressed)
-	gpVLayout.add_child(gpRibbon)
-	gpVLayout.move_child(gpRibbon, 1)
-	_gpSyncToolBar()
+	gpRibbonCoord.gpBuildRibbon()
 
 
-# 视觉分层（精致化）：
-# 右栏 TabContainer 背景（左边界交由顶层叠加层画发丝线，避免双线）；tab 按钮统一 DOCK 色，
-# 未选中/hover 也带 1px 发丝底线，使选中 accent 成为"高亮"而非孤零零的粗线；
-# 整排 tab 统一 1px 发丝底线；选中态靠 accent 颜色 + 略亮背景区分，不发粗线。
-# 三栏分隔条引擎 grabber 设为透明（视觉交给 GPOverlayChrome）。
-# The whole tab row shares a 1px hairline; the selected tab is told apart by accent
-# colour + a slightly lighter fill — no thick line. The splitter grabber is made
-# transparent (visuals delegated to GPOverlayChrome).
 func _gpStyleChrome() -> void:
-	if gpTabs != null:
-		# 右边界接缝由 GPOverlayChrome 统一绘制，这里不再重复画左边框。
-		gpTabs.add_theme_stylebox_override("panel",
-			GPChromeStyle.gpStyleFor(GPChromeStyle.GP_DOCK_BG, 0))
-		# 未选中 / hover 也带 1px 发丝底线，整排 tab 干净统一。
-		var gpTabBg: StyleBoxFlat = GPChromeStyle.gpStyleFor(GPChromeStyle.GP_DOCK_BG, GPChromeStyle.SIDE_BOTTOM)
-		gpTabs.add_theme_stylebox_override("tab_unselected", gpTabBg)
-		gpTabs.add_theme_stylebox_override("tab_hovered", gpTabBg)
-		# 选中态：1px accent 底线（与未选中同厚，仅颜色不同）+ 略亮背景，细腻区分。
-		# Selected: a 1px accent underline (same thickness as unselected, colour only
-		# differs) plus a slightly lighter fill — delicate distinction, no heavy line.
-		var gpTabSel: StyleBoxFlat = StyleBoxFlat.new()
-		gpTabSel.bg_color = Color(0.118, 0.131, 0.163)
-		gpTabSel.border_color = GPChromeStyle.GP_ACCENT
-		gpTabSel.border_width_bottom = 1
-		gpTabs.add_theme_stylebox_override("tab_selected", gpTabSel)
-	if gpBodySplit != null:
-		# 引擎 grabber 透明：拖拽仍可用，但不再画粗亮块；接缝发丝线 + 悬停高亮
-		# 由 GPOverlayChrome（顶层叠加层）绘制，细腻且不双重描边。
-		var gpDrag: StyleBoxFlat = StyleBoxFlat.new()
-		gpDrag.bg_color = Color(0.0, 0.0, 0.0, 0.0)
-		gpBodySplit.add_theme_stylebox_override("dragger", gpDrag)
-		var gpGrab: StyleBoxFlat = StyleBoxFlat.new()
-		gpGrab.bg_color = Color(0.0, 0.0, 0.0, 0.0)
-		gpBodySplit.add_theme_stylebox_override("grabber", gpGrab)
+	gpRibbonCoord.gpStyleChrome()
 
 
-# Add one toolbar button. gpToggle buttons keep their pressed highlight and are tracked for sync.
-# 添加一个工具栏按钮。gpToggle 按钮保持按下高亮并被记录以便同步。
 func _gpAddToolBtn(gpAction: String, gpKey: String, gpToggle: bool) -> Button:
-	var gpBtn: Button = Button.new()
-	gpBtn.text = I18n.gpTr(gpKey)
-	gpBtn.tooltip_text = I18n.gpTr(gpKey)
-	gpBtn.focus_mode = Control.FOCUS_NONE
-	if gpToggle:
-		gpBtn.toggle_mode = true
-	gpBtn.pressed.connect(_gpOnToolBarPressed.bind(gpAction))
-	gpToolBar.add_child(gpBtn)
-	if gpToggle:
-		gpToolBtns[gpAction] = gpBtn
-	return gpBtn
+	return gpRibbonCoord.gpAddToolBtn(gpAction, gpKey, gpToggle)
 
 
-# Add a thin vertical separator between tool groups.
-# 在工具组之间加一条细竖直分隔线。
 func _gpAddSep() -> void:
-	var gpSep: VSeparator = VSeparator.new()
-	gpToolBar.add_child(gpSep)
+	gpRibbonCoord.gpAddSep()
 
 
-# Toolbar button handler: select / connect / drawing tools switch the canvas mode; the
-# "New Symbol…" button opens the isolation editor for advanced symbol authoring.
-# 工具栏按钮处理：选择/连线/绘图工具切换画布模式；「新建图元…」按钮打开隔离编辑器用于高级图元创作。
 func _gpOnToolBarPressed(gpAction: String) -> void:
-	var gpCanvas: GPCanvas2D = gpActiveCanvas()
-	if gpCanvas == null:
-		return
-	match gpAction:
-		"select":
-			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_SELECT)
-			gpCanvas.gpConnectFrom = ""
-			_gpSetState("status.mode_select")
-		"connect":
-			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_CONNECT)
-			_gpSetState("status.mode_connect")
-		"line":
-			gpCanvas.gpPendingDef = null
-			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_LINE)
-			_gpSetState("status.mode_line")
-		"circle":
-			gpCanvas.gpPendingDef = null
-			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_CIRCLE)
-			_gpSetState("status.mode_circle")
-		"rect":
-			gpCanvas.gpPendingDef = null
-			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_RECT)
-			_gpSetState("status.mode_rect")
-		"polyline":
-			gpCanvas.gpPendingDef = null
-			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_POLYLINE)
-			_gpSetState("status.mode_polyline")
-		"pipe":
-			gpCanvas.gpPendingDef = null
-			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_PIPE)
-			_gpSetState("status.mode_pipe")
-		"signal":
-			gpCanvas.gpPendingDef = null
-			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_SIGNAL)
-			_gpSetState("status.mode_signal")
-		# ---- view / edit commands surfaced on the Ribbon (P0) ----
-		# ---- Ribbon 上暴露的视图/编辑命令（P0） ----
-		"view_zoom_in":
-			gpCanvas.gpZoomStep(1.0)
-		"view_zoom_out":
-			gpCanvas.gpZoomStep(-1.0)
-		"view_fit":
-			gpCanvas.gpResetView()
-			_gpSetState("status.view_reset")
-		"edit_undo":
-			_gpMenuUndo()
-		"edit_redo":
-			_gpMenuRedo()
-		"edit_delete":
-			_gpDeleteSelected()
-		"tool_settings":
-			_gpOpenSettings()
-	_gpSyncToolBar()
+	gpRibbonCoord.gpOnToolBarPressed(gpAction)
 
 
-# Highlight the toggle button matching the active canvas mode (select / connect / draw tools).
-# The optional gpMode parameter lets this serve as the gpModeChanged signal callback (1 arg)
-# while remaining callable with 0 args elsewhere. When gpMode < 0 the live canvas mode is read.
-# 高亮与当前画布模式匹配的开关按钮（选择 / 连线 / 绘图工具）。可选 gpMode 参数使其既能作为
-# gpModeChanged 信号的 1 参回调，又能在别处 0 参调用；gpMode < 0 时读取画布实时模式。
 func _gpSyncToolBar(gpMode: int = -1) -> void:
-	# The Ribbon owns the mode highlight now; delegate to it (P0 / ADR-UI-01).
-	# 模式高亮现由 Ribbon 负责，委托给它（P0 / ADR-UI-01）。
-	if gpRibbon != null:
-		var gpCanvas: GPCanvas2D = gpActiveCanvas()
-		if gpMode < 0:
-			gpMode = GPCanvas2D.GPMode.GP_SELECT if gpCanvas == null else gpCanvas.gpMode
-		gpRibbon.gpSyncMode(gpMode)
-		return
-	if gpToolBar == null:
-		return
-	var gpCanvas: GPCanvas2D = gpActiveCanvas()
-	if gpMode < 0:
-		gpMode = GPCanvas2D.GPMode.GP_SELECT if gpCanvas == null else gpCanvas.gpMode
-	for gpAct in gpToolBtns.keys():
-		var gpBtn: Button = gpToolBtns[gpAct]
-		var gpM: int = _gpModeForAction(gpAct)
-		gpBtn.button_pressed = (gpM >= 0 and gpMode == gpM)
+	gpRibbonCoord.gpSyncToolBar(gpMode)
 
 
-# Map a toolbar action to its canvas mode, or -1 for non-mode buttons (e.g. "new").
-# 把工具栏动作映射到对应画布模式；非模式按钮（如「新建」）返回 -1。
 func _gpModeForAction(gpAction: String) -> int:
-	match gpAction:
-		"select":
-			return GPCanvas2D.GPMode.GP_SELECT
-		"connect":
-			return GPCanvas2D.GPMode.GP_CONNECT
-		"line":
-			return GPCanvas2D.GPMode.GP_DRAW_LINE
-		"circle":
-			return GPCanvas2D.GPMode.GP_DRAW_CIRCLE
-		"rect":
-			return GPCanvas2D.GPMode.GP_DRAW_RECT
-		"polyline":
-			return GPCanvas2D.GPMode.GP_DRAW_POLYLINE
-		"pipe":
-			return GPCanvas2D.GPMode.GP_PIPE
-		"signal":
-			return GPCanvas2D.GPMode.GP_SIGNAL
-	return -1
-
-
-# ============================ in-place symbol editing ============================
-# ============================ 就地图元编辑 ============================
-# Open the isolation layer for one symbol type directly over the active canvas.
-# 为某个图元类型在活动画布正上方打开隔离层。
-# Open the "Make Symbol" dialog pre-loaded with the annotation-shape geometry the user promoted
-# from the main canvas. On confirm it registers / persists a GPSymbolDef (same display-name ->
-# overwrite existing, else new) and refreshes the palette + canvas.
-# 打开「生成图元」对话框，预装主画布上被选中的注释图形几何。确定后注册并持久化一个
-# GPSymbolDef（显示名相同则覆盖已有图元，否则新建）并刷新图元库与画布。
+	return gpRibbonCoord.gpModeForAction(gpAction)
 func _gpOnMakeSymbolFromShapes(gpDraft: Dictionary) -> void:
 	var gpCanvas: GPCanvas2D = gpActiveCanvas()
 	if gpCanvas == null or gpCenter == null:
