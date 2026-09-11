@@ -37,6 +37,10 @@ var gpSymbolLibCoord: GPSymbolLibraryCoordinator = null
 # 架构优化 §3.2：GPSelectionCoordinator（图与面板的双向同步桥：订阅事件总线刷新属性面板与状态栏，并把面板改值经命令层回写）。
 # Graph-to-panel sync bridge: subscribes to the event bus, refreshes inspector and status bar, writes panel edits back through the command layer.
 var gpSelCoord: GPSelectionCoordinator = null
+
+# 架构优化 §3.2：GPTagRuleCoordinator（位号规则对话框编排与重编号工作流）。
+# Tag-rule dialog orchestration and the renumber workflow.
+var gpTagCoord: GPTagRuleCoordinator = null
 var gpFileDialog: FileDialog
 
 # What the in-flight file dialog is for: "save" / "open" / "import" / "export_<kind>".
@@ -205,6 +209,8 @@ func _ready() -> void:
 	gpSymbolLibCoord.gpHost = self
 	gpSelCoord = GPSelectionCoordinator.new()
 	gpSelCoord.gpHost = self
+	gpTagCoord = GPTagRuleCoordinator.new()
+	gpTagCoord.gpHost = self
 	get_window().close_requested.connect(gpFileCoord.gpOnCloseRequested)
 
 	# Restore any symbol packs the user exported in a previous session so they
@@ -531,86 +537,25 @@ func _gpOnMenu(gpAction: String) -> void:
 		"tool_settings":
 			_gpOpenSettings()
 		"project_tag_rules":
-			_gpOpenTagRuleDialog()
+			gpTagCoord.gpOpenTagRuleDialog()
 		_:
 			_gpSetState("status.feature_todo", [gpAction])
 
 
-# Menu 项目 / 位号编号规则 (M9b). The dialog edits a copy and hands it back; renumbering
-# is a separate, confirmed, single-undo-step operation.
-# 菜单「项目 / 位号编号规则」（M9b）。对话框编辑副本并交回；重编号是独立的、
-# 需确认的、单撤销步操作。
 func _gpOpenTagRuleDialog() -> void:
-	var gpCanvas: GPCanvas2D = gpActiveCanvas()
-	if gpCanvas == null:
-		return
-	var gpDlg: GPTagRuleDialog = GPTagRuleDialog.new()
-	add_child(gpDlg)
-	gpDlg.gpRulesApplied.connect(_gpOnTagRulesApplied)
-	gpDlg.gpShowRules(gpCanvas.gpActions.gpTagRules(), gpCanvas.gpGraph.gpNodes.size())
-	# Free the dialog on close either way; it is a one-shot editor, not a panel.
-	# 无论何种关闭方式都释放对话框：它是一次性编辑器，而非常驻面板。
-	gpDlg.close_requested.connect(gpDlg.queue_free)
-	gpDlg.confirmed.connect(gpDlg.queue_free)
-	gpDlg.canceled.connect(gpDlg.queue_free)
+	gpTagCoord.gpOpenTagRuleDialog()
 
 
-# Apply the edited rules, then optionally renumber (with a confirmation, because a tag ends
-# up on a physical nameplate and in the DCS point list).
-# 应用编辑后的规则；可选地随后重编号（需确认，因为位号会落到现场标牌与 DCS 点表上）。
 func _gpOnTagRulesApplied(gpRules: GPProjectTagRules, gpRenumber: bool) -> void:
-	var gpCanvas: GPCanvas2D = gpActiveCanvas()
-	if gpCanvas == null:
-		return
-	gpCanvas.gpActions.gpSetTagRules(gpRules)
-	if not gpRenumber:
-		_gpSetState("tag_rule.applied")
-		return
-	_gpConfirmRenumberTags()
+	gpTagCoord.gpOnTagRulesApplied(gpRules, gpRenumber)
 
 
-# Ask before renumbering: the change is reversible in the app but NOT on a printed
-# nameplate, so the user must see the count first.
-# 重编号前先询问：本改动在软件内可撤销，但在已印好的标牌上不可撤销，
-# 故必须先让用户看到数量。
 func _gpConfirmRenumberTags() -> void:
-	var gpCanvas: GPCanvas2D = gpActiveCanvas()
-	if gpCanvas == null:
-		return
-	var gpCount: int = gpCanvas.gpGraph.gpNodes.size()
-	if gpCount == 0:
-		_gpSetState("tag_rule.applied")
-		return
-	var gpDlg: ConfirmationDialog = ConfirmationDialog.new()
-	gpDlg.title = I18n.gpTr("tag_rule.confirm_title")
-	gpDlg.dialog_text = I18n.gpTr("tag_rule.renumber_confirm") % [gpCount]
-	add_child(gpDlg)
-	gpDlg.confirmed.connect(func():
-		_gpDoRenumberTags()
-		gpDlg.queue_free())
-	gpDlg.canceled.connect(gpDlg.queue_free)
-	gpDlg.popup_centered()
+	gpTagCoord.gpConfirmRenumberTags()
 
 
-# Run the renumber command and report how many tags changed.
-# 执行重编号命令并报告变动了多少位号。
 func _gpDoRenumberTags() -> void:
-	var gpCanvas: GPCanvas2D = gpActiveCanvas()
-	if gpCanvas == null:
-		return
-	if not gpCanvas.gpActions.gpRenumberTags():
-		_gpSetState("tag_rule.applied")
-		return
-	var gpChanged: int = GPTagRuleService.gpChangedCount(gpCanvas.gpActions.gpLastTagMapping)
-	_gpSetState("tag_rule.renumbered", [gpChanged])
-	gpCanvas.queue_redraw()
-	gpSelCoord.gpRefreshSelection()
-
-
-# Refresh 编辑 menu items against the live undo stack, called just before the popup
-# opens. The menu bar itself never learns what a canvas is; it only asks.
-# 在菜单展开前依据实时撤销栈刷新「编辑」菜单项。菜单栏本身不需要知道画布是什么，
-# 它只是发问。
+	gpTagCoord.gpDoRenumberTags()
 func _gpOnMenuOpening(gpTitleKey: String) -> void:
 	if gpTitleKey != "menu.edit":
 		return
