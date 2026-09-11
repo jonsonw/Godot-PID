@@ -5,6 +5,9 @@
 [ext_resource type="Script" uid="uid://bll6tv3v6dfoj" path="res://src/ui/panels/toolbar.gd" id="3_tool"]
 [ext_resource type="Script" uid="uid://ci382atp5x3al" path="res://src/ui/panels/inspector.gd" id="5_insp"]
 [ext_resource type="Script" uid="uid://bsibdts7q8g56" path="res://src/ui/panels/center_area.gd" id="6_center"]
+[ext_resource type="Script" path="res://src/ui/shell/status_bar.gd" id="7_stat"]
+[ext_resource type="Script" path="res://src/ui/shell/split_chrome.gd" id="8_split"]
+[ext_resource type="Script" path="res://src/ui/shell/overlay_chrome.gd" id="9_overlay"]
 
 [node name="Main" type="Control" unique_id=326015921]
 layout_mode = 3
@@ -37,6 +40,7 @@ size_flags_vertical = 3
 split_offsets = PackedInt32Array(320, 1280)
 dragger_visibility = 1
 split_offset = 320
+script = ExtResource("8_split")
 
 [node name="LeftDock" type="VBoxContainer" parent="VLayout/Body" unique_id=649335995]
 custom_minimum_size = Vector2(160, 0)
@@ -100,6 +104,7 @@ custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 0
+script = ExtResource("7_stat")
 
 [node name="SelLabel" type="Label" parent="VLayout/StatusBar" unique_id=1357288580]
 layout_mode = 2
@@ -117,3 +122,13 @@ text = "缩放：100%"
 layout_mode = 2
 size_flags_horizontal = 3
 text = "就绪"
+
+[node name="OverlayChrome" type="Control" parent="." unique_id=912345678]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("9_overlay")

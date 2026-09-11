@@ -1,0 +1,20 @@
+# G-PID 标准线型表（AutoCAD 式，世界单位）
+# G-PID standard linetype table (AutoCAD-style, world units)
+#
+# 格式 / Format:
+#   名称 = 描述            name = description
+#   A,on,off,on,off,...    dash/space lengths (world units)
+# 数值与 GPEdgeStyle 的信号虚线同一单位体系，使全部线型共用一套尺度。
+# Values share GPEdgeStyle's signal-dash unit system so every line style uses one scale.
+# CONTINUOUS = 实线（无空白） Solid line (no gaps)
+A,0.0
+HIDDEN = 隐藏线（短划） Hidden line — short dashes
+A,12.0,6.0
+DASHED = 虚线 Dashed line
+A,18.0,6.0
+CENTER = 中心线（长划点·点） Center line — long dash dot dot
+A,28.0,6.0,3.0,6.0,3.0,6.0
+PHANTOM =  Phantom 线（长·短·短） Phantom line — long short short
+A,32.0,6.0,3.0,6.0,3.0,6.0
+DOT = 点线 Dotted line
+A,0.0,4.0

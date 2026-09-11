@@ -39,6 +39,19 @@ const GP_CTX_SMOOTH_VERTEX: int = 12
 const GP_CTX_DELETE_VERTEX: int = 13
 const GP_CTX_CORNER_VERTEX: int = 14
 
+# Edge-targeted actions (shown when a single edge is hit or selected).
+# 边级操作（单击命中或选中单条边时显示）。
+const GP_CTX_DELETE_EDGE: int = 20
+const GP_CTX_SET_PROCESS: int = 21
+const GP_CTX_SET_UTILITY: int = 22
+const GP_CTX_SET_SIGNAL: int = 23
+const GP_CTX_RESNAP_ENDS: int = 24
+const GP_CTX_CLEAR_VERTICES: int = 25
+# Sheet-wide action (shown whenever the graph has edges).
+# 全图纸操作（图内含边时显示）。
+const GP_CTX_RENUMBER: int = 26
+const GP_CTX_AUTO_CONNECT: int = 27
+
 # Canvas this menu acts on (state owner).
 # 本菜单作用的画布（状态持有者）。
 var gpCv: GPCanvas2D
@@ -46,6 +59,10 @@ var gpCv: GPCanvas2D
 # Node id the right-click menu was opened on ("" when the click missed everything).
 # 右键菜单打开时所处的节点 id（未命中任何节点时为空）。
 var _gpCtxHit: String = ""
+
+# Edge id the right-click menu was opened on ("" when no edge was hit / selected).
+# 右键菜单打开时所处的边 id（未命中或选中任何边时为空）。
+var _gpCtxEdge: String = ""
 
 # Vertex index the right-click menu was opened on, for a single selected annotation polyline
 # (only meaningful when the cursor hit one of its vertex / handle grips). -1 = none.
@@ -66,6 +83,7 @@ func _init(gpCanvas: GPCanvas2D) -> void:
 func gpOnRightDown(gpScreen: Vector2) -> void:
 	var gpWorld: Vector2 = gpCv.gpWorldFromScreen(gpScreen)
 	_gpCtxVertex = -1
+	_gpCtxEdge = ""
 	var gpHit: String = gpCv.gpHitTest(gpWorld)
 	if gpHit != "":
 		if not gpCv.gpSelection.has(gpHit):
@@ -88,6 +106,16 @@ func gpOnRightDown(gpScreen: Vector2) -> void:
 		var gpVGrip: Dictionary = gpCv.gpAnno.gpHitPolylineVertexGrip(gpWorld)
 		if not gpVGrip.is_empty():
 			_gpCtxVertex = int(gpVGrip["gi"])
+		_gpCtxHit = ""
+		gpShowContextMenu("")
+		return
+	# Edge hit: make it the selection, then open the edge menu.
+	# 命中边：将其设为选择，再打开边菜单。
+	var gpEid: String = gpCv.gpHitEdge(gpWorld)
+	if gpEid != "":
+		if not gpCv.gpEdgeSel.has(gpEid):
+			gpCv.gpSetEdgeSelection([gpEid])
+		_gpCtxEdge = gpEid
 		_gpCtxHit = ""
 		gpShowContextMenu("")
 		return
@@ -126,7 +154,19 @@ func gpShowContextMenu(gpNodeHit: String) -> void:
 	var gpCanDelete: bool = gpNodeCtx or (not gpCv.gpShapeSel.is_empty())
 	if gpCanDelete:
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_delete"), GP_CTX_DELETE)
-	gpMenu.add_separator()
+	# Edge-targeted actions: a single edge hit or already selected.
+	# 边级操作：单击命中或已选中的单条边。
+	var gpEdgeCtx: bool = (_gpCtxEdge != "" or gpCv.gpEdgeSel.size() == 1)
+	if gpEdgeCtx:
+		var gpEid: String = _gpCtxEdge if _gpCtxEdge != "" else gpCv.gpEdgeSel[0]
+		_gpCtxEdge = gpEid
+		gpMenu.add_item(I18n.gpTr("canvas.ctx_delete_edge"), GP_CTX_DELETE_EDGE)
+		gpMenu.add_item(I18n.gpTr("canvas.ctx_set_process"), GP_CTX_SET_PROCESS)
+		gpMenu.add_item(I18n.gpTr("canvas.ctx_set_utility"), GP_CTX_SET_UTILITY)
+		gpMenu.add_item(I18n.gpTr("canvas.ctx_set_signal"), GP_CTX_SET_SIGNAL)
+		gpMenu.add_item(I18n.gpTr("canvas.ctx_resnap_ends"), GP_CTX_RESNAP_ENDS)
+		gpMenu.add_item(I18n.gpTr("canvas.ctx_clear_vertices"), GP_CTX_CLEAR_VERTICES)
+		gpMenu.add_separator()
 	gpMenu.add_item(I18n.gpTr("canvas.ctx_select_all"), GP_CTX_SELECT_ALL)
 	gpMenu.add_item(I18n.gpTr("canvas.ctx_deselect"), GP_CTX_DESELECT)
 	gpMenu.add_separator()
@@ -143,6 +183,14 @@ func gpShowContextMenu(gpNodeHit: String) -> void:
 		gpMenu.set_item_disabled(gpMenu.get_item_index(GP_CTX_DELETE), gpCv.gpSelection.is_empty() and gpCv.gpShapeSel.is_empty())
 	gpMenu.set_item_disabled(gpMenu.get_item_index(GP_CTX_DESELECT), gpCv.gpSelection.is_empty() and gpCv.gpShapeSel.is_empty())
 	gpMenu.set_item_checked(gpMenu.get_item_index(GP_CTX_CONNECT), gpCv.gpMode == GPMode.GP_CONNECT)
+	# Sheet-wide renumber (useful from anywhere there are edges).
+	# 全图纸重新编号（只要有边即可，随处可用）。
+	if gpCv.gpGraph != null and not gpCv.gpGraph.gpEdges.is_empty():
+		gpMenu.add_item(I18n.gpTr("canvas.ctx_renumber"), GP_CTX_RENUMBER)
+	# Auto-connect the two PICKED endpoints with an obstacle-avoiding orthogonal route.
+	# 用绕开障碍的正交路径，自动连接「两个已拾取的端点」。
+	if gpCv.gpPortPick.size() >= 2:
+		gpMenu.add_item(I18n.gpTr("canvas.ctx_auto_connect"), GP_CTX_AUTO_CONNECT)
 	gpMenu.id_pressed.connect(gpOnContext)
 	gpCv.add_child(gpMenu)
 	# Godot 4's PopupMenu/Popup exposes NO popup_at_cursor(); the only positioning entry is popup(), and
@@ -205,4 +253,29 @@ func gpOnContext(gpId: int) -> void:
 		GP_CTX_CONNECT:
 			gpCv.gpSetMode(GPMode.GP_SELECT if gpCv.gpMode == GPMode.GP_CONNECT else GPMode.GP_CONNECT)
 			gpCv.gpConnectFrom = ""
+			gpCv.queue_redraw()
+		GP_CTX_DELETE_EDGE:
+			gpCv.gpActions.gpDeleteEdges([_gpCtxEdge])
+			gpCv.gpEdgeSel.clear()
+			gpCv.queue_redraw()
+		GP_CTX_SET_PROCESS:
+			gpCv.gpActions.gpSetEdgeKind(_gpCtxEdge, GPPIDEdge.GP_PROCESS)
+			gpCv.queue_redraw()
+		GP_CTX_SET_UTILITY:
+			gpCv.gpActions.gpSetEdgeKind(_gpCtxEdge, GPPIDEdge.GP_UTILITY)
+			gpCv.queue_redraw()
+		GP_CTX_SET_SIGNAL:
+			gpCv.gpActions.gpSetEdgeKind(_gpCtxEdge, GPPIDEdge.GP_SIGNAL, "ELECTRIC")
+			gpCv.queue_redraw()
+		GP_CTX_RESNAP_ENDS:
+			gpCv.gpActions.gpSnapEdgeEnds(_gpCtxEdge, gpCv.gpDefLookupCallable())
+			gpCv.queue_redraw()
+		GP_CTX_CLEAR_VERTICES:
+			gpCv.gpActions.gpSetEdgeRouting(_gpCtxEdge, [])
+			gpCv.queue_redraw()
+		GP_CTX_RENUMBER:
+			gpCv.gpActions.gpRenumberEdges()
+			gpCv.queue_redraw()
+		GP_CTX_AUTO_CONNECT:
+			gpCv.gpRequestAutoConnect()
 			gpCv.queue_redraw()

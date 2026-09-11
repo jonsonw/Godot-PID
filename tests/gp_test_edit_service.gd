@@ -169,8 +169,8 @@ func gpTestDuplicateSelection() -> void:
 	gpEq(copy.gpPosition, src.gpPosition + GPDuplicateNodesCommand.GP_OFFSET, "copy is offset")
 	# Deep-copied attributes: mutating the copy must not reach back into the original.
 	# 属性为深拷贝：改动副本不应回写到原件。
-	copy.gpAttrValues["k"] = 1
-	gpEq(src.gpAttrValues.has("k"), false, "attributes are deep-copied, not aliased")
+	copy.gpProps["k"] = 1
+	gpEq(src.gpProps.has("k"), false, "attributes are deep-copied, not aliased")
 
 
 func gpTestDuplicateIsUndoable() -> void:

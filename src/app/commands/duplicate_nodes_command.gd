@@ -55,13 +55,26 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		if gpSrc == null:
 			continue
 		var gpNid: String = gpCtx.gpIds.gpNext("n")
+		# A copy is a DIFFERENT piece of equipment, so it must NOT inherit the source's tag:
+		# two identical tags on one sheet is a drafting defect, and the tag ends up in the
+		# DCS point list. The registry mints a fresh one (M9). Without a registry the old
+		# behaviour is preserved, which is what the pre-M9 tests assert.
+		# 副本是另一台设备，故不应继承原件的位号：一张图纸上出现两个相同位号是制图缺陷，
+		# 且该位号最终会进 DCS 点表。由注册器铸造新位号（M9）。无注册器时保留旧行为，
+		# 这正是 M9 之前测试所断言的。
+		var gpCopyTag: String = gpSrc.gpTag
+		if gpCtx.gpTags != null:
+			gpCtx.gpTags.gpGraph = gpCtx.gpGraph
+			gpCopyTag = gpCtx.gpTags.gpNextTag(GPSymbolLibrary.gpFindById(gpSrc.gpSymbolId))
 		var gpCopy: GPPIDNode = gpCtx.gpGraph.gpNewNode(
-			gpNid, gpSrc.gpSymbolId, gpSrc.gpTag,
+			gpNid, gpSrc.gpSymbolId, gpCopyTag,
 			gpSrc.gpPosition + GP_OFFSET,
-			gpSrc.gpAttrValues.duplicate(true))
+			gpSrc.gpProps.duplicate(true))
 		gpCopy.gpRotationDeg = gpSrc.gpRotationDeg
 		gpCopy.gpFlipped = gpSrc.gpFlipped
 		gpCtx.gpGraph.gpAddNode(gpCopy)
+		if gpCtx.gpTags != null:
+			gpCtx.gpTags.gpRegister(gpNid, gpCopyTag)
 		_gpClones.append(gpCopy)
 		gpNewIds.append(gpNid)
 	return not _gpClones.is_empty()
@@ -74,6 +87,9 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 		return
 	for gpN in _gpClones:
 		gpCtx.gpGraph.gpRemoveNode(gpN.gpInstanceId)
+	if gpCtx.gpTags != null:
+		for gpN in _gpClones:
+			gpCtx.gpTags.gpRelease(gpN.gpInstanceId)
 
 
 # Re-add the very same clone objects (ids stay stable, so any later reference holds).
@@ -83,3 +99,5 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 		return
 	for gpN in _gpClones:
 		gpCtx.gpGraph.gpAddNode(gpN)
+		if gpCtx.gpTags != null:
+			gpCtx.gpTags.gpRegister(gpN.gpInstanceId, gpN.gpTag)

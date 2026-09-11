@@ -31,12 +31,16 @@ static func gpWriteProject(gpGraph: GPPIDGraph, gpPath: String) -> int:
 	# The caller is expected to have embedded any user symbol packs already (via
 	# GPPIDGraph.gpEmbedUserPacks), because gpToDict() serializes them verbatim.
 	# 调用方应已先行内嵌用户图元包（经 GPPIDGraph.gpEmbedUserPacks），因为 gpToDict() 会原样序列化之。
-	var gpText: String = JSON.stringify(gpGraph.gpToDict(), "", true)
-	var gpF: FileAccess = FileAccess.open(gpFilePath, FileAccess.WRITE)
-	if gpF == null:
-		return FileAccess.get_open_error()
-	gpF.store_string(gpText)
-	gpF.close()
+	# ATOMIC WRITE (ADR-4): the text is built and verified in a temp file, then renamed over
+	# the target. Writing straight into the target (the old behaviour) left a truncated,
+	# unparseable archive whenever the process died mid-write. The previous good copy is kept
+	# as <path>.bak so a bad save still has a fallback.
+	# 原子写（ADR-4）：文本先在临时文件中构造并校验，再 rename 覆盖目标。
+	# 直接写目标（旧行为）在进程写入途中死亡时会留下被截断、无法解析的存档。
+	# 上一份完好副本保留为 <path>.bak，使一次失败的保存仍有退路。
+	var gpWrite: GPIOResult = GPAtomicFile.gpWriteJsonAtomic(gpFilePath, gpGraph.gpToDict())
+	if not gpWrite.gpIsOk():
+		return FAILED
 	return OK
 
 
@@ -61,15 +65,99 @@ static func gpWriteProjectResult(gpGraph: GPPIDGraph, gpPath: String) -> GPIORes
 # 注意：GPPIDGraph.gpFromDict() 会把内嵌用户图元包调和回活动图元库，使重新打开后自定义图元
 # 再次可用——该副作用属于「载入工程」语义、位于模型层，而非本模块。
 static func gpReadProject(gpPath: String) -> GPPIDGraph:
-	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.READ)
-	if gpF == null:
+	# Delegated to GPAtomicFile so every archive read shares one failure taxonomy
+	# (io.open_failed vs io.parse_failed) and one place to add BOM / encoding handling later.
+	# 委派给 GPAtomicFile，使所有存档读取共用一套失败分类
+	# （io.open_failed 与 io.parse_failed）与一处将来加 BOM / 编码处理的地方。
+	var gpRead: GPIOResult = GPAtomicFile.gpReadJsonDict(gpPath)
+	if not gpRead.gpIsOk():
 		return null
-	var gpText: String = gpF.get_as_text()
-	gpF.close()
-	var gpParsed: Variant = JSON.parse_string(gpText)
-	if gpParsed == null or not (gpParsed is Dictionary):
-		return null
-	return GPPIDGraph.gpFromDict(gpParsed as Dictionary)
+	return GPPIDGraph.gpFromDict(gpRead.gpPayload as Dictionary)
+
+
+# Write a MULTI-SHEET project as a v3 container.
+# 把**多图纸**工程写成 v3 容器。
+# Single-sheet projects keep using gpWriteProject: it leaves the file in the v2 shape, which
+# means every archive written before this feature stays byte-stable. Only a project that
+# actually HAS several sheets is upgraded (see 持久化实现方案 §6.3).
+# 单图纸工程继续使用 gpWriteProject：它让文件保持 v2 形态，
+# 意味着本功能之前写出的每个存档都保持字节稳定。只有**确实**有多张图纸的工程才升格。
+# Project-level data (meta / tag_rules / embedded packs) is taken from the FIRST sheet's
+# graph, because that is where GPPIDGraph keeps it today.
+# 工程级数据（meta / tag_rules / 内嵌图元包）取自**第一张**图纸的图，
+# 因为 GPPIDGraph 目前就是把它存在那里的。
+static func gpWriteSheets(gpSheets: Array, gpPath: String) -> int:
+	if gpSheets.is_empty():
+		return FAILED
+	var gpFilePath: String = gpEnsurePidExt(gpPath)
+	var gpFirst: GPSheet = gpSheets[0] as GPSheet
+	var gpBase: Dictionary = {}
+	if gpFirst != null and gpFirst.gpGraph != null:
+		gpBase = gpFirst.gpGraph.gpToDict()
+	var gpOut: Dictionary = GPSchemaMigrate.gpMigrate(gpBase)
+	var gpSheetsOut: Array = []
+	var gpI: int = 0
+	for gpS in gpSheets:
+		var gpSheet: GPSheet = gpS as GPSheet
+		if gpSheet == null:
+			continue
+		var gpD: Dictionary = gpSheet.gpToDict()
+		# Re-derive the index: a stale index survives a reordered tab bar and would put two
+		# sheets in the same slot.
+		# 重新推导 index：过期的 index 会在标签重排后存活，导致两张图纸落进同一个位置。
+		gpD["index"] = gpI
+		gpSheetsOut.append(gpD)
+		gpI += 1
+	if gpSheetsOut.is_empty():
+		return FAILED
+	gpOut["sheets"] = gpSheetsOut
+	gpOut["kind"] = GPSchemaMigrate.GP_KIND_PROJECT
+	gpOut["meta"]["sheets"] = gpSheetsOut.size()
+	var gpWrite: GPIOResult = GPAtomicFile.gpWriteJsonAtomic(gpFilePath, gpOut)
+	if not gpWrite.gpIsOk():
+		return FAILED
+	return OK
+
+
+# Result-typed variant of gpWriteSheets. / gpWriteSheets 的结果类型版本。
+static func gpWriteSheetsResult(gpSheets: Array, gpPath: String) -> GPIOResult:
+	var gpErr: int = gpWriteSheets(gpSheets, gpPath)
+	if gpErr != OK:
+		return GPIOResult.gpFailure("io.write_failed", "status.save_fail", gpPath)
+	return GPIOResult.gpSuccess("io.saved", gpPath)
+
+
+# Read a project as a list of sheets. Works for v1/v2/v3 alike: a single-sheet archive
+# comes back as a ONE-element array, so callers need no special case.
+# 把工程读成图纸列表。对 v1/v2/v3 一视同仁：单图纸存档返回**单元素**数组，
+# 故调用方无需特例分支。
+static func gpReadSheets(gpPath: String) -> GPIOResult:
+	var gpRead: GPIOResult = GPProjectImport.gpReadArchive(gpPath)
+	if not gpRead.gpIsOk():
+		return gpRead
+	var gpV3: Dictionary = gpRead.gpPayload as Dictionary
+	if gpV3.is_empty():
+		return GPIOResult.gpSuccessWith([GPSheet.gpNew("sheet-1", "", 0)], "io.loaded", gpPath)
+	var gpSheetsOut: Array = []
+	var gpI: int = 0
+	for gpS in (gpV3.get("sheets", []) as Array):
+		var gpD: Dictionary = (gpS as Dictionary).duplicate(true)
+		gpD["index"] = gpI
+		# Project-level data is copied onto every sheet so the graph rebuild can reconcile
+		# embedded packs and numbering rules regardless of which tab is opened first.
+		# 工程级数据复制到每张图纸上，使无论先打开哪一页，
+		# 图重建都能调和内嵌图元包与编号规则。
+		gpD["meta"] = (gpV3.get("meta", {}) as Dictionary).duplicate(true)
+		gpD["user_symbol_packs"] = ((gpV3.get("library", {}) as Dictionary).get(
+			"packs", []) as Array).duplicate(true)
+		if gpV3.has("tag_rules"):
+			gpD["tag_rules"] = (gpV3.get("tag_rules", {}) as Dictionary).duplicate(true)
+		gpSheetsOut.append(GPSheet.gpFromDict(gpD))
+		gpI += 1
+	if gpSheetsOut.is_empty():
+		gpSheetsOut.append(GPSheet.gpNew("sheet-1", str((gpV3.get("meta", {})
+			as Dictionary).get("title", "")), 0))
+	return GPIOResult.gpSuccessWith(gpSheetsOut, "io.loaded", gpPath)
 
 
 # Result-typed variant of gpReadProject: distinguishes "file missing/unreadable" from

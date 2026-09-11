@@ -76,10 +76,11 @@ static func _gpLoadAllPacks() -> Array[GPSymbolDef]:
 	# Load ISO 10628 pack (25 symbols).
 	# 加载 ISO 10628 图元包（25 个图元）。
 	var gpIsoPack: Array[GPSymbolDef] = GPSymbolPackIso_10628.gpDefs()
-	# Decision D3: ISO library symbols are built-in (read-only). The in-place editor derives a
-	# custom_<id> copy instead of overwriting them, so flag them here at load time.
-	# 决策 D3：ISO 库图元为内置（只读）。就地编辑器派生 custom_<id> 副本而非覆盖，
-	# 故在加载时标记。
+	# Decision D3: ISO library symbols are built-in (read-only). The dialog derives a
+	# fresh C-rule copy (C<CATEGORY><nnn>) instead of overwriting them, so flag them
+	# here at load time.
+	# 决策 D3：ISO 库图元为内置（只读）。对话框派生一枚新的 C 规则副本
+	#（C<类别码><三位序号>）而非覆盖原图元，故在加载时标记。
 	for gpD in gpIsoPack:
 		gpD.gpBuiltin = true
 	gpOut.append_array(gpIsoPack)
@@ -246,11 +247,56 @@ static func _gpReadFile(gpPath: String) -> String:
 
 # Look up one definition by id across built-ins, packs and runtime registrations.
 # 跨内置图元、图元包与运行期注册按 id 查找单个定义。
+# Legacy-tolerant: a pre-rule id ("P_CentrifugalPump_001") is translated through
+# GPSymbolNaming.gpMigrate first, so *.pid.json files written before the L/C naming rule
+# keep resolving instead of turning every placed instance into an orphan.
+# 兼容旧 id：规则变更前的 id（"P_CentrifugalPump_001"）先经 GPSymbolNaming.gpMigrate
+# 翻译，使命名规则生效前落盘的 *.pid.json 仍能解析，而非让已放置实例全部变成孤儿。
 static func gpFindById(gpId: String) -> GPSymbolDef:
+	var gpWant: String = GPSymbolNaming.gpMigrate(gpId)
 	for gpD in gpDefaultDefs():
-		if gpD.gpId == gpId:
+		if gpD.gpId == gpWant:
+			return gpD
+	# Second pass on the RAW id: a def registered under a pre-rule id (user packs authored
+	# before this rule have no alias entry) must still be findable by exactly what it says.
+	# 第二遍按原始 id 查找：以规则变更前 id 注册的定义（用户自建包无别名条目）必须仍能
+	# 按其所写的字样被找到。
+	if gpWant != gpId:
+		for gpD in gpDefaultDefs():
+			if gpD.gpId == gpId:
+				return gpD
+	return null
+
+
+# Every id currently in the library. Feeds GPSymbolNaming.gpAllocate so a freshly
+# allocated id cannot collide with one that is already taken.
+# 图元库中当前的全部 id。供 GPSymbolNaming.gpAllocate 使用，使新分配的 id 不会与已有者冲突。
+static func gpTakenIds() -> Array[String]:
+	var gpOut: Array[String] = []
+	for gpD in gpDefaultDefs():
+		gpOut.append(gpD.gpId)
+	return gpOut
+
+
+# Find a definition by display name + category. Id uniqueness no longer follows the name
+# (ids are now L/C + category + sequence), so "does this symbol already exist?" must be
+# answered by the name the user typed, not by an id derived from it.
+# 按显示名 + 类别查找定义。id 的唯一性不再跟随名称（id 现为 L/C + 类别 + 序号），
+# 因此「该图元是否已存在」必须由用户键入的名称判定，而非由名称导出的 id。
+static func gpFindByNameAndCategory(gpName: String, gpCategory: String) -> GPSymbolDef:
+	for gpD in gpDefaultDefs():
+		if gpD.gpDisplayName == gpName and gpD.gpCategory == gpCategory:
 			return gpD
 	return null
+
+
+# Allocate the next free id for a NEW symbol of the given category, following the project
+# rule (C< CATEGORY ><nnn> for user-authored symbols).
+# 按项目规则为指定类别的新建图元分配下一个可用 id（用户自建为 C<类别码><三位序号>）。
+# Returns "" when the category is exhausted (999 used).
+# 该类别耗尽（已用满 999）时返回 ""。
+static func gpAllocateCustomId(gpCategory: String) -> String:
+	return GPSymbolNaming.gpAllocate(GPSymbolNaming.GP_SOURCE_CUSTOM, gpCategory, gpTakenIds())
 
 
 # Internal: index of a runtime-registered def by id, or -1.

@@ -25,13 +25,49 @@ extends RefCounted
 # id，不触发回退 —— 与画布历史行为一致（裸 "_" 曾是可接受 id）。
 const GP_FALLBACK: String = "symbol"
 
+# Alphabet for document ids: lowercase + digits, chosen so a uid stays safe inside filenames,
+# JSON keys and URLs without any escaping.
+# 文档 id 的字符集：小写字母 + 数字，使 uid 在文件名、JSON 键与 URL 中均无需转义。
+const GP_DOC_ID_ALPHABET: String = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+# Length of a document id (8 chars ≈ 2.8e12 combinations — ample for one workstation's work).
+# 文档 id 长度（8 位 ≈ 2.8e12 种组合，对单机工作量绰绰有余）。
+const GP_DOC_ID_LEN: int = 8
+
 
 # ---- instance counter ----
 # ---- 实例计数器 ----
-# Next value to hand out. Starts at 1 so the first node is "n1", matching the historic
-# behaviour of the canvas counter (0 was never used as an instance id).
-# 下一个待发数值。从 1 开始，使首个节点为 "n1"，与画布计数器的历史行为一致（0 从未作为实例 id）。
 var gpCounter: int = 1
+
+# Document id this generator stamps into every uid, e.g. "a3f9k2m1". Two drawings opened at
+# the same time (W21) therefore cannot produce colliding uids.
+# 本生成器为每个 uid 加盖的文档 id，如 "a3f9k2m1"。故同时打开的两张图纸（W21）
+# 不可能产生撞号的 uid。
+var gpDocId: String = ""
+
+
+func _init() -> void:
+	gpDocId = GPIdGen.gpNewDocId()
+
+
+# A fresh random document id. Static so tests and the W21 document manager can mint one
+# without instantiating a counter.
+# 新的随机文档 id。设为静态，使测试与 W21 文档管理器无需实例化计数器即可取得。
+static func gpNewDocId() -> String:
+	var gpOut: String = ""
+	for gpI in range(GP_DOC_ID_LEN):
+		var gpIdx: int = randi() % GP_DOC_ID_ALPHABET.length()
+		gpOut += GP_DOC_ID_ALPHABET.substr(gpIdx, 1)
+	return gpOut
+
+
+# Cross-document uid, e.g. gpNextGlobal("n") -> "a3f9k2m1-n17".
+# This is the id edges and off-page references store (W21/W22), which is what lets a tag be
+# renamed without tearing a pipe off its nozzle.
+# 跨文档 uid，如 gpNextGlobal("n") -> "a3f9k2m1-n17"。
+# 边与跨页引用存的就是它（W21/W22），正因如此，改位号不会把管线从管口上扯下来。
+func gpNextGlobal(gpPrefix: String) -> String:
+	return "%s-%s%d" % [gpDocId, gpPrefix, gpNextInt()]
 
 
 # Return the next raw integer and advance the counter. Node and edge ids SHARE one counter

@@ -5,7 +5,7 @@
 #   1. import      — 生成 .uid 与全局类索引。GUT 的 GutTest 等 class_name 依赖此步；
 #                    缺失时 gut_cmdln.gd 会报 "Some GUT class_names have not been imported"。
 #   2. compile     — 编辑器解析全工程，任何脚本编译错误即失败。
-#   3. core-tests  — 自研 GPGTest 运行器（tests/run_core_tests.gd），443 条断言，不依赖插件。
+#   3. core-tests  — 自研 GPGTest 运行器（tests/run_core_tests.gd），断言数随测试增长，不依赖插件。
 #   4. gut-tests   — GUT 9.6.1。含 GPGTest 桥接（tests/gut/test_gp_suites.gd，驱动既有 21 套）
 #                    与 GUT 原生测试（tests/test_export.gd 等）。
 #
@@ -60,7 +60,7 @@ jobs:
       - name: Compile scan (all scripts parse)
         run: godot --headless --editor --quit
 
-      - name: Run G-PID core tests (GPGTest runner, 443 asserts)
+      - name: Run G-PID core tests (GPGTest runner)
         run: godot --headless --script res://tests/run_core_tests.gd
 
       - name: Run GUT (GPGTest bridge + GUT-native tests)

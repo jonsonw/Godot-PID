@@ -67,6 +67,18 @@ var gpSymbolFontKey: String = "hiragino"
 # 当前图元字号。
 var gpSymbolFontSize: int = 16
 
+# When true, a line number on a vertical run is rotated -90° so it reads bottom-to-top
+# (the P&ID convention); when false it stays horizontal and right-aligned to the pipe.
+# This is the GLOBAL default — a per-edge "tag_rotate" attribute, if present, overrides it.
+# 为 true 时，竖管上的位号旋转 -90° 以便自下而上阅读（P&ID 惯例）；为 false 时保持水平、
+# 右对齐到管线。这是「全局默认」——若某条边显式带 "tag_rotate" 属性，则该属性优先。
+var gpPipeTagRotate: bool = true
+
+# Font size used to draw pipe line numbers. 0 means inherit the symbol font size
+# (gpSymbolFontSize); any positive value overrides it for line numbers only.
+# 绘制管线位号的字号。0 表示继承图元字号（gpSymbolFontSize）；正数则仅对位号覆盖。
+var gpPipeTagFontSize: int = 0
+
 # When true, both docks snap to their fixed floor widths on every resize so the
 # canvas (center) always absorbs the new width and stays maximal. When false, the
 # docks keep the widths the user set by dragging the splitters. The UI font size
@@ -77,6 +89,15 @@ var gpSymbolFontSize: int = 16
 # （不随窗口缩放），文字清晰且可预期。
 var gpAutoScale: bool = true
 
+# When true, edge line weights stay constant in SCREEN pixels across zoom
+# (rendered width = world width / zoom), the "plotting lineweight" mode used by
+# CAD plotters. When false (default), lines thicken as you zoom in, like CAD model
+# space. Either way the screen-space floor (GPEdgeStyle.GP_MIN_PX) protects legibility.
+# 为 true 时，连线线宽在缩放中保持「屏幕像素恒定」（渲染宽 = 世界宽 / 缩放），即 CAD
+# 出图线宽模式。为 false（默认）时线随放大变粗，如同 CAD 模型空间。两种模式都受
+# 屏幕空间下限（GPEdgeStyle.GP_MIN_PX）保护可读性。
+var gpScreenConstantWidth: bool = false
+
 # Cached symbol font so the canvas can read it cheaply each frame.
 # 缓存的图元字体，供画布逐帧廉价读取。
 var gpSymbolFont: Font = null
@@ -84,6 +105,11 @@ var gpSymbolFont: Font = null
 # Emitted when the symbol font or its size changes, so the canvas redraws.
 # 图元字体或字号变化时发出，供画布重绘。
 signal gpSymbolStyleChanged
+
+# Emitted when the pipe line-number style (rotation / font size) changes, so the
+# canvas redraws the line numbers.
+# 管线位号样式（旋转/字号）变化时发出，供画布重绘位号。
+signal gpPipeTagStyleChanged
 
 # Emitted when the UI font or its size changes, so the toolbar and other dynamic
 # controls can re-apply explicit font size overrides.
@@ -145,6 +171,8 @@ func gpLoad() -> void:
 	gpSymbolFontSize = gpCfg.get_value("symbol", "font_size", 16)
 	gpSymbolFontKey = gpCfg.get_value("symbol", "font", "hiragino")
 	gpAutoScale = gpCfg.get_value("ui", "auto_scale", true)
+	gpPipeTagRotate = gpCfg.get_value("pipe", "tag_rotate", true)
+	gpPipeTagFontSize = gpCfg.get_value("pipe", "tag_font_size", 0)
 
 
 # Save current settings to disk.
@@ -155,8 +183,11 @@ func gpSave() -> void:
 	gpCfg.set_value("ui", "locale", gpLocale)
 	gpCfg.set_value("ui", "font", gpFontKey)
 	gpCfg.set_value("ui", "auto_scale", gpAutoScale)
+	gpCfg.set_value("ui", "screen_constant_width", gpScreenConstantWidth)
 	gpCfg.set_value("symbol", "font_size", gpSymbolFontSize)
 	gpCfg.set_value("symbol", "font", gpSymbolFontKey)
+	gpCfg.set_value("pipe", "tag_rotate", gpPipeTagRotate)
+	gpCfg.set_value("pipe", "tag_font_size", gpPipeTagFontSize)
 	gpCfg.save(GP_CONFIG_PATH)
 
 
@@ -172,12 +203,26 @@ func gpEffectiveFontSize() -> int:
 # Apply font size AND family by setting the root theme's default font + size.
 # 通过设置根主题默认字体与字号来应用界面字体。
 func gpApplyFontSize() -> void:
-	var gpTheme: Theme = Theme.new()
+	var gpTheme: Theme = _gpLoadTheme()
 	gpTheme.default_font = gpLoadFont(gpFontKey)
 	gpTheme.default_font_size = gpEffectiveFontSize()
 	if get_tree() != null and get_tree().root != null:
 		get_tree().root.theme = gpTheme
 	gpUIFontChanged.emit()
+
+
+# Load the shared dark theme (res://assets/themes/gp_dark.tres) as the root-theme base,
+# falling back to a bare Theme if the file is missing. The .tres carries the unified palette
+# (light text, dock-dark backgrounds, accent) so every Control reads from one source of truth;
+# the manually drawn chrome (splitters, seams, status bar) stays in chrome_style.gd.
+# 载入共享深色主题（res://assets/themes/gp_dark.tres）作为根主题基底；文件缺失时回退到裸
+# Theme。.tres 承载统一调色板（浅色文字、深色背景、强调色），使所有控件取自同一事实源；
+# 自绘 chrome（分隔条、接缝、状态栏）仍留在 chrome_style.gd。
+func _gpLoadTheme() -> Theme:
+	var gpT: Theme = load("res://assets/themes/gp_dark.tres") as Theme
+	if gpT == null:
+		gpT = Theme.new()
+	return gpT
 
 
 # Apply locale through the I18n singleton.
@@ -191,6 +236,12 @@ func gpApplyLocale() -> void:
 func gpApplySymbolStyle() -> void:
 	gpSymbolFont = gpLoadFont(gpSymbolFontKey)
 	gpSymbolStyleChanged.emit()
+
+
+# Notify the canvas that the pipe line-number style changed (rotation / font size).
+# 通知画布管线位号样式（旋转/字号）已变。
+func gpApplyPipeTagStyle() -> void:
+	gpPipeTagStyleChanged.emit()
 
 
 # Apply all settings at once.

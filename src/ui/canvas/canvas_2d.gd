@@ -119,6 +119,18 @@ func gpBindDocument(gpMgr: GPAppDocumentManager) -> void:
 # 脏标记状态，而非这个服务。
 var gpActions: GPEditService = GPEditService.new()
 
+# Per-sheet tag uniqueness guard (M9). The canvas owns it because the canvas is the one that
+# places and duplicates instances; it rebinds to the graph's rules on every document swap, so
+# the sequence marks stay the ones the file serialises.
+# 每图纸的位号唯一性守卫（M9）。由画布持有，因为正是画布放置与复制实例；
+# 每次切换文档时它都会重新绑定到图的规则上，使序号水位线始终是文件会序列化的那一份。
+var gpTags: GPTagRegistry = GPTagRegistry.new()
+
+# Tag (位号) label grip / drag delegate (M10b). Mirrors gpEdgeGrips: the transient drag state
+# lives here, not on the canvas.
+# 位号标签抓取点 / 拖拽委托（M10b）。与 gpEdgeGrips 同形：瞬态拖拽状态存于此，不在画布上。
+var gpLabelGrips: GPLabelGripOps = null
+
 # Backing field for the gpGraph property. Kept explicit so the setter cannot recurse.
 # gpGraph 属性的后备字段。显式保留以避免 setter 递归。
 var _gpGraphRef: GPPIDGraph
@@ -175,6 +187,23 @@ var _gpOverlay: GPCanvasOverlay = null
 # 暴露它所触碰的画布内部实现。
 var gpAnno: GPAnnotationEditor = null
 
+# Edge line-number editor delegate (P3-4): a floating LineEdit opened by double-clicking an edge,
+# committing through the command layer as one undo step. Created in _ready() with this canvas.
+# 边管线号编辑器委托（P3-4）：双击边时打开的浮层 LineEdit，经命令层以一个撤销步提交。在 _ready() 中以
+# 本画布创建。
+var gpEdgeEditor: GPEdgeTagEditor = null
+
+# Edge grip / route editing delegate (P3-4): drag an endpoint to reconnect or a vertex to re-route,
+# each commit going through the command layer as one undo step. Created in _ready() with this canvas.
+# 边抓取点 / 布线编辑委托（P3-4）：拖端点改接或拖顶点改布线，每次提交经命令层成为一个撤销步。
+# 在 _ready() 中以本画布创建。
+var gpEdgeGrips: GPEdgeGripOps = null
+
+# Endpoint (anchor) highlight / pick / drag-to-connect delegate. Mirrors gpEdgeGrips: the
+# transient port state never lands on the canvas.
+# 端点（锚点）高亮 / 拾取 / 拖拽连线委托。与 gpEdgeGrips 同形：瞬态端点状态从不落在画布上。
+var gpPortOps: GPPortConnectOps = null
+
 # Right-click context-menu delegate (P2 split): hit-test / menu build / action dispatch, plus the
 # menu's hit state (_gpCtxHit / _gpCtxVertex, now owned by GPCanvasContextMenu). Created in _ready()
 # with this canvas as its state owner.
@@ -194,6 +223,9 @@ var _gpSelectTool: GPSelectTool = null
 var _gpPlaceTool: GPPlaceTool = null
 var _gpDrawTool: GPDrawShapeTool = null
 var _gpGripTool: GPGripTool = null
+# P3 connectivity tools / P3 连线工具。
+var _gpPipeTool: GPPipeTool = null
+var _gpSignalTool: GPSignalTool = null
 
 # Id counter for new nodes/edges — proxy to state.gpIds (GPIdGen). / 新节点/边 id 计数器 —— 代理 state.gpIds。
 var gpNextId: int:
@@ -283,6 +315,22 @@ var _gpPanOffsetStart: Vector2 = Vector2.ZERO
 # 当前选中注释图形的下标（与图元层的 gpSelection 对应的镜像）。
 var gpShapeSel: Array[int] = []
 
+# Selected edge ids (P3). Kept as a plain array next to gpShapeSel: an edge selection and a node
+# selection are mutually exclusive in practice, and a proxy into GPCanvasSelection would force the
+# node/shape/edge three-way rule into that class before it is understood.
+# 选中的边 id（P3）。与 gpShapeSel 并列保持为普通数组：边选择与节点选择在实践上互斥，
+# 而代理进 GPCanvasSelection 会迫使「节点/图形/边」三方互斥规则提前进入那个类。
+var gpEdgeSel: Array[String] = []
+
+# Anchor currently under the cursor (""-keyed empty dictionary when none). Written by
+# GPPortConnectOps so the hover highlight and the pick logic share one owner.
+# 光标下当前的锚点（无则为空字典）。由 GPPortConnectOps 写入，使悬停高亮与拾取逻辑共用一个持有者。
+var gpHoverPort: Dictionary = {}
+
+# The two endpoints picked for "auto-connect" (in click order, at most two).
+# 为「自动连线」拾取的两个端点（按点击顺序，最多两个）。
+var gpPortPick: Array[Dictionary] = []
+
 # M3: the drawing transient state (_gpDrawFrom / _gpDrawTo / _gpDrawActive / _gpPolyPts) and the
 # three drawing verbs (_gpOnDrawDown / _gpCommitDraw / _gpFinishPolyline) moved into GPDrawShapeTool,
 # which now also paints its own rubber band via the gpDrawOverlay hook (declared in P2, never wired).
@@ -342,6 +390,18 @@ func _ready() -> void:
 	# Create the annotation-shape editing delegate (P2 split), owner = this canvas.
 	# 创建注释图形编辑委托（P2 拆分），状态持有者为本画布。
 	gpAnno = GPAnnotationEditor.new(self)
+	# Create the edge editing delegates (P3-4), owner = this canvas. They are reached by the
+	# select tool through gpCtx (mirroring gpAnno), so transient edge-edit state never lives here.
+	# 创建边编辑委托（P3-4），状态持有者为本画布。选择工具经 gpCtx 访问它们（与 gpAnno 同形），
+	# 故边的瞬态编辑状态不落在本画布上。
+	gpEdgeEditor = GPEdgeTagEditor.new(self)
+	gpEdgeGrips = GPEdgeGripOps.new(self)
+	# M10b: the tag label gets the same grip treatment as an edge vertex.
+	# M10b：位号标签获得与边拐点相同的抓取点待遇。
+	gpLabelGrips = GPLabelGripOps.new(self)
+	# Endpoint-anchor interaction delegate (highlight / pick / drag-to-connect).
+	# 端点锚点交互委托（高亮 / 拾取 / 拖拽连线）。
+	gpPortOps = GPPortConnectOps.new(self)
 	# Create the right-click context-menu delegate (P2 split), owner = this canvas.
 	# 创建右键上下文菜单委托（P2 拆分），状态持有者为本画布。
 	_gpCtx = GPCanvasContextMenu.new(self)
@@ -359,7 +419,9 @@ func _ready() -> void:
 	_gpPlaceTool = GPPlaceTool.new()
 	_gpDrawTool = GPDrawShapeTool.new()
 	_gpGripTool = GPGripTool.new()
-	for gpT in [_gpSelectTool, _gpPlaceTool, _gpDrawTool, _gpGripTool]:
+	_gpPipeTool = GPPipeTool.new()
+	_gpSignalTool = GPSignalTool.new()
+	for gpT in [_gpSelectTool, _gpPlaceTool, _gpDrawTool, _gpGripTool, _gpPipeTool, _gpSignalTool]:
 		gpT.gpCtx = _gpToolCtx
 	_gpRegistry.gpRegister(GPMode.GP_SELECT, _gpSelectTool)
 	_gpRegistry.gpRegister(GPMode.GP_CONNECT, _gpSelectTool)
@@ -368,6 +430,8 @@ func _ready() -> void:
 	_gpRegistry.gpRegister(GPMode.GP_DRAW_RECT, _gpDrawTool)
 	_gpRegistry.gpRegister(GPMode.GP_DRAW_POLYLINE, _gpDrawTool)
 	_gpRegistry.gpRegister(GPMode.GP_DRAW_ARC, _gpDrawTool)
+	_gpRegistry.gpRegister(GPMode.GP_PIPE, _gpPipeTool)
+	_gpRegistry.gpRegister(GPMode.GP_SIGNAL, _gpSignalTool)
 	# Subscribe to language and font changes so symbol labels stay in sync.
 	# 订阅语言与字体变化，保持图元文字同步。
 	# Headless-resilient guard: `I18n` / `Settings` are autoloads and are NOT present when the
@@ -383,6 +447,8 @@ func _ready() -> void:
 	var _gpSettings: Object = get_node_or_null("/root/Settings")
 	if _gpSettings != null and _gpSettings.has_signal("gpSymbolStyleChanged"):
 		_gpSettings.gpSymbolStyleChanged.connect(_gpOnSymbolStyleChanged)
+	if _gpSettings != null and _gpSettings.has_signal("gpPipeTagStyleChanged"):
+		_gpSettings.gpPipeTagStyleChanged.connect(_gpRefreshEdges)
 	# Bridge the canvas's own gpGraphChanged funnel into the app event bus (M2): one channel, so
 	# the tool layer keeps emitting unchanged while new subscribers listen on the bus. The core
 	# GPPIDGraph emits a raw signal; the canvas is the single place that maps it onto the bus
@@ -411,7 +477,12 @@ func _gpSetGraph(gpValue: GPPIDGraph) -> void:
 	# Rebuild the command context for the new graph and drop the old history: undo must
 	# never reach back into a graph that is no longer displayed.
 	# 为新图重建命令上下文并丢弃旧历史：撤销绝不能回到已不再显示的图。
-	gpActions.gpBindGraph(_gpGraphRef, _gpState.gpIds)
+	# M9: hand the tag registry to the service so placement and duplication mint unique tags.
+	# gpBindGraph re-derives the index from the graph, so a document edited before M9 starts
+	# from the truth rather than an empty cache.
+	# M9：把位号注册器交给编辑服务，使放置与复制能铸造唯一位号。
+	# gpBindGraph 会从图重新推导索引，故 M9 之前编辑过的文档从真相出发而非空缓存。
+	gpActions.gpBindGraph(_gpGraphRef, _gpState.gpIds, gpTags)
 
 
 # Core graph mutated programmatically (gpAddNode / gpRemoveNodeWithEdges /
@@ -512,6 +583,11 @@ func _draw() -> void:
 	# M3：活动工具在共享覆盖层之后绘制「自己的」瞬态视觉（绘图橡皮筋、进行中的折线），沿用原有
 	# 层序——橡皮筋此前本就是 GPCanvasOverlay 最后绘制的内容。此钩子自 P2 起即已声明，但从未接线。
 	_gpActiveTool().gpDrawOverlay(self)
+	# Endpoint anchors sit on top of everything: they are the smallest, most precise targets on
+	# the sheet and must never be hidden behind a rubber band or a pipe.
+	# 端点锚点位于最上层：它们是图纸上最小、最需要精确点中的目标，绝不能被橡皮筋或管线遮住。
+	if gpPortOps != null:
+		gpPortOps.gpDrawPorts(self)
 
 
 # The background overlay paint (grid / shapes / grips / marquee / connect-preview) now lives in
@@ -527,7 +603,19 @@ func _draw() -> void:
 func _gpSyncViews() -> void:
 	if gpBinder == null:
 		return
-	gpBinder.gpSync(gpGraph, gpDefs, gpSelection, gpConnectFrom)
+	# gpZoom is forwarded so edge styling can hold its screen-space floors (line weight, dash
+	# length, arrowhead, selection halo) instead of shrinking with the drawing.
+	# 转发 gpZoom，使连线样式能保持其屏幕空间下限（线重、划长、箭头、选中光晕），
+	# 而不随图纸一起缩小。
+	# Edge selection lives in its own array (gpEdgeSel); forward it so the binder can light up the
+	# edge halo (it was previously ignored, so a selected pipe showed only grip triangles).
+	# 边选择存于独立数组 gpEdgeSel；一并转发使绑定器点亮边光晕（此前被忽略，选中管线只显三角）。
+	# While a grip is being dragged, flag that edge as "editing" for a distinct highlight.
+	# 抓取点拖拽进行中，把该边标记为「编辑中」以呈现差异化高亮。
+	var gpEditingEdgeId: String = ""
+	if gpEdgeGrips != null and gpEdgeGrips.gpIsDragging():
+		gpEditingEdgeId = gpEdgeGrips.gpDraggingEdgeId()
+	gpBinder.gpSync(gpGraph, gpDefs, gpSelection, gpConnectFrom, gpViewZoom, gpEdgeSel, gpEditingEdgeId)
 
 
 
@@ -537,6 +625,15 @@ func _gpSyncViews() -> void:
 func _gpRefreshSymbols() -> void:
 	if gpBinder != null:
 		gpBinder.gpRefreshSymbols()
+
+
+# Public port: repaint every symbol view. M10b fix — the tag label is painted by
+# GPSymbolView, NOT by the canvas, and a parent's queue_redraw() never cascades to
+# child CanvasItems. Without this a tag drag moved the model while the text stood still.
+# 公开端口：重绘所有图元视图。M10b 修复 —— 位号标签由 GPSymbolView 绘制、而非画布，
+# 且父节点的 queue_redraw() 不会级联到子 CanvasItem。缺此步，拖拽位号时模型动了、文字不动。
+func gpRefreshSymbolViews() -> void:
+	_gpRefreshSymbols()
 
 
 # ============================ lookup ============================
@@ -572,6 +669,10 @@ func _gui_input(gpEvent: InputEvent) -> void:
 		# Mouse wheel zooms in/out at the cursor position.
 		# 鼠标滚轮在光标位置缩放。
 		if gpMouseEvent.button_index == MOUSE_BUTTON_WHEEL_UP or gpMouseEvent.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			# P3-4: while the in-place tag editor is open, pan/zoom must stay frozen so the
+			# field cannot drift off the pipe it labels. / 边位号编辑器打开期间冻结缩放。
+			if gpEdgeEditor != null and gpEdgeEditor.gpIsEditing():
+				return
 			if gpMouseEvent.pressed:
 				var gpFactor: float = 1.0 if gpMouseEvent.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0
 				_gpZoomAt(gpMouseEvent.position, gpFactor)
@@ -580,6 +681,9 @@ func _gui_input(gpEvent: InputEvent) -> void:
 		# Middle button starts/ends panning.
 		# 中键开始/结束平移。
 		if gpMouseEvent.button_index == MOUSE_BUTTON_MIDDLE:
+			# P3-4: freeze panning while editing the tag too. / 编辑位号时同样冻结平移。
+			if gpEdgeEditor != null and gpEdgeEditor.gpIsEditing():
+				return
 			if gpMouseEvent.pressed:
 				_gpPanning = true
 				_gpPanStart = gpMouseEvent.position
@@ -645,6 +749,39 @@ func _gui_input(gpEvent: InputEvent) -> void:
 			_gpGripTool.gpOnMove(gpWorldFromScreen(gpMotion.position))
 			accept_event()
 			return
+		# Edge grip / route drag is also owned by GPGripTool (P3-4). It is checked AFTER the
+		# annotation drag so the two never fight over the same motion event.
+		# 边抓取点 / 布线拖拽同样由 GPGripTool 负责（P3-4）。它在注释拖拽之后检查，
+		# 使两者不会争抢同一移动事件。
+		if gpEdgeGrips.gpIsDragging():
+			_gpGripTool.gpOnMove(gpWorldFromScreen(gpMotion.position))
+			accept_event()
+			return
+		# Tag (位号) label grip drag (M10b). Checked before the port anchors so the two never
+		# fight over the same motion event; without this branch the label never followed.
+		# 位号标签抓取点拖拽（M10b）。在端点锚点之前检查，使两者不争抢同一移动事件；
+		# 缺这个分支，标签根本不会跟随。
+		if gpLabelGrips != null and gpLabelGrips.gpIsDragging():
+			gpLabelGrips.gpOnGripMove(gpWorldFromScreen(gpMotion.position))
+			accept_event()
+			return
+		# Endpoint-anchor drag (port-to-port connect). / 端点锚点拖拽（端对端连线）。
+		if gpPortOps != null and gpPortOps.gpIsDragging():
+			gpPortOps.gpUpdateDrag(gpWorldFromScreen(gpMotion.position))
+			queue_redraw()
+			accept_event()
+			return
+		# M10b: a move cursor over the tag grip. The handle is 9 px wide and sits OUTSIDE the
+		# glyph, so without feedback nobody ever finds it to drag it.
+		# M10b：抓取点上方显示移动光标。手柄仅 9 px 宽且位于字形**之外**，
+		# 没有反馈没人找得到它、更别说拖它。
+		if gpLabelGrips != null and gpLabelGrips.gpUpdateHoverCursor(gpWorldFromScreen(gpMotion.position)):
+			accept_event()
+			return
+		# Hover highlight for the anchor under the cursor (outside any drag).
+		# 光标下锚点的悬停高亮（拖拽之外）。
+		if gpPortOps != null:
+			gpPortOps.gpUpdateHover(gpWorldFromScreen(gpMotion.position))
 		# Tool-specific rubber band / connect preview (select = connect preview, draw = rubber band).
 		# The tool returns true when it consumed the motion (e.g. rubber band) so we accept it.
 		# 工具专属橡皮筋 / 连接预览（select=连接预览，draw=橡皮筋）。工具消费了移动事件时返回
@@ -668,7 +805,16 @@ func _gpRefreshEdges() -> void:
 # [param gpDouble] second click of a double click -> open the in-place block editor.
 # [param gpDouble] 双击的第二次点击 → 打开就地块编辑器。
 func _gpOnLeftDown(gpScreen: Vector2, gpShift: bool, gpDouble: bool) -> void:
-	_gpActiveTool().gpOnPress(gpWorldFromScreen(gpScreen), gpShift, gpDouble)
+	var gpWorld: Vector2 = gpWorldFromScreen(gpScreen)
+	# An endpoint anchor is the smallest, most precise target on the sheet, so it wins over the
+	# node, the edge and the marquee — but only when a symbol is selected (that is when anchors
+	# are shown at all).
+	# 端点锚点是图纸上最小、最需精确点中的目标，故它优先于节点、连线与框选 ——
+	# 但仅在有图元被选中时（只有那时锚点才会显示）。
+	if gpPortOps != null and gpPortOps.gpTryStartDrag(gpWorld):
+		queue_redraw()
+		return
+	_gpActiveTool().gpOnPress(gpWorld, gpShift, gpDouble)
 
 
 # Return the interaction tool for the current dispatch target: a pending palette placement wins
@@ -683,10 +829,28 @@ func _gpActiveTool() -> GPCanvasTool:
 
 func _gpOnLeftUp(gpScreen: Vector2) -> void:
 	var gpWorld: Vector2 = gpWorldFromScreen(gpScreen)
+	# Finish an endpoint-anchor drag (connect) or turn it into a pick.
+	# 结束端点锚点拖拽（连线），或把它转成一次拾取。
+	if gpPortOps != null and gpPortOps.gpIsDragging():
+		gpPortOps.gpFinishDrag()
+		return
 	# Grip / whole-shape drag belongs to GPGripTool (P2 split).
 	# 锚点 / 整图形拖拽由 GPGripTool 负责（P2 拆分）。
 	if gpAnno.gpIsDragging():
 		_gpGripTool.gpOnRelease(gpWorld)
+		return
+	# Edge grip / route drag belongs to GPGripTool too (P3-4).
+	# 边抓取点 / 布线拖拽同样由 GPGripTool 负责（P3-4）。
+	if gpEdgeGrips.gpIsDragging():
+		_gpGripTool.gpOnRelease(gpWorld)
+		return
+	# Tag (位号) label grip release (M10b): commit as ONE undo step. Without this branch the
+	# release fell through to the select tool and the drag was never recorded at all.
+	# 位号标签抓取点释放（M10b）：提交为**一个**撤销步。缺此分支，释放会落到选择工具上，
+	# 这次拖拽从未被记录。
+	if gpLabelGrips != null and gpLabelGrips.gpIsDragging():
+		gpLabelGrips.gpEndGripDrag()
+		accept_event()
 		return
 	# Everything else (draw commit / marquee / group drag) is dispatched to the active tool.
 	# 其余（提交绘图 / 框选 / 整组拖拽）分派给活动工具。
@@ -771,17 +935,57 @@ func gpRequestSelectAll() -> void:
 	gpSetSelection(gpAll)
 
 
-# Delete every selected node together with the edges attached to it.
-# 删除所有选中节点及其附着的连线。
+# Replace the edge selection set (P3). Edge selection is mutually exclusive with node / shape
+# selection, so setting it clears the others and refreshes the inspector via the selection event.
+# 替换边的选择集（P3）。边选择与节点 / 图形选择互斥，故设置它时清空其它两者，
+# 并经选择事件刷新属性面板。
+func gpSetEdgeSelection(gpIds: Array[String]) -> void:
+	gpEdgeSel = gpIds.duplicate()
+	gpSelection = []
+	gpShapeSel = []
+	gpConnectFrom = ""
+	queue_redraw()
+	# The inspector listens on the node-selection event; clearing it hides a stale node panel.
+	# 属性面板监听节点选择事件；清空它可隐藏残留的节点面板。
+	# Emit the already-typed gpSelection (Array[String]); passing a bare [] would make Godot
+	# refuse to coerce an untyped Array into the signal's Array[String] parameter.
+	# 发射已具类型的 gpSelection（Array[String]）；若直接传裸 []，Godot 会拒绝把无类型 Array
+	# 提升为信号的 Array[String] 参数而报转换错误。
+	gpEvents.gpSelectionChanged.emit(gpSelection)
+	gpEmitStatus()
+
+
+# Delete every selected node (with its attached edges), shape and selected edge in ONE undo step.
+# 删除所有选中节点（及其关联边）、图形与选中边，合并为「一个撤销步」。
 func gpRequestDeleteSelected() -> void:
 	if gpGraph == null:
 		return
-	# Nodes AND shapes go in one request, so a mixed marquee delete stays ONE undo step.
-	# 节点与图形同在一次请求中提交，故混合框选的删除仍是一个撤销步。
-	if not gpActions.gpDeleteSelection(gpSelection, gpShapeSel):
+	var gpNodes: Array[String] = gpSelection.duplicate()
+	var gpShapes: Array[int] = gpShapeSel.duplicate()
+	# Edges whose endpoints are being deleted are already removed by the node half of the command,
+	# so feeding them in again would double-delete and double-insert on undo. Keep only the edges
+	# that survive the node deletion.
+	# 端点正被删除的边已由命令的节点部分一并移除，重复纳入会双重删除并在撤销时重复插入。只保留
+	# 节点删除后仍存留的边。
+	var gpEdges: Array[String] = []
+	for gpEid in gpEdgeSel:
+		var gpE: GPPIDEdge = gpGraph.gpGetEdge(gpEid)
+		if gpE == null:
+			continue
+		var gpF: String = str(gpE.gpFromRef.get("node_id", ""))
+		var gpT: String = str(gpE.gpToRef.get("node_id", ""))
+		if gpNodes.has(gpF) or gpNodes.has(gpT):
+			continue
+		gpEdges.append(gpEid)
+	if gpNodes.is_empty() and gpShapes.is_empty() and gpEdges.is_empty():
+		return
+	# Nodes, shapes AND edges go in one request, so a mixed delete stays ONE undo step.
+	# 节点、图形与边同在一次请求中提交，故混合删除仍是一个撤销步。
+	if not gpActions.gpDeleteSelection(gpNodes, gpShapes, gpEdges):
 		return
 	gpShapeSel.clear()
 	gpSetSelection([])
+	gpSetEdgeSelection([])
 	queue_redraw()
 
 
@@ -835,9 +1039,17 @@ func _gpPruneSelection() -> void:
 	for gpI in gpShapeSel:
 		if gpI >= 0 and gpI < gpGraph.gpShapes.size():
 			gpShapeKeep.append(gpI)
-	if gpKeep.size() == gpSelection.size() and gpShapeKeep.size() == gpShapeSel.size():
+	# P3: an edge can be deleted by undo too; drop the selection entry so edge grips and the
+	# tag editor never point at a ghost edge.
+	# P3：边也可能被撤销删除；剔除该选择项，使边抓取点与位号编辑器永不指向幽灵边。
+	var gpEdgeKeep: Array[String] = []
+	for gpEid in gpEdgeSel:
+		if gpGraph.gpGetEdge(gpEid) != null:
+			gpEdgeKeep.append(gpEid)
+	if gpKeep.size() == gpSelection.size() and gpShapeKeep.size() == gpShapeSel.size() and gpEdgeKeep.size() == gpEdgeSel.size():
 		return
 	gpShapeSel = gpShapeKeep
+	gpEdgeSel = gpEdgeKeep
 	gpSetSelection(gpKeep)
 
 
@@ -893,7 +1105,170 @@ func gpRequestMoveNodes(gpNodeIds: Array[String], gpDelta: Vector2) -> bool:
 # generic port, so the canvas never needs to know which tool is currently mounted.
 # 请求活动交互工具放弃其半成品状态（ESC 路径）。一个通用端口，使画布无需知道当前挂的是哪个工具。
 func gpCancelActiveTool() -> bool:
+	# Tag (位号) label drag: ESC must abandon it like every other drag.
+	# 位号标签拖拽：ESC 必须像其它拖拽一样能放弃它。
+	if gpLabelGrips != null and gpLabelGrips.gpIsDragging():
+		gpLabelGrips.gpCancelDrag()
+		return true
+	if gpPortOps != null and gpPortOps.gpIsDragging():
+		gpPortOps.gpCancelDrag()
+		return true
 	return _gpActiveTool().gpCancel()
+
+
+# ============================ P3 连线意图端口 ============================
+# ============================ P3 edge intent ports ============================
+# The pipe / signal tools and the edge editor reach the model only through these. As with the
+# node ports above, the canvas adds nothing: GPEditService turns the intent into a command.
+# 管道 / 信号线工具与连线编辑器只经这些端口触达模型。与上面的节点端口一样，画布不附加逻辑：
+# GPEditService 把意图变成命令。
+
+# Symbol-id -> definition, handed to the pure geometry / hit-test modules so they never need the
+# binder (or the canvas) themselves.
+# 符号 id -> 定义，交给纯几何与命中测试模块，使它们无需直接依赖绑定器（或画布）。
+func gpDefLookupCallable() -> Callable:
+	return Callable(self, "_gpDefLookup")
+
+
+# Bound by gpDefLookupCallable(). / 由 gpDefLookupCallable() 绑定。
+func _gpDefLookup(gpSymbolId: String) -> GPSymbolDef:
+	if gpBinder == null:
+		return null
+	return gpBinder.gpDefFor(gpSymbolId)
+
+
+# Draw a pipe or a signal line between two resolved ends. Returns the new edge id, "" on refusal.
+# 在两个已解析端点之间画管道或信号线。返回新边 id，拒绝时为 ""。
+# Move the tag of one node (M10b). The offset is normalised (1.0 = half the envelope).
+# 移动某节点的位号标签（M10b）。偏移为归一化值（1.0 = 半个包络）。
+func gpRequestSetLabelOffset(gpNodeId: String, gpOffset: Vector2) -> bool:
+	return gpActions.gpSetLabelOffset(gpNodeId, gpOffset)
+
+
+# Definition for a symbol id, through the binder (used by the pure geometry delegates).
+# 经绑定器取某符号 id 的定义（供纯几何委托使用）。
+func gpDefFor(gpSymbolId: String) -> GPSymbolDef:
+	if gpBinder == null:
+		return null
+	return gpBinder.gpDefFor(gpSymbolId)
+
+
+func gpRequestConnectEdge(gpFromRef: Dictionary, gpToRef: Dictionary, gpKind: String,
+		gpSignalType: String = "", gpOrtho: bool = true) -> String:
+	return gpActions.gpConnectEdge(gpFromRef, gpToRef, gpKind, gpSignalType, gpOrtho)
+
+
+# Delete edges by id as one undo step. / 按 id 删除边（一步撤销）。
+func gpRequestDeleteEdges(gpEdgeIds: Array[String]) -> bool:
+	return gpActions.gpDeleteEdges(gpEdgeIds)
+
+
+# Rename an edge's line number. / 修改一条边的管线号。
+func gpRequestSetEdgeTag(gpEdgeId: String, gpTag: String) -> bool:
+	return gpActions.gpSetEdgeTag(gpEdgeId, gpTag)
+
+
+# Move one end of an edge to another port / node, or make it dangle.
+# 把一条边的一端改接到另一个端口 / 节点，或改为悬空。
+func gpRequestReconnectEdge(gpEdgeId: String, gpIsFrom: bool, gpNewRef: Dictionary) -> bool:
+	return gpActions.gpReconnectEdge(gpEdgeId, gpIsFrom, gpNewRef)
+
+
+# Replace an edge's intermediate waypoints. / 替换一条边的中间拐点。
+func gpRequestSetEdgeRouting(gpEdgeId: String, gpRouting: Array[Vector2]) -> bool:
+	return gpActions.gpSetEdgeRouting(gpEdgeId, gpRouting)
+
+
+# Drop the auto-connect endpoint picks (ESC path and every selection change).
+# 清除自动连线端点的拾取（ESC 路径与每次选择变化时）。
+func gpClearPortPick() -> void:
+	gpPortPick.clear()
+	gpHoverPort = {}
+	queue_redraw()
+
+
+# Connect the TWO PICKED endpoints with an obstacle-avoiding orthogonal route.
+# 用一条绕开障碍的正交路径，把「两个已拾取的端点」连起来。
+# The route becomes the edge's stored waypoints, so it stays fully editable afterwards and the
+# manual drag / straight / L-Z-U routing remains available — the two coexist by design.
+# 该路径写为这条边的折点，故此后仍可完全编辑，手动拖拽 / 直连 / L-Z-U 布线也依旧可用 ——
+# 两种方式按设计并存。
+# [return] the new edge id, or "" when refused (fewer than two picks, an illegal pair, ...).
+# [return] 新边的 id；被拒绝时返回 ""（拾取不足两个、端点配对非法等）。
+func gpRequestAutoConnect() -> String:
+	if gpGraph == null or gpBinder == null or gpPortPick.size() != 2:
+		return ""
+	var gpA: Dictionary = gpPortPick[0]
+	var gpB: Dictionary = gpPortPick[1]
+	var gpWhy: String = GPPortAnchor.gpValidatePair(gpA, gpB)
+	if gpWhy != GPPortAnchor.GP_REFUSAL_NONE:
+		gpReportRefusal(gpWhy)
+		return ""
+	var gpKind: String = GPPortAnchor.gpConnectKindFor(str(gpA.get("type", "")),
+		str(gpB.get("type", "")))
+	var gpLookup: Callable = gpDefLookupCallable()
+	var gpFa: Dictionary = GPPortAnchor.gpAnchorOf(gpGraph, gpLookup, str(gpA.get("node_id", "")),
+		str(gpA.get("port_id", "")))
+	var gpFb: Dictionary = GPPortAnchor.gpAnchorOf(gpGraph, gpLookup, str(gpB.get("node_id", "")),
+		str(gpB.get("port_id", "")))
+	if gpFa.is_empty() or gpFb.is_empty():
+		gpReportRefusal(GPPortAnchor.GP_REFUSAL_MISSING)
+		return ""
+	var gpFromEnd: Dictionary = {"pos": gpFa.get("pos", Vector2.ZERO),
+		"dir": gpFa.get("dir", Vector2.ZERO), "bound": true}
+	var gpToEnd: Dictionary = {"pos": gpFb.get("pos", Vector2.ZERO),
+		"dir": gpFb.get("dir", Vector2.ZERO), "bound": true}
+	# The two endpoint symbols are excluded: a pipe must be allowed to touch what it connects.
+	# 排除两个端点图元：管线必须被允许接触它所连接的东西。
+	var gpSkip: Array[String] = [str(gpA.get("node_id", "")), str(gpB.get("node_id", ""))]
+	var gpObstacles: Array[Rect2] = GPEdgeAutoRoute.gpObstacles(gpGraph, gpLookup, gpSkip)
+	var gpExisting: Array[PackedVector2Array] = gpBinder.gpExistingPolylines()
+	var gpPath: PackedVector2Array = GPEdgeAutoRoute.gpRouteAuto(gpFromEnd, gpToEnd, gpObstacles,
+		gpExisting)
+	# gpRouting stores MIDDLE waypoints only — the ends are re-resolved from the port refs every
+	# frame, which is what keeps the pipe glued to its symbol when the symbol moves.
+	# gpRouting 只存中间折点 —— 两端每帧都由端口引用重算，这正是图元移动时管线仍紧贴图元的原因。
+	var gpMid: Array[Vector2] = []
+	for gpI in range(1, gpPath.size() - 1):
+		gpMid.append(gpPath[gpI])
+	var gpId: String = gpActions.gpConnectEdgeRouted({
+		"node_id": str(gpA.get("node_id", "")), "port_id": str(gpA.get("port_id", ""))}, {
+		"node_id": str(gpB.get("node_id", "")), "port_id": str(gpB.get("port_id", ""))},
+		gpKind, gpMid)
+	if gpId == "":
+		gpReportRefusal(gpActions.gpLastRefusal)
+		return ""
+	gpClearPortPick()
+	gpGraphChanged.emit()
+	queue_redraw()
+	return gpId
+
+
+# Topmost edge under a world point, or "". / 世界点下最上层的边，无则 ""。
+func gpHitEdge(gpWorld: Vector2) -> String:
+	return GPCanvasHitTest.gpHitEdge(gpGraph, gpDefLookupCallable(), gpWorld, gpViewZoom)
+
+
+# Surface a refusal to the user instead of failing silently: a click that produces no pipe must
+# SAY why, or the tool looks broken.
+# 把拒绝原因呈现给用户而非静默失败：一次点不出管线的点击必须「说明原因」，否则工具看起来是坏的。
+func gpReportRefusal(gpKey: String) -> void:
+	if gpKey == "":
+		return
+	var gpMsg: String = gpKey
+	# Headless-resilient: I18n is an autoload and is absent (or unreachable via an absolute
+	# path) outside the live app / active scene tree. Only resolve it when safely in-tree,
+	# otherwise keep the raw key as the message so headless runs stay error-free.
+	# 无界面容错：I18n 是自动加载单例，脱离活动现场或活跃场景树时（含 headless 测试）
+	# 既不存在也无法经绝对路径访问。仅在确定处于活跃场景树内时才解析，否则保留原始
+	# 键作为消息，使无界面运行不再产生错误噪声。
+	if is_inside_tree():
+		var gpI18n: Object = get_node_or_null("/root/I18n")
+		if gpI18n != null and gpI18n.has_method("gpTr"):
+			gpMsg = str(gpI18n.gpTr("edge." + gpKey))
+	var gpInfo: Dictionary = {"refusal": gpKey, "message": gpMsg}
+	gpStatusUpdated.emit(gpInfo)
+	gpEvents.gpStatusUpdated.emit(gpInfo)
 
 
 # ============================ context menu ============================

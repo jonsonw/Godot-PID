@@ -23,9 +23,14 @@ var gpCurrentPath: String = ""
 # 打开/另存为用的文件对话框，创建一次重复使用。
 var gpFileDialog: FileDialog
 
-# What the in-flight file dialog is for: "save" or "open".
-# 当前文件对话框的用途：save 或 open。
+# What the in-flight file dialog is for: "save" / "open" / "import" / "export_<kind>".
+# 当前文件对话框的用途：save / open / import / export_<kind>。
 var gpPendingFileAction: String = ""
+
+# Set when the user chose "Save" in the close-confirmation and the project had no path yet,
+# so the quit has to wait for the save-as dialog to complete.
+# 用户在关闭确认中选了「保存」但工程尚无路径时置位，使退出必须等另存为对话框完成。
+var gpQuitAfterSave: bool = false
 
 # Application-layer document manager (M6). The composition root owns it; it holds the event
 # bus, the active graph and the unsaved-dirty flag, replacing the old GPAppState autoload stub.
@@ -144,10 +149,38 @@ var gpToolBar: HBoxContainer = null
 # 开关按钮（选择 / 连线），保留以便同步高亮；以动作名为键。
 var gpToolBtns: Dictionary = {}
 
+# Ribbon command bar (P0 / ADR-UI-01). Replaces the old flat DrawToolBar in the
+# same VBox slot; emits gpActionTriggered, which routes to _gpOnToolBarPressed.
+# Ribbon 命令栏（P0 / ADR-UI-01），在原 DrawToolBar 同位置取代它；发射 gpActionTriggered
+# 并路由到 _gpOnToolBarPressed。回退只需恢复 _gpBuildToolBar 调用（见下方注释）。
+var gpRibbon: GPPIDRibbon = null
+
 
 # Wire the static scene together and set up initial state.
 # 将静态场景拼接起来并设置初始状态。
 func _ready() -> void:
+	# Arm the close guard: take ownership of the OS close request so the window does
+	# NOT quit by itself. The _notification(NOTIFICATION_WM_CLOSE_REQUEST) handler below
+	# then decides (clean -> quit, dirty -> three-way ask). Without this line the engine
+	# quits immediately after dispatching the notification, so the unsaved-changes dialog
+	# is created but never shown and work is lost silently.
+	# 武装关闭拦截：接管 OS 关闭请求，使窗口不会自行退出。下方的
+	# _notification(NOTIFICATION_WM_CLOSE_REQUEST) 才拥有决定权（干净→退出，
+	# 脏→三选一）。缺此一行，引擎会在派发通知后立刻退出，未保存对话框虽被创建却
+	# 永无机会显示，改动被静默丢失。
+	get_tree().auto_accept_quit = false
+
+	# Intercept the OS window-close via the root Window's close_requested signal (the
+	# reliable, signal-based path in Godot 4). A plain _notification(NOTIFICATION_WM_CLOSE_
+	# REQUEST) on a Control root is NOT reliably delivered, so the three-way dialog would
+	# never appear on a red-X click. close_requested fires on the actual Window and lets us
+	# decide (clean -> quit, dirty -> three-way ask) instead of the engine auto-quitting.
+	# 用根 Window 的 close_requested 信号拦截 OS 关闭（Godot 4 中可靠、基于信号的做法）。
+	# 在 Control 根上用 _notification(NOTIFICATION_WM_CLOSE_REQUEST) 并不可靠地送达，
+	# 红叉点击时三选一对话框因此从不出现。close_requested 在真正的 Window 上触发，
+	# 由我们决定（干净→退出，脏→三选一）而非引擎自退。
+	get_window().close_requested.connect(_gpOnCloseRequested)
+
 	# Restore any symbol packs the user exported in a previous session so they
 	# re-appear in the palette and on the canvas after a restart.
 	# 恢复用户在上一次会话中导出的图元包，使重启后它们重新出现在图元库与画布中。
@@ -200,6 +233,17 @@ func _ready() -> void:
 	# ---- inspector ----
 	# ---- 属性面板 ----
 	gpInspector.gpAttrChanged.connect(_gpOnAttrChanged)
+	gpInspector.gpEdgeAttrChanged.connect(_gpOnEdgeAttrChanged)
+	# M10: the panel owns no graph, so a symbol swap is announced and executed here.
+	# M10：面板不持有图，故「更换图元」在此被宣告并执行。
+	gpInspector.gpSymbolSwapRequested.connect(_gpOnSymbolSwap)
+	# M11: a batched edit arrives once with the whole id set, so it becomes one undo step.
+	# M11：批量编辑连同整个 id 集合一次性送达，故只产生一个撤销步。
+	gpInspector.gpBatchAttrChanged.connect(_gpOnBatchAttrChanged)
+	# M12: orphaned values may only be dropped on an explicit request from the panel.
+	# M12：孤儿值仅在面板明确请求时才可被清除。
+	gpInspector.gpCleanOrphansRequested.connect(_gpOnCleanOrphans)
+	gpInspector.gpDefs = gpDefs
 
 	# ---- menu ----
 	# ---- 菜单 ----
@@ -208,9 +252,10 @@ func _ready() -> void:
 	# 菜单展开前向宿主请求刷新启用状态。
 	gpMenuBar.gpMenuOpening.connect(_gpOnMenuOpening)
 
-	# ---- drawing toolbar row under the menu bar ----
-	# ---- 菜单栏下方的绘图工具栏行 ----
-	_gpBuildToolBar()
+	# ---- Ribbon command bar under the menu bar (P0 / ADR-UI-01) ----
+	# ---- 菜单栏下方的 Ribbon 命令栏（P0 / ADR-UI-01） ----
+	_gpBuildRibbon()
+	_gpStyleChrome()
 
 	# ---- file dialog (open / save-as) ----
 	# ---- 文件对话框（打开 / 另存为） ----
@@ -490,6 +535,17 @@ func _gpRefreshSelection() -> void:
 		return
 	var gpId: String = gpCanvas.gpSelectedId
 	if gpId == "":
+		# No node selected: before clearing the panel, show a single selected edge's form if any.
+		# 未选中节点：在清空面板前，若单选了一条边则显示其表单。
+		if gpCanvas.gpEdgeSel.size() == 1 and gpCanvas.gpGraph != null:
+			var gpEdge: GPPIDEdge = gpCanvas.gpGraph.gpGetEdge(gpCanvas.gpEdgeSel[0])
+			if gpEdge != null:
+				gpInspector.gpShowEdge(gpEdge)
+				var gpType: String = I18n.gpTr(GPEdgeStyle.gpLineTypeKey(gpEdge.gpKind, gpEdge.gpSignalType))
+				gpInfoLabel.text = "%s：%s\n%s：%s" % [
+					I18n.gpTr("info.id"), gpEdge.gpInstanceId,
+					I18n.gpTr("edge.kind"), gpType]
+				return
 		gpInspector.gpShow(null, null)
 		gpInfoLabel.text = I18n.gpTr("symbol_lib.no_selection")
 		return
@@ -501,7 +557,26 @@ func _gpRefreshSelection() -> void:
 		return
 
 	var gpDef: GPSymbolDef = _gpDefFor(gpNode.gpSymbolId)
-	gpInspector.gpShow(gpDef, gpNode)
+
+	# Multi-select (M10): when every selected instance instantiates the SAME symbol, the panel
+	# edits them as one batch. A mixed selection falls back to the primary node — writing a
+	# property onto instances that never declared it would be silent data damage.
+	# 多选（M10）：当所有选中实例实例化的是**同一**图元时，面板按批量编辑。
+	# 混合选择回落到主节点 —— 把某属性写到从未声明它的实例上属于静默的数据破坏。
+	var gpBatch: Array[GPPIDNode] = []
+	var gpSameSymbol: bool = true
+	for gpSelId in gpCanvas.gpSelection:
+		var gpSelNode: GPPIDNode = _gpNodeFor(gpSelId)
+		if gpSelNode == null:
+			continue
+		if gpSelNode.gpSymbolId != gpNode.gpSymbolId:
+			gpSameSymbol = false
+			break
+		gpBatch.append(gpSelNode)
+	if gpBatch.size() > 1 and gpSameSymbol:
+		gpInspector.gpShowMulti(gpDef, gpBatch)
+	else:
+		gpInspector.gpShow(gpDef, gpNode)
 
 	var gpCat: String = I18n.gpTr(gpDef.gpCategory) if gpDef else "—"
 	var gpSize: String = str(gpDef.gpDefaultSize) if gpDef else "—"
@@ -512,17 +587,161 @@ func _gpRefreshSelection() -> void:
 		I18n.gpTr("info.size"), gpSize]
 
 
-# React to an attribute edit in the inspector.
-# 响应属性面板中的属性编辑。
+# React to an attribute edit in the inspector, and to the batched form of the same edit.
+# 响应属性面板中的属性编辑，以及同一次编辑的批量形式。
+# Reserved keys (M10): "tag", "name:<locale>", "label_anchor"; anything else is a property key.
+# The historical "label" key is still accepted as a tag, so an older panel keeps working.
+# 保留键（M10）："tag"、"name:<语种>"、"label_anchor"；其余一律视为属性键。
+# 历史上的 "label" 键仍按位号处理，使旧面板继续可用。
+#
+# M11: every one of these now travels through an undoable command on the edit service, so
+# Ctrl+Z reverses it and the dirty flag is set exactly once (driven by gpGraphChanged).
+# M11：它们现在都经编辑服务上的可撤销命令落地，故 Ctrl+Z 可撤销，
+# 且脏标记恰好置一次（由 gpGraphChanged 驱动）。
 func _gpOnAttrChanged(gpId: String, gpKey: String, gpVal) -> void:
-	var gpNode: GPPIDNode = _gpNodeFor(gpId)
+	var gpIds: Array[String] = [gpId]
+	_gpApplyAttr(gpIds, gpKey, gpVal)
+
+
+func _gpOnBatchAttrChanged(gpIds: Array[String], gpKey: String, gpVal) -> void:
+	_gpApplyAttr(gpIds, gpKey, gpVal)
+
+
+# Route one edit (single or batched) to the matching undoable intent on the edit service.
+# 把一次编辑（单选或批量）路由到编辑服务上对应的可撤销意图。
+func _gpApplyAttr(gpIds: Array[String], gpKey: String, gpVal: Variant) -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null or gpIds.is_empty() or gpKey == "":
+		return
+	var gpActs: GPEditService = gpCanvas.gpActions
+	var gpOk: bool = false
+	if gpIds.size() == 1:
+		var gpId: String = gpIds[0]
+		if gpKey == "tag" or gpKey == "label":
+			gpOk = gpActs.gpSetTag(gpId, str(gpVal))
+		elif gpKey == "label_anchor":
+			gpOk = gpActs.gpSetLabelAnchor(gpId, int(gpVal))
+		elif gpKey.begins_with(GPInspector.GP_NAME_PREFIX):
+			# "name:zh_CN" -> the locale is everything after the prefix.
+			# "name:zh_CN" -> 前缀之后的部分即语种。
+			gpOk = gpActs.gpSetName(gpId,
+				gpKey.substr(GPInspector.GP_NAME_PREFIX.length()), str(gpVal))
+		else:
+			gpOk = gpActs.gpSetProperty(gpId, gpKey, gpVal)
+	else:
+		gpOk = gpActs.gpBatchSetProperty(gpIds, gpKey, gpVal)
+	if gpOk:
+		return
+	# A refused edit explains itself (e.g. a duplicate tag); "nothing changed" stays silent.
+	# 被拒绝的编辑会自己说明原因（如位号重复）；「无实际变化」则保持安静。
+	if gpActs.gpLastRefusal != "":
+		_gpSetState(gpActs.gpLastRefusal)
+
+
+# Swap one instance onto another symbol (M10). uid, tag, property values and every
+# connection survive; only gpSymbolId changes. Missing ports are downgraded to the node
+# centre rather than severed, and the count is surfaced as a warning.
+# 把某个实例换到另一个图元上（M10）。uid、位号、属性值与全部连接都保留，只有 gpSymbolId 变更。
+# 缺失的端口降级到图元中心而非被切断，并把数量以警告形式告知用户。
+func _gpOnSymbolSwap(gpNodeId: String, gpNewSymbolId: String) -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null or gpCanvas.gpGraph == null:
+		return
+	var gpNewDef: GPSymbolDef = _gpDefFor(gpNewSymbolId)
+	if gpNewDef == null:
+		_gpSetState("swap.no_such_symbol", [gpNewSymbolId])
+		return
+	if not gpCanvas.gpActions.gpReplaceSymbol(gpNodeId, gpNewDef):
+		return
+	gpCanvas.queue_redraw()
+	_gpRefreshSelection()
+	# "Allowed but warned" (decided 2026-09-09): the pipes still connect, they just lost the
+	# exact nozzle they were drawn onto — the user decides whether to re-seat them.
+	# 「允许但警告」（2026-09-09 拍板）：管路仍然连通，只是失去了原本吸附的管口
+	# —— 是否重新落位由用户决定。
+	var gpDowngraded: Array[String] = gpCanvas.gpActions.gpLastSwapWarning
+	if gpDowngraded.size() > 0:
+		_gpSetState("swap.warn_ports", [gpDowngraded.size()])
+	else:
+		_gpSetState("swap.done", [I18n.gpTr(gpNewDef.gpDisplayName, gpNewDef.gpDisplayName)])
+
+
+# Hand the live library to the inspector so its "更换图元" dropdown follows every reload.
+# 把活动库交给属性面板，使其「更换图元」下拉跟随每次库重载。
+func _gpSyncInspectorDefs() -> void:
+	if gpInspector != null:
+		gpInspector.gpDefs = gpDefs
+
+
+# M12: reconcile a freshly opened drawing against the CURRENT library. Renamed fields carry
+# their values across; deleted fields leave ORPHANS that are kept (never swept) and merely
+# counted, so the user decides whether to clean them.
+# M12：把刚打开的图纸与**当前**图元库对账。改名字段带着取值迁移；删除字段留下孤儿值
+# —— 保留（绝不自动清扫）并只做计数，是否清理由用户决定。
+func _gpReconcileLibraryDrift(gpGraph: GPPIDGraph) -> void:
+	if gpGraph == null:
+		return
+	var gpLive: Dictionary = GPPropertyResolver.gpFingerprintsFor(gpDefs)
+	var gpDrift: Array[String] = GPPropertyResolver.gpDriftedSymbols(
+		gpLive, gpGraph.gpSchemaFingerprints)
+	# Adopt the live fingerprints: from here on this drawing is "as of this library".
+	# 采用当前指纹：从此本图纸即「对应此版本的库」。
+	gpGraph.gpSchemaFingerprints = gpLive.duplicate()
+	if gpDrift.is_empty():
+		return
+	var gpMigrated: int = GPPropertyResolver.gpMigrateGraph(gpGraph, gpDefs)
+	var gpOrphans: int = GPPropertyResolver.gpOrphanCount(gpGraph, gpDefs)
+	_gpSetState("lib.drift", [gpDrift.size(), gpMigrated, gpOrphans])
+
+
+# M12: drop the orphaned values of one instance, on the user's explicit request.
+# M12：按用户明确请求，清除某个实例上的孤儿值。
+func _gpOnCleanOrphans(gpNodeId: String) -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null or gpCanvas.gpGraph == null:
+		return
+	var gpNode: GPPIDNode = _gpNodeFor(gpNodeId)
 	if gpNode == null:
 		return
-	if gpKey == "label":
-		gpNode.gpTag = gpVal
-	else:
-		gpNode.gpAttrValues[gpKey] = gpVal
-	gpActiveCanvas().queue_redraw()
+	var gpDef: GPSymbolDef = _gpDefFor(gpNode.gpSymbolId)
+	var gpSchema: GPPropertySchema = gpDef.gpSchema if gpDef != null else null
+	var gpRemoved: int = GPPropertyResolver.gpCleanOrphans(gpNode, gpSchema)
+	if gpRemoved <= 0:
+		return
+	gpCanvas.gpGraph.gpGraphChanged.emit()
+	gpCanvas.queue_redraw()
+	_gpRefreshSelection()
+	_gpSetState("lib.orphans_cleaned", [gpRemoved])
+
+
+# React to an attribute edit in the edge form: route each key to the matching undoable
+# intent on the edit service, then repaint and rebuild the form (so kind-dependent fields
+# like signal_type vs dn/medium/insulation show or hide according to the new kind).
+# 响应边表单中的属性编辑：把每个键路由到编辑服务上对应的可撤销意图，随后重绘并重建表单
+#（使依赖类型的字段——signal_type 与 dn/medium/insulation——按新类型正确显隐）。
+func _gpOnEdgeAttrChanged(gpEdgeId: String, gpKey: String, gpVal) -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null or gpCanvas.gpGraph == null:
+		return
+	match gpKey:
+		"kind":
+			# A SIGNAL edge must carry a signal type; default to ELECTRIC on the form's behalf.
+			# 信号线必带信号类型；代表单默认取 ELECTRIC。
+			if gpVal == GPPIDEdge.GP_SIGNAL:
+				gpCanvas.gpActions.gpSetEdgeKind(gpEdgeId, GPPIDEdge.GP_SIGNAL, "ELECTRIC")
+			else:
+				gpCanvas.gpActions.gpSetEdgeKind(gpEdgeId, gpVal)
+		"signal_type":
+			var gpEdge: GPPIDEdge = gpCanvas.gpGraph.gpGetEdge(gpEdgeId)
+			var gpKind: String = gpEdge.gpKind if gpEdge != null else GPPIDEdge.GP_SIGNAL
+			gpCanvas.gpActions.gpSetEdgeKind(gpEdgeId, gpKind, gpVal)
+		"tag":
+			gpCanvas.gpActions.gpSetEdgeTag(gpEdgeId, str(gpVal))
+		_:
+			gpCanvas.gpActions.gpSetEdgeAttr(gpEdgeId, gpKey, gpVal)
+	gpCanvas.queue_redraw()
+	# Re-show the form so kind-dependent fields update (e.g. switching to SIGNAL hides dn/medium).
+	# 重新显示表单，使依赖类型的字段随新类型更新（如切到信号线时隐藏 dn/medium）。
 	_gpRefreshSelection()
 
 
@@ -548,6 +767,22 @@ func _gpOnMenu(gpAction: String) -> void:
 			_gpSaveProject(true)
 		"file_open":
 			_gpOpenProject()
+		"file_import":
+			_gpImportProject()
+		"file_quit":
+			# Route through the SAME close guard as the OS window-close button so the
+			# unsaved-changes dialog behaves identically whether the user clicks the red X
+			# or picks Quit from the menu. Used to diagnose whether the red X reaches
+			# NOTIFICATION_WM_CLOSE_REQUEST at all.
+			# 走与 OS 关闭按钮**完全相同**的关闭护栏，使未保存对话框在「点红 X」与
+			# 「菜单退出」两种入口下表现一致。用于排查红 X 是否真的触发了关闭通知。
+			_gpOnCloseRequested()
+		"export_project":
+			_gpPickExportPath("project")
+		"export_library":
+			_gpPickExportPath("library")
+		"export_config":
+			_gpPickExportPath("config")
 		"view_zoom_in":
 			gpActiveCanvas().gpZoomStep(1.0)
 		"view_zoom_out":
@@ -564,8 +799,81 @@ func _gpOnMenu(gpAction: String) -> void:
 			_gpMenuRedo()
 		"tool_settings":
 			_gpOpenSettings()
+		"project_tag_rules":
+			_gpOpenTagRuleDialog()
 		_:
 			_gpSetState("status.feature_todo", [gpAction])
+
+
+# Menu 项目 / 位号编号规则 (M9b). The dialog edits a copy and hands it back; renumbering
+# is a separate, confirmed, single-undo-step operation.
+# 菜单「项目 / 位号编号规则」（M9b）。对话框编辑副本并交回；重编号是独立的、
+# 需确认的、单撤销步操作。
+func _gpOpenTagRuleDialog() -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null:
+		return
+	var gpDlg: GPTagRuleDialog = GPTagRuleDialog.new()
+	add_child(gpDlg)
+	gpDlg.gpRulesApplied.connect(_gpOnTagRulesApplied)
+	gpDlg.gpShowRules(gpCanvas.gpActions.gpTagRules(), gpCanvas.gpGraph.gpNodes.size())
+	# Free the dialog on close either way; it is a one-shot editor, not a panel.
+	# 无论何种关闭方式都释放对话框：它是一次性编辑器，而非常驻面板。
+	gpDlg.close_requested.connect(gpDlg.queue_free)
+	gpDlg.confirmed.connect(gpDlg.queue_free)
+	gpDlg.canceled.connect(gpDlg.queue_free)
+
+
+# Apply the edited rules, then optionally renumber (with a confirmation, because a tag ends
+# up on a physical nameplate and in the DCS point list).
+# 应用编辑后的规则；可选地随后重编号（需确认，因为位号会落到现场标牌与 DCS 点表上）。
+func _gpOnTagRulesApplied(gpRules: GPProjectTagRules, gpRenumber: bool) -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null:
+		return
+	gpCanvas.gpActions.gpSetTagRules(gpRules)
+	if not gpRenumber:
+		_gpSetState("tag_rule.applied")
+		return
+	_gpConfirmRenumberTags()
+
+
+# Ask before renumbering: the change is reversible in the app but NOT on a printed
+# nameplate, so the user must see the count first.
+# 重编号前先询问：本改动在软件内可撤销，但在已印好的标牌上不可撤销，
+# 故必须先让用户看到数量。
+func _gpConfirmRenumberTags() -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null:
+		return
+	var gpCount: int = gpCanvas.gpGraph.gpNodes.size()
+	if gpCount == 0:
+		_gpSetState("tag_rule.applied")
+		return
+	var gpDlg: ConfirmationDialog = ConfirmationDialog.new()
+	gpDlg.title = I18n.gpTr("tag_rule.confirm_title")
+	gpDlg.dialog_text = I18n.gpTr("tag_rule.renumber_confirm") % [gpCount]
+	add_child(gpDlg)
+	gpDlg.confirmed.connect(func():
+		_gpDoRenumberTags()
+		gpDlg.queue_free())
+	gpDlg.canceled.connect(gpDlg.queue_free)
+	gpDlg.popup_centered()
+
+
+# Run the renumber command and report how many tags changed.
+# 执行重编号命令并报告变动了多少位号。
+func _gpDoRenumberTags() -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null:
+		return
+	if not gpCanvas.gpActions.gpRenumberTags():
+		_gpSetState("tag_rule.applied")
+		return
+	var gpChanged: int = GPTagRuleService.gpChangedCount(gpCanvas.gpActions.gpLastTagMapping)
+	_gpSetState("tag_rule.renumbered", [gpChanged])
+	gpCanvas.queue_redraw()
+	_gpRefreshSelection()
 
 
 # Refresh 编辑 menu items against the live undo stack, called just before the popup
@@ -614,6 +922,82 @@ func _gpMenuRedo() -> void:
 	_gpRefreshEditMenu()
 
 
+# ============================ close guard ============================
+# ============================ 关闭拦截 ============================
+# Intercept the window close so an unsaved drawing is never lost silently.
+# 拦截窗口关闭，使未保存的图纸永不静默丢失。
+# WHY THIS IS NEEDED / 为何需要：saving is explicit (ADR-7: Ctrl+S is the only save path),
+# which means a user who simply forgets to press it would lose everything with no warning.
+# The guard is the safety net that makes an explicit-save model safe to adopt.
+# 保存是显式的（ADR-7：Ctrl+S 是唯一保存路径），这意味着仅仅**忘记按**的用户会
+# 毫无警告地丢失全部内容。这道护栏正是让「显式保存」模型可以被安全采用的安全网。
+#
+# NOTE / 注：the close is intercepted through get_window().close_requested (wired in
+# _ready), NOT _notification(NOTIFICATION_WM_CLOSE_REQUEST). On a Control scene root the
+# WM notification is not reliably delivered in Godot 4, so the dialog would silently fail
+# to appear. The signal fires on the real Window and is the canonical interception point.
+# 关闭经由 get_window().close_requested（在 _ready 接线）拦截，而非
+# _notification(NOTIFICATION_WM_CLOSE_REQUEST)。在 Control 场景根上该 WM 通知在 Godot 4
+# 中不可靠地送达，对话框会静默不出现。信号在真正的 Window 上触发，是权威拦截点。
+
+
+# Close path: clean -> quit immediately; dirty -> ask, never decide for the user.
+# 关闭路径：干净 -> 立即退出；脏 -> 询问，绝不替用户决定。
+func _gpOnCloseRequested() -> void:
+	if not gpDocManager.gpIsDirty():
+		get_tree().quit()
+		return
+	_gpAskUnsaved()
+
+
+# Three-way confirmation: Save / Don't Save / Cancel.
+# 三选一确认：保存 / 不保存 / 取消。
+# "Don't Save" is offered because a user may be closing precisely BECAUSE the edit was a
+# mistake — forcing a save in that case would overwrite a good file with a bad one.
+# 提供「不保存」是因为用户关闭窗口**恰恰可能**因为这次编辑是个错误 ——
+# 此时强制保存会用坏数据覆盖好文件。
+func _gpAskUnsaved() -> void:
+	var gpDlg: ConfirmationDialog = ConfirmationDialog.new()
+	gpDlg.title = I18n.gpTr("dialog.unsaved_title")
+	gpDlg.dialog_text = I18n.gpTr("dialog.unsaved_text")
+	gpDlg.get_ok_button().text = I18n.gpTr("dialog.unsaved_save")
+	gpDlg.get_cancel_button().text = I18n.gpTr("dialog.cancel")
+	gpDlg.add_button(I18n.gpTr("dialog.unsaved_discard"), true, "discard")
+	gpDlg.confirmed.connect(_gpOnUnsavedSave.bind(gpDlg))
+	gpDlg.canceled.connect(gpDlg.queue_free)
+	gpDlg.custom_action.connect(_gpOnUnsavedDiscard.bind(gpDlg))
+	add_child(gpDlg)
+	gpDlg.popup_centered()
+
+
+# "Save" chosen: save (asking for a path first when there is none), then quit.
+# 选择了「保存」：先保存（无路径时先询问路径），再退出。
+func _gpOnUnsavedSave(gpDlg: ConfirmationDialog) -> void:
+	gpDlg.queue_free()
+	if gpCurrentPath == "":
+		# No path yet: the save-as dialog must run first, and the quit waits for it.
+		# 尚无路径：必须先走另存为对话框，退出等它完成。
+		gpQuitAfterSave = true
+		_gpSaveProject(true)
+		return
+	_gpSaveProject(false)
+	# Only quit if the save actually cleared the dirty flag; a failed save must leave the
+	# window open, otherwise the guard would be the thing that loses the work.
+	# 仅在保存确实清除了脏标记后才退出；保存失败必须让窗口保持打开，
+	# 否则这道护栏本身就变成了丢失工作的原因。
+	if not gpDocManager.gpIsDirty():
+		get_tree().quit()
+
+
+# "Don't Save" chosen: discard and quit.
+# 选择了「不保存」：丢弃并退出。
+func _gpOnUnsavedDiscard(gpAction: StringName, gpDlg: ConfirmationDialog) -> void:
+	if str(gpAction) != "discard":
+		return
+	gpDlg.queue_free()
+	get_tree().quit()
+
+
 # ============================ project save / open ============================
 # ============================ 工程存盘 / 打开 ============================
 # Save the active project. Reuses the last path unless gpForcePick is true (Save As).
@@ -637,6 +1021,23 @@ func _gpOpenProject() -> void:
 	gpFileDialog.popup_centered()
 
 
+# Merge an archive INTO the current drawing (non-destructive: nothing here is replaced).
+# 把档案**合并进**当前图纸（非破坏：此处不替换任何东西）。
+func _gpImportProject() -> void:
+	gpPendingFileAction = "import"
+	gpFileDialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	gpFileDialog.popup_centered()
+
+
+# Ask where to write an export container. Export is NOT save-as: the current path is
+# untouched and the in-memory drawing is not modified.
+# 询问导出容器写到哪里。导出不是另存为：当前路径不变，内存中的图纸也不被修改。
+func _gpPickExportPath(gpKind: String) -> void:
+	gpPendingFileAction = "export_" + gpKind
+	gpFileDialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	gpFileDialog.popup_centered()
+
+
 # Forward the file-dialog result to the right handler.
 # 把文件对话框的结果转交给对应处理。
 func _gpOnFileSelected(gpPath: String) -> void:
@@ -644,6 +1045,10 @@ func _gpOnFileSelected(gpPath: String) -> void:
 		_gpWriteProject(gpPath)
 	elif gpPendingFileAction == "open":
 		_gpReadProject(gpPath)
+	elif gpPendingFileAction == "import":
+		_gpDoImport(gpPath)
+	elif gpPendingFileAction.begins_with("export_"):
+		_gpDoExport(gpPath, gpPendingFileAction.trim_prefix("export_"))
 
 
 # Serialize the active graph (with embedded user packs) and write it to disk.
@@ -656,12 +1061,31 @@ func _gpWriteProject(gpPath: String) -> void:
 	# Embed custom user packs so the file is self-contained (data sovereignty).
 	# 嵌入用户自定义图元包，使文件自包含（数据主权）。
 	gpActiveGraph().gpEmbedUserPacks(GPSymbolLibrary.gpUserPacks())
+	# M12: stamp the library's schema fingerprints into the file so a later open can detect
+	# that a field was added, renamed or deleted in the meantime.
+	# M12：把库的 schema 指纹盖进文件，使日后打开能察觉期间字段被增 / 改名 / 删过。
+	gpActiveGraph().gpSchemaFingerprints = GPPropertyResolver.gpFingerprintsFor(gpDefs)
 	var gpFilePath: String = GPProjectIO.gpEnsurePidExt(gpPath)
+	# A leftover .tmp means the last save died mid-write. Discard it: the target is still the
+	# previous good copy, and a stale .tmp would otherwise confuse a later reader (E4).
+	# 残留的 .tmp 意味着上次保存写了一半就死了。清掉它：目标仍是上一份完好副本，
+	# 而陈旧的 .tmp 否则会迷惑日后的读取方（E4）。
+	if GPAtomicFile.gpHasTempRemains(gpFilePath):
+		GPAtomicFile.gpDiscardTempRemains(gpFilePath)
+		_gpSetState("status.tmp_cleaned", [gpFilePath])
 	# Prefer the GPIOResult API: it carries a machine-readable code plus an i18n reason key,
 	# so the shell can explain WHY a save failed instead of only knowing that it did.
 	# 优先使用 GPIOResult API：它携带机器可读码与 i18n 原因键，使外壳能解释保存「为何」失败，
 	# 而不只是知道失败了。
-	var gpWriteResult: GPIOResult = GPProjectIO.gpWriteProjectResult(gpActiveGraph(), gpFilePath)
+	# Multi-sheet projects are written as a v3 container; a single-sheet project keeps the
+	# v2 shape so archives written before this feature stay byte-stable.
+	# 多图纸工程写成 v3 容器；单图纸工程保持 v2 形态，使本功能之前写出的存档保持字节稳定。
+	var gpSheets: Array = gpCenter.gpToSheets()
+	var gpWriteResult: GPIOResult
+	if gpSheets.size() > 1:
+		gpWriteResult = GPProjectIO.gpWriteSheetsResult(gpSheets, gpFilePath)
+	else:
+		gpWriteResult = GPProjectIO.gpWriteProjectResult(gpActiveGraph(), gpFilePath)
 	if not gpWriteResult.gpIsOk():
 		_gpSetState("status.save_fail", [gpFilePath])
 		return
@@ -669,6 +1093,12 @@ func _gpWriteProject(gpPath: String) -> void:
 	# M6: a successful save clears the unsaved-dirty flag so the title bar / project tree update.
 	# M6：保存成功清除未保存脏标记，使标题栏/工程树同步。
 	gpDocManager.gpClearDirty()
+	# Honour a pending quit from the close guard (path-less save-as on exit).
+	# 兑现关闭拦截留下的待退出（退出时无路径的另存为）。
+	if gpQuitAfterSave:
+		gpQuitAfterSave = false
+		get_tree().quit()
+		return
 	var gpPackCount: int = gpActiveGraph().gpUserSymbolPacks.size()
 	_gpSetState("status.saved_with_packs", [gpFilePath, gpPackCount])
 
@@ -679,24 +1109,40 @@ func _gpWriteProject(gpPath: String) -> void:
 # follow remain here because they touch the canvas, dock and selection state.
 # 文件解析/解码交给 GPProjectIO；其后的图切换与 UI 刷新仍在此处，因为它们涉及画布、停靠栏与选择状态。
 func _gpReadProject(gpPath: String) -> void:
-	# GPIOResult distinguishes a missing file from malformed JSON; the shell shows the same
-	# localized failure state either way and the graph arrives in gpPayload.
-	# GPIOResult 区分「文件缺失」与「JSON 损坏」；外壳两者都显示同一本地化失败态，
-	# 成功时图由 gpPayload 带回。
-	var gpReadResult: GPIOResult = GPProjectIO.gpReadProjectResult(gpPath)
-	if not gpReadResult.gpIsOk():
+	# Read as SHEETS, not as one graph: a v3 file may carry several pages, and even a v1/v2
+	# file comes back as a one-element list, so there is no special case.
+	# 以**图纸**为单位读取，而非读成一张图：v3 文件可能含多页，
+	# 即便 v1/v2 文件也返回单元素列表，故无特例分支。
+	# GPIOResult distinguishes a missing file from malformed JSON, and gpReadSheets keeps
+	# that taxonomy (io.open_failed vs io.parse_failed).
+	# GPIOResult 区分「文件缺失」与「JSON 损坏」，gpReadSheets 保持该分类
+	# （io.open_failed 与 io.parse_failed）。
+	var gpSheetsResult: GPIOResult = GPProjectIO.gpReadSheets(gpPath)
+	if not gpSheetsResult.gpIsOk():
 		_gpSetState("status.load_fail", [gpPath])
 		return
-	var gpNewGraph: GPPIDGraph = gpReadResult.gpPayload as GPPIDGraph
-	# Rebuild the graph; gpFromDict also reconciles embedded user packs into the
-	# live library so custom symbols are available again after reopening.
-	# 重建图；gpFromDict 同时把内嵌用户包调和进活动图元库，使重新打开后自定义图元再次可用。
-	gpCenter.gpSetActiveGraph(gpNewGraph)
+	var gpSheets: Array = gpSheetsResult.gpPayload as Array
+	if gpSheets.is_empty():
+		_gpSetState("status.load_fail", [gpPath])
+		return
+	var gpNewGraph: GPPIDGraph = (gpSheets[0] as GPSheet).gpGraph
+	# Rebuild EVERY tab, not just the active one: a multi-sheet file whose extra sheets were
+	# silently dropped would look fine until the engineer printed the missing page.
+	# 重建**每个**标签页，而不只是活动页：一个多图纸文件若其余图纸被静默丢弃，
+	# 在工程师打印那张缺页之前看起来一切正常。
+	gpCenter.gpLoadSheets(gpSheets)
 	gpActiveCanvas().gpGraph = gpNewGraph
 	# M6: swap the active document in the manager (resets dirty, announces the change on the bus).
 	# M6：在管理器中切换当前文档（重置脏标记并总线通告变更）。
 	gpDocManager.gpSetGraph(gpNewGraph)
 	gpDefs = GPSymbolLibrary.gpDefaultDefs()
+	_gpSyncInspectorDefs()
+	# M12: the library may have moved on since this file was saved. Migrate renamed fields
+	# first (values follow the rename), then TELL the user — an unreported field change is how
+	# a drawing quietly stops matching the plant.
+	# M12：自本文件存盘以来，库可能已经变了。先迁移改名字段（取值跟随改名），
+	# 再**告知**用户 —— 不报告的字段变更正是图纸悄悄与现场脱节的原因。
+	_gpReconcileLibraryDrift(gpNewGraph)
 	gpLeftDock.gpPopulate(gpDefs)
 	gpActiveCanvas().gpDefs = gpDefs
 	gpActiveCanvas().gpClearSelection()
@@ -705,6 +1151,57 @@ func _gpReadProject(gpPath: String) -> void:
 	gpActiveCanvas().queue_redraw()
 	gpCurrentPath = gpPath
 	_gpSetState("status.loaded_with_packs", [gpPath, gpNewGraph.gpUserSymbolPacks.size()])
+
+
+# Merge an archive into the active drawing.
+# 把档案合并进活动图纸。
+# The archive may be v1/v2/v3: the migration chain runs inside gpReadArchive, so an old
+# file is upgraded rather than rejected.
+# 档案可以是 v1/v2/v3：迁移链在 gpReadArchive 内部运行，故旧文件被升级而非拒绝。
+func _gpDoImport(gpPath: String) -> void:
+	var gpRead: GPIOResult = GPProjectImport.gpReadArchive(gpPath)
+	if not gpRead.gpIsOk():
+		_gpSetState(gpRead.gpMessageKey, [gpPath])
+		return
+	var gpGraph: GPPIDGraph = gpActiveGraph()
+	var gpBefore: int = gpGraph.gpNodes.size()
+	var gpMerge: GPIOResult = GPProjectImport.gpMergeInto(gpGraph,
+		gpRead.gpPayload as Dictionary)
+	if not gpMerge.gpIsOk():
+		_gpSetState("status.import_fail", [gpPath])
+		return
+	var gpReport: GPImportReport = gpMerge.gpPayload as GPImportReport
+	# Imported symbols may be new to the library, so both docks must be rebuilt.
+	# 导入的图元对库可能是新的，故两个停靠栏都必须重建。
+	gpDefs = GPSymbolLibrary.gpDefaultDefs()
+	gpLeftDock.gpPopulate(gpDefs)
+	gpActiveCanvas().gpDefs = gpDefs
+	gpActiveCanvas().queue_redraw()
+	# An import IS an edit: the drawing changed, so the dirty flag must follow.
+	# 导入**就是**一次编辑：图纸变了，脏标记必须跟着走。
+	gpDocManager.gpMarkDirty()
+	_gpSetState("status.imported", [gpPath, gpReport.gpCountOf(GPImportReport.GP_ERROR),
+		gpReport.gpCountOf(GPImportReport.GP_WARNING)])
+	# Warnings are not shown inline yet; the count in the status bar is the honest minimum
+	# (a silent "imported OK" would hide a renamed tag).
+	# 警告尚未内联展示；状态栏里的计数是诚实的最低限度
+	# （一句静默的「导入成功」会掩盖被改名的位号）。
+	if gpReport.gpCountOf(GPImportReport.GP_ERROR) > 0:
+		print("G-PID import report: ", gpReport.gpSummary())
+
+
+# Write one of the three export containers.
+# 写出三种导出容器之一。
+func _gpDoExport(gpPath: String, gpKind: String) -> void:
+	var gpPacks: Array = GPSymbolLibrary.gpUserPacks()
+	var gpOut: GPIOResult = GPProjectExport.gpExportToFile(gpKind, gpPath,
+		gpActiveGraph(), gpPacks)
+	if not gpOut.gpIsOk():
+		_gpSetState(gpOut.gpMessageKey, [gpPath])
+		return
+	var gpStats: Dictionary = gpOut.gpPayload as Dictionary
+	_gpSetState("status.exported", [gpPath, int(gpStats.get("nodes", 0)),
+		int(gpStats.get("edges", 0))])
 
 
 # Open the settings dialog.
@@ -721,35 +1218,57 @@ func _gpOpenSettings() -> void:
 
 # ============================ drawing toolbar ============================
 # ============================ 绘图工具栏 ============================
-# Build the toolbar row and insert it between the menu bar and the body in the root VBox.
-# 构建工具栏行并插入到根 VBox 的菜单栏与主体之间。
-# Drawing tools (line / circle / rectangle / polyline) switch the canvas into a direct-draw
-# mode — annotation shapes are drawn on the main canvas, and can then be promoted into a real
-# symbol (select → right-click "Make Symbol").
-# 绘图工具（直线 / 圆 / 矩形 / 折线）把画布切到直接绘制模式——注释图形画在主画布上，
-# 选中后可用右键「生成图元」提升为真正图元。
-func _gpBuildToolBar() -> void:
+# Build the Ribbon command bar and insert it between the menu bar and the body in the
+# root VBox (the same slot the old DrawToolBar occupied). The Ribbon emits
+# gpActionTriggered, which we route to the existing toolbar handler. To REVERT to the
+# previous flat toolbar, rename this back to _gpBuildToolBar and restore that builder.
+# 构建 Ribbon 命令栏并插入根 VBox 的菜单栏与主体之间（即原 DrawToolBar 的位置）。
+# Ribbon 发射 gpActionTriggered，我们将其路由到既有的工具栏处理器。要回退旧平铺工具栏，
+# 把本函数改回 _gpBuildToolBar 并恢复其构建体即可。
+func _gpBuildRibbon() -> void:
 	var gpVLayout: VBoxContainer = $VLayout
-	gpToolBar = HBoxContainer.new()
-	gpToolBar.name = "DrawToolBar"
-	gpToolBar.add_theme_constant_override("separation", 6)
-	var gpStyle: StyleBoxFlat = StyleBoxFlat.new()
-	gpStyle.bg_color = Color(0.13, 0.14, 0.18)
-	gpStyle.content_margin_left = 6.0
-	gpStyle.content_margin_right = 6.0
-	gpStyle.content_margin_top = 3.0
-	gpStyle.content_margin_bottom = 3.0
-	gpToolBar.add_theme_stylebox_override("panel", gpStyle)
-	gpVLayout.add_child(gpToolBar)
-	gpVLayout.move_child(gpToolBar, 1)
-	_gpAddToolBtn("select", "symbol_lib.tool_select", true)
-	_gpAddToolBtn("connect", "symbol_lib.tool_connect", true)
-	_gpAddSep()
-	_gpAddToolBtn("line", "canvas.tool_line", true)
-	_gpAddToolBtn("circle", "canvas.tool_circle", true)
-	_gpAddToolBtn("rect", "canvas.tool_rect", true)
-	_gpAddToolBtn("polyline", "canvas.tool_polyline", true)
+	gpRibbon = GPPIDRibbon.new()
+	gpRibbon.name = "Ribbon"
+	gpRibbon.gpActionTriggered.connect(_gpOnToolBarPressed)
+	gpVLayout.add_child(gpRibbon)
+	gpVLayout.move_child(gpRibbon, 1)
 	_gpSyncToolBar()
+
+
+# 视觉分层（精致化）：
+# 右栏 TabContainer 背景（左边界交由顶层叠加层画发丝线，避免双线）；tab 按钮统一 DOCK 色，
+# 未选中/hover 也带 1px 发丝底线，使选中 accent 成为"高亮"而非孤零零的粗线；
+# 整排 tab 统一 1px 发丝底线；选中态靠 accent 颜色 + 略亮背景区分，不发粗线。
+# 三栏分隔条引擎 grabber 设为透明（视觉交给 GPOverlayChrome）。
+# The whole tab row shares a 1px hairline; the selected tab is told apart by accent
+# colour + a slightly lighter fill — no thick line. The splitter grabber is made
+# transparent (visuals delegated to GPOverlayChrome).
+func _gpStyleChrome() -> void:
+	if gpTabs != null:
+		# 右边界接缝由 GPOverlayChrome 统一绘制，这里不再重复画左边框。
+		gpTabs.add_theme_stylebox_override("panel",
+			GPChromeStyle.gpStyleFor(GPChromeStyle.GP_DOCK_BG, 0))
+		# 未选中 / hover 也带 1px 发丝底线，整排 tab 干净统一。
+		var gpTabBg: StyleBoxFlat = GPChromeStyle.gpStyleFor(GPChromeStyle.GP_DOCK_BG, GPChromeStyle.SIDE_BOTTOM)
+		gpTabs.add_theme_stylebox_override("tab_unselected", gpTabBg)
+		gpTabs.add_theme_stylebox_override("tab_hovered", gpTabBg)
+		# 选中态：1px accent 底线（与未选中同厚，仅颜色不同）+ 略亮背景，细腻区分。
+		# Selected: a 1px accent underline (same thickness as unselected, colour only
+		# differs) plus a slightly lighter fill — delicate distinction, no heavy line.
+		var gpTabSel: StyleBoxFlat = StyleBoxFlat.new()
+		gpTabSel.bg_color = Color(0.118, 0.131, 0.163)
+		gpTabSel.border_color = GPChromeStyle.GP_ACCENT
+		gpTabSel.border_width_bottom = 1
+		gpTabs.add_theme_stylebox_override("tab_selected", gpTabSel)
+	if gpBodySplit != null:
+		# 引擎 grabber 透明：拖拽仍可用，但不再画粗亮块；接缝发丝线 + 悬停高亮
+		# 由 GPOverlayChrome（顶层叠加层）绘制，细腻且不双重描边。
+		var gpDrag: StyleBoxFlat = StyleBoxFlat.new()
+		gpDrag.bg_color = Color(0.0, 0.0, 0.0, 0.0)
+		gpBodySplit.add_theme_stylebox_override("dragger", gpDrag)
+		var gpGrab: StyleBoxFlat = StyleBoxFlat.new()
+		gpGrab.bg_color = Color(0.0, 0.0, 0.0, 0.0)
+		gpBodySplit.add_theme_stylebox_override("grabber", gpGrab)
 
 
 # Add one toolbar button. gpToggle buttons keep their pressed highlight and are tracked for sync.
@@ -806,6 +1325,31 @@ func _gpOnToolBarPressed(gpAction: String) -> void:
 			gpCanvas.gpPendingDef = null
 			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_POLYLINE)
 			_gpSetState("status.mode_polyline")
+		"pipe":
+			gpCanvas.gpPendingDef = null
+			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_PIPE)
+			_gpSetState("status.mode_pipe")
+		"signal":
+			gpCanvas.gpPendingDef = null
+			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_SIGNAL)
+			_gpSetState("status.mode_signal")
+		# ---- view / edit commands surfaced on the Ribbon (P0) ----
+		# ---- Ribbon 上暴露的视图/编辑命令（P0） ----
+		"view_zoom_in":
+			gpCanvas.gpZoomStep(1.0)
+		"view_zoom_out":
+			gpCanvas.gpZoomStep(-1.0)
+		"view_fit":
+			gpCanvas.gpResetView()
+			_gpSetState("status.view_reset")
+		"edit_undo":
+			_gpMenuUndo()
+		"edit_redo":
+			_gpMenuRedo()
+		"edit_delete":
+			_gpDeleteSelected()
+		"tool_settings":
+			_gpOpenSettings()
 	_gpSyncToolBar()
 
 
@@ -815,6 +1359,14 @@ func _gpOnToolBarPressed(gpAction: String) -> void:
 # 高亮与当前画布模式匹配的开关按钮（选择 / 连线 / 绘图工具）。可选 gpMode 参数使其既能作为
 # gpModeChanged 信号的 1 参回调，又能在别处 0 参调用；gpMode < 0 时读取画布实时模式。
 func _gpSyncToolBar(gpMode: int = -1) -> void:
+	# The Ribbon owns the mode highlight now; delegate to it (P0 / ADR-UI-01).
+	# 模式高亮现由 Ribbon 负责，委托给它（P0 / ADR-UI-01）。
+	if gpRibbon != null:
+		var gpCanvas: GPCanvas2D = gpActiveCanvas()
+		if gpMode < 0:
+			gpMode = GPCanvas2D.GPMode.GP_SELECT if gpCanvas == null else gpCanvas.gpMode
+		gpRibbon.gpSyncMode(gpMode)
+		return
 	if gpToolBar == null:
 		return
 	var gpCanvas: GPCanvas2D = gpActiveCanvas()
@@ -842,6 +1394,10 @@ func _gpModeForAction(gpAction: String) -> int:
 			return GPCanvas2D.GPMode.GP_DRAW_RECT
 		"polyline":
 			return GPCanvas2D.GPMode.GP_DRAW_POLYLINE
+		"pipe":
+			return GPCanvas2D.GPMode.GP_PIPE
+		"signal":
+			return GPCanvas2D.GPMode.GP_SIGNAL
 	return -1
 
 
@@ -886,27 +1442,33 @@ func _gpOpenMakeSymbolDialog(gpDraft: Dictionary, gpInitialName: String, gpAllow
 func _gpOnSymbolEditRequested(gpSymbolId: String) -> void:
 	# The in-place symbol editor was removed (P4 refactor). Editing an existing placed symbol now
 	# re-opens the Make-Symbol dialog seeded with that symbol's geometry; confirming under the same
-	# display name overwrites the def (built-ins derive a custom_ copy per decision D3).
+	# display name overwrites the def (built-ins derive a C-rule copy per decision D3).
 	# 就地图元编辑器已移除（P4 重构）。编辑已放置图元改为用「生成图元」对话框带入该图元几何；
-	# 以相同显示名确定即覆盖该 def（内置图元按决策 D3 派生 custom_ 副本）。
+	# 以相同显示名确定即覆盖该 def（内置图元按决策 D3 派生 C 规则副本）。
 	var gpCanvas: GPCanvas2D = gpActiveCanvas()
 	if gpCanvas == null or gpCenter == null:
 		return
 	var gpDef: GPSymbolDef = _gpDefFor(gpSymbolId)
 	if gpDef == null:
 		return
-	# D3: built-in symbols are read-only → derive a custom_<id> copy so the original ISO glyph is
-	# never overwritten or re-fit.
-	# 决策 D3：内置图元只读 → 派生 custom_<id> 副本，绝不覆盖/重拟合原始 ISO 图元。
+	# D3: built-in symbols are read-only → derive a copy under a fresh C-rule id
+	# (C<CATEGORY><nnn>) so the original ISO glyph is never overwritten or re-fit.
+	# 决策 D3：内置图元只读 → 以新的 C 规则 id（C<类别码><三位序号>）派生副本，
+	# 绝不覆盖/重拟合原始 ISO 图元。
 	var gpEditDef: GPSymbolDef = gpDef
 	var gpAllowOverwrite: bool = true
 	if gpDef.gpBuiltin:
+		var gpDerivedId: String = GPSymbolLibrary.gpAllocateCustomId(gpDef.gpCategory)
+		if gpDerivedId == "":
+			push_warning("GPMainWindow: category %s has no free C-rule id left" % gpDef.gpCategory)
+			return
 		var gpCanon: GPSymbolDef = GPSymbolNormalizer.gpNormalizeSymbol(
 			GPSymbolNormalizer.gpDenormalizeSymbol(gpDef), gpDef.gpCategory, {})
-		gpCanon.gpId = "custom_" + gpDef.gpId
+		gpCanon.gpId = gpDerivedId
 		gpCanon.gpBuiltin = false
 		GPSymbolLibrary.gpRegisterDefs([gpCanon])
 		gpDefs = GPSymbolLibrary.gpDefaultDefs()
+		_gpSyncInspectorDefs()
 		gpLeftDock.gpPopulate(gpDefs)
 		gpCenter.gpSetDefs(gpDefs)
 		gpEditDef = gpCanon
@@ -942,6 +1504,7 @@ func _gpOnSymbolEditRequested(gpSymbolId: String) -> void:
 # 只需刷新图元库与重绘。
 func _gpOnSymbolSaved(gpSymbolId: String) -> void:
 	gpDefs = GPSymbolLibrary.gpDefaultDefs()
+	_gpSyncInspectorDefs()
 	gpLeftDock.gpPopulate(gpDefs)
 	gpCenter.gpSetDefs(gpDefs)
 	var gpCanvas: GPCanvas2D = gpActiveCanvas()

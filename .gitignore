@@ -32,3 +32,11 @@ pdf_text.txt
 # CI 每轮生成的 JUnit 报告（-gjunit_xml_file=res://gut_junit.xml），不入库。
 # GUT JUnit report generated each CI run; never commit it.
 gut_junit.xml
+
+# ===== 本地调试存档（手动测试产生的 scratch 文件，不入库）=====
+# Scratch archives produced by manual testing; never commit.
+# 注意：project.pid.json 是已入库的样例工程，不在此列。
+/1.pid.json
+/1.pid.json.bak
+/test.pid.json
+/test.pid.json.bak

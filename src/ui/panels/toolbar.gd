@@ -140,6 +140,9 @@ func _ready() -> void:
 	Settings.gpUIFontChanged.connect(_gpOnFontChanged)
 	Settings.gpSymbolStyleChanged.connect(_gpOnSymbolStyleChanged)
 	_gpRefreshLocale(I18n.gpLocale)
+	# 视觉分层：增大垂直留白 + 首帧自绘背景（与画布分隔的右边界）。
+	add_theme_constant_override("separation", 6)
+	queue_redraw()
 
 
 # Inject symbols grouped by category. Call once after assigning the def set.
@@ -212,6 +215,20 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 		gpHeader.add_theme_font_size_override("font_size", Settings.gpEffectiveFontSize())
 		gpHeader.text = ("▾ " if not gpCollapsedNow else "▸ ") + I18n.gpTr(gpCat)
 		gpGroup.add_child(gpHeader)
+		# 类目标题：克制的浅背景（仅比 dock 略亮）+ 1px 发丝底线，
+		# 取代原先"接近画布亮色的粗填充带"，边界细腻而不抢眼。
+		var gpHdrBg: StyleBoxFlat = StyleBoxFlat.new()
+		gpHdrBg.bg_color = Color(0.108, 0.120, 0.150)
+		gpHdrBg.content_margin_left = 6.0
+		gpHdrBg.content_margin_right = 6.0
+		gpHdrBg.content_margin_top = 2.0
+		gpHdrBg.content_margin_bottom = 2.0
+		gpHdrBg.border_color = GPChromeStyle.GP_BORDER
+		gpHdrBg.border_width_bottom = 1
+		gpHeader.add_theme_stylebox_override("normal", gpHdrBg)
+		gpHeader.add_theme_stylebox_override("hover", gpHdrBg)
+		gpHeader.add_theme_stylebox_override("pressed", gpHdrBg)
+		gpHeader.add_theme_color_override("font_color", Color(0.80, 0.84, 0.90))
 
 		# Multi-column, width-adaptive thumbnail grid. Its minimum width is forced
 		# to the viewport width by _gpReflow so it always fills and re-derives its
@@ -338,3 +355,10 @@ func _gpOnPick(gpTypeId: String) -> void:
 # 在图元确实被移除后由主窗口经 gpPopulate 完成。
 func _gpOnDeleteRequested(gpId: String) -> void:
 	gpSymbolDeleteRequested.emit(gpId)
+
+
+# 视觉分层：左停靠栏显式刷 DOCK 背景（受控的深色档），接缝发丝线由顶层叠加层绘制。
+# Visual layering: paint the left dock's controlled DOCK background; the seam hairline is
+# drawn by the top overlay. _draw content sits beneath child controls.
+func _draw() -> void:
+	GPChromeStyle.gpDraw(self, GPChromeStyle.GP_DOCK_BG, 0)

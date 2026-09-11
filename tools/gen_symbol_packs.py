@@ -31,7 +31,7 @@ from svg_to_gpsym import _apply, _mul, _parse_transform  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Godot-PID-Core
 PACKS_DIR = os.path.join(ROOT, "assets", "symbol_packs")
-OUT_DIR = os.path.join(ROOT, "src", "core", "symbol_packs")
+OUT_DIR = os.path.join(ROOT, "src", "core", "symbol", "symbol_packs")
 
 # License header for every emitted GDScript file.
 # 每个输出 GDScript 文件的许可证头。
@@ -45,7 +45,7 @@ HEADER = """\
 def _read_nominal():
     # Parse GP_NOMINAL from src/core/symbol_categories.gd so sizes stay in sync.
     # 从 src/core/symbol_categories.gd 解析 GP_NOMINAL，使尺寸与枚举表保持一致。
-    cat_path = os.path.join(ROOT, "src", "core", "symbol_categories.gd")
+    cat_path = os.path.join(ROOT, "src", "core", "symbol", "symbol_categories.gd")
     with open(cat_path, "r", encoding="utf-8") as f:
         text = f.read()
     block = re.search(r"const\s+GP_NOMINAL[^{]*\{(.*?)\}", text, re.S)
@@ -153,56 +153,176 @@ def _infer_category(svg_path, csv_path):
     return cat
 
 
-def _infer_ports_svg(svg_path, cat):
-    # Infer port positions from SVG geometry (left/right for valve/pump, top/bottom for tank).
-    # 根据 SVG 几何推断端口位置（阀门/泵取左右，储罐取上下）。
-    ns = "http://www.w3.org/2000/svg"
-    tree = ET.parse(svg_path)
-    root = tree.getroot()
-    pts = []
-    for el in root.iter():
-        if el.tag == ns + "line":
-            x1 = float(el.attrib.get("x1", 0)); y1 = float(el.attrib.get("y1", 0))
-            x2 = float(el.attrib.get("x2", 0)); y2 = float(el.attrib.get("y2", 0))
-            pts.append((x1, y1)); pts.append((x2, y2))
-        elif el.tag == ns + "rect":
-            x = float(el.attrib.get("x", 0)); y = float(el.attrib.get("y", 0))
-            w = float(el.attrib.get("width", 0)); h = float(el.attrib.get("height", 0))
-            pts.append((x, y)); pts.append((x + w, y + h))
-    if not pts:
-        return []
-    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
-    minx, maxx = min(xs), max(xs); miny, maxy = min(ys), max(ys)
-    bw = maxx - minx or 1; bh = maxy - miny or 1
-    cx = (minx + maxx) / 2; cy = (miny + maxy) / 2
+# ---- Port tables (P1) ----
+# ---- 端口表（P1）----
+# Why a literal table instead of scraping the SVG: the previous _infer_ports_svg was dead code.
+# It scanned for namespace-prefixed tags ("{http://www.w3.org/2000/svg}line") while the ISO SVGs
+# carry bare tags, so it always returned [] — which is why every built-in symbol shipped with
+# no ports. It also computed a bounding box and then returned hard-coded constants anyway.
+# An explicit table is reviewable, matches GP_STD_PORTS / GP_PORT_OVERRIDES in
+# src/core/symbol/symbol_categories.gd, and is what gp_test_symbol_pack.gd asserts against.
+# 为何用字面表而非扫描 SVG：先前的 _infer_ports_svg 是死代码。它按带命名空间前缀的标签
+# ("{http://www.w3.org/2000/svg}line") 扫描，而 ISO 的 SVG 是裸标签，故恒返回 [] —— 这正是
+# 每个内置图元都没有端口的原因。它还算出包围盒后仍返回硬编码常量。字面表可审阅、与
+# src/core/symbol/symbol_categories.gd 的 GP_STD_PORTS / GP_PORT_OVERRIDES 一致，
+# 且由 gp_test_symbol_pack.gd 断言。
+#
+# "type" is the port purpose / "type" 为端口用途：
+#   NOZZLE 工艺管口（接管道）/ ACTUATOR 阀门执行机构（接信号线）
+#   SIGNAL 仪表信号端子（接信号线）/ TERMINAL 通用端点
+STD_PORTS = {
+    "valve": [
+        {"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+        {"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+    ],
+    "pump": [
+        {"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+        {"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+    ],
+    "heat": [
+        {"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+        {"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+    ],
+    "tank": [
+        {"name": "top", "pos": [0.5, 0.0], "dir": [0, -1], "type": "NOZZLE"},
+        {"name": "bottom", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
+    ],
+    # A transmitter taps the process (proc, bottom) and emits a signal (sig, top).
+    # 变送器从工艺侧取压/取样（proc 在下），并向上发出信号（sig 在上）。
+    "instrument": [
+        {"name": "proc", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
+        {"name": "sig", "pos": [0.5, 0.0], "dir": [0, -1], "type": "SIGNAL"},
+    ],
+    "general": [],
+}
 
-    if cat == "valve":
-        # Left and right midpoints.
-        # 左中点和右中点。
-        return [
-            {"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0]},
-            {"name": "out", "pos": [1.0, 0.5], "dir": [1, 0]},
-        ]
-    elif cat == "pump":
-        return [
-            {"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0]},
-            {"name": "out", "pos": [1.0, 0.5], "dir": [1, 0]},
-        ]
-    elif cat == "tank":
-        return [
-            {"name": "top", "pos": [0.5, 0.0], "dir": [0, -1]},
-            {"name": "bottom", "pos": [0.5, 1.0], "dir": [0, 1]},
-        ]
-    elif cat == "instrument":
-        return [
-            {"name": "in", "pos": [0.5, 1.0], "dir": [0, 1]},
-        ]
-    elif cat in ("heat",):
-        return [
-            {"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0]},
-            {"name": "out", "pos": [1.0, 0.5], "dir": [1, 0]},
-        ]
-    return []
+# Per-symbol overrides, keyed by symbol id. A present key REPLACES the category table entirely,
+# so a four-nozzle heat exchanger does not have to inherit a two-nozzle default.
+# 按符号 id 的端口覆盖表。存在该键即「整体替换」类别表，故四管口换热器无需继承两管口默认值。
+PORT_OVERRIDES = {
+    # 换热器：壳程两个 + 管程两个 / shell side x2 + tube side x2
+    "LHEAT001": [  # 换热器
+        {"name": "shell_in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+        {"name": "shell_out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+        {"name": "tube_in", "pos": [0.5, 0.0], "dir": [0, -1], "type": "NOZZLE"},
+        {"name": "tube_out", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
+    ],
+    # 储罐：顶 / 底 / 两侧 / tank: top, bottom and two side nozzles
+    "LTANK001": [  # 储罐
+        {"name": "top", "pos": [0.5, 0.0], "dir": [0, -1], "type": "NOZZLE"},
+        {"name": "bottom", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
+        {"name": "left", "pos": [0.0, 0.25], "dir": [-1, 0], "type": "NOZZLE"},
+        {"name": "right", "pos": [1.0, 0.75], "dir": [1, 0], "type": "NOZZLE"},
+    ],
+    # 调节阀 / 执行器 / 定位器：两个管口 + 顶部执行机构接点 / two nozzles + actuator terminal
+    "LVALVE003": [  # 调节阀
+        {"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+        {"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+        {"name": "act", "pos": [0.5, 0.0], "dir": [0, -1], "type": "ACTUATOR"},
+    ],
+    "LVALVE008": [  # 阀门执行器
+        {"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+        {"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+        {"name": "act", "pos": [0.5, 0.0], "dir": [0, -1], "type": "ACTUATOR"},
+    ],
+    "LVALVE007": [  # 阀门定位器
+        {"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+        {"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+        {"name": "act", "pos": [0.5, 0.0], "dir": [0, -1], "type": "ACTUATOR"},
+    ],
+    # 现场接线箱：两个信号端子，无工艺管口 / field enclosure: two signal terminals only
+    "LINSTRUMENT001": [  # 现场接线箱
+        {"name": "sig_in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "SIGNAL"},
+        {"name": "sig_out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "SIGNAL"},
+    ],
+    # 线型图例符号：图例美术，故意不可连接 / legend glyphs, deliberately not connectable
+    "LGENERAL003": [],  # 工艺实线 / process solid line
+    "LGENERAL002": [],  # 仪表虚线 / instrument dashed line
+    "LGENERAL001": [],  # 电气点划线 / electrical dot-dash line
+}
+
+# In-line indicators (FI/PI/TI/LI): the glyph is pierced left-to-right by the pipe, so they get
+# two nozzles plus a signal terminal. Overrides for these ids are None -> this table is used.
+# 就地指示表（FI/PI/TI/LI）：字形被管线左右贯穿，故两个管口 + 一个信号端子。
+# 这些 id 的覆盖值为 None，即使用本表。
+INLINE_INSTRUMENT = [
+    {"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+    {"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+    {"name": "sig", "pos": [0.5, 0.0], "dir": [0, -1], "type": "SIGNAL"},
+]
+for _id in ("LINSTRUMENT002", "LINSTRUMENT006",
+            "LINSTRUMENT008", "LINSTRUMENT004"):
+    PORT_OVERRIDES[_id] = None
+
+
+def _ports_for(symbol_id, cat):
+    # Resolve a symbol's ports: explicit override wins, then the category table.
+    # 解析某符号的端口：显式覆盖优先，其次类别表。
+    if symbol_id in PORT_OVERRIDES:
+        ov = PORT_OVERRIDES[symbol_id]
+        return [dict(p) for p in (INLINE_INSTRUMENT if ov is None else ov)]
+    return [dict(p) for p in STD_PORTS.get(cat, [])]
+
+
+# Factory tag prefix per category (M9). Mirrors GPTagRule.GP_DEFAULT_CATEGORY_PREFIXES in
+# core/model/tag_rule.gd — change BOTH or symbols will be numbered with a prefix the runtime
+# does not recognise. / 各类别的出厂位号前缀（M9）。与 core/model/tag_rule.gd 中的
+# GPTagRule.GP_DEFAULT_CATEGORY_PREFIXES 互为镜像 —— 两处须同步改，否则位号会带上运行期
+# 不认识的前缀。
+TAG_PREFIX = {
+    "pump": "P",
+    "valve": "V",
+    "heat": "E",
+    "tank": "T",
+    "instrument": "I",
+    "filter": "F",
+    "general": "G",
+}
+
+
+def _tag_prefix(cat):
+    # A symbol may opt out of the category convention; unknown categories simply carry no
+    # prefix and let the runtime fall back to the category's first letter.
+    # 图元可跳出类别约定；未知类别不带前缀，由运行期回落到类别首字母。
+    return TAG_PREFIX.get(str(cat), "")
+
+
+def _category_code(cat):
+    # Letters only, upper-cased — mirrors GPSymbolNaming.gpCategoryCode.
+    # 仅保留字母并大写 —— 与 GPSymbolNaming.gpCategoryCode 一致。
+    out = "".join(ch for ch in str(cat) if ch.isascii() and ch.isalpha())
+    return out.upper() or "GENERAL"
+
+
+def _assign_symbol_ids(raw_entries, source_code="L"):
+    # Give every entry its canonical id: <source><CATEGORY><3-digit seq>.
+    # 为每个条目赋予规范 id：<来源码><类别码><三位序号>。
+    # Ordering is (category, source_key) so the numbers are stable across re-runs —
+    # re-running the generator must never renumber an existing symbol, or every saved
+    # *.pid.json would silently point at a different glyph.
+    # 排序键为 (类别, 源键)，使序号在重复运行时保持稳定 —— 重跑生成器绝不能给已有图元
+    # 重新编号，否则所有已存盘的 *.pid.json 都会静默指向另一个图元。
+    seq_by_cat = {}
+    for e in sorted(raw_entries, key=lambda x: (x["category"], x["source_key"])):
+        cat = e["category"]
+        seq_by_cat[cat] = seq_by_cat.get(cat, 0) + 1
+        e["seq"] = seq_by_cat[cat]
+        e["id"] = "%s%s%03d" % (source_code, _category_code(cat), seq_by_cat[cat])
+    return raw_entries
+
+
+def _write_legacy_map(pack_dir, raw_entries):
+    # Persist the old-id -> new-id translation so GPSymbolNaming can keep resolving
+    # *.pid.json files written before the naming rule existed.
+    # 落盘「旧 id -> 新 id」映射，使 GPSymbolNaming 能继续解析命名规则生效前写下的
+    # *.pid.json 文件。
+    mapping = {e["source_key"]: e["id"] for e in raw_entries if e["source_key"] != e["id"]}
+    path = os.path.join(pack_dir, "legacy_id_map.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(mapping, f, ensure_ascii=False, indent=2, sort_keys=True)
+        f.write("\n")
+    print("[legacy] %s: %d aliases -> %s" % (os.path.basename(pack_dir), len(mapping), path))
+    return mapping
 
 
 def _fmt(v):
@@ -260,7 +380,7 @@ def _process_pack(pack_dir, pack_id, nominal_sizes):
         print("[warn] %s: no SVG files in %s" % (pack_id, svg_dir), file=sys.stderr)
         return None, [], None
 
-    entries = []
+    raw_entries = []
     for fn in svg_files:
         svg_path = os.path.join(svg_dir, fn)
         # Skip legend / non-symbol SVGs.
@@ -300,20 +420,36 @@ def _process_pack(pack_dir, pack_id, nominal_sizes):
         cat = _infer_category(svg_path, csv_path)
         if icon_entry and icon_entry.get("type"):
             cat = icon_entry["type"]
-        ports = _infer_ports_svg(svg_path, cat)
         env = nominal_sizes.get(cat, (64.0, 64.0))
 
-        entries.append({
-            "id": base,
+        raw_entries.append({
+            "source_key": base,
             "display_name": display_name,
             "chinese_name": chinese_name,
             "category": cat,
-            "ports": ports,
+            # Ports are resolved after the canonical ids exist: PORT_OVERRIDES is keyed by
+            # canonical id, mirroring GP_PORT_OVERRIDES in symbol_categories.gd.
+            # 端口在规范 id 生成后解析：PORT_OVERRIDES 以规范 id 为键，
+            # 与 symbol_categories.gd 的 GP_PORT_OVERRIDES 互为镜像。
+            "ports": [],
             "shape": shape,
             "env": env,
         })
-        print("[ok] %-30s -> %-10s env=%dx%d paths=%d ports=%d" % (
-            base, cat, env[0], env[1], len(paths), len(ports)))
+        print("[ok] %-30s -> %-10s env=%dx%d paths=%d" % (
+            base, cat, env[0], env[1], len(paths)))
+
+    # Assign the canonical ids (L<CATEGORY><nnn>) and persist the legacy translation.
+    # 分配规范 id（L<类别码><三位序号>）并落盘旧 id 映射。
+    entries = _assign_symbol_ids(raw_entries, "L")
+    # Now that every entry carries its canonical id, resolve ports against PORT_OVERRIDES.
+    # 各条目已持有规范 id，此时再按 PORT_OVERRIDES 解析端口。
+    for e in entries:
+        e["ports"] = _ports_for(e["id"], e["category"])
+        e["tag_prefix"] = _tag_prefix(e["category"])
+    _write_legacy_map(pack_dir, entries)
+    for e in entries:
+        e["ports"] = _ports_for(e["id"], e["category"])
+        print("[id] %-32s -> %-14s ports=%d" % (e["source_key"], e["id"], len(e["ports"])))
 
     # Emit GDScript file.
     # 输出 GDScript 文件。
@@ -342,23 +478,34 @@ def _process_pack(pack_dir, pack_id, nominal_sizes):
     lines.append("\tvar gpOut: Array[GPSymbolDef] = []")
     for e in entries:
         env_expr = "Vector2(%s, %s)" % (_fmt(e["env"][0]), _fmt(e["env"][1]))
-        lines.append("\tgpOut.append(_gpMk(%s, %s, %s, %s, %s, %s))" % (
+        lines.append("\tgpOut.append(_gpMk(%s, %s, %s, %s, %s, %s, %s))" % (
             _to_gd(e["id"]), _to_gd(e["chinese_name"]), _to_gd(e["category"]),
-            _to_gd(e["ports"]), _to_gd(e["shape"]), env_expr))
+            _to_gd(e["ports"]), _to_gd(e["shape"]), env_expr,
+            _to_gd(e.get("tag_prefix", ""))))
     lines.append("\treturn gpOut")
     lines.append("")
     lines.append("")
     lines.append("# Internal helper: build one SymbolDef from parsed data.")
     lines.append("# 内部辅助：从解析数据构造一个 SymbolDef。")
     lines.append("static func _gpMk(gpId: String, gpChineseName: String, gpCat: String, "
-                "gpPorts: Array[Dictionary], gpShape: Dictionary, gpEnv: Vector2) -> GPSymbolDef:")
+                "gpPorts: Array[Dictionary], gpShape: Dictionary, gpEnv: Vector2, "
+                "gpTagPrefix: String = \"\") -> GPSymbolDef:")
     lines.append("\tvar gpD: GPSymbolDef = GPSymbolDef.new()")
     lines.append("\tgpD.gpId = gpId")
     lines.append("\tgpD.gpDisplayName = gpChineseName")
     lines.append("\tgpD.gpCategory = gpCat")
     lines.append("\tgpD.gpDefaultSize = gpEnv")
-    lines.append("\tgpD.gpPorts = gpPorts")
-    lines.append("\tgpD.gpShape = gpShape")
+    lines.append("\t# M9: the category's factory tag prefix (\"P\" for a pump). The runtime")
+    lines.append("\t# falls back to the category table when this is empty.")
+    lines.append("\t# M9：类别的出厂位号前缀（泵为 \"P\"）。为空时运行期回落到类别表。")
+    lines.append("\tgpD.gpTagPrefix = gpTagPrefix")
+    lines.append("\t# P0 unified model: the generated dict specs are converted into the shared "
+                 "GPShape / GPPort")
+    lines.append("\t# types here, so the library, the editor and the canvas all consume one model.")
+    lines.append("\t# P0 统一模型：此处把生成的字典规格转换为共用的 GPShape / GPPort 类型，")
+    lines.append("\t# 使图元库、编辑器与画布共用同一模型。")
+    lines.append("\tgpD.gpPorts = GPPortSpec.gpFromDicts(gpPorts)")
+    lines.append("\tgpD.gpShapes = GPShapeSpec.gpFromSpec(gpShape)")
     lines.append("\treturn gpD")
     lines.append("")
 

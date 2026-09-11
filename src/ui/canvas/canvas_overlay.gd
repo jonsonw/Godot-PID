@@ -62,27 +62,48 @@ func _gpDrawMarquee() -> void:
 	gpCv.draw_rect(gpRect, gpCol, false, 1.0)
 
 
-# Draw the background grid aligned to the world coordinate system.
-# 绘制与世界坐标系对齐的背景网格。
+# Draw the background grid aligned to the world coordinate system: a fine MINOR grid,
+# a coarser MAJOR grid every 5 minor steps, and the world origin axes (X green, Y red) —
+# the AutoCAD model-space feel (reference Godot-CAD/Scripts/GridSystem.gd:52-57).
+# 绘制与世界坐标系对齐的背景网格：细次网格 + 每 5 格一道粗主网格 + 世界原点轴
+#（X 绿 / Y 红）—— AutoCAD 模型空间感（参考 Godot-CAD/Scripts/GridSystem.gd:52-57）。
 func _gpDrawGrid() -> void:
 	var gpStep: float = 50.0 * gpCv.gpViewZoom
 	if gpStep < 8.0:
 		return
 	var gpStartX: int = int(fmod(gpCv.gpViewOffset.x, gpStep))
 	var gpStartY: int = int(fmod(gpCv.gpViewOffset.y, gpStep))
-	var gpCol: Color = Color(0.22, 0.24, 0.30, 0.6)
-	# Vertical grid lines.
-	# 垂直网格线。
+	var gpMinor: Color = Color(0.22, 0.24, 0.30, 0.45)
+	# Vertical minor grid lines. / 垂直次网格线。
 	var x: int = gpStartX
 	while x < int(gpCv.size.x):
-		gpCv.draw_line(Vector2(x, 0), Vector2(x, gpCv.size.y), gpCol, 1.0)
+		gpCv.draw_line(Vector2(x, 0), Vector2(x, gpCv.size.y), gpMinor, 1.0)
 		x += int(gpStep)
-	# Horizontal grid lines.
-	# 水平网格线。
+	# Horizontal minor grid lines. / 水平次网格线。
 	var y: int = gpStartY
 	while y < int(gpCv.size.y):
-		gpCv.draw_line(Vector2(0, y), Vector2(gpCv.size.x, y), gpCol, 1.0)
+		gpCv.draw_line(Vector2(0, y), Vector2(gpCv.size.x, y), gpMinor, 1.0)
 		y += int(gpStep)
+	# Major grid lines: every 5 minor steps, slightly brighter. / 主网格：每 5 次格，略亮。
+	var gpMajorStep: float = gpStep * 5.0
+	var gpMajorX: int = int(fmod(gpCv.gpViewOffset.x, gpMajorStep))
+	var gpMajorY: int = int(fmod(gpCv.gpViewOffset.y, gpMajorStep))
+	var gpMajor: Color = Color(0.30, 0.34, 0.42, 0.7)
+	var mx: int = gpMajorX
+	while mx < int(gpCv.size.x):
+		gpCv.draw_line(Vector2(mx, 0), Vector2(mx, gpCv.size.y), gpMajor, 1.0)
+		mx += int(gpMajorStep)
+	var my: int = gpMajorY
+	while my < int(gpCv.size.y):
+		gpCv.draw_line(Vector2(0, my), Vector2(gpCv.size.x, my), gpMajor, 1.0)
+		my += int(gpMajorStep)
+	# World origin axes (AutoCAD model space): X = green, Y = red, through (0,0).
+	# 世界原点轴（AutoCAD 模型空间）：X 绿 / Y 红，过 (0,0)。
+	var gpO: Vector2 = gpCv.gpScreenFromWorld(Vector2.ZERO)
+	if gpO.x >= -2.0 and gpO.x <= gpCv.size.x + 2.0:
+		gpCv.draw_line(Vector2(gpO.x, 0.0), Vector2(gpO.x, gpCv.size.y), Color(0.30, 0.75, 0.40, 0.9), 1.5)
+	if gpO.y >= -2.0 and gpO.y <= gpCv.size.y + 2.0:
+		gpCv.draw_line(Vector2(0.0, gpO.y), Vector2(gpCv.size.x, gpO.y), Color(0.85, 0.40, 0.40, 0.9), 1.5)
 
 
 # Draw the rubber-band line when connecting two symbols.

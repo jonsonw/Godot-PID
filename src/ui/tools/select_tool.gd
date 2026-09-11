@@ -110,7 +110,26 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 		return true
 	# SELECT mode: hit -> select (Shift toggles); miss -> start a marquee.
 	# 选择模式：命中 → 选择（Shift 切换）；落空 → 开始框选。
+	# M10b: the tag grip of the single selected node is tested FIRST, because it can sit
+	# outside the glyph (below / beside it) where gpHitTest() would report a miss.
+	# M10b：单选节点的位号抓取点被**优先**检测，因为它可能落在字形之外（下方 / 侧旁），
+	# 而那里 gpHitTest() 会报未命中。
+	if gpCv.gpSelection.size() == 1 and gpCtx.gpLabelGrips != null:
+		var gpSelId: String = gpCv.gpSelection[0]
+		if gpDouble and gpCtx.gpLabelGrips.gpHitGrip(gpWorld,
+				gpCv.gpGraph.gpGetNode(gpSelId), gpCv.gpDefFor(
+					gpCv.gpGraph.gpGetNode(gpSelId).gpSymbolId if gpCv.gpGraph.gpGetNode(gpSelId) != null else ""),
+				8.0 / maxf(gpCv.gpViewZoom, 0.0001)):
+			# Double-click the grip: reset to the type layer's default.
+			# 双击抓取点：复位为类型层默认。
+			gpCtx.gpLabelGrips.gpReset(gpSelId)
+			return true
+		if gpCtx.gpLabelGrips.gpTryStart(gpWorld, gpSelId):
+			return true
 	if gpHit != "":
+		# P3-4: selecting a node drops any edge selection (the two are mutually exclusive).
+		# 选中节点时清除边选择（两者互斥）。
+		gpCv.gpEdgeSel.clear()
 		if gpShift:
 			if gpCv.gpSelection.has(gpHit):
 				gpCv.gpSelection.erase(gpHit)
@@ -132,6 +151,35 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 		else:
 			_gpDragId = ""
 	else:
+		# ---- P3-4: edge selection / double-click tag edit / grip drag ----
+		# 边选择 / 双击改号 / 抓取点拖拽（P3-4）。
+		# Pipes and signal lines are first-class selection targets in SELECT mode, just below
+		# nodes. / 管道与信号线是选择模式下的一等选择目标，优先级仅次于节点。
+		var gpEdgeHit: String = gpCv.gpHitEdge(gpWorld)
+		# Double-click an edge opens its line-number editor in place. / 双击边就地打开管线号编辑器。
+		if gpDouble and gpEdgeHit != "":
+			gpCtx.gpEdgeEditor.gpOpen(gpEdgeHit)
+			return true
+		# If the single selected edge's grip is under the cursor, start a grip drag. The edge must
+		# already be selected so a first click picks it and a second interacts with its grips.
+		# 若单选边的抓取点在光标下，开始抓取点拖拽。边须已选中，使首次点击选中、再次操作抓取点。
+		if gpCv.gpEdgeSel.size() == 1 and gpCv.gpEdgeSel[0] == gpEdgeHit and gpEdgeHit != "":
+			var gpGrip: Dictionary = gpCtx.gpEdgeGrips.gpHitGrip(gpWorld, gpEdgeHit)
+			if not gpGrip.is_empty():
+				gpCtx.gpEdgeGrips.gpStartGripDrag(gpEdgeHit, gpGrip)
+				return true
+		# Plain click on an edge selects it (mutually exclusive with node / shape selection).
+		# 在边上的普通点击选中该边（与节点 / 图形选择互斥）。
+		if gpEdgeHit != "":
+			if gpShift:
+				if gpCv.gpEdgeSel.has(gpEdgeHit):
+					gpCv.gpEdgeSel.erase(gpEdgeHit)
+				else:
+					gpCv.gpEdgeSel.append(gpEdgeHit)
+				gpCv.gpSetEdgeSelection(gpCv.gpEdgeSel)
+			elif not gpCv.gpEdgeSel.has(gpEdgeHit):
+				gpCv.gpSetEdgeSelection([gpEdgeHit])
+			return true
 		# Double-clicking a vertex / handle grip of the single selected annotation polyline toggles
 		# Bézier handles (corner <-> smooth). Intercept BEFORE the hit/move logic below.
 		# 双击「单选注释折线」的顶点 / 手柄抓取点：切换贝塞尔手柄（拐角 <-> 平滑）。须在下方命中/移动
@@ -152,6 +200,9 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 		# 未命中图元：改试注释图形（选中一枚时锚点编辑优先）。
 		var gpSh: int = gpCv.gpHitShape(gpWorld)
 		if gpSh >= 0:
+			# P3-4: picking a shape drops any edge selection (mutually exclusive).
+			# 选中图形时清除边选择（互斥）。
+			gpCv.gpEdgeSel.clear()
 			if gpCv.gpShapeSel.size() == 1:
 				var gpGrip: Dictionary = gpCtx.gpAnno.gpHitGrip(gpWorld, gpCv.gpShapeSel[0])
 				if not gpGrip.is_empty():
@@ -178,6 +229,9 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 		if not gpShift:
 			gpCv.gpSetSelection([])
 			gpCv.gpShapeSel.clear()
+			# P3-4: clicking empty space also drops any edge selection.
+			# 点空白处同样清除边选择。
+			gpCv.gpEdgeSel.clear()
 		var gpScreen: Vector2 = gpCv.gpScreenFromWorld(gpWorld)
 		_gpMarq.gpBegin(gpScreen, gpShift)
 	gpCv.queue_redraw()
@@ -239,6 +293,16 @@ func gpOnMove(gpWorld: Vector2) -> bool:
 
 func gpOnKey(gpKey: InputEventKey) -> bool:
 	return false
+
+
+# Overlay: draw the grips for every selected edge (P3-4). Called by the canvas after the shared
+# background overlay, so the grips sit above the pipe ink. The canvas itself is the CanvasItem.
+# 覆盖层：为每条被选中的边绘制抓取点（P3-4）。由画布在共享背景覆盖层之后调用，使抓取点盖在管线墨线之上。
+# 画布自身即 CanvasItem。
+func gpDrawOverlay(gpCv: CanvasItem) -> void:
+	var gpCanvas := gpCtx.gpCv
+	for gpEid in gpCanvas.gpEdgeSel:
+		gpCtx.gpEdgeGrips.gpDrawGrips(gpCv, gpEid)
 
 
 # ============================ private ============================

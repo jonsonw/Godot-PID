@@ -560,14 +560,14 @@ func _gpRefreshState() -> void:
 	# 标识 id 查重与所选模式无关，每次输入都执行：派生 id 是否已存在于库中决定哪种模式
 	# 可用（id 唯一性主导对话框）。显示名不参与判定。
 	var gpHintSet: bool = false
-	var gpTarget: GPSymbolDef = _gpFindExisting(gpName)
+	var gpTarget: GPSymbolDef = _gpFindExisting(gpName, _gpCurrentCategory())
 	var gpBuiltinHit: bool = gpTarget != null and gpTarget.gpBuiltin
 
 	if gpTarget != null and not gpBuiltinHit:
-		# The id is taken by a user symbol: Overwrite is the ONLY available mode and is
-		# forced on, so confirming replaces that symbol. New is disabled to keep ids unique.
-		# 该 id 已被用户图元占用：覆盖是唯一可用模式并被强制选中，确定即替换该图元；
-		# 新建被禁用以保证 id 唯一。
+		# The name is taken by a user symbol: Overwrite is the ONLY available mode and is
+		# forced on, so confirming replaces that symbol (keeping its allocated id).
+		# 该名称已被用户图元占用：覆盖是唯一可用模式并被强制选中，确定即替换该图元
+		#（沿用其已分配的 id）。
 		_gpExistingTargetId = gpTarget.gpId
 		_gpModeNew.disabled = true
 		_gpModeOver.disabled = false
@@ -622,17 +622,27 @@ func _gpRefreshState() -> void:
 			_gpHint.text = ""
 
 
-# Uniqueness is judged by ID (not display name): the id derived from the internal name is
-# looked up directly in the live library — on every keystroke, regardless of mode. The
-# display name is a free-form label and may repeat. Built-ins are read-only (decision D3):
-# when the id hits a built-in, it is returned so _gpRefreshState/_gpOnOk can refuse.
-# 唯一性以标识 id 判定（非显示名）：由内部名称导出的 id 直接到活动库查找——每次输入都查、
-# 与模式无关。显示名是自由标签、可重复。内置图元只读（决策 D3）：id 命中内置时原样返回，
-# 由 _gpRefreshState/_gpOnOk 拒绝。
-func _gpFindExisting(gpName: String) -> GPSymbolDef:
+# Uniqueness is judged by NAME + CATEGORY, not by an id: since the L/C naming rule the id
+# is allocated from the category (C< CATEGORY ><nnn>) and no longer derives from the name,
+# so the name is the only thing that tells "does this symbol already exist?". Built-ins are
+# read-only (decision D3): when the name hits a built-in, it is returned so
+# _gpRefreshState/_gpOnOk can refuse.
+# 唯一性以「名称 + 类别」判定，而非 id：自 L/C 命名规则起，id 由类别分配
+# （C<类别码><三位序号>）、不再由名称导出，因此只有名称能回答「该图元是否已存在」。
+# 内置图元只读（决策 D3）：名称命中内置时原样返回，由 _gpRefreshState/_gpOnOk 拒绝。
+func _gpFindExisting(gpName: String, gpCategory: String) -> GPSymbolDef:
 	if gpName == "":
 		return null
-	return GPSymbolLibrary.gpFindById(_gpIdFromName(gpName))
+	return GPSymbolLibrary.gpFindByNameAndCategory(gpName, gpCategory)
+
+
+# Category currently selected in the dropdown, defaulting to "general".
+# 下拉框当前选中的类别，缺省为 "general"。
+func _gpCurrentCategory() -> String:
+	var gpCat: String = "general"
+	if _gpCatBtn.selected >= 0 and _gpCatBtn.selected < _gpCatKeys.size():
+		gpCat = _gpCatKeys[_gpCatBtn.selected]
+	return gpCat
 
 
 func _gpOnCancel() -> void:
@@ -656,16 +666,23 @@ func _gpOnOk() -> void:
 		gpCat = _gpCatKeys[_gpCatBtn.selected]
 	var gpOverwrite: bool = _gpModeOver.button_pressed
 
-	# Overwrite is decided purely by id: the id derived from the internal name identifies
-	# the existing def to replace; New path dedupes via _gpUniqueId to keep ids unique.
-	# 覆盖完全由 id 决定：由内部名称导出的 id 定位被替换的已有图元；新建路径经
-	# _gpUniqueId 去重以保持 id 唯一。
-	var gpTarget: GPSymbolDef = _gpFindExisting(gpName)
+	# Overwrite is decided by NAME + CATEGORY: the name identifies the existing def to
+	# replace. The New path allocates the next free id from the naming rule
+	# (C<CATEGORY><nnn>) — ids are never derived from the name any more.
+	# 覆盖由「名称 + 类别」决定：名称定位被替换的已有图元。新建路径按命名规则
+	#（C<类别码><三位序号>）分配下一个空闲 id —— id 不再由名称导出。
+	var gpTarget: GPSymbolDef = _gpFindExisting(gpName, gpCat)
 	var gpId: String = ""
 	if gpOverwrite and gpTarget != null and not gpTarget.gpBuiltin:
 		gpId = gpTarget.gpId
 	else:
-		gpId = _gpUniqueId(gpName)
+		gpId = GPSymbolLibrary.gpAllocateCustomId(gpCat)
+	if gpId == "":
+		# The category used up all 999 slots: refuse instead of emitting a malformed id.
+		# 该类别已用满 999 个号位：拒绝，而不是产出一个非法 id。
+		_gpHint.text = I18n.gpTr("make_symbol.category_full",
+			"Category %s has no free id left (999 used)") % GPSymbolNaming.gpCategoryCode(gpCat)
+		return
 
 	# Serialize the edited geometry from the working model (lossless, keeps Bézier handles) plus
 	# the edited ports expressed in author-space pixels.
@@ -685,28 +702,15 @@ func _gpOnOk() -> void:
 	queue_free()
 
 
-# Filesystem-safe id from a name (CJK kept); non-alphanumerics collapse to "_".
-# Delegates to GPIdGen.gpSanitize: the SAME normalization that _gpUniqueId and _gpFindExisting
-# rely on, so the id typed by the user is the id matched in the library. Keeping one
-# implementation matters because W21/W22 will create ids for documents and cross-references
-# from other entry points too.
-# 由名称生成文件系统安全 id（中文保留）；非字母数字折叠为 "_"。委托 GPIdGen.gpSanitize：
-# 与 _gpUniqueId、_gpFindExisting 使用同一套归一化，保证用户输入的标识即库中匹配的标识。
-# 保持单一实现很重要，因为 W21/W22 还会从别的入口为文档与跨图引用生成 id。
-func _gpIdFromName(gpName: String) -> String:
-	return GPIdGen.gpSanitize(gpName)
-
-
-# Unique id for creation: normalize the name, then dedupe against the live library with a
-# numeric suffix. This is what guarantees id uniqueness on the New path.
-# 新建路径的唯一 id：归一化名称后与活动库去重（数字后缀）。此即新建路径的唯一性保障。
-func _gpUniqueId(gpName: String) -> String:
-	# The predicate is passed as a Callable so the library is queried lazily — no need to
-	# materialize every id for the common "free on first try" case.
-	# 谓词以 Callable 传入，使图元库被惰性查询——「首次即空闲」的常见情形无需物化全部 id。
-	var gpIsTaken: Callable = func(gpCandidate: String) -> bool:
-		return GPSymbolLibrary.gpFindById(gpCandidate) != null
-	return GPIdGen.gpEnsureUnique(GPIdGen.gpSanitize(gpName), gpIsTaken)
+# Symbol ids are no longer derived from the name: since the L/C naming rule they are
+# allocated by GPSymbolNaming via GPSymbolLibrary.gpAllocateCustomId (C<CATEGORY><nnn>).
+# The name still matters — it is what makes a symbol "already exist" (see
+# _gpFindExisting) — but it no longer turns into an id. GPIdGen.gpSanitize remains the
+# normalizer for the OTHER id spaces (documents, cross-references) that W21/W22 add.
+# 图元 id 不再由名称导出：自 L/C 命名规则起，它们由 GPSymbolNaming 经
+# GPSymbolLibrary.gpAllocateCustomId 分配（C<类别码><三位序号>）。名称仍有作用 —— 它是判定
+# 图元「是否已存在」的依据（见 _gpFindExisting）—— 但不再被转成 id。GPIdGen.gpSanitize
+# 仍是其他 id 空间（文档、跨图引用）的归一化器，供 W21/W22 使用。
 
 
 # Persist a def as a single-symbol user pack under user://symbol_packs/<id>.json.
