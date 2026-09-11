@@ -15,6 +15,17 @@ extends Resource
 # editor and the renderer share one strongly typed port model with the graph shapes.
 # 取代原先的字典端口条目（{"name","pos","dir"}），使图元编辑器与渲染层共享同一强类型端口模型。
 
+# Port purpose (which kind of line may attach to it).
+# 端口用途（决定可接哪类连线）。
+# NOZZLE   : 工艺管口，只接管道 / process nozzle, pipes only
+# ACTUATOR : 阀门执行机构接点，只接信号线 / valve actuator terminal, signal lines only
+# SIGNAL   : 仪表信号端子，只接信号线 / instrument signal terminal, signal lines only
+# TERMINAL : 通用端点（跨页接续等），两类线都可接 / generic terminal, accepts both
+const GP_NOZZLE: String = "NOZZLE"
+const GP_ACTUATOR: String = "ACTUATOR"
+const GP_SIGNAL: String = "SIGNAL"
+const GP_TERMINAL: String = "TERMINAL"
+
 # Human-readable port name, e.g. "in" / "out" / "p1".
 # 人类可读的端口名，如 "in" / "out" / "p1"。
 var gpName: String = ""
@@ -27,14 +38,22 @@ var gpPos: Vector2 = Vector2(0.5, 0.5)
 # 向外法线方向（可选）；默认零向量（无偏好方向）。
 var gpDir: Vector2 = Vector2.ZERO
 
+# Port purpose. Legacy packs and legacy archives carry no "type" key and therefore default
+# to NOZZLE, which reproduces the pre-P1 behaviour exactly.
+# 端口用途。旧图元包与旧存档无 "type" 键，默认 NOZZLE，与 P1 之前的行为完全一致。
+var gpType: String = GP_NOZZLE
 
-# Build a port from its parts.
-# 由各分量构造端口。
-static func gpMake(gpNameIn: String, gpPosIn: Vector2, gpDirIn: Vector2 = Vector2.ZERO) -> GPPort:
+
+# Build a port from its parts. The type defaults to NOZZLE so every existing call site
+# (which passes three arguments) keeps its meaning.
+# 由各分量构造端口。类型默认 NOZZLE，使每个既有调用点（传三个实参）保持原义。
+static func gpMake(gpNameIn: String, gpPosIn: Vector2, gpDirIn: Vector2 = Vector2.ZERO,
+		gpTypeIn: String = GP_NOZZLE) -> GPPort:
 	var gpP: GPPort = GPPort.new()
 	gpP.gpName = gpNameIn
 	gpP.gpPos = gpPosIn
 	gpP.gpDir = gpDirIn
+	gpP.gpType = gpTypeIn
 	return gpP
 
 
@@ -45,6 +64,7 @@ func gpToDict() -> Dictionary:
 		"name": gpName,
 		"pos": [gpPos.x, gpPos.y],
 		"dir": [gpDir.x, gpDir.y],
+		"type": gpType,
 	}
 
 
@@ -56,3 +76,4 @@ func gpFromDict(gpD: Dictionary) -> void:
 	gpPos = Vector2(float(gpRawPos[0]), float(gpRawPos[1]))
 	var gpRawDir: Array = gpD.get("dir", [0.0, 0.0])
 	gpDir = Vector2(float(gpRawDir[0]), float(gpRawDir[1]))
+	gpType = str(gpD.get("type", GP_NOZZLE))

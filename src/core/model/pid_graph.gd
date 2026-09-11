@@ -11,7 +11,12 @@ extends RefCounted
 # Project metadata stored inside the graph resource.
 # 图资源内部保存的工程元数据。
 var gpMeta: Dictionary = {
-	"version": "1.0",
+	# 1.1 adds the port-aware edge shape (signal_type / ortho / dangling ends) and the pipe
+	# tag high-water marks under "tag_seq". Older files keep loading: every new key is read
+	# through get(key, default).
+	# 1.1 引入端口感知的边（signal_type / ortho / 悬空端）与 "tag_seq" 下的管线号水位线。
+	# 旧文件照常加载：每个新键都以 get(key, default) 读取。
+	"version": "1.1",
 	"title": "",
 	"sheets": 1,
 }
@@ -45,6 +50,35 @@ var gpUserSymbolPacks: Array[GPSymbolPack] = []
 # 往返后保持一致。
 var gpShapes: Array[GPShape] = []
 
+# Project-wide tag numbering rules (M9). They travel with the file, NOT with the symbol
+# library: a project's numbering convention belongs to the project, so reopening the
+# archive years later reproduces the same convention (data sovereignty).
+# 工程级位号编号规则（M9）。它们随文件走，而非随图元库走：编号约定属于该工程，
+# 故多年后重开存档仍能复现同一套约定（数据主权）。
+# Null until first touched; gpTagRulesOrCreate() materialises it.
+# 首次使用前为 null；gpTagRulesOrCreate() 负责建立。
+var gpTagRules: GPProjectTagRules = null
+
+# Snapshot of the symbol library's property-schema fingerprints at SAVE time (M12),
+# keyed by symbol id: {"LPUMP003": "-12093481"}.
+# 存盘那一刻图元库属性 schema 的指纹快照（M12），按图元 id 索引：{"LPUMP003": "-12093481"}。
+# Comparing it against the live library on load is how a drawing can tell that a field was
+# added, renamed or deleted since it was saved — without that, "edit the library, every
+# project follows" would silently diverge from the archived values.
+# 载入时与活动库比对，图纸才能知道自存盘以来字段被增 / 改名 / 删过 ——
+# 没有它，「改库即全项目同步」就会与已存档的取值静默分叉。
+# Written only when non-empty, so a pre-M12 file keeps its exact v1/v2 byte shape.
+# 仅在非空时写出，使 M12 之前的文件逐字节保持原有 v1/v2 形态。
+var gpSchemaFingerprints: Dictionary = {}
+
+
+# The project's numbering rules, creating the factory default on first use. Never null.
+# 工程的编号规则，首次使用时建立出厂默认。绝不返回 null。
+func gpTagRulesOrCreate() -> GPProjectTagRules:
+	if gpTagRules == null:
+		gpTagRules = GPProjectTagRules.gpDefaultRules()
+	return gpTagRules
+
 
 # Signals fired when data changes; the canvas subscribes to keep views in sync.
 # 数据变化时发出的信号；画布订阅它们以保持视图同步。
@@ -63,7 +97,7 @@ func gpNewNode(gpId: String, gpSymbolId: String, gpLabel: String, gpPos: Vector2
 	gpN.gpSymbolId = gpSymbolId
 	gpN.gpTag = gpLabel
 	gpN.gpPosition = gpPos
-	gpN.gpAttrValues = gpAttrs.duplicate()
+	gpN.gpProps = gpAttrs.duplicate()
 	return gpN
 
 
@@ -76,6 +110,26 @@ func gpNewEdge(gpId: String, gpFromId: String, gpToId: String, gpAttrs: Dictiona
 	gpE.gpToRef = {"node_id": gpToId, "port_id": ""}
 	gpE.gpKind = "PROCESS"
 	gpE.gpAttrs = gpAttrs.duplicate()
+	return gpE
+
+
+# Port-aware edge factory. Both refs accept any of the three end shapes documented on
+# GPPIDEdge (port-bound / node-bound / dangling), so one factory covers every case the pipe
+# and signal tools can produce. gpNewEdge stays as-is so its existing callers and tests are
+# untouched.
+# 端口感知的边工厂。两端引用接受 GPPIDEdge 上记载的三种端点形态之一（端口绑定 / 节点绑定 /
+# 悬空），故一个工厂即覆盖管道与信号工具能产出的全部情形。gpNewEdge 保持原样，其既有
+# 调用点与测试不受影响。
+func gpNewEdgeEx(gpId: String, gpFrom: Dictionary, gpTo: Dictionary, gpKind: String,
+		gpSignalType: String = "", gpTag: String = "", gpAttrs: Dictionary = {}) -> GPPIDEdge:
+	var gpE: GPPIDEdge = GPPIDEdge.new()
+	gpE.gpInstanceId = gpId
+	gpE.gpFromRef = gpFrom.duplicate(true)
+	gpE.gpToRef = gpTo.duplicate(true)
+	gpE.gpKind = gpKind
+	gpE.gpSignalType = gpSignalType
+	gpE.gpTag = gpTag
+	gpE.gpAttrs = gpAttrs.duplicate(true)
 	return gpE
 
 
@@ -144,6 +198,17 @@ func gpRemoveNodeWithEdges(gpId: String) -> void:
 		else:
 			gpKeep.append(gpE)
 	gpEdges = gpKeep
+	gpGraphChanged.emit()
+
+
+# Insert an edge at a position (default: append). Used by undo to put a deleted edge back at
+# the index it came from, which keeps the sheet's z-order stable across an undo.
+# 在指定位置插入一条边（默认追加）。供撤销把已删边放回其原始下标，使图纸层序在撤销后保持稳定。
+func gpInsertEdge(gpEdge: GPPIDEdge, gpAt: int = -1) -> void:
+	if gpEdge == null:
+		return
+	gpEdges.insert(gpAt if gpAt >= 0 else gpEdges.size(), gpEdge)
+	gpEdgeAdded.emit(gpEdge)
 	gpGraphChanged.emit()
 
 
@@ -262,13 +327,25 @@ func gpToDict() -> Dictionary:
 	var gpPacksOut: Array = []
 	for gpPack in gpUserSymbolPacks:
 		gpPacksOut.append(gpPack.gpToDict())
-	return {
-		"meta": gpMeta.duplicate(),
+	# M12: the library fingerprint snapshot travels INSIDE meta, so a reader that knows
+	# nothing about it still sees an ordinary meta dictionary.
+	# M12：库指纹快照放在 meta **内部**，故不认识它的读取方看到的仍是一个普通的 meta 字典。
+	var gpMetaOut: Dictionary = gpMeta.duplicate()
+	if not gpSchemaFingerprints.is_empty():
+		gpMetaOut["schema_fingerprints"] = gpSchemaFingerprints.duplicate()
+	var gpOut: Dictionary = {
+		"meta": gpMetaOut,
 		"nodes": gpNodesOut,
 		"edges": gpEdgesOut,
 		"shapes": gpShapesOut,
 		"user_symbol_packs": gpPacksOut,
 	}
+	# Written only once the project actually has rules, so a file untouched by M9 keeps
+	# its v1 shape byte for byte. / 仅当工程确有规则时写出，使未经 M9 改动的文件
+	# 逐字节保持 v1 形态。
+	if gpTagRules != null:
+		gpOut["tag_rules"] = gpTagRules.gpToDict()
+	return gpOut
 
 
 # Restore a graph from a plain dictionary (tolerant of old/new node/edge shapes).
@@ -277,6 +354,17 @@ static func gpFromDict(gpData: Dictionary) -> GPPIDGraph:
 	var gpG: GPPIDGraph = GPPIDGraph.new()
 	if gpData.has("meta"):
 		gpG.gpMeta = gpData["meta"].duplicate()
+		# M12: restore the library fingerprint snapshot (absent in every pre-M12 file).
+		# M12：恢复库指纹快照（M12 之前的文件都没有）。
+		var gpFp: Variant = gpG.gpMeta.get("schema_fingerprints", null)
+		if gpFp is Dictionary:
+			gpG.gpSchemaFingerprints = (gpFp as Dictionary).duplicate()
+	# v2: numbering rules. Absent in v1 files -> left null, and gpTagRulesOrCreate() hands
+	# out the factory default on first use, so an old archive loads unchanged.
+	# v2：编号规则。v1 文件里没有此键 -> 保持 null，由 gpTagRulesOrCreate() 在首次使用
+	# 时给出出厂默认，故旧存档载入行为不变。
+	if gpData.has("tag_rules"):
+		gpG.gpTagRules = GPProjectTagRules.gpFromDict(gpData["tag_rules"] as Dictionary)
 	if gpData.has("nodes"):
 		for gpND in gpData["nodes"]:
 			var gpN: GPPIDNode = GPPIDNode.new()

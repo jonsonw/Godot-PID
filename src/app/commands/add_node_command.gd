@@ -56,7 +56,19 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		# "n"（小写）是全项目统一的节点 id 前缀：画布自身的放置路径与所有存档文件都用它。
 		# 此处若用大写 "N" 会静默地分叉 id 命名空间。
 		var gpId: String = gpCtx.gpIds.gpNext("n")
-		_gpNode = gpCtx.gpGraph.gpNewNode(gpId, gpSymbolId, gpTag, gpPos)
+		# Auto-number when the caller supplied no tag (M9): the sheet must show a tag, and a
+		# tag must be unique project-wide. Done HERE rather than in gpRedo so the minted tag
+		# is stored on the kept node object and survives undo/redo unchanged.
+		# 调用方未给位号时自动编号（M9）：图纸上要显示位号，且位号必须工程级唯一。
+		# 在此处而非 gpRedo 中编号，使铸造出的位号存留在被保留的节点对象上，
+		# 撤销/重做后保持不变。
+		var gpTagToUse: String = gpTag
+		if gpTagToUse == "" and gpCtx.gpTags != null:
+			gpCtx.gpTags.gpGraph = gpCtx.gpGraph
+			gpTagToUse = gpCtx.gpTags.gpNextTag(GPSymbolLibrary.gpFindById(gpSymbolId))
+		_gpNode = gpCtx.gpGraph.gpNewNode(gpId, gpSymbolId, gpTagToUse, gpPos)
+		if gpCtx.gpTags != null:
+			gpCtx.gpTags.gpRegister(_gpNode.gpInstanceId, _gpNode.gpTag)
 	gpCtx.gpGraph.gpAddNode(_gpNode)
 	return true
 
@@ -68,6 +80,8 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 	if gpCtx == null or gpCtx.gpGraph == null or _gpNode == null:
 		return
 	gpCtx.gpGraph.gpRemoveNode(_gpNode.gpInstanceId)
+	if gpCtx.gpTags != null:
+		gpCtx.gpTags.gpRelease(_gpNode.gpInstanceId)
 
 
 # Re-add the very same node object, preserving its id.
@@ -79,3 +93,5 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 	if gpCtx == null or gpCtx.gpGraph == null:
 		return
 	gpCtx.gpGraph.gpAddNode(_gpNode)
+	if gpCtx.gpTags != null:
+		gpCtx.gpTags.gpRegister(_gpNode.gpInstanceId, _gpNode.gpTag)

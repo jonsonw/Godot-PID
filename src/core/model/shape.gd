@@ -56,6 +56,24 @@ var gpColor: Color = Color(0.92, 0.94, 0.98)
 # "Could not parse global class GPShape"）。
 var gpHandles: Array[PackedVector2Array] = []
 
+# ---- identity & properties (M8) ----
+# ---- 标识与属性（M8） ----
+# Cross-document technical id, e.g. "a3f9k2m1-s3". Assigned by GPIdGen.gpNextGlobal.
+# 跨文档技术号，如 "a3f9k2m1-s3"。由 GPIdGen.gpNextGlobal 分配。
+var gpUid: String = ""
+
+# Human name for the annotation, e.g. "界区线". Shown in the inspector only.
+# 注释图形的人类可读名称，如 "界区线"。仅显示在属性面板。
+var gpName: String = ""
+
+# Layer bucket: ANNOTATION (default) / BORDER / DIMENSION / HATCH.
+# 图层分桶：ANNOTATION（默认）/ BORDER（图框）/ DIMENSION（标注）/ HATCH（填充）。
+var gpLayer: String = "ANNOTATION"
+
+# Property values keyed by field key (same "values only" rule as GPPIDNode).
+# 按字段键索引的属性值（与 GPPIDNode 相同的「只存值」规则）。
+var gpProps: Dictionary = {}
+
 
 # Build a 2-point line.
 # 构造两点直线。
@@ -307,6 +325,16 @@ func gpToDict() -> Dictionary:
 				gpOut = gpHandles[gpI][1]
 			gpHs.append([[gpIn.x, gpIn.y], [gpOut.x, gpOut.y]])
 		gpD["handles"] = gpHs
+	# Identity & properties (M8): emitted only when non-default, to keep flat files clean.
+	# 标识与属性（M8）：仅在非默认时输出，保持扁平文件整洁。
+	if gpUid != "":
+		gpD["uid"] = gpUid
+	if gpName != "":
+		gpD["name"] = gpName
+	if gpLayer != "ANNOTATION":
+		gpD["layer"] = gpLayer
+	if not gpProps.is_empty():
+		gpD["props"] = gpProps.duplicate(true)
 	return gpD
 
 
@@ -342,3 +370,10 @@ func gpFromDict(gpD: Dictionary) -> void:
 				if gpPair.size() >= 2:
 					gpOut = Vector2(float(gpPair[1][0]), float(gpPair[1][1]))
 			gpHandles.append(PackedVector2Array([gpIn, gpOut]))
+	# Identity & properties (M8): all optional, so pre-M8 archives load unchanged.
+	# 标识与属性（M8）：全部可选，故 M8 之前的存档加载行为不变。
+	gpUid = gpD.get("uid", "")
+	gpName = gpD.get("name", "")
+	gpLayer = gpD.get("layer", "ANNOTATION")
+	var gpPropsIn: Variant = gpD.get("props", {})
+	gpProps = (gpPropsIn as Dictionary).duplicate(true) if gpPropsIn is Dictionary else {}

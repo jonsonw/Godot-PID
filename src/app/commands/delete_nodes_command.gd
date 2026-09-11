@@ -56,6 +56,9 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 				_gpEdges.append(gpE)
 	for gpId in _gpIds:
 		gpCtx.gpGraph.gpRemoveNodeWithEdges(gpId)
+	if gpCtx.gpTags != null:
+		for gpN in _gpNodes:
+			gpCtx.gpTags.gpRelease(gpN.gpInstanceId)
 	return true
 
 
@@ -66,6 +69,8 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 		return
 	for gpN in _gpNodes:
 		gpCtx.gpGraph.gpAddNode(gpN)
+		if gpCtx.gpTags != null:
+			gpCtx.gpTags.gpRegister(gpN.gpInstanceId, gpN.gpTag)
 	for gpE in _gpEdges:
 		gpCtx.gpGraph.gpAddEdge(gpE)
 

@@ -37,9 +37,21 @@ var gpIds: GPIdGen = null
 # Both collaborators may be supplied up front; a null graph simply makes every command
 # refuse to run (gpIsReady) instead of crashing on a nil dereference.
 # 两个协作者可在构造时一次给全；图为 null 时命令只是拒绝执行（gpIsReady），而非空引用崩溃。
-func _init(gpInGraph: GPPIDGraph = null, gpInIds: GPIdGen = null) -> void:
+# Tag uniqueness guard (M9). Optional: without it commands still run, they just cannot mint
+# or refuse a tag — which is exactly how every pre-M9 command behaves in the tests.
+# 位号唯一性守卫（M9）。可选：没有它命令照常运行，只是不能铸造或拒绝位号
+# ——这正是 M9 之前每条命令在测试中的行为。
+var gpTags: GPTagRegistry = null
+
+
+# Both collaborators may be supplied up front; a null graph simply makes every command
+# refuse to run (gpIsReady) instead of crashing on a nil dereference.
+# 两个协作者可在构造时一次给全；图为 null 时命令只是拒绝执行（gpIsReady），而非空引用崩溃。
+func _init(gpInGraph: GPPIDGraph = null, gpInIds: GPIdGen = null,
+		gpInTags: GPTagRegistry = null) -> void:
 	gpGraph = gpInGraph
 	gpIds = gpInIds
+	gpTags = gpInTags
 
 
 # True when the context can actually run a command that mutates the graph.

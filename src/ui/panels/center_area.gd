@@ -127,6 +127,8 @@ func _ready() -> void:
 	# Keep the static header labels (button tooltips) in sync with the locale.
 	# 让头部静态文字（按钮提示）随语言同步。
 	I18n.gpLocaleChanged.connect(_gpOnLocale)
+	# 视觉分层：首帧自绘画布工作区背景（最亮一档，聚焦）。
+	queue_redraw()
 
 
 # ============================ public API ============================
@@ -136,7 +138,7 @@ func _ready() -> void:
 func gpAddTab() -> void:
 	gpSheetSeq += 1
 	var gpTitle: String = I18n.gpTr("center.sheet") + " " + str(gpSheetSeq)
-	_gpAddTabWith(gpTitle)
+	_gpAddTabWith(gpTitle, "sheet-" + str(gpSheetSeq))
 
 
 # Return the active sheet's canvas (null if none).
@@ -178,6 +180,49 @@ func gpSetActiveGraph(gpNewGraph: GPPIDGraph) -> void:
 	gpC.gpGraph = gpNewGraph
 
 
+# Every open tab as a persistable GPSheet, in tab order.
+# 把每个打开的标签页按标签顺序导出为可持久化的 GPSheet。
+func gpToSheets() -> Array[GPSheet]:
+	var gpOut: Array[GPSheet] = []
+	var gpI: int = 0
+	for gpTab in gpTabs:
+		var gpSheet: GPSheet = GPSheet.new()
+		gpSheet.gpId = str(gpTab.get("id", "sheet-" + str(gpI + 1)))
+		gpSheet.gpName = str(gpTab.get("title", ""))
+		gpSheet.gpIndex = gpI
+		gpSheet.gpGraph = gpTab["graph"]
+		gpOut.append(gpSheet)
+		gpI += 1
+	return gpOut
+
+
+# Replace every open tab with gpSheets (used when opening a project file).
+# 用 gpSheets 替换所有打开的标签页（打开工程文件时调用）。
+# Existing canvases are torn down first: keeping them would leave orphaned GPCanvas2D
+# nodes holding graphs that are no longer part of the project — invisible, but still
+# receiving redraws and still holding memory.
+# 先拆除既有画布：保留它们会留下持有「已不属于本工程」的图的孤立 GPCanvas2D 节点 ——
+# 看不见，但仍在接收重绘、仍占着内存。
+func gpLoadSheets(gpSheets: Array) -> void:
+	for gpTab in gpTabs:
+		var gpC: GPCanvas2D = gpTab["canvas"]
+		if gpC != null and is_instance_valid(gpC):
+			gpBody.remove_child(gpC)
+			gpC.queue_free()
+	gpTabs.clear()
+	gpTabBar.clear_tabs()
+	gpActive = -1
+	gpSheetSeq = 0
+	var gpI: int = 0
+	for gpS in gpSheets:
+		var gpSheet: GPSheet = gpS as GPSheet
+		if gpSheet == null:
+			continue
+		gpSheetSeq += 1
+		_gpAddTabWith(gpSheet.gpName, gpSheet.gpId, gpSheet.gpGraph)
+		gpI += 1
+
+
 # Push a new symbol-definition set to every sheet's canvas (e.g. after exporting
 # a custom symbol pack). Also remembered for future sheets.
 # 把新的图元定义集推送到每个图纸的画布（如导出自定义图元包后）。同时记录供后续图纸使用。
@@ -192,8 +237,12 @@ func gpSetDefs(gpNewDefs: Array[GPSymbolDef]) -> void:
 # ============================ 内部方法 ============================
 # Create a sheet with the given title and wire it into the tab bar / body.
 # 以给定标题创建图纸并接入标签栏 / 画布体。
-func _gpAddTabWith(gpTitle: String) -> void:
-	var gpGraph: GPPIDGraph = GPPIDGraph.new()
+# [param gpId] stable identity; empty is fine for a brand-new tab (gpToSheets derives one).
+# [param gpId] 稳定标识；全新标签页留空亦可（gpToSheets 会推导一个）。
+# [param gpGraphIn] when non-null the tab shows THIS graph instead of a fresh one.
+# [param gpGraphIn] 非 null 时，该标签页显示**这个**图，而非新建一个。
+func _gpAddTabWith(gpTitle: String, gpId: String = "", gpGraphIn: GPPIDGraph = null) -> void:
+	var gpGraph: GPPIDGraph = gpGraphIn if gpGraphIn != null else GPPIDGraph.new()
 	var gpCanvas: GPCanvas2D = GPCanvas2D.new()
 	gpCanvas.gpGraph = gpGraph
 	gpCanvas.gpDefs = gpDefs
@@ -202,7 +251,7 @@ func _gpAddTabWith(gpTitle: String) -> void:
 	# 填满画布体：画布是普通 Control 子节点，故锚定到全矩形。
 	gpCanvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	gpCanvas.visible = false
-	var gpTab: Dictionary = {"title": gpTitle, "graph": gpGraph, "canvas": gpCanvas}
+	var gpTab: Dictionary = {"id": gpId, "title": gpTitle, "graph": gpGraph, "canvas": gpCanvas}
 	gpTabs.append(gpTab)
 	gpTabBar.add_tab(gpTitle)
 	var gpIdx: int = gpTabs.size() - 1
@@ -280,3 +329,9 @@ func _gpMakeCloseIcon(gpSize: int) -> Texture2D:
 			if abs(gpX - gpY) <= gpT or abs(gpX + gpY - (gpSize - 1)) <= gpT:
 				gpImg.set_pixel(gpX, gpY, gpCol)
 	return ImageTexture.create_from_image(gpImg)
+
+# Paint the canvas working-area background (brightest tier) so the sheet stands out
+# from the darker side docks; canvas content draws on top.
+# 自绘画布工作区背景（最亮一档），使图纸从较暗侧栏中凸显；画布内容绘制于其上。
+func _draw() -> void:
+	GPChromeStyle.gpDraw(self, GPChromeStyle.GP_CANVAS_BG, 0)

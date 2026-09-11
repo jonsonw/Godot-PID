@@ -61,6 +61,22 @@ var gpAutoScaleLabel: Label
 # 停靠栏自动缩放复选框。
 var gpAutoScaleCheck: CheckBox
 
+# Pipe line-number rotation label (added programmatically; lives in no .tscn node).
+# 管线位号旋转标签（动态添加，不在 .tscn 节点中）。
+var gpPipeRotateLabel: Label
+
+# Pipe line-number rotation checkbox.
+# 管线位号旋转复选框。
+var gpPipeRotateCheck: CheckBox
+
+# Pipe line-number font size label (added programmatically).
+# 管线位号字号标签（动态添加）。
+var gpPipeFontSizeLabel: Label
+
+# Pipe line-number font size spin box.
+# 管线位号字号选择框。
+var gpPipeFontSizeSpin: SpinBox
+
 # OK button.
 # 确定按钮。
 var gpOk: Button
@@ -158,6 +174,10 @@ func _ready() -> void:
 	gpAutoScaleCheck.button_pressed = Settings.gpAutoScale
 	gpAutoScaleCheck.toggled.connect(_gpOnAutoScaleToggled)
 
+	# Pipe line-number style rows (added programmatically so the .tscn is untouched).
+	# 管线位号样式两行（动态添加，不改动 .tscn）。
+	_gpBuildPipeTagRows()
+
 	gpOk.pressed.connect(queue_free)
 
 	I18n.gpLocaleChanged.connect(_gpRefreshText)
@@ -238,6 +258,60 @@ func _gpOnAutoScaleToggled(gpOn: bool) -> void:
 	Settings.gpSave()
 
 
+# Build the pipe line-number style rows (rotation + font size) and insert them into the
+# VBox just before the OK button. Done in code so the scene file needs no edit.
+# 构建管线位号样式两行（旋转 + 字号）并插入 VBox、紧邻「确定」按钮之前。以代码完成，
+# 故无需改动场景文件。
+func _gpBuildPipeTagRows() -> void:
+	var gpVBox: VBoxContainer = $Panel/VBox
+
+	# Rotation row: label + checkbox. / 旋转行：标签 + 复选框。
+	var gpRotRow: HBoxContainer = HBoxContainer.new()
+	gpPipeRotateLabel = Label.new()
+	gpPipeRotateLabel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	gpPipeRotateCheck = CheckBox.new()
+	gpPipeRotateCheck.button_pressed = Settings.gpPipeTagRotate
+	gpPipeRotateCheck.toggled.connect(_gpOnPipeRotateToggled)
+	gpRotRow.add_child(gpPipeRotateLabel)
+	gpRotRow.add_child(gpPipeRotateCheck)
+
+	# Font-size row: label + spin box. / 字号行：标签 + 选择框。
+	var gpSizeRow: HBoxContainer = HBoxContainer.new()
+	gpPipeFontSizeLabel = Label.new()
+	gpPipeFontSizeLabel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	gpPipeFontSizeSpin = SpinBox.new()
+	gpPipeFontSizeSpin.min_value = 0
+	gpPipeFontSizeSpin.max_value = 48
+	gpPipeFontSizeSpin.step = 1
+	gpPipeFontSizeSpin.value = Settings.gpPipeTagFontSize
+	gpPipeFontSizeSpin.value_changed.connect(_gpOnPipeFontSizeChanged)
+	gpSizeRow.add_child(gpPipeFontSizeLabel)
+	gpSizeRow.add_child(gpPipeFontSizeSpin)
+
+	# Insert both rows right before the OK button. / 把两行插到「确定」按钮之前。
+	var gpOkIdx: int = gpVBox.get_children().find(gpOk)
+	gpVBox.add_child(gpRotRow)
+	gpVBox.move_child(gpRotRow, gpOkIdx)
+	gpVBox.add_child(gpSizeRow)
+	gpVBox.move_child(gpSizeRow, gpOkIdx)
+
+
+# Handle pipe line-number rotation toggle.
+# 处理管线位号旋转切换。
+func _gpOnPipeRotateToggled(gpOn: bool) -> void:
+	Settings.gpPipeTagRotate = gpOn
+	Settings.gpApplyPipeTagStyle()
+	Settings.gpSave()
+
+
+# Handle pipe line-number font size change.
+# 处理管线位号字号变化。
+func _gpOnPipeFontSizeChanged(gpVal: float) -> void:
+	Settings.gpPipeTagFontSize = int(gpVal)
+	Settings.gpApplyPipeTagStyle()
+	Settings.gpSave()
+
+
 # Select the language dropdown item matching the given locale code.
 # 选中与给定语言代码匹配的语言下拉项。
 func _gpSelectLocale(gpCode: String) -> void:
@@ -257,6 +331,8 @@ func _gpRefreshText(gpLocale: String) -> void:
 	gpSymFontLabel.text = I18n.gpTr("settings.symbol_font")
 	gpLangLabel.text = I18n.gpTr("settings.language")
 	gpAutoScaleLabel.text = I18n.gpTr("settings.auto_scale")
+	gpPipeRotateLabel.text = I18n.gpTr("settings.pipe_tag_rotate")
+	gpPipeFontSizeLabel.text = I18n.gpTr("settings.pipe_tag_font_size")
 	gpOk.text = I18n.gpTr("settings.ok")
 	# Update the language item labels themselves so they match the new locale.
 	# 更新语言下拉项本身的文本，使其与新语言一致。

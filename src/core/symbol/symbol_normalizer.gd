@@ -61,7 +61,7 @@ static func gpNormalizeSymbol(gpRaw: Dictionary, gpCat: String, gpPackSizes: Dic
 		# Nothing was drawn: keep an empty shape so the renderer falls back to a plain rectangle.
 		# 未绘制任何图形：保留空形状，渲染层回退为纯矩形。
 		gpDef.gpShapes = []
-		gpDef.gpPorts = GPPortSpec.gpFromDicts(GPSymbolCategories.gpStandardPorts(gpCat))
+		gpDef.gpPorts = GPPortSpec.gpFromDicts(GPSymbolCategories.gpPortsForSymbol(gpDef.gpId, gpCat))
 		return gpDef
 
 	# (2) Uniform fit into the 100x100 unit box, centered. Uniform (not per-axis) scaling is
@@ -76,7 +76,7 @@ static func gpNormalizeSymbol(gpRaw: Dictionary, gpCat: String, gpPackSizes: Dic
 	# (3) 端口：作者放置的端口与字形走同一套几何变换，并以标称包络的 0..1 表达；
 	#     否则回退为类别标准锚点。
 	if gpRawPorts.is_empty():
-		gpDef.gpPorts = GPPortSpec.gpFromDicts(GPSymbolCategories.gpStandardPorts(gpCat))
+		gpDef.gpPorts = GPPortSpec.gpFromDicts(GPSymbolCategories.gpPortsForSymbol(gpDef.gpId, gpCat))
 	else:
 		gpDef.gpPorts = GPPortSpec.gpFromDicts(gpNormalizePorts(gpRawPorts, gpBBox, gpEnv))
 	return gpDef
@@ -185,6 +185,7 @@ static func gpDenormalizePorts(gpPorts: Array, gpBBox: Rect2, gpEnv: Vector2) ->
 				snappedf(gpCtr.y + (gpNy - 0.5) * gpEnvH / gpSEff, 0.01),
 			],
 			"dir": gpP.get("dir", gpEdgeNormal(Vector2(gpNx, gpNy))),
+			"type": str(gpP.get("type", GPPort.GP_NOZZLE)),
 		})
 	return gpOut
 
@@ -228,6 +229,11 @@ static func gpNormalizePorts(gpRawPorts: Array, gpBBox: Rect2, gpEnv: Vector2) -
 			"name": gpName,
 			"pos": [snappedf(gpNx, 0.0001), snappedf(gpNy, 0.0001)],
 			"dir": gpEdgeNormal(Vector2(gpNx, gpNy)),
+			# The purpose survives normalization: a signal terminal must not come back as a
+			# process nozzle, or every signal line drawn to it would be refused.
+			# 用途在归一化中保留：信号端子绝不能在往返后变成工艺管口，否则所有连到它的信号线
+			# 都会被判为非法。
+			"type": str(gpP.get("type", GPPort.GP_NOZZLE)),
 		})
 	return gpOut
 

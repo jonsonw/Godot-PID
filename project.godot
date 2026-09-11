@@ -24,6 +24,7 @@ config/features=PackedStringArray("4.7", "Forward Plus")
 
 I18n="*res://src/autoload/i18n.gd"
 Settings="*res://src/autoload/settings.gd"
+SnapState="*res://src/autoload/snap_state.gd"
 
 [debug]
 
@@ -45,3 +46,4 @@ enabled=PackedStringArray("res://addons/gut/plugin.cfg")
 [rendering]
 
 textures/vram_compression/import_etc2_astc=true
+anti_aliasing/quality/msaa_2d=3

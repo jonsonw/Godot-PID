@@ -28,6 +28,19 @@ var gpState: GPCanvasInteractState
 var gpAnno: GPAnnotationEditor:
 	get: return gpCv.gpAnno
 
+# Edge line-number editor collaborator (P3-4). Lazily reached from the canvas, same as gpAnno.
+# 边管线号编辑器协作者（P3-4）。与 gpAnno 一样惰性取自画布。
+var gpEdgeEditor: GPEdgeTagEditor:
+	get: return gpCv.gpEdgeEditor
+
+# Edge grip/route editing collaborator (P3-4). / 边抓取点 / 布线编辑协作者（P3-4）。
+var gpEdgeGrips: GPEdgeGripOps:
+	get: return gpCv.gpEdgeGrips
+
+# Tag-label grip/drag collaborator (M10b). / 位号标签抓取点 / 拖拽协作者（M10b）。
+var gpLabelGrips: GPLabelGripOps:
+	get: return gpCv.gpLabelGrips
+
 func _init(gpCanvas: GPCanvas2D) -> void:
 	gpCv = gpCanvas
 	gpState = gpCanvas.gpState

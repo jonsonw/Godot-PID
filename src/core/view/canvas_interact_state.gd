@@ -27,7 +27,22 @@ extends RefCounted
 # ---- 交互模式 ----
 # Drawing modes are appended last so the legacy SELECT/CONNECT values (0/1) stay unchanged.
 # 绘图模式置于末尾，使旧的选择/连线取值（0/1）保持不变。
-enum GPMode { GP_SELECT, GP_CONNECT, GP_DRAW_LINE, GP_DRAW_CIRCLE, GP_DRAW_RECT, GP_DRAW_POLYLINE, GP_DRAW_ARC }
+# GP_PIPE / GP_SIGNAL are the P3 connectivity tools. They are appended AFTER the drawing range
+# on purpose: GP_LAST_DRAW_MODE still terminates the draw tools, so gpIsDrawMode() keeps
+# returning false for them and every "am I drawing?" rule stays untouched.
+# GP_PIPE / GP_SIGNAL 是 P3 的连线工具。刻意追加在绘图区间之后：GP_LAST_DRAW_MODE 仍终结
+# 绘图工具，故 gpIsDrawMode() 对它们仍返回 false，一切「我是否在绘图」的判据不受影响。
+enum GPMode {
+	GP_SELECT,
+	GP_CONNECT,
+	GP_DRAW_LINE,
+	GP_DRAW_CIRCLE,
+	GP_DRAW_RECT,
+	GP_DRAW_POLYLINE,
+	GP_DRAW_ARC,
+	GP_PIPE,
+	GP_SIGNAL,
+}
 
 # Lowest mode value that is a drawing tool (used for the "entering a draw tool" rule).
 # 属于绘图工具的最小模式值（用于「进入绘图工具」规则）。
@@ -83,7 +98,12 @@ func gpSetMode(gpM: int) -> bool:
 	if gpM == gpMode:
 		return false
 	gpMode = gpM
-	if gpM >= GP_FIRST_DRAW_MODE:
+	# Written as an explicit predicate rather than "gpM >= GP_FIRST_DRAW_MODE": PIPE/SIGNAL sit
+	# ABOVE the drawing range, so an ordering-based test would happen to work today and break
+	# silently the day the enum is reordered.
+	# 用显式判据而非「gpM >= GP_FIRST_DRAW_MODE」：PIPE/SIGNAL 位于绘图区间之上，基于顺序的
+	# 判断今天碰巧成立，枚举一重排就会静默失效。
+	if gpIsDrawMode() or gpIsConnectMode():
 		gpSel.gpSetNodes([])
 	return true
 
@@ -92,6 +112,12 @@ func gpSetMode(gpM: int) -> bool:
 # 当前模式是否为注释绘图工具之一？
 func gpIsDrawMode() -> bool:
 	return gpMode >= GP_FIRST_DRAW_MODE and gpMode <= GP_LAST_DRAW_MODE
+
+
+# Is the current mode one of the P3 connectivity tools (pipe / signal line)?
+# 当前模式是否为 P3 的连线工具（管道 / 信号线）之一？
+func gpIsConnectMode() -> bool:
+	return gpMode == GPMode.GP_PIPE or gpMode == GPMode.GP_SIGNAL
 
 
 # ---- reset ----

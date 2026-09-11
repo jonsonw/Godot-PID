@@ -39,6 +39,19 @@ To avoid collisions with Godot's native classes and third-party plugins in the g
 
 Do **not** rename: Godot virtual methods (`_ready`, `_draw`, `_gui_input`, `_process`…); engine built-ins (`position`, `name`, `size`, `visible`); dictionary keys (`"id"`, `"from"`, `"to"` — they are the data contract); single-letter coordinate loop vars (`x`, `y`, `z`, `w`, `h`).
 
+### Symbol id rule（强制 / mandatory）
+Every symbol definition carries an id of the form **`<source><CATEGORY><3-digit sequence>`**:
+- `L` = **library** symbol (ships with the release, read-only) — `LVALVE001`, `LPUMP003`.
+- `C` = **custom** symbol (user-authored, or derived from a built-in) — `CVALVE001`.
+- The category code is `gpCategory` with non-letters dropped and upper-cased (`valve` → `VALVE`).
+- The sequence counts **within** a category and is **never recycled**: allocation is
+  `max(existing) + 1`, so a retired number is never handed out again — reusing one would make
+  an old `*.pid.json` silently resolve to a different symbol.
+
+Never hand-write an id; always go through `GPSymbolNaming.gpAllocate` or
+`GPSymbolLibrary.gpAllocateCustomId`. `src/core/service/symbol_naming.gd` is the single
+authoritative definition, guarded by `tests/gp_test_symbol_naming.gd`.
+
 ## 中文
 
 感谢你关注并参与 G-PID —— 一个用 Godot 引擎构建的开源 P&ID 编辑器。
@@ -78,3 +91,14 @@ Do **not** rename: Godot virtual methods (`_ready`, `_draw`, `_gui_input`, `_pro
 - **文件名**：保持 `snake_case`（Godot 约定，不带前缀）—— `pid_graph.gd` 定义类 `GPPIDGraph`。
 
 **禁止改名**：Godot 虚方法（`_ready`、`_draw`、`_gui_input`、`_process` 等）；引擎内置属性（`position`、`name`、`size`、`visible`）；字典键（`"id"`、`"from"`、`"to"`，属数据契约）；单字母坐标循环变量（`x`、`y`、`z`、`w`、`h`）。
+
+### 图元标识 id 命名规则（强制）
+每个图元定义的 id 形如 **`<来源码><类别码><三位序号>`**：
+- `L` = **内置库**图元（随发行版自带、只读）—— `LVALVE001`、`LPUMP003`。
+- `C` = **自定义**图元（用户自建，或由内置图元派生）—— `CVALVE001`。
+- 类别码由 `gpCategory` 去掉非字母字符并大写得到（`valve` → `VALVE`）。
+- 序号在**类别内部**计数，且**永不复用**：分配取 `max(已有) + 1`，已退役的号码绝不再次发放 ——
+  复用会让旧 `*.pid.json` 静默解析到另一个图元。
+
+禁止手写 id，一律经 `GPSymbolNaming.gpAllocate` 或 `GPSymbolLibrary.gpAllocateCustomId` 分配。
+`src/core/service/symbol_naming.gd` 是唯一权威定义，由 `tests/gp_test_symbol_naming.gd` 守护。

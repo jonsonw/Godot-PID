@@ -27,6 +27,14 @@ func gpOnMove(gpWorld: Vector2) -> bool:
 	# 拖动整枚选中的注释图形以移动之。
 	elif gpAnno.gpHasShapeDrag():
 		gpAnno.gpOnShapeMove(gpWorld)
+	# Dragging an edge endpoint / routing vertex (P3-4): re-route or reconnect, previewed live.
+	# 拖动边的端点 / 布线顶点（P3-4）：实时预览改布线或改接。
+	elif gpCtx.gpEdgeGrips.gpIsDragging():
+		gpCtx.gpEdgeGrips.gpOnGripMove(gpWorld)
+	# Dragging a tag (位号) label (M10b): live preview, committed as one undo step on release.
+	# 拖动位号标签（M10b）：实时预览，释放时作为一个撤销步提交。
+	elif gpCtx.gpLabelGrips.gpIsDragging():
+		gpCtx.gpLabelGrips.gpOnGripMove(gpWorld)
 	return true
 
 
@@ -44,6 +52,19 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 	# 结束整枚图形的移动。
 	if gpAnno.gpHasShapeDrag():
 		gpAnno.gpEndShapeDrag()
+		gpCv.gpGraphChanged.emit()
+		gpCv.gpEmitStatus()
+		return true
+	# Finish an edge grip drag — commit one undo step (vertex re-route or endpoint reconnect).
+	# 结束边抓取点拖拽——提交一个撤销步（顶点改布线或端点改接）。
+	if gpCtx.gpEdgeGrips.gpIsDragging():
+		gpCtx.gpEdgeGrips.gpEndGripDrag()
+		gpCv.gpGraphChanged.emit()
+		gpCv.gpEmitStatus()
+		return true
+	# Finish a tag-label drag — commit one undo step. / 结束位号标签拖拽——提交一个撤销步。
+	if gpCtx.gpLabelGrips.gpIsDragging():
+		gpCtx.gpLabelGrips.gpEndGripDrag()
 		gpCv.gpGraphChanged.emit()
 		gpCv.gpEmitStatus()
 		return true

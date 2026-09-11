@@ -77,6 +77,144 @@ func gpTestNormalizeEmptyGlyph() -> void:
 	gpCheck(gpD.gpPorts.size() == 2, "empty glyph should still carry standard ports")
 
 
+# ---- P1: built-in symbols must SHIP with ports ----
+# ---- P1：内置图元必须自带端口 ----
+# Before P1 every built-in symbol had an empty gpPorts because the generator's SVG scan was
+# dead code (it matched namespace-prefixed tags against bare-tag SVGs). Pipes could therefore
+# only be attached to a node centre — "connect this line to the shell side of the exchanger"
+# was not expressible. These assertions are the guard that ports stay in the pack.
+# P1 之前每个内置图元的 gpPorts 都是空的，因为生成器的 SVG 扫描是死代码（用带命名空间前缀的
+# 标签去匹配裸标签 SVG）。于是管线只能连到节点中心 ——「把这条管线接到换热器壳程」无法表达。
+# 以下断言就是「端口必须留在包里」的护栏。
+
+# Legend glyphs (the three line-type samples) are artwork, not connectable symbols.
+# 图例符号（三个线型样例）是美术元素，不是可连接图元。
+# The three line-type samples are artwork, not connectable symbols. Ids follow the project
+# rule L/C + category + 3-digit sequence (see GPSymbolNaming).
+# 三个线型样例是美术元素，不是可连接图元。id 遵循项目规则 L/C + 类别 + 三位序号
+#（见 GPSymbolNaming）。
+const GP_LEGEND_IDS: Array[String] = [
+	"LGENERAL003", "LGENERAL002", "LGENERAL001",  # ProcessLine / InstrumentLine / ElectricalLine
+]
+
+
+func _gpBuiltinDefs() -> Array[GPSymbolDef]:
+	return GPSymbolPackIso_10628.gpDefs()
+
+
+func gpTestEveryBuiltinSymbolHasPorts() -> void:
+	var gpDefs: Array[GPSymbolDef] = _gpBuiltinDefs()
+	gpEq(gpDefs.size(), 25, "the ISO pack still holds 25 symbols")
+	for gpD in gpDefs:
+		if GP_LEGEND_IDS.has(gpD.gpId):
+			gpCheck(gpD.gpPorts.is_empty(), "legend glyph carries no ports: %s" % gpD.gpId)
+		else:
+			gpCheck(not gpD.gpPorts.is_empty(), "connectable symbol must carry ports: %s" % gpD.gpId)
+
+
+func gpTestBuiltinPortNamesAreUnique() -> void:
+	for gpD in _gpBuiltinDefs():
+		gpCheck(gpD.gpPortNamesUnique(), "port names are unique so port_id can be a name: %s"
+			% gpD.gpId)
+
+
+func gpTestMultiNozzleEquipment() -> void:
+	for gpD in _gpBuiltinDefs():
+		match gpD.gpId:
+			"LHEAT001", "LTANK001":  # 换热器 / 储罐
+				gpEq(gpD.gpPorts.size(), 4, "%s exposes four nozzles" % gpD.gpId)
+				gpEq(gpD.gpPortsOfType(GPPort.GP_NOZZLE).size(), 4,
+					"%s nozzles are all process nozzles" % gpD.gpId)
+			_:
+				pass
+
+
+# A control valve, an actuator and a positioner each take a signal line on their actuator
+# terminal — that is what makes "wire the controller to the valve" expressible at all.
+# 调节阀、执行器与定位器各有一个执行机构端子用于接信号线 —— 这正是「把控制器接到阀门上」
+# 得以表达的前提。
+func gpTestValveActuatorTerminals() -> void:
+	for gpName in ["调节阀", "阀门执行器", "阀门定位器"]:
+		var gpD: GPSymbolDef = _gpDefByDisplayName(gpName)
+		gpCheck(gpD != null, "symbol exists: %s" % gpName)
+		if gpD == null:
+			continue
+		gpEq(gpD.gpPortsOfType(GPPort.GP_ACTUATOR).size(), 1,
+			"%s has exactly one actuator terminal" % gpName)
+		gpEq(gpD.gpPortsOfType(GPPort.GP_NOZZLE).size(), 2,
+			"%s keeps its two process nozzles" % gpName)
+
+
+func gpTestTransmittersHaveProcessAndSignalPorts() -> void:
+	for gpName in ["流量变送器", "压力变送器", "液位变送器", "温度变送器"]:
+		var gpD: GPSymbolDef = _gpDefByDisplayName(gpName)
+		gpCheck(gpD != null, "symbol exists: %s" % gpName)
+		if gpD == null:
+			continue
+		gpEq(gpD.gpPortsOfType(GPPort.GP_NOZZLE).size(), 1,
+			"%s taps the process through one nozzle" % gpName)
+		gpEq(gpD.gpPortsOfType(GPPort.GP_SIGNAL).size(), 1,
+			"%s emits one signal" % gpName)
+
+
+# In-line indicators are pierced by the pipe, so they get two nozzles plus a signal terminal.
+# 就地指示表被管线贯穿，故两个管口 + 一个信号端子。
+func gpTestInLineIndicators() -> void:
+	for gpName in ["流量指示器", "压力指示器", "温度指示器", "液位指示器"]:
+		var gpD: GPSymbolDef = _gpDefByDisplayName(gpName)
+		gpCheck(gpD != null, "symbol exists: %s" % gpName)
+		if gpD == null:
+			continue
+		gpEq(gpD.gpPortsOfType(GPPort.GP_NOZZLE).size(), 2, "%s has two nozzles" % gpName)
+		gpEq(gpD.gpPortsOfType(GPPort.GP_SIGNAL).size(), 1,
+			"%s has one signal terminal" % gpName)
+
+
+func gpTestFieldEnclosureIsSignalOnly() -> void:
+	var gpD: GPSymbolDef = _gpDefByDisplayName("现场接线箱")
+	gpCheck(gpD != null, "field enclosure exists")
+	if gpD != null:
+		gpEq(gpD.gpPortsOfType(GPPort.GP_SIGNAL).size(), 2, "a field enclosure has two terminals")
+		gpEq(gpD.gpPortsOfType(GPPort.GP_NOZZLE).size(), 0, "a field enclosure has no nozzle")
+
+
+# The GDScript table and the generator's Python table must agree: a user symbol created from
+# a category gets its ports from GPSymbolCategories, so if the two drifted, a built-in valve
+# and a user valve would not behave the same when you try to connect a pipe.
+# GDScript 表与生成器的 Python 表必须一致：按类别创建的用户图元从 GPSymbolCategories 取端口，
+# 若两者脱节，内置阀门与用户阀门在连线时行为就会不同。
+func gpTestCategoryTableMatchesGeneratedPack() -> void:
+	for gpD in _gpBuiltinDefs():
+		var gpFromTable: Array[Dictionary] = GPSymbolCategories.gpPortsForSymbol(
+			gpD.gpId, gpD.gpCategory)
+		gpEq(gpFromTable.size(), gpD.gpPorts.size(),
+			"table and pack agree on the port count: %s" % gpD.gpId)
+		for gpI in range(mini(gpFromTable.size(), gpD.gpPorts.size())):
+			gpEq(str(gpFromTable[gpI].get("name", "")), gpD.gpPorts[gpI].gpName,
+				"table and pack agree on port %d of %s" % [gpI, gpD.gpId])
+			gpEq(str(gpFromTable[gpI].get("type", "")), gpD.gpPorts[gpI].gpType,
+				"table and pack agree on the purpose of port %d of %s" % [gpI, gpD.gpId])
+
+
+func _gpDefById(gpId: String) -> GPSymbolDef:
+	for gpD in _gpBuiltinDefs():
+		if gpD.gpId == gpId:
+			return gpD
+	return null
+
+
+# Look-up by display name. Since the L/C naming rule an id is ALLOCATED from the category,
+# so the sequence part shifts whenever a symbol is inserted before another one; tests that
+# name ids would break on every such insertion. The display name is the stable handle.
+# 按显示名查找。自 L/C 命名规则起，id 由类别「分配」而来，一旦在某个图元之前插入新图元，
+# 其后的序号就会平移；写死 id 的测试会在每次插入时失效。显示名才是稳定句柄。
+func _gpDefByDisplayName(gpName: String) -> GPSymbolDef:
+	for gpD in _gpBuiltinDefs():
+		if gpD.gpDisplayName == gpName:
+			return gpD
+	return null
+
+
 # A pack survives JSON stringify -> parse -> from_dict with its symbols intact.
 # 符号包经 JSON 序列化 -> 解析 -> from_dict 后应保持符号完整。
 func gpTestPackRoundTrip() -> void:

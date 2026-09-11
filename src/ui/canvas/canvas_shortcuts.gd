@@ -78,6 +78,18 @@ func gpOnEscape() -> void:
 		gpCv.gpPendingDef = null
 		gpCv.queue_redraw()
 		return
+	# P3-4: the in-place tag editor is the innermost layer — close it before anything else so a
+	# half-typed number is never stranded on screen. / 就地位号编辑器是最内层，先关闭它。
+	if gpCv.gpEdgeEditor.gpIsEditing():
+		gpCv.gpEdgeEditor.gpClose()
+		gpCv.queue_redraw()
+		return
+	# P3-4: an in-flight edge grip drag is abandoned next, before the tool/annotation cancels.
+	# 边抓取点拖拽进行中，其次放弃，早于工具 / 注释取消。
+	if gpCv.gpEdgeGrips.gpIsDragging():
+		gpCv.gpEdgeGrips.gpEndDrag()
+		gpCv.queue_redraw()
+		return
 	# One generic port instead of the canvas knowing which tool is which: the select tool
 	# abandons its group drag here, the draw tool drops its half-finished primitive.
 	# 一个通用端口取代「画布认识每个工具」：选择工具在此放弃整组拖拽，

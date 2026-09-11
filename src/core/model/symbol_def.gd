@@ -49,14 +49,41 @@ enum GPSymbolCategory { GP_EQUIPMENT, GP_VALVE, GP_PIPE, GP_FITTING, GP_INSULATI
 # (0,0) = 包络左上角，(1,1) = 右下角；"dir" 为可选的向外法线。
 @export var gpPorts: Array[GPPort] = []
 
-# Attribute template the user can fill in.
-# 用户可填写的属性模板。
+# Attribute template the user can fill in (LEGACY, untyped). Kept for round-tripping old
+# symbol packs; new code uses gpSchema below.
+# 用户可填写的属性模板（历史遗留，无类型）。保留以兼容旧图元包往返；新代码用下方的 gpSchema。
 @export var gpAttrsSchema: Dictionary = {}
 
-# Built-in flag (decision D3): ISO library symbols are read-only; the in-place editor derives a
-# custom_<id> copy instead of overwriting the original. User-authored symbols are not built-in.
-# 内置标志（决策 D3）：ISO 库图元只读；就地编辑器派生 custom_<id> 副本而非覆盖原图元。
-# 用户自建图元非内置。
+# Typed property schema (M8). Field DEFINITIONS live here, in the TYPE layer, so editing the
+# library propagates to every instance in every project — instances only store values.
+# 类型化属性 schema（M8）。字段**定义**位于此处（类型层），故改库会传播到所有项目的所有实例
+# —— 实例只存值。
+@export var gpSchema: GPPropertySchema = null
+
+# Tag prefix used by automatic numbering, e.g. "P" for pumps, "XV" for on/off valves.
+# Overridable per project by the numbering rule panel (M9b).
+# 自动编号所用的位号前缀，如泵的 "P"、开关阀的 "XV"。可由编号规则面板按项目覆盖（M9b）。
+@export var gpTagPrefix: String = ""
+
+# Canvas label template. DEFAULT SHOWS THE TAG ONLY — the library display name belongs to the
+# inspector, never to the drawing. Supported tokens: {tag} and {name}.
+# 画布标签模板。**默认只显示位号** —— 库的显示名属于属性面板，绝不属于图纸。
+# 支持的占位符：{tag} 与 {name}。
+@export var gpLabelFormat: String = GPPropertyResolver.GP_DEFAULT_LABEL_FORMAT
+
+# Default label anchor for every instance of this symbol (GPLabelAnchor.GP_*).
+# 本图元所有实例的默认标签锚点（GPLabelAnchor.GP_*）。
+@export var gpLabelAnchor: int = GPLabelAnchor.GPAnchor.GP_BELOW
+
+# Default label offset, NORMALISED (1.0 = half the envelope).
+# 默认标签偏移，归一化（1.0 = 半个包络）。
+@export var gpLabelOffset: Vector2 = Vector2.ZERO
+
+# Built-in flag (decision D3): ISO library symbols are read-only; editing one derives a
+# C-rule copy (C<CATEGORY><nnn>) instead of overwriting the original. User-authored
+# symbols are not built-in.
+# 内置标志（决策 D3）：ISO 库图元只读；编辑时派生 C 规则副本（C<类别码><三位序号>）
+# 而非覆盖原图元。用户自建图元非内置。
 @export var gpBuiltin: bool = false
 
 
@@ -92,6 +119,45 @@ func gpPortLocals() -> Array[Vector2]:
 	return gpOut
 
 
+# Look up a port by name. Returns null when there is no such port.
+# 按名称查找端口；不存在时返回 null。
+# INVARIANT: gpName is the "port_id" stored in GPPIDEdge.gpFromRef / gpToRef, and names must
+# be unique within one definition — see gpPortNamesUnique(). The edge's port_id is a HINT,
+# not a contract: GPPortResolver degrades gracefully when a name is missing or renamed, so
+# editing a symbol's ports degrades a pipe's look instead of silently breaking the connection.
+# 不变式：gpName 就是 GPPIDEdge.gpFromRef / gpToRef 里的 "port_id"，且同一定义内名称必须唯一
+# —— 见 gpPortNamesUnique()。边上的 port_id 是「提示」而非「契约」：名称缺失或被改名时
+# GPPortResolver 会优雅降级，故编辑图元端口只让管线外观降级，而不会静默断掉连接。
+func gpPortByName(gpNameIn: String) -> GPPort:
+	for gpP in gpPorts:
+		if gpP.gpName == gpNameIn:
+			return gpP
+	return null
+
+
+# Every port of the given purpose, in declaration order.
+# 指定用途的全部端口，按声明顺序。
+# [param gpTypeIn] one of GPPort.GP_NOZZLE / GP_ACTUATOR / GP_SIGNAL / GP_TERMINAL.
+# [param gpTypeIn] 取 GPPort.GP_NOZZLE / GP_ACTUATOR / GP_SIGNAL / GP_TERMINAL 之一。
+func gpPortsOfType(gpTypeIn: String) -> Array[GPPort]:
+	var gpOut: Array[GPPort] = []
+	for gpP in gpPorts:
+		if gpP.gpType == gpTypeIn:
+			gpOut.append(gpP)
+	return gpOut
+
+
+# Whether every port name is unique — the invariant that lets port_id be a plain name.
+# 端口名是否全部唯一 —— 该不变式使 port_id 可以就是一个名字。
+func gpPortNamesUnique() -> bool:
+	var gpSeen: Dictionary = {}
+	for gpP in gpPorts:
+		if gpSeen.has(gpP.gpName):
+			return false
+		gpSeen[gpP.gpName] = true
+	return true
+
+
 # Derived render spec: rebuild the legacy {paths,circles,rects,box} dict from gpShapes.
 # 派生渲染规格：由 gpShapes 重建历史 {paths,circles,rects,box} 字典。
 # Kept so the mature, ISO-compliant painter / normalizer keep working unchanged.
@@ -109,7 +175,7 @@ func gpToDict() -> Dictionary:
 	var gpPortsOut: Array = []
 	for gpP in gpPorts:
 		gpPortsOut.append(gpP.gpToDict())
-	return {
+	var gpOut: Dictionary = {
 		"id": gpId,
 		"display_name": gpDisplayName,
 		"category": gpCategory,
@@ -120,6 +186,13 @@ func gpToDict() -> Dictionary:
 		"attrs_schema": gpAttrsSchema.duplicate(true),
 		"builtin": gpBuiltin,
 	}
+	if gpSchema != null:
+		gpOut["schema"] = gpSchema.gpToDict()
+	gpOut["tag_prefix"] = gpTagPrefix
+	gpOut["label_format"] = gpLabelFormat
+	gpOut["label_anchor"] = gpLabelAnchor
+	gpOut["label_offset"] = [gpLabelOffset.x, gpLabelOffset.y]
+	return gpOut
 
 
 # Rebuild this symbol definition from a dictionary (inverse of gpToDict).
@@ -158,3 +231,23 @@ func gpFromDict(gpD: Dictionary) -> void:
 
 	gpAttrsSchema = gpD.get("attrs_schema", {})
 	gpBuiltin = gpD.get("builtin", false)
+
+	# Typed schema (M8). Absent in every pre-M8 pack, hence the null default — this is the
+	# "read new fields with .get(key, default)" rule that keeps old archives loadable.
+	# 类型化 schema（M8）。M8 之前的图元包都没有，故默认 null —— 这正是
+	# 「新增字段一律 .get(key, default) 读取」规则，保证旧存档仍可载入。
+	gpSchema = null
+	var gpSchemaIn: Variant = gpD.get("schema", null)
+	if gpSchemaIn is Dictionary:
+		var gpSc: GPPropertySchema = GPPropertySchema.new()
+		gpSc.gpFromDict(gpSchemaIn as Dictionary)
+		gpSchema = gpSc
+
+	gpTagPrefix = gpD.get("tag_prefix", "")
+	gpLabelFormat = gpD.get("label_format", GPPropertyResolver.GP_DEFAULT_LABEL_FORMAT)
+	gpLabelAnchor = int(gpD.get("label_anchor", GPLabelAnchor.GPAnchor.GP_BELOW))
+	var gpOff: Array = gpD.get("label_offset", [])
+	if gpOff.size() >= 2:
+		gpLabelOffset = Vector2(float(gpOff[0]), float(gpOff[1]))
+	else:
+		gpLabelOffset = Vector2.ZERO

@@ -31,26 +31,105 @@ const GP_FALLBACK_SIZE: Vector2 = Vector2(64, 64)
 # 类别 → 标准端口锚点，相对标称包络归一化到 0..1。
 # (0,0) = top-left of the envelope, (1,1) = bottom-right; "dir" is the outward normal.
 # (0,0) = 包络左上角，(1,1) = 右下角；"dir" 为向外法线方向。
+# "type" is the port purpose and decides which line kind may attach (see GPPort.GP_*).
+# "type" 是端口用途，决定可接哪类连线（见 GPPort.GP_*）。
 const GP_STD_PORTS: Dictionary = {
 	"valve": [
-		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0]},
-		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0]},
+		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
 	],
 	"pump": [
-		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0]},
-		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0]},
+		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
 	],
 	"heat": [
-		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0]},
-		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0]},
+		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
 	],
 	"tank": [
-		{"name": "top", "pos": [0.5, 0.0], "dir": [0, -1]},
-		{"name": "bottom", "pos": [0.5, 1.0], "dir": [0, 1]},
+		{"name": "top", "pos": [0.5, 0.0], "dir": [0, -1], "type": "NOZZLE"},
+		{"name": "bottom", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
 	],
+	# A transmitter is tapped into the process (proc, bottom) and emits a signal (sig, top).
+	# 变送器从工艺侧取压/取样（proc 在下），并向上发出信号（sig 在上）。
 	"instrument": [
-		{"name": "in", "pos": [0.5, 1.0], "dir": [0, 1]},
+		{"name": "proc", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
+		{"name": "sig", "pos": [0.5, 0.0], "dir": [0, -1], "type": "SIGNAL"},
 	],
+}
+
+# Per-symbol port overrides, keyed by symbol id. A present key REPLACES the category table
+# entirely, so a four-nozzle heat exchanger does not have to inherit a two-nozzle default.
+# 按符号 id 的端口覆盖表。存在该键即「整体替换」类别表，故四管口换热器无需继承两管口默认值。
+#
+# Mirrors PORT_OVERRIDES in tools/gen_symbol_packs.py. gp_test_symbol_pack.gd asserts that a
+# built-in symbol and a user symbol of the same category end up with the same ports, because
+# GPSymbolNormalizer falls back to this table for user symbols with no ports of their own.
+# 与 tools/gen_symbol_packs.py 的 PORT_OVERRIDES 镜像。gp_test_symbol_pack.gd 断言同类别的
+# 内置图元与用户图元端口一致，因为 GPSymbolNormalizer 对用户自建的无端口图元走本表回退。
+const GP_PORT_OVERRIDES: Dictionary = {
+	# 换热器：壳程两个 + 管程两个 / shell side x2 + tube side x2
+	"LHEAT001": [
+		{"name": "shell_in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "shell_out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+		{"name": "tube_in", "pos": [0.5, 0.0], "dir": [0, -1], "type": "NOZZLE"},
+		{"name": "tube_out", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
+	],
+	# 储罐：顶 / 底 / 两侧 / tank: top, bottom and two side nozzles
+	"LTANK001": [
+		{"name": "top", "pos": [0.5, 0.0], "dir": [0, -1], "type": "NOZZLE"},
+		{"name": "bottom", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
+		{"name": "left", "pos": [0.0, 0.25], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "right", "pos": [1.0, 0.75], "dir": [1, 0], "type": "NOZZLE"},
+	],
+	# 调节阀 / 执行器 / 定位器：两个管口 + 顶部执行机构接点（接信号线）
+	# control valve / actuator / positioner: two nozzles + a top actuator terminal
+	"LVALVE003": [
+		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+		{"name": "act", "pos": [0.5, 0.0], "dir": [0, -1], "type": "ACTUATOR"},
+	],
+	"LVALVE008": [
+		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+		{"name": "act", "pos": [0.5, 0.0], "dir": [0, -1], "type": "ACTUATOR"},
+	],
+	"LVALVE007": [
+		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+		{"name": "act", "pos": [0.5, 0.0], "dir": [0, -1], "type": "ACTUATOR"},
+	],
+	# 就地指示表（FI/PI/TI/LI）：图形左右被管线贯穿，故是两个管口 + 顶部信号端子
+	# in-line indicators: the glyph is pierced left-to-right by the pipe, plus a signal terminal
+	"LINSTRUMENT002": [
+		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+		{"name": "sig", "pos": [0.5, 0.0], "dir": [0, -1], "type": "SIGNAL"},
+	],
+	"LINSTRUMENT006": [
+		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+		{"name": "sig", "pos": [0.5, 0.0], "dir": [0, -1], "type": "SIGNAL"},
+	],
+	"LINSTRUMENT008": [
+		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+		{"name": "sig", "pos": [0.5, 0.0], "dir": [0, -1], "type": "SIGNAL"},
+	],
+	"LINSTRUMENT004": [
+		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+		{"name": "sig", "pos": [0.5, 0.0], "dir": [0, -1], "type": "SIGNAL"},
+	],
+	# 现场接线箱：两个信号端子，无工艺管口 / field enclosure: two signal terminals only
+	"LINSTRUMENT001": [
+		{"name": "sig_in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "SIGNAL"},
+		{"name": "sig_out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "SIGNAL"},
+	],
+	# 线型图例符号：它们是图例美术，不是可连接图元 / legend glyphs, deliberately not connectable
+	"LGENERAL003": [],
+	"LGENERAL002": [],
+	"LGENERAL001": [],
 }
 
 # Glyph fit margin inside the 100x100 unit box during normalization.
@@ -87,6 +166,21 @@ static func gpStandardPorts(gpCat: String) -> Array[Dictionary]:
 	for gpP in gpSrc:
 		gpOut.append((gpP as Dictionary).duplicate(true))
 	return gpOut
+
+
+# Ports for a symbol: the per-id override table wins, then the per-category standard table.
+# 某图元的端口：按 id 覆盖表优先，其次按类别标准表。
+# Mirrors tools/gen_symbol_packs.py::_ports_for so a built-in symbol and a user symbol of the
+# same category get identical ports. gp_test_symbol_pack.gd asserts the two stay in step.
+# 与 tools/gen_symbol_packs.py::_ports_for 镜像，使同类别的内置图元与用户图元端口完全一致。
+# gp_test_symbol_pack.gd 断言两侧不脱节。
+static func gpPortsForSymbol(gpSymbolId: String, gpCat: String) -> Array[Dictionary]:
+	var gpOut: Array[Dictionary] = []
+	if GP_PORT_OVERRIDES.has(gpSymbolId):
+		for gpP in (GP_PORT_OVERRIDES[gpSymbolId] as Array):
+			gpOut.append((gpP as Dictionary).duplicate(true))
+		return gpOut
+	return gpStandardPorts(gpCat)
 
 
 # List all known category keys (stable order for UI dropdowns).
