@@ -1,3 +1,4 @@
+class_name GPMainWindow
 extends Control
 
 # Main scene controller. The CAD-style layout (top menu / left palette / center
@@ -21,6 +22,9 @@ var gpCurrentPath: String = ""
 
 # File dialog (open / save-as), created once and reused.
 # 打开/另存为用的文件对话框，创建一次重复使用。
+# 架构优化 §3.2：文件生命周期协调者（保存/打开/导入/导出/关闭拦截）。
+# File lifecycle coordinator (save/open/import/export/close guard).
+var gpFileCoord: GPFileCoordinator = null
 var gpFileDialog: FileDialog
 
 # What the in-flight file dialog is for: "save" / "open" / "import" / "export_<kind>".
@@ -179,7 +183,11 @@ func _ready() -> void:
 	# 在 Control 根上用 _notification(NOTIFICATION_WM_CLOSE_REQUEST) 并不可靠地送达，
 	# 红叉点击时三选一对话框因此从不出现。close_requested 在真正的 Window 上触发，
 	# 由我们决定（干净→退出，脏→三选一）而非引擎自退。
-	get_window().close_requested.connect(_gpOnCloseRequested)
+	# 架构优化 §3.2：文件生命周期已抽出为 GPFileCoordinator，根类仅做装配与转发。
+	# The file lifecycle now lives in GPFileCoordinator; the root only assembles.
+	gpFileCoord = GPFileCoordinator.new()
+	gpFileCoord.gpHost = self
+	get_window().close_requested.connect(gpFileCoord.gpOnCloseRequested)
 
 	# Restore any symbol packs the user exported in a previous session so they
 	# re-appear in the palette and on the canvas after a restart.
@@ -262,7 +270,7 @@ func _ready() -> void:
 	gpFileDialog = FileDialog.new()
 	gpFileDialog.access = FileDialog.ACCESS_FILESYSTEM
 	gpFileDialog.add_filter("*.pid.json", I18n.gpTr("doc.pid_filter"))
-	gpFileDialog.file_selected.connect(_gpOnFileSelected)
+	gpFileDialog.file_selected.connect(gpFileCoord.gpOnFileSelected)
 	add_child(gpFileDialog)
 
 	I18n.gpLocaleChanged.connect(_gpOnLocaleChanged)
@@ -762,13 +770,13 @@ func _gpOnMenu(gpAction: String) -> void:
 			gpActiveCanvas().queue_redraw()
 			_gpSetState("status.cleared")
 		"file_save":
-			_gpSaveProject(false)
+			gpFileCoord.gpSaveProject(false)
 		"file_save_as":
-			_gpSaveProject(true)
+			gpFileCoord.gpSaveProject(true)
 		"file_open":
-			_gpOpenProject()
+			gpFileCoord.gpOpenProject()
 		"file_import":
-			_gpImportProject()
+			gpFileCoord.gpImportProject()
 		"file_quit":
 			# Route through the SAME close guard as the OS window-close button so the
 			# unsaved-changes dialog behaves identically whether the user clicks the red X
@@ -776,13 +784,13 @@ func _gpOnMenu(gpAction: String) -> void:
 			# NOTIFICATION_WM_CLOSE_REQUEST at all.
 			# 走与 OS 关闭按钮**完全相同**的关闭护栏，使未保存对话框在「点红 X」与
 			# 「菜单退出」两种入口下表现一致。用于排查红 X 是否真的触发了关闭通知。
-			_gpOnCloseRequested()
+			gpFileCoord.gpOnCloseRequested()
 		"export_project":
-			_gpPickExportPath("project")
+			gpFileCoord.gpPickExportPath("project")
 		"export_library":
-			_gpPickExportPath("library")
+			gpFileCoord.gpPickExportPath("library")
 		"export_config":
-			_gpPickExportPath("config")
+			gpFileCoord.gpPickExportPath("config")
 		"view_zoom_in":
 			gpActiveCanvas().gpZoomStep(1.0)
 		"view_zoom_out":
@@ -944,268 +952,31 @@ func _gpMenuRedo() -> void:
 # Close path: clean -> quit immediately; dirty -> ask, never decide for the user.
 # 关闭路径：干净 -> 立即退出；脏 -> 询问，绝不替用户决定。
 func _gpOnCloseRequested() -> void:
-	if not gpDocManager.gpIsDirty():
-		get_tree().quit()
-		return
-	_gpAskUnsaved()
-
-
-# Three-way confirmation: Save / Don't Save / Cancel.
-# 三选一确认：保存 / 不保存 / 取消。
-# "Don't Save" is offered because a user may be closing precisely BECAUSE the edit was a
-# mistake — forcing a save in that case would overwrite a good file with a bad one.
-# 提供「不保存」是因为用户关闭窗口**恰恰可能**因为这次编辑是个错误 ——
-# 此时强制保存会用坏数据覆盖好文件。
+	gpFileCoord.gpOnCloseRequested()
 func _gpAskUnsaved() -> void:
-	var gpDlg: ConfirmationDialog = ConfirmationDialog.new()
-	gpDlg.title = I18n.gpTr("dialog.unsaved_title")
-	gpDlg.dialog_text = I18n.gpTr("dialog.unsaved_text")
-	gpDlg.get_ok_button().text = I18n.gpTr("dialog.unsaved_save")
-	gpDlg.get_cancel_button().text = I18n.gpTr("dialog.cancel")
-	gpDlg.add_button(I18n.gpTr("dialog.unsaved_discard"), true, "discard")
-	gpDlg.confirmed.connect(_gpOnUnsavedSave.bind(gpDlg))
-	gpDlg.canceled.connect(gpDlg.queue_free)
-	gpDlg.custom_action.connect(_gpOnUnsavedDiscard.bind(gpDlg))
-	add_child(gpDlg)
-	gpDlg.popup_centered()
-
-
-# "Save" chosen: save (asking for a path first when there is none), then quit.
-# 选择了「保存」：先保存（无路径时先询问路径），再退出。
+	gpFileCoord.gpAskUnsaved()
 func _gpOnUnsavedSave(gpDlg: ConfirmationDialog) -> void:
-	gpDlg.queue_free()
-	if gpCurrentPath == "":
-		# No path yet: the save-as dialog must run first, and the quit waits for it.
-		# 尚无路径：必须先走另存为对话框，退出等它完成。
-		gpQuitAfterSave = true
-		_gpSaveProject(true)
-		return
-	_gpSaveProject(false)
-	# Only quit if the save actually cleared the dirty flag; a failed save must leave the
-	# window open, otherwise the guard would be the thing that loses the work.
-	# 仅在保存确实清除了脏标记后才退出；保存失败必须让窗口保持打开，
-	# 否则这道护栏本身就变成了丢失工作的原因。
-	if not gpDocManager.gpIsDirty():
-		get_tree().quit()
-
-
-# "Don't Save" chosen: discard and quit.
-# 选择了「不保存」：丢弃并退出。
+	gpFileCoord.gpOnUnsavedSave(gpDlg)
 func _gpOnUnsavedDiscard(gpAction: StringName, gpDlg: ConfirmationDialog) -> void:
-	if str(gpAction) != "discard":
-		return
-	gpDlg.queue_free()
-	get_tree().quit()
-
-
-# ============================ project save / open ============================
-# ============================ 工程存盘 / 打开 ============================
-# Save the active project. Reuses the last path unless gpForcePick is true (Save As).
-# 保存当前工程。除非 gpForcePick 为真（另存为），否则复用上次的路径。
+	gpFileCoord.gpOnUnsavedDiscard(gpAction, gpDlg)
 func _gpSaveProject(gpForcePick: bool) -> void:
-	if gpForcePick or gpCurrentPath == "":
-		# No path yet (or Save As): ask the user via the file dialog.
-		# 尚无路径（或另存为）：用文件对话框询问用户。
-		gpPendingFileAction = "save"
-		gpFileDialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
-		gpFileDialog.popup_centered()
-		return
-	_gpWriteProject(gpCurrentPath)
-
-
-# Open an existing project from disk.
-# 从磁盘打开已有工程。
+	gpFileCoord.gpSaveProject(gpForcePick)
 func _gpOpenProject() -> void:
-	gpPendingFileAction = "open"
-	gpFileDialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	gpFileDialog.popup_centered()
-
-
-# Merge an archive INTO the current drawing (non-destructive: nothing here is replaced).
-# 把档案**合并进**当前图纸（非破坏：此处不替换任何东西）。
+	gpFileCoord.gpOpenProject()
 func _gpImportProject() -> void:
-	gpPendingFileAction = "import"
-	gpFileDialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	gpFileDialog.popup_centered()
-
-
-# Ask where to write an export container. Export is NOT save-as: the current path is
-# untouched and the in-memory drawing is not modified.
-# 询问导出容器写到哪里。导出不是另存为：当前路径不变，内存中的图纸也不被修改。
+	gpFileCoord.gpImportProject()
 func _gpPickExportPath(gpKind: String) -> void:
-	gpPendingFileAction = "export_" + gpKind
-	gpFileDialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
-	gpFileDialog.popup_centered()
-
-
-# Forward the file-dialog result to the right handler.
-# 把文件对话框的结果转交给对应处理。
+	gpFileCoord.gpPickExportPath(gpKind)
 func _gpOnFileSelected(gpPath: String) -> void:
-	if gpPendingFileAction == "save":
-		_gpWriteProject(gpPath)
-	elif gpPendingFileAction == "open":
-		_gpReadProject(gpPath)
-	elif gpPendingFileAction == "import":
-		_gpDoImport(gpPath)
-	elif gpPendingFileAction.begins_with("export_"):
-		_gpDoExport(gpPath, gpPendingFileAction.trim_prefix("export_"))
-
-
-# Serialize the active graph (with embedded user packs) and write it to disk.
-# 把活动图（含内嵌用户图元包）序列化并写入磁盘。
-# The actual file mechanics live in GPProjectIO (single source of truth for *.pid.json);
-# this method only owns UI-side concerns (embedding packs, status, path bookkeeping).
-# 真正的文件机制在 GPProjectIO（*.pid.json 的单一事实来源）；本方法仅负责 UI 关注点
-# （嵌入图元包、状态栏、路径记账）。
+	gpFileCoord.gpOnFileSelected(gpPath)
 func _gpWriteProject(gpPath: String) -> void:
-	# Embed custom user packs so the file is self-contained (data sovereignty).
-	# 嵌入用户自定义图元包，使文件自包含（数据主权）。
-	gpActiveGraph().gpEmbedUserPacks(GPSymbolLibrary.gpUserPacks())
-	# M12: stamp the library's schema fingerprints into the file so a later open can detect
-	# that a field was added, renamed or deleted in the meantime.
-	# M12：把库的 schema 指纹盖进文件，使日后打开能察觉期间字段被增 / 改名 / 删过。
-	gpActiveGraph().gpSchemaFingerprints = GPPropertyResolver.gpFingerprintsFor(gpDefs)
-	var gpFilePath: String = GPProjectIO.gpEnsurePidExt(gpPath)
-	# A leftover .tmp means the last save died mid-write. Discard it: the target is still the
-	# previous good copy, and a stale .tmp would otherwise confuse a later reader (E4).
-	# 残留的 .tmp 意味着上次保存写了一半就死了。清掉它：目标仍是上一份完好副本，
-	# 而陈旧的 .tmp 否则会迷惑日后的读取方（E4）。
-	if GPAtomicFile.gpHasTempRemains(gpFilePath):
-		GPAtomicFile.gpDiscardTempRemains(gpFilePath)
-		_gpSetState("status.tmp_cleaned", [gpFilePath])
-	# Prefer the GPIOResult API: it carries a machine-readable code plus an i18n reason key,
-	# so the shell can explain WHY a save failed instead of only knowing that it did.
-	# 优先使用 GPIOResult API：它携带机器可读码与 i18n 原因键，使外壳能解释保存「为何」失败，
-	# 而不只是知道失败了。
-	# Multi-sheet projects are written as a v3 container; a single-sheet project keeps the
-	# v2 shape so archives written before this feature stay byte-stable.
-	# 多图纸工程写成 v3 容器；单图纸工程保持 v2 形态，使本功能之前写出的存档保持字节稳定。
-	var gpSheets: Array = gpCenter.gpToSheets()
-	var gpWriteResult: GPIOResult
-	if gpSheets.size() > 1:
-		gpWriteResult = GPProjectIO.gpWriteSheetsResult(gpSheets, gpFilePath)
-	else:
-		gpWriteResult = GPProjectIO.gpWriteProjectResult(gpActiveGraph(), gpFilePath)
-	if not gpWriteResult.gpIsOk():
-		_gpSetState("status.save_fail", [gpFilePath])
-		return
-	gpCurrentPath = gpFilePath
-	# M6: a successful save clears the unsaved-dirty flag so the title bar / project tree update.
-	# M6：保存成功清除未保存脏标记，使标题栏/工程树同步。
-	gpDocManager.gpClearDirty()
-	# Honour a pending quit from the close guard (path-less save-as on exit).
-	# 兑现关闭拦截留下的待退出（退出时无路径的另存为）。
-	if gpQuitAfterSave:
-		gpQuitAfterSave = false
-		get_tree().quit()
-		return
-	var gpPackCount: int = gpActiveGraph().gpUserSymbolPacks.size()
-	_gpSetState("status.saved_with_packs", [gpFilePath, gpPackCount])
-
-
-# Read a project from disk and swap it into the active canvas.
-# 从磁盘读入工程并替换为当前活动画布。
-# File parsing/decoding is delegated to GPProjectIO; the graph-swap and UI refresh that
-# follow remain here because they touch the canvas, dock and selection state.
-# 文件解析/解码交给 GPProjectIO；其后的图切换与 UI 刷新仍在此处，因为它们涉及画布、停靠栏与选择状态。
+	gpFileCoord.gpWriteProject(gpPath)
 func _gpReadProject(gpPath: String) -> void:
-	# Read as SHEETS, not as one graph: a v3 file may carry several pages, and even a v1/v2
-	# file comes back as a one-element list, so there is no special case.
-	# 以**图纸**为单位读取，而非读成一张图：v3 文件可能含多页，
-	# 即便 v1/v2 文件也返回单元素列表，故无特例分支。
-	# GPIOResult distinguishes a missing file from malformed JSON, and gpReadSheets keeps
-	# that taxonomy (io.open_failed vs io.parse_failed).
-	# GPIOResult 区分「文件缺失」与「JSON 损坏」，gpReadSheets 保持该分类
-	# （io.open_failed 与 io.parse_failed）。
-	var gpSheetsResult: GPIOResult = GPProjectIO.gpReadSheets(gpPath)
-	if not gpSheetsResult.gpIsOk():
-		_gpSetState("status.load_fail", [gpPath])
-		return
-	var gpSheets: Array = gpSheetsResult.gpPayload as Array
-	if gpSheets.is_empty():
-		_gpSetState("status.load_fail", [gpPath])
-		return
-	var gpNewGraph: GPPIDGraph = (gpSheets[0] as GPSheet).gpGraph
-	# Rebuild EVERY tab, not just the active one: a multi-sheet file whose extra sheets were
-	# silently dropped would look fine until the engineer printed the missing page.
-	# 重建**每个**标签页，而不只是活动页：一个多图纸文件若其余图纸被静默丢弃，
-	# 在工程师打印那张缺页之前看起来一切正常。
-	gpCenter.gpLoadSheets(gpSheets)
-	gpActiveCanvas().gpGraph = gpNewGraph
-	# M6: swap the active document in the manager (resets dirty, announces the change on the bus).
-	# M6：在管理器中切换当前文档（重置脏标记并总线通告变更）。
-	gpDocManager.gpSetGraph(gpNewGraph)
-	gpDefs = GPSymbolLibrary.gpDefaultDefs()
-	_gpSyncInspectorDefs()
-	# M12: the library may have moved on since this file was saved. Migrate renamed fields
-	# first (values follow the rename), then TELL the user — an unreported field change is how
-	# a drawing quietly stops matching the plant.
-	# M12：自本文件存盘以来，库可能已经变了。先迁移改名字段（取值跟随改名），
-	# 再**告知**用户 —— 不报告的字段变更正是图纸悄悄与现场脱节的原因。
-	_gpReconcileLibraryDrift(gpNewGraph)
-	gpLeftDock.gpPopulate(gpDefs)
-	gpActiveCanvas().gpDefs = gpDefs
-	gpActiveCanvas().gpClearSelection()
-	gpActiveCanvas().gpConnectFrom = ""
-	gpActiveCanvas().gpShapeSel.clear()
-	gpActiveCanvas().queue_redraw()
-	gpCurrentPath = gpPath
-	_gpSetState("status.loaded_with_packs", [gpPath, gpNewGraph.gpUserSymbolPacks.size()])
-
-
-# Merge an archive into the active drawing.
-# 把档案合并进活动图纸。
-# The archive may be v1/v2/v3: the migration chain runs inside gpReadArchive, so an old
-# file is upgraded rather than rejected.
-# 档案可以是 v1/v2/v3：迁移链在 gpReadArchive 内部运行，故旧文件被升级而非拒绝。
+	gpFileCoord.gpReadProject(gpPath)
 func _gpDoImport(gpPath: String) -> void:
-	var gpRead: GPIOResult = GPProjectImport.gpReadArchive(gpPath)
-	if not gpRead.gpIsOk():
-		_gpSetState(gpRead.gpMessageKey, [gpPath])
-		return
-	var gpGraph: GPPIDGraph = gpActiveGraph()
-	var gpBefore: int = gpGraph.gpNodes.size()
-	var gpMerge: GPIOResult = GPProjectImport.gpMergeInto(gpGraph,
-		gpRead.gpPayload as Dictionary)
-	if not gpMerge.gpIsOk():
-		_gpSetState("status.import_fail", [gpPath])
-		return
-	var gpReport: GPImportReport = gpMerge.gpPayload as GPImportReport
-	# Imported symbols may be new to the library, so both docks must be rebuilt.
-	# 导入的图元对库可能是新的，故两个停靠栏都必须重建。
-	gpDefs = GPSymbolLibrary.gpDefaultDefs()
-	gpLeftDock.gpPopulate(gpDefs)
-	gpActiveCanvas().gpDefs = gpDefs
-	gpActiveCanvas().queue_redraw()
-	# An import IS an edit: the drawing changed, so the dirty flag must follow.
-	# 导入**就是**一次编辑：图纸变了，脏标记必须跟着走。
-	gpDocManager.gpMarkDirty()
-	_gpSetState("status.imported", [gpPath, gpReport.gpCountOf(GPImportReport.GP_ERROR),
-		gpReport.gpCountOf(GPImportReport.GP_WARNING)])
-	# Warnings are not shown inline yet; the count in the status bar is the honest minimum
-	# (a silent "imported OK" would hide a renamed tag).
-	# 警告尚未内联展示；状态栏里的计数是诚实的最低限度
-	# （一句静默的「导入成功」会掩盖被改名的位号）。
-	if gpReport.gpCountOf(GPImportReport.GP_ERROR) > 0:
-		print("G-PID import report: ", gpReport.gpSummary())
-
-
-# Write one of the three export containers.
-# 写出三种导出容器之一。
+	gpFileCoord.gpDoImport(gpPath)
 func _gpDoExport(gpPath: String, gpKind: String) -> void:
-	var gpPacks: Array = GPSymbolLibrary.gpUserPacks()
-	var gpOut: GPIOResult = GPProjectExport.gpExportToFile(gpKind, gpPath,
-		gpActiveGraph(), gpPacks)
-	if not gpOut.gpIsOk():
-		_gpSetState(gpOut.gpMessageKey, [gpPath])
-		return
-	var gpStats: Dictionary = gpOut.gpPayload as Dictionary
-	_gpSetState("status.exported", [gpPath, int(gpStats.get("nodes", 0)),
-		int(gpStats.get("edges", 0))])
-
-
-# Open the settings dialog.
-# 打开设置对话框。
+	gpFileCoord.gpDoExport(gpPath, gpKind)
 func _gpOpenSettings() -> void:
 	var gpDlg: GPSettingsDialog = (load("res://scenes/settings_dialog.tscn") as PackedScene).instantiate()
 	add_child(gpDlg)
