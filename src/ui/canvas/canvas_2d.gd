@@ -156,6 +156,15 @@ var gpDefs: Array[GPSymbolDef] = []
 # 持有增量视图缓存与同步逻辑的图绑定器（组合子节点）。
 var gpBinder: GPGraphBinder = null
 
+# Injected render-style snapshot (架构优化 §4.2). Built from Settings / I18n at assembly and
+# pushed into the binder; rebuilt + re-pushed whenever locale / font / pipe-tag style changes so
+# the render layer never reads an autoload. Null only when the canvas is used headlessly without
+# a live app (the views then fall back to their own defaults).
+# 注入的渲染样式快照（架构优化 §4.2）。在装配时由 Settings / I18n 构造并推入绑定器；
+# 语言 / 字号 / 位号样式变化时重建并重推，使 render 层永不读 autoload。仅当画布在脱离
+# 现场环境下使用（视图回落自身默认值）时为 null。
+var gpRenderStyle: GPRenderStyle = null
+
 # ---- 架构优化 §3.4：四个实现类（1 root + 4 impl，非破坏性） ----
 # ---- Architecture §3.4: the four implementation classes (1 root + 4 impl, non-breaking) ----
 # Each one owns one responsibility end to end and reaches the canvas only through its public
@@ -398,6 +407,12 @@ func _ready() -> void:
 	gpBinder.name = "GraphBinder"
 	add_child(gpBinder)
 	gpBinder.gpWorldRoot = gpWorldRoot
+	# 架构优化 §4.2：构造渲染样式快照并注入绑定器，使 render 层不读 autoload。
+	# 订阅语言 / 字号 / 位号样式变化，变化时重建快照并显式重推（见下方三个回调）。
+	# Architecture §4.2: build the render-style snapshot and inject it so the render layer
+	# stays autoload-free; locale / font / pipe-tag changes rebuild + re-push it (see callbacks).
+	gpRenderStyle = _gpBuildRenderStyle()
+	gpBinder.gpStyle = gpRenderStyle
 	# Create the drawing delegate (P2 split). It borrows this Control as its CanvasItem.
 	# 创建绘制委托（P2 拆分）。它以本 Control 作为绘制目标 CanvasItem。
 	_gpOverlay = GPCanvasOverlay.new(self)
@@ -436,7 +451,7 @@ func _ready() -> void:
 	if _gpSettings != null and _gpSettings.has_signal("gpSymbolStyleChanged"):
 		_gpSettings.gpSymbolStyleChanged.connect(_gpOnSymbolStyleChanged)
 	if _gpSettings != null and _gpSettings.has_signal("gpPipeTagStyleChanged"):
-		_gpSettings.gpPipeTagStyleChanged.connect(gpSymbolLayer.gpRefreshEdges)
+		_gpSettings.gpPipeTagStyleChanged.connect(_gpOnTagStyleChanged)
 	# Bridge the canvas's own gpGraphChanged funnel into the app event bus (M2): one channel, so
 	# the tool layer keeps emitting unchanged while new subscribers listen on the bus. The core
 	# GPPIDGraph emits a raw signal; the canvas is the single place that maps it onto the bus
@@ -499,16 +514,72 @@ func _gpForwardGraphChanged() -> void:
 	gpEvents.gpGraphChanged.emit(_gpGraphRef)
 
 
-# React to language change by refreshing symbol labels.
-# 语言变化时刷新图元标签。
+# React to language change: rebuild the style snapshot and re-push it into every view.
+# 语言变化时重建样式快照并重新推入所有视图。
 func _gpOnLocaleChanged(_gpLocale: String) -> void:
-	gpSymbolLayer.gpRefreshSymbols()
+	_gpRebuildRenderStyle()
 
 
-# React to symbol font/style change by refreshing symbol labels.
-# 图元字体/样式变化时刷新图元标签。
+# React to symbol font/style change: rebuild the style snapshot and re-push it.
+# 图元字体/样式变化时重建样式快照并重新推入。
 func _gpOnSymbolStyleChanged() -> void:
-	gpSymbolLayer.gpRefreshSymbols()
+	_gpRebuildRenderStyle()
+
+
+# React to pipe-tag style change (rotate / font): rebuild + re-push, then the views repaint.
+# 位号样式（旋转 / 字号）变化时重建并重新推入，视图随后重绘。
+func _gpOnTagStyleChanged() -> void:
+	_gpRebuildRenderStyle()
+
+
+# 架构优化 §4.2：由 Settings / I18n 重建渲染样式快照，写回 gpRenderStyle 并显式重推给绑定器。
+# 所有视图的 style 字段随之更新，旧视图不再残留旧字号 / 旧文字 —— 该行为由
+# tests/gp_test_render_style_injection.gd 钉住（切换 locale 后所有视图 style 已更新）。
+# Architecture §4.2: rebuild the render-style snapshot from Settings / I18n, write it back into
+# gpRenderStyle and re-push it to the binder. Every view's style updates, so stale views never
+# linger — this is pinned by tests/gp_test_render_style_injection.gd.
+func _gpRebuildRenderStyle() -> void:
+	gpRenderStyle = _gpBuildRenderStyle()
+	if gpBinder != null:
+		gpBinder.gpApplyStyle(gpRenderStyle)
+
+
+# 架构优化 §4.2：从 Settings / I18n 读取当前渲染样式，构造纯数据快照后返回。
+# 调用方持有 autoload 依赖，本方法只负责取值；autoload 缺失时（headless）回落安全默认值。
+# Architecture §4.2: read the current render style from Settings / I18n and return a pure-data
+# snapshot. The caller owns the autoload dependency; this method only reads. Falls back to safe
+# defaults when the autoloads are absent (headless).
+func _gpBuildRenderStyle() -> GPRenderStyle:
+	var gpFont: Font = null
+	var gpFontSize: int = 16
+	var gpLoc: String = "zh_CN"
+	var gpConstWidth: bool = false
+	var gpTagFontSize: int = 0
+	var gpTagRotate: bool = false
+	# Engine.get_singleton is tree-independent (works whether this canvas is in the live
+	# scene tree or exercised headlessly), so the default-fallback path is identical in both.
+	# Engine.get_singleton 与场景树无关（无论画布在活动现场还是被 headless 演练都适用），
+	# 故两条路径的回落逻辑完全一致。
+	var _gpSettings: Object = null
+	if Engine.has_singleton("Settings"):
+		_gpSettings = Engine.get_singleton("Settings")
+	if _gpSettings != null:
+		if _gpSettings.get("gpSymbolFont") != null:
+			gpFont = _gpSettings.gpSymbolFont
+		if _gpSettings.get("gpSymbolFontSize") != null:
+			gpFontSize = _gpSettings.gpSymbolFontSize
+		if _gpSettings.get("gpScreenConstantWidth") != null:
+			gpConstWidth = _gpSettings.gpScreenConstantWidth
+		if _gpSettings.get("gpPipeTagFontSize") != null:
+			gpTagFontSize = _gpSettings.gpPipeTagFontSize
+		if _gpSettings.get("gpPipeTagRotate") != null:
+			gpTagRotate = _gpSettings.gpPipeTagRotate
+	var _gpI18n: Object = null
+	if Engine.has_singleton("I18n"):
+		_gpI18n = Engine.get_singleton("I18n")
+	if _gpI18n != null and _gpI18n.get("gpLocale") != null:
+		gpLoc = _gpI18n.gpLocale
+	return GPRenderStyle.gpFrom(gpFont, gpFontSize, gpLoc, gpConstWidth, gpTagFontSize, gpTagRotate)
 
 
 # Build and emit a status snapshot for the status bar.

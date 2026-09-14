@@ -25,6 +25,12 @@ var gpWorldRoot: Node2D = null
 # 由所属画布推送的当前缩放。连线视图需要它来把线宽、虚线、箭头与光晕保持在屏幕空间下限之上。
 var gpZoom: float = 1.0
 
+# Injected render-style snapshot (架构优化 §4.2). Passed to every view so the render layer
+# stays autoload-free; rebuilt and re-pushed by the owning canvas on locale / font change.
+# 注入的渲染样式快照（架构优化 §4.2）。传给每个视图，使 render 层不依赖 autoload；
+# 语言 / 字号变化时由所属画布重建并重推。
+var gpStyle: GPRenderStyle = null
+
 # Incremental view caches: id -> view node. Used for sync instead of full rebuild.
 # 增量视图缓存：id → 视图节点。用于增量同步而非全量重建。
 var _gpSymbolViews: Dictionary = {}
@@ -130,6 +136,7 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
 			gpV = GPSymbolView.new()
 			var gpDef: GPSymbolDef = gpDefFor(gpN.gpSymbolId)
 			gpV.gpInit(gpN, gpDef)
+			gpV.gpStyle = gpStyle
 			gpWorldRoot.add_child(gpV)
 		# Multi-select: every id in the selection set lights up, not just the primary one.
 		# 多选：选择集中的每个 id 都会高亮，而不只是主选项。
@@ -168,6 +175,7 @@ func _gpSyncEdgeViews(gpSelection: Array[String], gpEdgeSelection: Array[String]
 			# 为该连线创建新视图。
 			gpV = GPEdgeView.new()
 			gpV.gpInit(gpE, gpGraph, Callable(self, "_gpLookupDef"))
+			gpV.gpStyle = gpStyle
 			gpWorldRoot.add_child(gpV)
 		# Edge ids live in their OWN selection array (gpEdgeSel), so selection must be tested against
 		# BOTH the node set and the edge set — otherwise an edge's halo never lights up and the user
@@ -197,6 +205,25 @@ func gpRefreshSymbols() -> void:
 func gpRefreshEdges() -> void:
 	for gpId in _gpEdgeViews.keys():
 		var gpV: GPEdgeView = _gpEdgeViews[gpId] as GPEdgeView
+		gpV.queue_redraw()
+
+# 架构优化 §4.2：重新注入渲染样式快照（语言 / 字号变化时由画布调用）。
+# 把新快照写入所有已有视图并显式请求重绘，使切换语言后旧视图不残留旧字号 / 文字。
+# Re-push a fresh render-style snapshot (called by the canvas on locale / font change):
+# write it into every existing view and request a repaint so stale views never linger.
+func gpApplyStyle(gpNewStyle: GPRenderStyle) -> void:
+	gpStyle = gpNewStyle
+	for gpId in _gpSymbolViews.keys():
+		var gpV: GPSymbolView = _gpSymbolViews[gpId] as GPSymbolView
+		if gpV == null:
+			continue
+		gpV.gpStyle = gpStyle
+		gpV.gpRepaint()
+	for gpId in _gpEdgeViews.keys():
+		var gpV: GPEdgeView = _gpEdgeViews[gpId] as GPEdgeView
+		if gpV == null:
+			continue
+		gpV.gpStyle = gpStyle
 		gpV.queue_redraw()
 
 # Remove all view nodes and clear caches. Call before teardown or graph reload.

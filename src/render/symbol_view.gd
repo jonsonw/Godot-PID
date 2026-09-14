@@ -51,6 +51,10 @@ var gpConnectSource: bool = false
 # 承载翻转与旋转的子层。
 var _gpBody: GPSymbolBody = null
 
+# Injected render-style snapshot (架构优化 §4.2). Replaces direct autoload reads.
+# 注入的渲染样式快照（架构优化 §4.2）。取代直接读 autoload。
+var gpStyle: GPRenderStyle = null
+
 
 # Bind this view to a graph node and its definition.
 # 将本视图绑定到一个图节点及其定义。
@@ -132,7 +136,7 @@ func _draw() -> void:
 	# the grip and the headless tests all agree on where it goes.
 	# M10b：标签即**位号**，经共用的几何模块解析，使画布、抓取点与 headless 测试
 	# 对「它画在哪」完全一致。
-	var gpLabel: String = GPLabelGripOps.gpLabelText(gpNode, gpDef, I18n.gpLocale)
+	var gpLabel: String = GPLabelGripOps.gpLabelText(gpNode, gpDef, gpStyle.gpLocale if gpStyle != null else "zh_CN")
 	if gpLabel == "":
 		return
 
@@ -145,8 +149,10 @@ func _draw() -> void:
 		gpOff.x = -gpOff.x
 	gpOff = gpOff.rotated(deg_to_rad(gpNode.gpRotationDeg))
 
-	var gpFont: Font = Settings.gpSymbolFont if Settings.gpSymbolFont != null else ThemeDB.fallback_font
-	var gpFontSz: int = maxi(1, Settings.gpSymbolFontSize)
+	var gpFont: Font = ThemeDB.fallback_font
+	if gpStyle != null and gpStyle.gpSymbolFont != null:
+		gpFont = gpStyle.gpSymbolFont
+	var gpFontSz: int = maxi(1, gpStyle.gpSymbolFontSize if gpStyle != null else 16)
 	# Measure first, then place the text relative to the anchor per its alignment.
 	# 先测量，再按对齐方式把文字摆到锚点的相应位置。
 	var gpSzText: Vector2 = gpFont.get_string_size(gpLabel, HORIZONTAL_ALIGNMENT_LEFT, -1.0, gpFontSz)

@@ -56,6 +56,11 @@ var gpDefLookup: Callable = Callable()
 # 当前画布缩放；驱动屏幕空间下限。
 var gpZoom: float = 1.0
 
+# Injected render-style snapshot (架构优化 §4.2). Replaces direct autoload reads; null only
+# in hand-built tests that skip injection (defaults below then kick in).
+# 注入的渲染样式快照（架构优化 §4.2）。取代直接读 autoload；仅在跳过注入的手工测试中为 null（下方有默认兜底）。
+var gpStyle: GPRenderStyle = null
+
 # Selection / hover / editing state (painted as a halo under the ink).
 # 选中 / 悬停 / 编辑状态（以墨线之下的光晕绘制）。
 var gpSelected: bool = false
@@ -128,7 +133,7 @@ func _draw() -> void:
 	# zoomed in, like a CAD model space). Either way the screen-space floor protects legibility.
 	# 屏幕恒定线宽：缩放时渲染像素宽不变（width / zoom），即「出图线宽」模式。默认关闭
 	#（线随放大变粗，如同 CAD 模型空间）。两种模式都受屏幕空间下限保护可读性。
-	if Settings.gpScreenConstantWidth:
+	if gpStyle != null and gpStyle.gpScreenConstantWidth:
 		gpW = gpW / gpZoom
 	gpW = maxf(gpW, GPEdgeStyle.GP_MIN_PX / gpZoom)
 
@@ -220,10 +225,15 @@ func _gpShouldDrawTag() -> bool:
 # Paint the line number (or its placeholder) on the longest leg.
 # 把管线编号（或其占位符）绘制到最长段上。
 func _gpDrawTag(gpPts: PackedVector2Array, gpCol: Color) -> void:
-	var gpFont: Font = Settings.gpSymbolFont if Settings.gpSymbolFont != null else ThemeDB.fallback_font
+	var gpFont: Font = ThemeDB.fallback_font
+	if gpStyle != null and gpStyle.gpSymbolFont != null:
+		gpFont = gpStyle.gpSymbolFont
 	# Pipe-tag font size overrides the symbol font size when set (>0); otherwise it inherits.
 	# 管线位号字号在设置为正时覆盖图元字号，否则继承。
-	var gpSize: int = maxi(1, Settings.gpPipeTagFontSize if Settings.gpPipeTagFontSize > 0 else Settings.gpSymbolFontSize)
+	var gpSizeSrc: int = 16
+	if gpStyle != null:
+		gpSizeSrc = gpStyle.gpPipeTagFontSize if gpStyle.gpPipeTagFontSize > 0 else gpStyle.gpSymbolFontSize
+	var gpSize: int = maxi(1, gpSizeSrc)
 	var gpText: String = gpEdge.gpTag
 	var gpColor: Color = gpCol
 	if gpText == "":
@@ -234,7 +244,7 @@ func _gpDrawTag(gpPts: PackedVector2Array, gpCol: Color) -> void:
 	# The per-edge "tag_rotate" attribute overrides the global default when present; otherwise
 	# the global setting decides whether a vertical-run number is rotated.
 	# 当边显式带 "tag_rotate" 属性时该属性优先；否则由全局设置决定竖管位号是否旋转。
-	var gpRotate: bool = _gpAttrBool("tag_rotate", Settings.gpPipeTagRotate)
+	var gpRotate: bool = _gpAttrBool("tag_rotate", gpStyle.gpPipeTagRotate if gpStyle != null else false)
 	GPEdgePainter.gpDrawTag(self, gpPts, gpText, gpFont, gpSize, gpColor, gpRotate)
 
 
