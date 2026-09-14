@@ -52,8 +52,10 @@ const GP_FONT_PRESETS: Dictionary = {
 var gpFontSize: int = 16
 
 # Current locale code.
-# 当前语言代码。
-var gpLocale: String = "en"
+# 当前语言代码。声明默认与 gpLoad 回退（"zh"）及 I18n 默认一致，避免首启未加载前的窗口期出现 en。
+# The declared default matches the gpLoad fallback ("zh") and the I18n default, so there is no
+# "en" window before the saved config is loaded on first boot.
+var gpLocale: String = "zh"
 
 # Current UI font preset key.
 # 当前界面字体预设键。

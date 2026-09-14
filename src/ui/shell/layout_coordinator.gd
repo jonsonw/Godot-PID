@@ -51,8 +51,8 @@ func gpOnBodyDragged(gpOffset: int) -> void:
 		# grid so it recomputes its column count immediately.
 		# 左分隔条：偏移即左栏宽度。把新宽度传给图元网格，使其立即重算列数。
 		gpHost.gpLeftWidthPx = clampf(gpOffsetF, GPMainWindow.GP_LEFT_MIN, gpBW - GPMainWindow.GP_RIGHT_MIN - 80.0)
-		if gpHost.gpLeftDock != null and gpHost.gpLeftDock.has_method("_gpReflow"):
-			gpHost.gpLeftDock._gpReflow(gpHost.gpLeftWidthPx)
+		if gpHost.gpLeftDock != null and gpHost.gpLeftDock.has_method("gpReflow"):
+			gpHost.gpLeftDock.gpReflow(gpHost.gpLeftWidthPx)
 	else:
 		# Right splitter: offset == left+center span, so right width = body - offset.
 		# 右分隔条：偏移即左+中跨度，故右栏宽度 = 主体宽度 - 偏移。
@@ -116,8 +116,8 @@ func gpApplySplits() -> void:
 	# above gpL (otherwise a wide grid min would lock the dock at its old width).
 	# 先把图元网格最小宽钉到目标左栏宽，使左停靠栏合并最小宽等于 gpL、分隔条不会被
 	# 钳到 gpL 以上（否则网格的旧大最小宽会把停靠栏锁在旧宽度）。
-	if gpHost.gpLeftDock != null and gpHost.gpLeftDock.has_method("_gpReflow"):
-		gpHost.gpLeftDock._gpReflow(gpL)
+	if gpHost.gpLeftDock != null and gpHost.gpLeftDock.has_method("gpReflow"):
+		gpHost.gpLeftDock.gpReflow(gpL)
 	# Split 0 sits at the left dock's right edge; split 1 sits one right-dock
 	# width back from the body's right edge, leaving the center to fill the gap.
 	# 分隔条 0 位于左栏右缘；分隔条 1 距主体右缘一个右栏宽度，中间栏填满缝隙。

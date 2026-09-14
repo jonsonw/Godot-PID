@@ -31,12 +31,6 @@ enum GPPrefixSource {
 	GP_FIXED,        # always gpFixedPrefix / 恒用 gpFixedPrefix
 }
 
-# What to do when the next number is already taken. / 下一个号已被占用时怎么办。
-enum GPConflictPolicy {
-	GP_REJECT,    # refuse and name the occupant / 拒绝并指出占用者
-	GP_AUTO_NEXT, # keep scanning for a free number / 继续找空号
-}
-
 # Factory template. Must contain {seq} — a rule without a sequence is a constant string and
 # would hand every instance in the project the same tag.
 # 出厂模板。必须含 {seq}——不含序号的规则是常量串，会给工程里每个实例同一个位号。

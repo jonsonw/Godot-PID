@@ -96,7 +96,7 @@ func _ready() -> void:
 	# Reflow the thumbnail grids whenever the dock (and thus the viewport) is resized,
 	# so the palette stays multi-column and matches the real width.
 	# 停靠栏（也即视口）缩放时重排缩略图网格，使图元库保持多列并贴合真实宽度。
-	gpListRoot.resized.connect(_gpReflow)
+	gpListRoot.resized.connect(gpReflow)
 	add_child(gpListRoot)
 
 	# ---- frozen frame: tool group ----
@@ -257,7 +257,7 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 
 	# Recompute columns now that grids exist (size may be 0 yet; resize handler refreshes later).
 	# 网格已建好，先按当前视口重排一次（此时尺寸可能仍为 0，缩放处理器之后会再刷新）。
-	_gpReflow(-1.0)
+	gpReflow(-1.0)
 
 
 # Re-derive each category grid's columns after a width change. The grid fills the
@@ -271,7 +271,12 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 # 已关闭）铺满停靠栏，因此绝不能把网格「最小宽」钉成停靠栏宽：非零最小宽会沿 VBox 链向上
 # 冒泡到左停靠栏，把 HSplitContainer 分隔条锁死在「曾达到的最宽」（只能加宽、拖不回去）。
 # 网格最小宽保持 0，正是分隔条能自由双向拖动的关键。
-func _gpReflow(gpForcedWidth: float = -1.0) -> void:
+# Public port (架构优化 §5 P3 #1): previously a private `_gpReflow`, called cross-object by
+# GPLayoutCoordinator. Promoting it closes that encapsulation leak; the toolbar still calls it
+# internally on resize and at first build.
+# 公开端口（架构优化 §5 P3 #1）：原为私有 `_gpReflow`，被 GPLayoutCoordinator 跨对象调用。
+# 提升为公开端口消除该封装泄漏；工具栏自身在缩放与首次构建时仍内部调用它。
+func gpReflow(gpForcedWidth: float = -1.0) -> void:
 	# Always feed the grid the real ScrollContainer viewport width. Relying on the
 	# grid's own size.x inside NOTIFICATION_SORT_CHILDREN is unreliable because the
 	# grid may be sorted before the parent has allocated the new width. The resized
