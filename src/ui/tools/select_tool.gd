@@ -84,6 +84,9 @@ func gpOnDragMove(gpScreen: Vector2) -> void:
 
 func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 	var gpCv := gpCtx.gpCv
+	# Clear any bump-anchor selection first; re-set below only when an anchor is actually grabbed.
+	# 先清除鼓包锚点选择；仅当真正抓到锚点时才在下方重新置位。
+	gpCtx.gpEdgeGrips.gpClearBumpSelection()
 	var gpHit: String = gpCv.gpHitTest(gpWorld)
 	# Double click edits the symbol's geometry in place (AutoCAD BEDIT entry point).
 	# 双击就地编辑图元几何（AutoCAD BEDIT 入口）。
@@ -114,8 +117,9 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 	# outside the glyph (below / beside it) where gpHitTest() would report a miss.
 	# M10b：单选节点的位号抓取点被**优先**检测，因为它可能落在字形之外（下方 / 侧旁），
 	# 而那里 gpHitTest() 会报未命中。
+	var gpSelId: String = ""
 	if gpCv.gpSelection.size() == 1 and gpCtx.gpLabelGrips != null:
-		var gpSelId: String = gpCv.gpSelection[0]
+		gpSelId = gpCv.gpSelection[0]
 		if gpDouble and gpCtx.gpLabelGrips.gpHitGrip(gpWorld,
 				gpCv.gpGraph.gpGetNode(gpSelId), gpCv.gpDefFor(
 					gpCv.gpGraph.gpGetNode(gpSelId).gpSymbolId if gpCv.gpGraph.gpGetNode(gpSelId) != null else ""),
@@ -124,7 +128,31 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 			# 双击抓取点：复位为类型层默认。
 			gpCtx.gpLabelGrips.gpReset(gpSelId)
 			return true
-		if gpCtx.gpLabelGrips.gpTryStart(gpWorld, gpSelId):
+	if gpCtx.gpLabelGrips.gpTryStart(gpWorld, gpSelId):
+		return true
+	# P3-4 (grip priority): when a single edge is already selected, its grips (midpoint AND endpoint)
+	# take priority over node / marquee handling, so a grip sitting on a symbol can still be grabbed.
+	# 端点抓取点落在图元上，否则会被节点命中先行吃掉；故单选边时其抓取点优先于节点 / 框选处理。
+	if gpCv.gpEdgeSel.size() == 1:
+		var gpGrip: Dictionary = gpCtx.gpEdgeGrips.gpHitGrip(gpWorld, gpCv.gpEdgeSel[0])
+		if not gpGrip.is_empty():
+			gpCtx.gpEdgeGrips.gpStartGripDrag(gpCv.gpEdgeSel[0], gpGrip)
+			return true
+		# Orange bump anchor on the edge under the cursor (any edge) -> reshape that bump.
+		# 光标下边上的橙色鼓包锚点（任意边）→ 重塑该鼓包。
+		var gpEdgeUnder: String = gpCv.gpHitEdge(gpWorld)
+		if gpEdgeUnder != "":
+			var gpBump: Dictionary = gpCtx.gpEdgeGrips.gpHitBump(gpWorld, gpEdgeUnder)
+			if not gpBump.is_empty():
+				gpCtx.gpEdgeGrips.gpSelectBump(gpEdgeUnder, int(gpBump["anchor"]))
+				gpCtx.gpEdgeGrips.gpStartBumpDrag(gpEdgeUnder, int(gpBump["anchor"]))
+				return true
+		# Body of the SAME selected edge (not a grip) -> translate the whole line rigidly, so a
+		# drag moves the entire pipe instead of bending it at the click point. Grab a grip for bend.
+		# 同一选中边的线体（非抓取点）→ 整线刚性平移；拖动即移动整条管线而非在点击处折断。
+		# 要鼓出请抓取抓取点。
+		if gpCv.gpHitEdge(gpWorld) == gpCv.gpEdgeSel[0]:
+			gpCtx.gpEdgeGrips.gpStartEdgeMove(gpCv.gpEdgeSel[0], gpWorld)
 			return true
 	if gpHit != "":
 		# P3-4: selecting a node drops any edge selection (the two are mutually exclusive).
@@ -160,14 +188,6 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 		if gpDouble and gpEdgeHit != "":
 			gpCtx.gpEdgeEditor.gpOpen(gpEdgeHit)
 			return true
-		# If the single selected edge's grip is under the cursor, start a grip drag. The edge must
-		# already be selected so a first click picks it and a second interacts with its grips.
-		# 若单选边的抓取点在光标下，开始抓取点拖拽。边须已选中，使首次点击选中、再次操作抓取点。
-		if gpCv.gpEdgeSel.size() == 1 and gpCv.gpEdgeSel[0] == gpEdgeHit and gpEdgeHit != "":
-			var gpGrip: Dictionary = gpCtx.gpEdgeGrips.gpHitGrip(gpWorld, gpEdgeHit)
-			if not gpGrip.is_empty():
-				gpCtx.gpEdgeGrips.gpStartGripDrag(gpEdgeHit, gpGrip)
-				return true
 		# Plain click on an edge selects it (mutually exclusive with node / shape selection).
 		# 在边上的普通点击选中该边（与节点 / 图形选择互斥）。
 		if gpEdgeHit != "":

@@ -49,8 +49,8 @@ P1 数据模型 · P2 渲染 · P3 交互 · P4 属性面板/i18n/回归 + 2026-
 | 编号 | 功能 | 类别 | 关键模块 |
 |---|---|---|---|
 | F1 | 创建连线（端口吸附→建边→分配位号） | 创建与几何 | GPPipeTool · GPEditService · GPConnectEdgeCommand · GPTagGen |
-| F2 | 端点改接（grip 拖拽重连） | 创建与几何 | GPEdgeGripOps · GPReconnectEdgeCommand |
-| F3 | 折点/管线走向编辑 | 创建与几何 | GPEdgeGripOps · GPSetEdgeRoutingCommand |
+| F2 | 端点改接（右键重吸附/改接命令） | 创建与几何 | GPPortResolver · GPReconnectEdgeCommand |
+| F3 | 管线走向编辑（段中点抓取点 + 正交鼓出） | 创建与几何 | GPEdgeGripOps · GPSetEdgeRoutingCommand |
 | F4 | 边位号编辑（双击） | 创建与几何 | GPEdgeTagEditor · GPSetEdgeTagCommand |
 | F5 | 删除边 | 创建与几何 | canvas_context_menu · GPDeleteEdgesCommand |
 | F6 | 边属性面板（动态表单） | 属性与样式 | GPInspector · GPMainWindow · SetEdge*Command |
@@ -67,6 +67,7 @@ P1 数据模型 · P2 渲染 · P3 交互 · P4 属性面板/i18n/回归 + 2026-
 | F20 | 选中管线高亮（光晕+亮色描边，根因修复） | 选择交互 | graph_binder · edge_view · edge_style |
 | F21 | 路径拖拽编辑增强（实时断线 + 编辑态高亮） | 创建与几何 | GPEdgeGripOps · graph_binder · edge_view |
 | F22 | 选中管线按 Del 删除（并入单撤销步） | 选择交互 | canvas_2d · edit_service · delete_selection_command |
+| F23 | 编辑点中段化 + 拖拽单轴正交约束（修两缺陷） | 创建与几何 | GPEdgeGripOps（gpMidpointGrips/gpBumpWaypoints/gpPolylineOrtho）· GPSetEdgeRoutingCommand |
 
 ### F.1 创建与几何编辑
 
@@ -160,3 +161,5 @@ P1–P4（888→1024 断言）；2026-09-09 信号崩溃修复 + smoke 测试；
 v1.1（2026-09-09）新增「F. 功能实现总览」：16 项已落地功能按五类归类，逐项目给关键模块/核心流程/相关函数职责。
 v1.2（2026-09-09）新增 F17 端点对端点连接 / F18 正交自动布线（Hanan 网格 A* 避障）/ F19 交叉检测与断线渲染（仅渲染不改拓扑）。回归 1166→1191 断言全绿（新增 `tests/gp_test_connection_features.gd` 25 断言）。`GPPortAnchor`·`GPEdgeAutoRoute`·`GPEdgeCrossing` 三个纯静态模块 + `GPPortConnectOps` 画布委托 + 右键「自动连线」+ 拒绝键 i18n。
 v1.3（2026-09-09 晚）选中体验增强：F20 选中管线高亮（根因修复——binder 现把 `gpEdgeSel` 透传给 `edge_view`，整条路径发亮而非仅三角）、F21 拖拽编辑实时断线 + 编辑态橙色高亮、F22 选中管线按 Del 删除（并入单撤销步复合命令）。回归 1191→1202 断言全绿（新增 `tests/gp_test_edge_commands.gd` 中删边选中路径 2 例 11 断言）。改动：`graph_binder`(gpSync 增 gpEdgeSelection/gpEditingEdgeId)、`edge_view`(gpSetView+_draw 高亮)、`edge_style`(GP_SEL_HALO/GP_EDIT_HALO/GP_SEL_OUTLINE)、`edge_grip_ops`(gpDraggingEdgeId)、`canvas_2d`(gpRequestDeleteSelected 并入 gpEdgeSel)、`edit_service`+`delete_selection_command`(边半步)。
+
+v1.4（2026-09-12）连线编辑两缺陷修复：① **编辑点从顶点/段端移至每条横/竖线段中点**（`gpMidpointGrips`，每边至少一段 ⇒ 至少一处可编辑点，消除「选中却无抓取点」）；② **拖拽改为单轴正交鼓出**（`gpBumpWaypoints`——水平段沿 Y、垂直段沿 X、近斜段沿较宽轴鼓出，光标离轴分量被忽略，结果恒正交、绝无斜偏移；`GP_BUMP_MIN` 阈值内路径不变）。同步更正因本修正而过时的 F2/F3/F21 描述与 §4/§5 调用链为「段中点抓取点模型」；F2 端点重连改走右键命令（grip 不再做重连）。新增 `tests/gp_test_edge_grip_ops.gd`（33 断言：纯几何 `gpMidpointGrips`/`gpBumpWaypoints`/`gpPolylineOrtho` 3 例 + 集成 `GPCanvas2D.new()` 离树 5 例，覆盖直边单中点、水平/垂直/斜向光标均正交、L+直段拖动插入二拐点）。全量回归 **1982 断言全绿**（v1.3 标注 1202 为当时全局总数，其后画布拆分等测试已并入；本任务 +33）。

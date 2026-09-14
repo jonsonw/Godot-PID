@@ -51,6 +51,9 @@ const GP_CTX_CLEAR_VERTICES: int = 25
 # 全图纸操作（图内含边时显示）。
 const GP_CTX_RENUMBER: int = 26
 const GP_CTX_AUTO_CONNECT: int = 27
+# Bump-anchor action (shown when right-click lands on an existing orange bump anchor).
+# 鼓包锚点操作（右键命中既有橙色锚点时显示）。
+const GP_CTX_DELETE_BUMP: int = 30
 
 # Canvas this menu acts on (state owner).
 # 本菜单作用的画布（状态持有者）。
@@ -69,6 +72,12 @@ var _gpCtxEdge: String = ""
 # 右键菜单打开时所处的「单选注释折线」顶点下标（仅当光标命中其顶点 / 手柄抓取点时才有意义）。-1 = 无。
 var _gpCtxVertex: int = -1
 
+# Bump anchor the right-click menu was opened on ("" / -1 when not on a bump). Cleared at the top of
+# gpOnRightDown so a non-bump right-click never leaves a stale target. / 右键菜单打开时所处的鼓包锚点
+#（非锚点时为空 / -1）。在 gpOnRightDown 顶部清零，非锚点右键绝不残留旧目标。
+var _gpCtxBumpEid: String = ""
+var _gpCtxBumpAi: int = -1
+
 
 func _init(gpCanvas: GPCanvas2D) -> void:
 	gpCv = gpCanvas
@@ -84,6 +93,8 @@ func gpOnRightDown(gpScreen: Vector2) -> void:
 	var gpWorld: Vector2 = gpCv.gpWorldFromScreen(gpScreen)
 	_gpCtxVertex = -1
 	_gpCtxEdge = ""
+	_gpCtxBumpEid = ""
+	_gpCtxBumpAi = -1
 	var gpHit: String = gpCv.gpHitTest(gpWorld)
 	if gpHit != "":
 		if not gpCv.gpSelection.has(gpHit):
@@ -109,15 +120,26 @@ func gpOnRightDown(gpScreen: Vector2) -> void:
 		_gpCtxHit = ""
 		gpShowContextMenu("")
 		return
-	# Edge hit: make it the selection, then open the edge menu.
-	# 命中边：将其设为选择，再打开边菜单。
+	# Edge hit: RIGHT-CLICK on any segment creates an ORANGE bump anchor there (scheme b). The edge
+	# context menu is intentionally suppressed on the edge body — it remains reachable by right-clicking
+	# empty space with the edge already selected. / 命中边：在任意线段右键「生成橙色锚点」（方案 b）。
+	# 右键菜单在边线上被有意抑制 —— 仍可在「先选中边、再右键空白处」时呼出。
 	var gpEid: String = gpCv.gpHitEdge(gpWorld)
 	if gpEid != "":
 		if not gpCv.gpEdgeSel.has(gpEid):
 			gpCv.gpSetEdgeSelection([gpEid])
-		_gpCtxEdge = gpEid
+		# Right-click on an EXISTING orange bump anchor -> open a delete-anchor menu (do NOT create a
+		# new one). / 右键命中既有橙色锚点 -> 弹出「删除此锚点」菜单（不新建）。
+		var gpExisting: Dictionary = gpCv.gpEdgeGrips.gpHitBump(gpWorld, gpEid)
+		if not gpExisting.is_empty():
+			_gpCtxBumpEid = gpEid
+			_gpCtxBumpAi = int(gpExisting["anchor"])
+			gpShowContextMenu("")
+			return
+		# Empty segment -> create a new orange bump anchor there (scheme b). / 空白线段 -> 新建橙色锚点。
+		gpCv.gpEdgeGrips.gpStartBump(gpEid, gpWorld)
+		_gpCtxEdge = ""
 		_gpCtxHit = ""
-		gpShowContextMenu("")
 		return
 	# Empty area: open the menu against the current selection (no new hit target).
 	# 空白处：基于当前选择打开菜单（无新命中目标）。
@@ -154,9 +176,14 @@ func gpShowContextMenu(gpNodeHit: String) -> void:
 	var gpCanDelete: bool = gpNodeCtx or (not gpCv.gpShapeSel.is_empty())
 	if gpCanDelete:
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_delete"), GP_CTX_DELETE)
+	# Bump-anchor target: offer delete. Shown INSTEAD of the full edge menu (suppressed below) so the
+	# user is not offered both "delete anchor" and "delete connection" at once.
+	# 鼓包锚点目标：提供删除。与整条边菜单互斥（下方已压制），避免同时出现「删锚点」与「删连线」。
+	if _gpCtxBumpAi >= 0:
+		gpMenu.add_item(I18n.gpTr("canvas.ctx_delete_bump"), GP_CTX_DELETE_BUMP)
 	# Edge-targeted actions: a single edge hit or already selected.
 	# 边级操作：单击命中或已选中的单条边。
-	var gpEdgeCtx: bool = (_gpCtxEdge != "" or gpCv.gpEdgeSel.size() == 1)
+	var gpEdgeCtx: bool = (_gpCtxEdge != "" or gpCv.gpEdgeSel.size() == 1) and _gpCtxBumpAi < 0
 	if gpEdgeCtx:
 		var gpEid: String = _gpCtxEdge if _gpCtxEdge != "" else gpCv.gpEdgeSel[0]
 		_gpCtxEdge = gpEid
@@ -278,4 +305,10 @@ func gpOnContext(gpId: int) -> void:
 			gpCv.queue_redraw()
 		GP_CTX_AUTO_CONNECT:
 			gpCv.gpRequestAutoConnect()
+			gpCv.queue_redraw()
+		GP_CTX_DELETE_BUMP:
+			if _gpCtxBumpEid != "" and _gpCtxBumpAi >= 0:
+				gpCv.gpEdgeGrips.gpDeleteBump(_gpCtxBumpEid, _gpCtxBumpAi)
+				_gpCtxBumpEid = ""
+				_gpCtxBumpAi = -1
 			gpCv.queue_redraw()

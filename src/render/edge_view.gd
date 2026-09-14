@@ -66,20 +66,6 @@ var gpHovered: bool = false
 # 本边抓取点正被拖拽（编辑态）时为真。驱动橙色高亮，使「选中」与「正在编辑」视觉分离。
 var gpEditing: bool = false
 
-# Crossing points where THIS line must show a break (断口). Pushed by the binder, which is the
-# only party that can see every edge at once. Topology is unaffected — this is paint only.
-# 本线须显示为断口的交叉点。由绑定器推送 —— 它是唯一能同时看到所有边的一方。
-# 拓扑不受影响 —— 这仅仅是绘制。
-var gpBreaks: Array[Vector2] = []
-
-
-# Replace the break points. Called by GPGraphBinder after each crossing pass.
-# 替换断点。由 GPGraphBinder 在每次交叉计算后调用。
-func gpSetBreaks(gpPts: Array[Vector2]) -> void:
-	gpBreaks = gpPts
-	queue_redraw()
-
-
 # Bind this view to a graph edge.
 # 将本视图绑定到一条图边。
 func gpInit(gpE: GPPIDEdge, gpG: GPPIDGraph, gpLookup: Callable = Callable()) -> void:
@@ -151,11 +137,11 @@ func _draw() -> void:
 	# Editing state (a grip is being dragged) wins over plain selection, then hover.
 	# 编辑态（抓取点正拖拽）优先于普通选中，再之后是悬停。
 	if gpEditing:
-		GPEdgePainter.gpDrawHalo(self, gpPts, GPEdgeStyle.GP_EDIT_HALO, gpW + 13.0 / gpZoom, gpBreaks)
+		GPEdgePainter.gpDrawHalo(self, gpPts, GPEdgeStyle.GP_EDIT_HALO, gpW + 13.0 / gpZoom)
 	elif gpSelected:
-		GPEdgePainter.gpDrawHalo(self, gpPts, GPEdgeStyle.GP_SEL_HALO, gpW + 11.0 / gpZoom, gpBreaks)
+		GPEdgePainter.gpDrawHalo(self, gpPts, GPEdgeStyle.GP_SEL_HALO, gpW + 11.0 / gpZoom)
 	elif gpHovered:
-		GPEdgePainter.gpDrawHalo(self, gpPts, GPEdgeStyle.GP_HOVER_HALO, gpW + 6.0 / gpZoom, gpBreaks)
+		GPEdgePainter.gpDrawHalo(self, gpPts, GPEdgeStyle.GP_HOVER_HALO, gpW + 6.0 / gpZoom)
 
 	# Ink: GPU dashed path (Line2D + shader) for non-selected dashed edges, else the
 	# validated CPU dash. Selection still draws via _draw so the bright outline stays on top.
@@ -163,17 +149,17 @@ func _draw() -> void:
 	# 选中态仍由 _draw 绘制，使亮色描边位于墨线之上。
 	if gpInkLine != null:
 		gpInkLine.visible = false
-	if GP_GPU_DASH and gpPat.size() >= 2 and gpBreaks.is_empty() and not (gpSelected or gpEditing):
+	if GP_GPU_DASH and gpPat.size() >= 2 and not (gpSelected or gpEditing):
 		_gpDrawInkGPU(gpPts, gpCol, gpW, gpPat)
 	else:
-		GPEdgePainter.gpDrawInk(self, gpPts, gpCol, gpW, gpPat, gpBreaks)
+		GPEdgePainter.gpDrawInk(self, gpPts, gpCol, gpW, gpPat)
 
 	# Selected / editing: overlay a thin bright core stroke ON TOP of the ink so the WHOLE path
 	# lights up (the halo alone can read as just a thicker glow). Keeps the original colour visible.
 	# 选中 / 编辑：在墨线之上叠一道细亮描边，使整条路径发亮（仅光晕可能被误读为单纯变粗）。
 	# 同时保留原色可见。
 	if gpEditing or gpSelected:
-		GPEdgePainter.gpDrawInk(self, gpPts, GPEdgeStyle.GP_SEL_OUTLINE, GPEdgeStyle.GP_MIN_PX / gpZoom, PackedFloat32Array(), gpBreaks)
+		GPEdgePainter.gpDrawInk(self, gpPts, GPEdgeStyle.GP_SEL_OUTLINE, GPEdgeStyle.GP_MIN_PX / gpZoom, PackedFloat32Array())
 
 	# A free end is legal but must be visible, otherwise a half-built pipe looks finished.
 	# 悬空端合法但必须可见，否则一条只画了一半的管道看起来像是已完成。
@@ -200,7 +186,7 @@ func _draw() -> void:
 func _gpDrawInkGPU(gpPts: PackedVector2Array, gpColor: Color, gpWidth: float,
 		gpPattern: PackedFloat32Array) -> void:
 	if gpInkLine == null or gpPts.size() < 2:
-		GPEdgePainter.gpDrawInk(self, gpPts, gpColor, gpWidth, gpPattern, gpBreaks)
+		GPEdgePainter.gpDrawInk(self, gpPts, gpColor, gpWidth, gpPattern)
 		return
 	gpInkLine.points = gpPts
 	gpInkLine.width = gpWidth

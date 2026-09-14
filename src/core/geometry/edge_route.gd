@@ -43,9 +43,27 @@ static func gpRoute(gpFrom: Dictionary, gpTo: Dictionary,
 		gpRouting: Array[Vector2], gpOrtho: bool) -> PackedVector2Array:
 	var gpA: Vector2 = gpFrom.get("pos", Vector2.ZERO)
 	var gpB: Vector2 = gpTo.get("pos", Vector2.ZERO)
-	# 1. The user owns the path when waypoints exist — never second-guess a dragged vertex.
-	# 有折点时由用户决定路径 —— 绝不擅自改动用户拖过的顶点。
+	# 1. The user owns the MIDDLE waypoints — honoured verbatim. But when ortho is on we still grow
+	#    the two port stubs and join every leg with an L-corner, so a dragged bend can NEVER turn
+	#    diagonal. (This is exactly what keeps the line orthogonal while editing — the old code
+	#    concatenated [endA] + routing + [endB] raw, dropping the stubs and leaving the first/last
+	#    legs free to slant.) / 用户拥有「中间」折点——原样采纳。但开启正交时仍长出两端端口引出段、
+	#    并用 L 角点连接每一段，使拖出的鼓包绝不会变斜。这正是编辑时保持正交的关键：旧代码把
+	#    [端A]+routing+[端B] 裸拼、丢掉引出段，首/尾两段因而可能斜出。
 	if not gpRouting.is_empty():
+		if gpOrtho:
+			var gpDa: Vector2 = gpAxisDir(gpFrom.get("dir", Vector2.ZERO), gpB - gpA)
+			var gpDb: Vector2 = gpAxisDir(gpTo.get("dir", Vector2.ZERO), gpA - gpB)
+			var gpStubA: float = GP_STUB if bool(gpFrom.get("bound", true)) else 0.0
+			var gpStubB: float = GP_STUB if bool(gpTo.get("bound", true)) else 0.0
+			var gpVerts: Array[Vector2] = [gpA, gpA + gpDa * gpStubA]
+			for gpP in gpRouting:
+				gpVerts.append(gpP)
+			gpVerts.append(gpB + gpDb * gpStubB)
+			gpVerts.append(gpB)
+			return gpOrthoThrough(gpVerts)
+		# Straight (Shift) edges keep the raw user path, no stubs, no corners.
+		# 直连（Shift）边保持用户原始路径，无引出段、无角点。
 		var gpUser: Array[Vector2] = [gpA]
 		for gpP in gpRouting:
 			gpUser.append(gpP)
@@ -65,6 +83,31 @@ static func gpRoute(gpFrom: Dictionary, gpTo: Dictionary,
 	var gpStubB: float = GP_STUB if bool(gpTo.get("bound", true)) else 0.0
 	return gpOrthoPath(gpA, gpFrom.get("dir", Vector2.ZERO), gpB,
 		gpTo.get("dir", Vector2.ZERO), gpStubA, gpStubB)
+
+
+# Connect an already-stubbed vertex list orthogonally: between every pair that is NOT axis-aligned
+# insert exactly one Manhattan corner (horizontal leg first). The vertex order is preserved, so a
+# user waypoint sequence stays in the same spatial order. gpClean then drops zero-length / collinear
+# points, so a stub that happens to be collinear with the next leg simply folds away.
+# 把「已含引出段」的顶点表正交化：每对不轴对齐的顶点之间恰好插入一个曼哈顿角点（先水平）。
+# 顶点顺序保持不变，故用户折点序列仍按同一空间顺序排列。随后 gpClean 去掉零长/共线点，
+# 因此与下一段共线的引出段会被自然并掉。
+static func gpOrthoThrough(gpVerts: Array[Vector2]) -> PackedVector2Array:
+	if gpVerts.size() < 2:
+		var gpR: PackedVector2Array = PackedVector2Array()
+		for gpP in gpVerts:
+			gpR.append(gpP)
+		return gpR
+	var gpOut: Array[Vector2] = [gpVerts[0]]
+	for gpI in range(1, gpVerts.size()):
+		var gpPrev: Vector2 = gpOut[-1]
+		var gpCur: Vector2 = gpVerts[gpI]
+		if absf(gpCur.x - gpPrev.x) > GP_EPS and absf(gpCur.y - gpPrev.y) > GP_EPS:
+			# One corner: go horizontal along the previous leg's row, then vertical.
+			# 一个角点：先沿上一段所在行水平走，再竖直。
+			gpOut.append(Vector2(gpCur.x, gpPrev.y))
+		gpOut.append(gpCur)
+	return gpClean(gpOut)
 
 
 # Orthogonal path between two ports: L (one corner), Z (one corner, offset ends) or U (detour).

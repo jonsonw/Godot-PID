@@ -109,16 +109,29 @@ func gpTestDanglingEndHasNoStub() -> void:
 	gpEq(gpPts[gpPts.size() - 1], gpFree, "free end lands exactly on its stored point / 悬空端精确落在已存点上")
 
 
-# Stored waypoints are the user's: honoured verbatim, never re-routed.
-# 已存折点属于用户：原样采纳，绝不重新布线。
+# Stored waypoints are the user's: honoured verbatim, never re-routed — but with ortho on the
+# pipe still grows the two port stubs and stays axis-aligned, so a bent edge can never slant.
+# 已存折点属于用户：原样采纳，绝不重新布线——但开启正交时管线仍长出两端引出段且保持轴对齐，
+# 故弯边绝不会斜出（这正是编辑时保持正交的关键）。
 func gpTestStoredWaypointsWin() -> void:
 	var gpWay: Array[Vector2] = [Vector2(100.0, 0.0), Vector2(100.0, 100.0)]
 	var gpPts: PackedVector2Array = GPEdgeRoute.gpRoute(
 		{"pos": Vector2(0.0, 0.0), "dir": Vector2(1.0, 0.0)},
 		{"pos": Vector2(200.0, 100.0), "dir": Vector2(-1.0, 0.0)}, gpWay, true)
-	gpEq(gpPts.size(), 4, "user waypoints are kept / 保留用户折点")
-	gpEq(gpPts[1], Vector2(100.0, 0.0), "first waypoint preserved / 第一个折点保留")
-	gpEq(gpPts[2], Vector2(100.0, 100.0), "second waypoint preserved / 第二个折点保留")
+	# Every leg stays axis-aligned (stubs + L-corners guarantee orthogonality).
+	# 每一段都轴对齐（引出段 + L 角点保证正交）。
+	gpCheck(GPEdgeRoute.gpIsOrthogonal(gpPts), "every leg axis-aligned / 每段轴对齐")
+	# The user's waypoints survive VERBATIM — the router never nudges them.
+	# 用户的折点原样保留——布线器绝不擅自挪动。
+	var gpHasFirst: bool = false
+	var gpHasSecond: bool = false
+	for gpP in gpPts:
+		if gpP.distance_to(Vector2(100.0, 0.0)) <= GPEdgeRoute.GP_EPS:
+			gpHasFirst = true
+		if gpP.distance_to(Vector2(100.0, 100.0)) <= GPEdgeRoute.GP_EPS:
+			gpHasSecond = true
+	gpCheck(gpHasFirst, "first user waypoint preserved / 第1用户折点保留")
+	gpCheck(gpHasSecond, "second user waypoint preserved / 第2用户折点保留")
 
 
 # Shift-drawn edges are straight, even when the ports would have produced an L.
