@@ -237,6 +237,7 @@ const GP_STRINGS: Dictionary = {
 	"canvas.ctx_smooth_vertex":  { "zh": "顶点转为平滑（拉出手柄）", "en": "Smooth Vertex (pull handles)" },
 	"canvas.ctx_corner_vertex":  { "zh": "顶点转为拐角（收起手柄）", "en": "Corner Vertex (collapse handles)" },
 	"canvas.ctx_delete_vertex":  { "zh": "删除此顶点", "en": "Delete This Vertex" },
+	"canvas.ctx_delete_bump":    { "zh": "删除鼓包锚点", "en": "Delete Bump Anchor" },
 
 	# ---- Main-canvas annotation draw tools / 主画布注释绘图工具 ----
 	"canvas.tool_polyline":   { "zh": "折线", "en": "Polyline" },

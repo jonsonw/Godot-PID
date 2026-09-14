@@ -42,6 +42,12 @@ func gpHandleKey(gpKey: InputEventKey) -> bool:
 	var gpCtrl: bool = gpKey.ctrl_pressed or gpKey.meta_pressed
 	match gpKey.keycode:
 		KEY_DELETE, KEY_BACKSPACE:
+			# A selected bump anchor takes priority: Del removes just that anchor, not the whole edge.
+			# 选中的鼓包锚点优先：Del 只删该锚点，而非整条边。
+			var gpBump: Dictionary = gpCv.gpEdgeGrips.gpSelectedBump()
+			if not gpBump.is_empty():
+				gpCv.gpEdgeGrips.gpDeleteBump(gpBump.get("eid", ""), int(gpBump.get("ai", -1)))
+				return true
 			gpCv.gpRequestDeleteSelected()
 			return true
 		KEY_A:

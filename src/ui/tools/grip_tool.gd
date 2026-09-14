@@ -31,6 +31,10 @@ func gpOnMove(gpWorld: Vector2) -> bool:
 	# 拖动边的端点 / 布线顶点（P3-4）：实时预览改布线或改接。
 	elif gpCtx.gpEdgeGrips.gpIsDragging():
 		gpCtx.gpEdgeGrips.gpOnGripMove(gpWorld)
+	# Dragging the body of an edge: translate the whole line rigidly.
+	# 拖动边的线体：整条刚性平移。
+	elif gpCtx.gpEdgeGrips.gpIsMoving():
+		gpCtx.gpEdgeGrips.gpOnEdgeMove(gpWorld)
 	# Dragging a tag (位号) label (M10b): live preview, committed as one undo step on release.
 	# 拖动位号标签（M10b）：实时预览，释放时作为一个撤销步提交。
 	elif gpCtx.gpLabelGrips.gpIsDragging():
@@ -59,6 +63,13 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 	# 结束边抓取点拖拽——提交一个撤销步（顶点改布线或端点改接）。
 	if gpCtx.gpEdgeGrips.gpIsDragging():
 		gpCtx.gpEdgeGrips.gpEndGripDrag()
+		gpCv.gpGraphChanged.emit()
+		gpCv.gpEmitStatus()
+		return true
+	# Finish a whole-edge translate — commit one undo step (routing + dangling ends shifted).
+	# 结束整线平移——提交一个撤销步（路由 + 悬空端整体平移）。
+	if gpCtx.gpEdgeGrips.gpIsMoving():
+		gpCtx.gpEdgeGrips.gpEndEdgeMove()
 		gpCv.gpGraphChanged.emit()
 		gpCv.gpEmitStatus()
 		return true

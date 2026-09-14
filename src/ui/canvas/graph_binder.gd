@@ -30,17 +30,6 @@ var gpZoom: float = 1.0
 var _gpSymbolViews: Dictionary = {}
 var _gpEdgeViews: Dictionary = {}
 
-# Signature of the geometry the crossing pass depends on. Crossing detection is the only O(n^2)
-# step on the sheet, so it runs ONLY when the geometry actually moved — not on every repaint.
-# 交叉计算所依赖几何的签名。交叉检测是图纸上唯一的 O(n^2) 步骤，故仅在几何真正变化时运行，
-# 而非每次重绘都跑。
-var _gpCrossSig: String = ""
-
-# Whether crossing breaks are painted at all (host toggle; default on).
-# 是否绘制断口（宿主开关；默认开启）。
-var gpCrossBreaksEnabled: bool = true
-
-
 # Find a symbol definition by its id.
 # 按 id 查找图元定义。
 func gpDefFor(gpTypeId: String) -> GPSymbolDef:
@@ -49,25 +38,21 @@ func gpDefFor(gpTypeId: String) -> GPSymbolDef:
 			return gpD
 	return null
 
-
 # Callable wrapper of gpDefFor, handed to GPEdgeView so it can resolve port positions without
 # knowing the binder or the library.
 # gpDefFor 的 Callable 包装，交给 GPEdgeView，使其无需知晓绑定器或图元库即可解析端口位置。
 func _gpLookupDef(gpTypeId: String) -> GPSymbolDef:
 	return gpDefFor(gpTypeId)
 
-
 # Return the symbol view node for an id, or null if not present.
 # 按 id 返回图元视图节点；不存在则返回 null。
 func gpGetSymbolView(gpId: String) -> GPSymbolView:
 	return _gpSymbolViews.get(gpId, null) as GPSymbolView
 
-
 # Return the edge view node for an id, or null if not present.
 # 按 id 返回连线视图节点；不存在则返回 null。
 func gpGetEdgeView(gpId: String) -> GPEdgeView:
 	return _gpEdgeViews.get(gpId, null) as GPEdgeView
-
 
 # Every routed polyline already on the sheet (optionally skipping one id). Handed to the
 # auto-router so a new pipe prefers a corridor no other line has taken.
@@ -85,7 +70,6 @@ func gpExistingPolylines(gpSkipId: String = "") -> Array[PackedVector2Array]:
 		if gpPts.size() >= 2:
 			gpOut.append(gpPts)
 	return gpOut
-
 
 # Sync both symbol and edge views to the current graph state.
 # 将图元与连线视图同步到当前图状态。
@@ -110,8 +94,6 @@ func gpSync(gpG: GPPIDGraph, gpD: Array[GPSymbolDef], gpSelection: Array[String]
 		return
 	_gpSyncSymbolViews(gpSelection, gpConnectFrom)
 	_gpSyncEdgeViews(gpSelection, gpEdgeSelection, gpEditingEdgeId)
-	_gpUpdateCrossings()
-
 
 # Incrementally sync symbol view nodes with gpGraph.gpNodes.
 # 增量同步图元视图节点与 gpGraph.gpNodes。
@@ -162,7 +144,6 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
 			gpV.queue_free()
 	_gpSymbolViews = gpFresh
 
-
 # Incrementally sync edge view nodes with gpGraph.gpEdges.
 # 增量同步连线视图节点与 gpGraph.gpEdges。
 # [param gpSelection] selected node ids / 选中的节点 id
@@ -204,57 +185,6 @@ func _gpSyncEdgeViews(gpSelection: Array[String], gpEdgeSelection: Array[String]
 			gpV.queue_free()
 	_gpEdgeViews = gpFresh
 
-
-# Recompute the "which line breaks at a crossing" pass and push the results onto the edge views.
-# 重算「交叉处哪条线断」这一遍，并把结果推送到各连线视图。
-# Only the binder can do this: an edge view sees itself, never the line it crosses.
-# 只有绑定器能做这件事：连线视图只看得到自己，看不到它所交叉的那条线。
-func _gpUpdateCrossings() -> void:
-	if gpGraph == null:
-		return
-	var gpSig: String = _gpCrossSignature()
-	if gpSig == _gpCrossSig:
-		return
-	_gpCrossSig = gpSig
-	var gpLines: Array[Dictionary] = []
-	for gpE in gpGraph.gpEdges:
-		var gpV: GPEdgeView = _gpEdgeViews.get(gpE.gpInstanceId, null) as GPEdgeView
-		if gpV == null:
-			continue
-		gpLines.append({
-			"id": gpE.gpInstanceId,
-			"kind": gpE.gpKind,
-			"pts": gpV.gpPolyline(),
-		})
-	var gpCross: Array[Dictionary] = []
-	if gpCrossBreaksEnabled:
-		gpCross = GPEdgeCrossing.gpFindCrossings(gpLines)
-	for gpE2 in gpGraph.gpEdges:
-		var gpV2: GPEdgeView = _gpEdgeViews.get(gpE2.gpInstanceId, null) as GPEdgeView
-		if gpV2 == null:
-			continue
-		gpV2.gpSetBreaks(GPEdgeCrossing.gpBreaksFor(gpCross, gpE2.gpInstanceId))
-
-
-# A cheap fingerprint of everything crossing detection depends on: node transforms, edge kinds
-# and every stored waypoint. Zoom is NOT part of it — crossings are a world-space fact.
-# 交叉检测所依赖的一切的廉价指纹：节点变换、边类型与每个已存折点。缩放不在其中 ——
-# 交叉是世界坐标下的事实。
-func _gpCrossSignature() -> String:
-	if gpGraph == null:
-		return ""
-	var gpS: String = str(gpGraph.gpNodes.size()) + "/" + str(gpGraph.gpEdges.size())
-	for gpN in gpGraph.gpNodes:
-		gpS += "|" + gpN.gpInstanceId + ":" + str(gpN.gpPosition.x) + "," + str(gpN.gpPosition.y)
-		gpS += "," + str(gpN.gpRotationDeg) + "," + str(gpN.gpFlipped)
-	for gpE in gpGraph.gpEdges:
-		gpS += "|" + gpE.gpInstanceId + ":" + gpE.gpKind + "," + str(gpE.gpSignalType)
-		gpS += "," + str(gpE.gpOrtho) + "," + str(gpE.gpRouting.size())
-		for gpP in gpE.gpRouting:
-			gpS += "," + str(gpP.x) + "," + str(gpP.y)
-	return gpS
-
-
 # Queue redraw on all symbol views.
 # 令所有图元视图重新绘制。
 func gpRefreshSymbols() -> void:
@@ -262,14 +192,12 @@ func gpRefreshSymbols() -> void:
 		var gpV: GPSymbolView = _gpSymbolViews[gpId] as GPSymbolView
 		gpV.gpRepaint()
 
-
 # Queue redraw on all edge views.
 # 令所有连线视图重新绘制。
 func gpRefreshEdges() -> void:
 	for gpId in _gpEdgeViews.keys():
 		var gpV: GPEdgeView = _gpEdgeViews[gpId] as GPEdgeView
 		gpV.queue_redraw()
-
 
 # Remove all view nodes and clear caches. Call before teardown or graph reload.
 # 移除所有视图节点并清空缓存。销毁前或重新载入图前调用。
@@ -280,4 +208,3 @@ func gpClear() -> void:
 		(gpV as Node2D).queue_free()
 	_gpSymbolViews.clear()
 	_gpEdgeViews.clear()
-	_gpCrossSig = ""

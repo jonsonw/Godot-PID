@@ -26,54 +26,29 @@ const GP_TEXT_OUTLINE: int = 2
 # Draw the ink (solid or dashed) of one edge.
 # 绘制一条边的墨线（实线或虚线）。
 # [param gpPattern] empty = solid / 为空表示实线
-# [param gpGaps] crossing points where this line must show a break (断口); EMPTY = draw it whole.
-# [param gpGaps] 本线须显示为断口的交叉点；为空表示整条连通绘制。
 static func gpDrawInk(gpCv: CanvasItem, gpPts: PackedVector2Array, gpColor: Color,
-		gpWidth: float, gpPattern: PackedFloat32Array, gpGaps: Array[Vector2] = []) -> void:
+		gpWidth: float, gpPattern: PackedFloat32Array) -> void:
 	if gpCv == null or gpPts.size() < 2:
 		return
-	if gpGaps.is_empty():
-		if gpPattern.is_empty():
-			gpCv.draw_polyline(gpPts, gpColor, gpWidth)
-			return
-		var gpSegs: PackedVector2Array = GPEdgeDash.gpSegments(gpPts, gpPattern)
-		var gpI: int = 0
-		while gpI + 1 < gpSegs.size():
-			gpCv.draw_line(gpSegs[gpI], gpSegs[gpI + 1], gpColor, gpWidth)
-			gpI += 2
-		return
-	# Gapped: a solid run is split into pieces so the joins survive; a dashed run keeps its phase
-	# by generating the dashes over the WHOLE polyline first and only then trimming them.
-	# 带断口：实线切成分段以保留接缝；虚线则先沿整条折线生成划段（保留相位），之后才修剪。
 	if gpPattern.is_empty():
-		for gpPiece in GPEdgeCrossing.gpSplitByGaps(gpPts, gpGaps, GPEdgeCrossing.GP_BREAK_GAP):
-			if gpPiece.size() >= 2:
-				gpCv.draw_polyline(gpPiece, gpColor, gpWidth)
+		gpCv.draw_polyline(gpPts, gpColor, gpWidth)
 		return
-	var gpTrimmed: PackedVector2Array = GPEdgeCrossing.gpClipSegsByGaps(
-		GPEdgeDash.gpSegments(gpPts, gpPattern), gpGaps, GPEdgeCrossing.GP_BREAK_GAP)
-	var gpJ: int = 0
-	while gpJ + 1 < gpTrimmed.size():
-		gpCv.draw_line(gpTrimmed[gpJ], gpTrimmed[gpJ + 1], gpColor, gpWidth)
-		gpJ += 2
+	var gpSegs: PackedVector2Array = GPEdgeDash.gpSegments(gpPts, gpPattern)
+	var gpI: int = 0
+	while gpI + 1 < gpSegs.size():
+		gpCv.draw_line(gpSegs[gpI], gpSegs[gpI + 1], gpColor, gpWidth)
+		gpI += 2
 
 
 # Draw a soft halo UNDER the ink so selecting a 1.4-wide signal line is actually visible.
 # 在墨线「之下」画一层柔和光晕，使选中 1.4 宽的细信号线也能被看见。
 # Always solid: a dashed halo reads as noise and hides the dash pattern it surrounds.
 # 恒为实线：虚线光晕看起来像噪点，还会盖住它所环绕的虚线图案。
-# The halo is cut by the same gaps, otherwise it would fill the very break it surrounds.
-# 光晕同样被断口切断，否则它会把本应留出的断口填满。
 static func gpDrawHalo(gpCv: CanvasItem, gpPts: PackedVector2Array, gpColor: Color,
-		gpWidth: float, gpGaps: Array[Vector2] = []) -> void:
+		gpWidth: float) -> void:
 	if gpCv == null or gpPts.size() < 2:
 		return
-	if gpGaps.is_empty():
-		gpCv.draw_polyline(gpPts, gpColor, gpWidth)
-		return
-	for gpPiece in GPEdgeCrossing.gpSplitByGaps(gpPts, gpGaps, GPEdgeCrossing.GP_BREAK_GAP):
-		if gpPiece.size() >= 2:
-			gpCv.draw_polyline(gpPiece, gpColor, gpWidth)
+	gpCv.draw_polyline(gpPts, gpColor, gpWidth)
 
 
 # Mark a free (dangling) end with a hollow ring — the drafting convention for "continues
