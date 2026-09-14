@@ -169,18 +169,10 @@ var gpLeftWidthPx: float = GP_LEFT_MIN
 # 当前右停靠栏宽度（像素）；以 GP_RIGHT_MIN 初始化，拖拽时更新。
 var gpRightWidthPx: float = GP_RIGHT_MIN
 
-# Drawing toolbar row under the menu bar (select / connect / line / circle / rect / polyline / port / new).
-# 菜单栏下方的绘图工具栏行（选择 / 连线 / 直线 / 圆 / 矩形 / 折线 / 端口 / 新建）。
-var gpToolBar: HBoxContainer = null
-
-# Toggle buttons (select / connect) kept for highlight sync; keyed by action name.
-# 开关按钮（选择 / 连线），保留以便同步高亮；以动作名为键。
-var gpToolBtns: Dictionary = {}
-
 # Ribbon command bar (P0 / ADR-UI-01). Replaces the old flat DrawToolBar in the
 # same VBox slot; emits gpActionTriggered, which routes to gpRibbonCoord.gpOnToolBarPressed.
 # Ribbon 命令栏（P0 / ADR-UI-01），在原 DrawToolBar 同位置取代它；发射 gpActionTriggered
-# 并路由到 gpRibbonCoord.gpOnToolBarPressed。回退只需恢复 _gpBuildToolBar 调用（见下方注释）。
+# 并路由到 gpRibbonCoord.gpOnToolBarPressed。
 var gpRibbon: GPPIDRibbon = null
 
 
@@ -568,14 +560,6 @@ func _gpStyleChrome() -> void:
 	gpRibbonCoord.gpStyleChrome()
 
 
-func _gpAddToolBtn(gpAction: String, gpKey: String, gpToggle: bool) -> Button:
-	return gpRibbonCoord.gpAddToolBtn(gpAction, gpKey, gpToggle)
-
-
-func _gpAddSep() -> void:
-	gpRibbonCoord.gpAddSep()
-
-
 func _gpOnToolBarPressed(gpAction: String) -> void:
 	gpRibbonCoord.gpOnToolBarPressed(gpAction)
 
@@ -584,8 +568,6 @@ func _gpSyncToolBar(gpMode: int = -1) -> void:
 	gpRibbonCoord.gpSyncToolBar(gpMode)
 
 
-func _gpModeForAction(gpAction: String) -> int:
-	return gpRibbonCoord.gpModeForAction(gpAction)
 func _gpOnMakeSymbolFromShapes(gpDraft: Dictionary) -> void:
 	gpSymbolLibCoord.gpOnMakeSymbolFromShapes(gpDraft)
 

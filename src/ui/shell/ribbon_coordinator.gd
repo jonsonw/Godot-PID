@@ -25,28 +25,6 @@ extends RefCounted
 var gpHost: GPMainWindow = null
 
 
-# Map a toolbar action to its canvas mode, or -1 for non-mode buttons (e.g. "new").
-# 把工具栏动作映射到对应画布模式；非模式按钮（如「新建」）返回 -1。
-func gpModeForAction(gpAction: String) -> int:
-	match gpAction:
-		"select":
-			return GPCanvas2D.GPMode.GP_SELECT
-		"connect":
-			return GPCanvas2D.GPMode.GP_CONNECT
-		"line":
-			return GPCanvas2D.GPMode.GP_DRAW_LINE
-		"circle":
-			return GPCanvas2D.GPMode.GP_DRAW_CIRCLE
-		"rect":
-			return GPCanvas2D.GPMode.GP_DRAW_RECT
-		"polyline":
-			return GPCanvas2D.GPMode.GP_DRAW_POLYLINE
-		"pipe":
-			return GPCanvas2D.GPMode.GP_PIPE
-		"signal":
-			return GPCanvas2D.GPMode.GP_SIGNAL
-	return -1
-
 
 # ============================ in-place symbol editing ============================
 # ============================ 就地图元编辑 ============================
@@ -72,15 +50,6 @@ func gpSyncToolBar(gpMode: int = -1) -> void:
 			gpMode = GPCanvas2D.GPMode.GP_SELECT if gpCanvas == null else gpCanvas.gpMode
 		gpHost.gpRibbon.gpSyncMode(gpMode)
 		return
-	if gpHost.gpToolBar == null:
-		return
-	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
-	if gpMode < 0:
-		gpMode = GPCanvas2D.GPMode.GP_SELECT if gpCanvas == null else gpCanvas.gpMode
-	for gpAct in gpHost.gpToolBtns.keys():
-		var gpBtn: Button = gpHost.gpToolBtns[gpAct]
-		var gpM: int = gpModeForAction(gpAct)
-		gpBtn.button_pressed = (gpM >= 0 and gpMode == gpM)
 
 # Toolbar button handler: select / connect / drawing tools switch the canvas mode; the
 # "New Symbol…" button opens the isolation editor for advanced symbol authoring.
@@ -140,26 +109,6 @@ func gpOnToolBarPressed(gpAction: String) -> void:
 			gpHost._gpOpenSettings()
 	gpSyncToolBar()
 
-# Add a thin vertical separator between tool groups.
-# 在工具组之间加一条细竖直分隔线。
-func gpAddSep() -> void:
-	var gpSep: VSeparator = VSeparator.new()
-	gpHost.gpToolBar.add_child(gpSep)
-
-# Add one toolbar button. gpToggle buttons keep their pressed highlight and are tracked for sync.
-# 添加一个工具栏按钮。gpToggle 按钮保持按下高亮并被记录以便同步。
-func gpAddToolBtn(gpAction: String, gpKey: String, gpToggle: bool) -> Button:
-	var gpBtn: Button = Button.new()
-	gpBtn.text = I18n.gpTr(gpKey)
-	gpBtn.tooltip_text = I18n.gpTr(gpKey)
-	gpBtn.focus_mode = Control.FOCUS_NONE
-	if gpToggle:
-		gpBtn.toggle_mode = true
-	gpBtn.pressed.connect(gpOnToolBarPressed.bind(gpAction))
-	gpHost.gpToolBar.add_child(gpBtn)
-	if gpToggle:
-		gpHost.gpToolBtns[gpAction] = gpBtn
-	return gpBtn
 
 # 视觉分层（精致化）：
 # 右栏 TabContainer 背景（左边界交由顶层叠加层画发丝线，避免双线）；tab 按钮统一 DOCK 色，
