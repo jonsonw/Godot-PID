@@ -92,3 +92,99 @@ func gpTestIsPortHelper() -> void:
 	var gpGrid: Dictionary = GPSnapResolver.gpSnap(g, gpLookup, Vector2(1000, 1000), 1.0, [])
 	gpEq(GPSnapResolver.gpIsPort(gpPort), true, "gpIsPort true for a port snap")
 	gpEq(GPSnapResolver.gpIsPort(gpGrid), false, "gpIsPort false for a grid snap")
+
+
+# ---- SnapState wiring tests (P3, item 2): the toggles must actually change behaviour. ----
+# ---- SnapState 接线测试（P3 第 2 项）：开关必须真正改变行为。 ----
+
+# A graph with two straight (ortho=false) dangling edges that cross at (200,200):
+#   e1  (100,100) -> (300,300)      e2  (100,300) -> (300,100)
+# Their resolved polylines are exact straight lines, so midpoints / feet / crossing are
+# computable by hand and independent of any routing internals.
+# 含两条直连（非正交）悬空边、在 (200,200) 交叉的图：
+#   e1  (100,100) -> (300,300)      e2  (100,300) -> (300,100)
+# 解析出的折线是精确直线，故中点 / 垂足 / 交点均可手算，与任何布线内部无关。
+func _mkWithEdges() -> Array:
+	var g: GPPIDGraph = GPPIDGraph.new()
+	var e1: GPPIDEdge = GPPIDEdge.new()
+	e1.gpInstanceId = "e1"
+	e1.gpFromRef = {"node_id": "", "port_id": "", "point": [100.0, 100.0]}
+	e1.gpToRef = {"node_id": "", "port_id": "", "point": [300.0, 300.0]}
+	e1.gpOrtho = false
+	e1.gpRouting = []
+	var e2: GPPIDEdge = GPPIDEdge.new()
+	e2.gpInstanceId = "e2"
+	e2.gpFromRef = {"node_id": "", "port_id": "", "point": [100.0, 300.0]}
+	e2.gpToRef = {"node_id": "", "port_id": "", "point": [300.0, 100.0]}
+	e2.gpOrtho = false
+	e2.gpRouting = []
+	g.gpAddEdge(e1)
+	g.gpAddEdge(e2)
+	return [g]
+
+
+func _gpNoLookup() -> Callable:
+	return func(gpId: String) -> GPSymbolDef:
+		return null
+
+
+# gpSnapEnabled = false must return the raw click, never pulled onto a port/grid/edge.
+# gpSnapEnabled = false 必须返回原始点击，绝不吸附到端口/网格/边。
+func gpTestSnapOffReturnsFree() -> void:
+	var f: Array = _mkWithEdges()
+	var g: GPPIDGraph = f[0]
+	var gpS: Dictionary = GPSnapResolver.gpSnap(g, _gpNoLookup(), Vector2(200, 200), 1.0, [],
+		false, GPSnapResolver.GP_KIND_ENDPOINT)
+	gpEq(gpS.get("kind"), GPSnapResolver.GP_FREE, "disabled snap returns GP_FREE")
+	gpApprox(float(gpS.get("pos").x), 200.0, 0.01, "free pos x is the raw click")
+	gpApprox(float(gpS.get("pos").y), 200.0, 0.01, "free pos y is the raw click")
+
+
+# gpSnapType = MIDPOINT snaps to the nearest edge midpoint.
+# gpSnapType = MIDPOINT 吸附到最近边的中点。
+func gpTestSnapMidpoint() -> void:
+	var f: Array = _mkWithEdges()
+	var g: GPPIDGraph = f[0]
+	var gpS: Dictionary = GPSnapResolver.gpSnap(g, _gpNoLookup(), Vector2(200, 200), 1.0, [],
+		true, GPSnapResolver.GP_KIND_MIDPOINT)
+	gpEq(gpS.get("kind"), GPSnapResolver.GP_MID, "midpoint mode snaps to edge midpoint")
+	gpApprox(float(gpS.get("pos").x), 200.0, 0.01, "mid x is the crossing point")
+	gpApprox(float(gpS.get("pos").y), 200.0, 0.01, "mid y is the crossing point")
+	gpEq(str(gpS.get("edge_id")), "e1", "midpoint belongs to e1 (first edge wins ties)")
+
+
+# gpSnapType = PERPENDICULAR snaps to the nearest perpendicular foot on an edge.
+# gpSnapType = PERPENDICULAR 吸附到边上最近的垂足。
+func gpTestSnapPerpendicular() -> void:
+	var f: Array = _mkWithEdges()
+	var g: GPPIDGraph = f[0]
+	var gpS: Dictionary = GPSnapResolver.gpSnap(g, _gpNoLookup(), Vector2(200, 210), 1.0, [],
+		true, GPSnapResolver.GP_KIND_PERPENDICULAR)
+	gpEq(gpS.get("kind"), GPSnapResolver.GP_PERP, "perp mode snaps to a perpendicular foot")
+	gpApprox(float(gpS.get("pos").x), 205.0, 0.01, "perp foot x on e1 (y=x)")
+	gpApprox(float(gpS.get("pos").y), 205.0, 0.01, "perp foot y on e1 (y=x)")
+
+
+# gpSnapType = INTERSECTION snaps to the crossing of two edges.
+# gpSnapType = INTERSECTION 吸附到两条边的交点。
+func gpTestSnapIntersection() -> void:
+	var f: Array = _mkWithEdges()
+	var g: GPPIDGraph = f[0]
+	var gpS: Dictionary = GPSnapResolver.gpSnap(g, _gpNoLookup(), Vector2(200, 200), 1.0, [],
+		true, GPSnapResolver.GP_KIND_INTERSECTION)
+	gpEq(gpS.get("kind"), GPSnapResolver.GP_INTER, "intersection mode snaps to crossing")
+	gpApprox(float(gpS.get("pos").x), 200.0, 0.01, "inter x is the crossing")
+	gpApprox(float(gpS.get("pos").y), 200.0, 0.01, "inter y is the crossing")
+
+
+# When no feature is within reach, a feature mode falls back to the grid (consistent with
+# ENDPOINT mode), so the click still lands on something aligned.
+# 当附近无特征时，特征模式回落网格（与 ENDPOINT 模式一致），点击仍落在对齐的位置上。
+func gpTestSnapFeatureFallbackToGrid() -> void:
+	var f: Array = _mkWithEdges()
+	var g: GPPIDGraph = f[0]
+	var gpS: Dictionary = GPSnapResolver.gpSnap(g, _gpNoLookup(), Vector2(900, 900), 1.0, [],
+		true, GPSnapResolver.GP_KIND_MIDPOINT)
+	gpEq(gpS.get("kind"), GPSnapResolver.GP_GRID, "feature mode falls back to grid when nothing is near")
+	gpApprox(float(gpS.get("pos").x), 900.0, 0.01, "grid x nearest 50-step")
+	gpApprox(float(gpS.get("pos").y), 900.0, 0.01, "grid y nearest 50-step")
