@@ -98,7 +98,7 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 		gpCv.queue_redraw()
 		return true
 	var gpId: String = gpCv.gpRequestConnectEdge(_gpRefFrom(_gpStart), _gpRefFrom(gpSnap),
-		_gpKind(), _gpDefaultSignalType(), not gpShift)
+		_gpKind(), _gpDefaultSignalType(), SnapState.gpOrthoEnabled and not gpShift)
 	if gpId == "":
 		# The command refused (duplicate / self-loop / both ends free).
 		# 命令拒绝（重复边 / 自环 / 两端皆悬空）。
@@ -177,10 +177,31 @@ func _gpReset() -> void:
 	_gpCursorSnap = {}
 
 
+# Map the global SnapState snap mode onto the resolver's GP_KIND_* constants (a 1:1
+# correspondence). The tool — not the core resolver — owns the autoload read, so core stays
+# free of any global dependency.
+# 把全局 SnapState 的捕捉模式映射到解析器的 GP_KIND_* 常量（一一对应）。读 autoload 的是工具而非
+# core 解析器，故 core 层始终无全局依赖。
+func _gpSnapKind() -> int:
+	match SnapState.gpSnapType:
+		SnapState.GP_SNAP_TYPE.MIDPOINT:
+			return GPSnapResolver.GP_KIND_MIDPOINT
+		SnapState.GP_SNAP_TYPE.INTERSECTION:
+			return GPSnapResolver.GP_KIND_INTERSECTION
+		SnapState.GP_SNAP_TYPE.PERPENDICULAR:
+			return GPSnapResolver.GP_KIND_PERPENDICULAR
+		_:
+			return GPSnapResolver.GP_KIND_ENDPOINT
+
+
 func _gpSnapAt(gpWorld: Vector2) -> Dictionary:
 	var gpCv := gpCtx.gpCv
+	# The two binary toggles flow straight from SnapState: snapping on/off and the active
+	# CAD snap mode. The ortho flag (Shift or not) is applied at the router, not here.
+	# 两个开关直接来自 SnapState：捕捉开/关与当前 CAD 捕捉模式。正交标志（是否按 Shift）在
+	# 布线处施加，不在此处。
 	return GPSnapResolver.gpSnap(gpCv.gpGraph, gpCv.gpDefLookupCallable(), gpWorld,
-		gpCv.gpViewZoom, _gpWantTypes())
+		gpCv.gpViewZoom, _gpWantTypes(), SnapState.gpSnapEnabled, _gpSnapKind())
 
 
 # Shift means "straight, no orthogonal routing". Sampled live at draw time (not from the press
