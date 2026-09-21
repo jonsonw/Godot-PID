@@ -1,26 +1,24 @@
 class_name GPConnectEdgeCommand
 extends GPCommand
 # Copyright © 2026 Jonson Wang
-# Create one port-aware edge (pipe or signal line) as a single undo step (P3).
-# 创建一条「端口感知」的边（管道或信号线），作为一个撤销步（P3）。
 #
 # Why a new command instead of extending GPConnectCommand / 为何新增而非扩展 GPConnectCommand:
-#   GPConnectCommand is node-to-node and is covered by two existing tests; overloading it with
-#   ports, kinds, signal types, tag minting and duplicate detection would turn a 63-line value
-#   object into a compatibility minefield. The two live side by side: the old one keeps serving
-#   the SELECT/CONNECT path, this one serves the P3 pipe and signal tools.
-#   GPConnectCommand 是节点到节点，且已有两个测试覆盖；若把端口、类型、信号、铸号与重复检测
-#   都塞进去，会把 63 行的值对象变成兼容性雷区。两者并存：旧的继续服务选择/连线路径，
-#   本命令服务 P3 的管道与信号线工具。
+# GPConnectCommand is node-to-node and is covered by two existing tests; overloading it with
+# ports, kinds, signal types, tag minting and duplicate detection would turn a 63-line value
+# object into a compatibility minefield. The two live side by side: the old one keeps serving
+# the SELECT/CONNECT path, this one serves the P3 pipe and signal tools.
+# GPConnectCommand 是节点到节点，且已有两个测试覆盖；若把端口、类型、信号、铸号与重复检测
+# 都塞进去，会把 63 行的值对象变成兼容性雷区。两者并存：旧的继续服务选择/连线路径，
+# 本命令服务 P3 的管道与信号线工具。
 #
 # Tag minting belongs HERE, not in the tool / 铸号属于此处，而非工具：
-#   Undo must not silently burn a number. If the tool minted the tag before handing off, an
-#   undone-and-redone pipe would consume two numbers from a sequence that is defined as
-#   never-recycled. Minting inside gpExecute ties the number to a step that is recorded.
-#   撤销绝不能静默烧掉一个号。若工具在交棒前铸号，一次「撤销再重做」的管道会从「绝不回收」
-#   的序列里吃掉两个号。把铸号放进 gpExecute，就把号与「被记录的那一步」绑定在一起。
-#   Undo deliberately does NOT roll the high-water mark back — that is what "never recycled"
-#   means. / 撤销刻意不回退水位线 —— 这正是「绝不回收」的含义。
+# Undo must not silently burn a number. If the tool minted the tag before handing off, an
+# undone-and-redone pipe would consume two numbers from a sequence that is defined as
+# never-recycled. Minting inside gpExecute() ties the number to a step that is recorded.
+# 撤销绝不能静默烧掉一个号。若工具在交棒前铸号，一次「撤销再重做」的管道会从「绝不回收」
+# 的序列里吃掉两个号。把铸号放进 gpExecute()，就把号与「被记录的那一步」绑定在一起。
+# Undo deliberately does NOT roll the high-water mark back — that is what "never recycled"
+# means. / 撤销刻意不回退水位线 —— 这正是「绝不回收」的含义。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -43,13 +41,13 @@ var gpSignalType: String = ""
 var gpOrtho: bool = true
 
 # Pre-computed MIDDLE waypoints (auto-routed). Empty = let GPEdgeRoute derive an L/Z/U path from
-# the two port normals, exactly as a hand-drawn pipe does. Set by GPEditService.gpConnectEdgeRouted.
+# the two port normals, exactly as a hand-drawn pipe does. Set by GPEditService.gpConnectEdgeRouted().
 # 预先算好的中间折点（自动布线）。为空表示由 GPEdgeRoute 依两端口法线推导 L/Z/U 路径 ——
-# 与手绘管线完全一致。由 GPEditService.gpConnectEdgeRouted 设置。
+# 与手绘管线完全一致。由 GPEditService.gpConnectEdgeRouted() 设置。
 var gpRouting: Array[Vector2] = []
 
-# Id of the created edge (readable after a successful gpExecute, for selection).
-# 所创建边的 id（gpExecute 成功后可读，供选中用）。
+# Id of the created edge (readable after a successful gpExecute(), for selection).
+# 所创建边的 id（gpExecute() 成功后可读，供选中用）。
 var gpCreatedId: String = ""
 
 # Human-readable reason the command refused, so the caller can show it instead of guessing.
@@ -86,17 +84,17 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		return false
 	if _gpEdge == null:
 		var gpEid: String = gpCtx.gpIds.gpNext("e")
-		# Mint the pipe number INSIDE the command (see the header: undo must not burn a number).
-		# Signal lines carry no line number by convention, so they get "".
-		# 在命令内部铸管线号（见文件头：撤销不得烧号）。信号线按惯例不带线号，故为 ""。
+ # Mint the pipe number INSIDE the command (see the header: undo must not burn a number).
+ # Signal lines carry no line number by convention, so they get "".
+ # 在命令内部铸管线号（见文件头：撤销不得烧号）。信号线按惯例不带线号，故为 ""。
 		var gpTag: String = ""
 		if gpKind != GPPIDEdge.GP_SIGNAL:
 			gpTag = GPTagGen.gpNextTag(gpCtx.gpGraph)
 		_gpEdge = gpCtx.gpGraph.gpNewEdgeEx(gpEid, gpFromRef, gpToRef, gpKind, gpSignalType, gpTag)
 		_gpEdge.gpOrtho = gpOrtho
-		# An auto-routed edge stores its waypoints as DATA, never as baked geometry: the two ends
-		# are still re-resolved from the port refs every frame.
-		# 自动布线的边把折点存为「数据」而非烘死的几何：两端仍每帧由端口引用重算。
+ # An auto-routed edge stores its waypoints as DATA, never as baked geometry: the two ends
+ # are still re-resolved from the port refs every frame.
+ # 自动布线的边把折点存为「数据」而非烘死的几何：两端仍每帧由端口引用重算。
 		if not gpRouting.is_empty():
 			_gpEdge.gpRouting = gpRouting.duplicate()
 		gpCreatedId = gpEid
@@ -124,11 +122,11 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 # ============================ private ============================
 
 # Reject the shapes that have no meaning on a P&ID:
-#   - both ends dangling (a line with no connection at all is not a pipe)
-#   - the same port on the same node (a self-loop)
+# - both ends dangling (a line with no connection at all is not a pipe)
+# - the same port on the same node (a self-loop)
 # 拒绝在 P&ID 上没有意义的形状：
-#   - 两端皆悬空（一条完全没有连接的线不是管线）
-#   - 同一节点的同一端口（自环）
+# - 两端皆悬空（一条完全没有连接的线不是管线）
+# - 同一节点的同一端口（自环）
 # The same node with two DIFFERENT ports is allowed: a real recirculation or bypass line.
 # 同一节点的两个「不同」端口是允许的：真实的回流线或旁通线。
 func _gpValidate() -> bool:

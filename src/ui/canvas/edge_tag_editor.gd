@@ -1,20 +1,20 @@
 class_name GPEdgeTagEditor
 extends RefCounted
 
-# In-place line-number editor for a P&ID edge (P3-4). A floating LineEdit is shown over the
+# In-place line-number editor for a P&ID edge . A floating LineEdit is shown over the
 # selected edge's midpoint; typing a new tag and pressing Enter (or clicking away) commits it
 # through the canvas edit port, so the rename is ONE undo step. While the editor is open the
 # canvas freezes pan/zoom so the field cannot drift off the pipe.
-# 一条边的就地管线号编辑器（P3-4）。一个浮层 LineEdit 显示在该边中点的上方；输入新位号并回车
+# 一条边的就地管线号编辑器。一个浮层 LineEdit 显示在该边中点的上方；输入新位号并回车
 # （或点击别处）即经画布编辑端口提交，使重命名成为一个撤销步。编辑器打开期间画布冻结平移/缩放，
 # 字段不会偏离管线。
 #
 # Why a canvas delegate (not a free module) / 为何是画布委托：
-#   it owns a UI node (a LineEdit) that must live in the canvas tree and must reach the model
-#   through the same edit ports as every other interaction. Mirrors GPAnnotationEditor's
-#   "holds the canvas reference" shape.
-#   它持有一个 UI 节点（LineEdit），必须挂在画布子树中，并须经与其它交互相同的编辑端口触达模型。
-#   与 GPAnnotationEditor「持有画布引用」的形状一致。
+# it owns a UI node (a LineEdit) that must live in the canvas tree and must reach the model
+# through the same edit ports as every other interaction. Mirrors GPAnnotationEditor's
+# "holds the canvas reference" shape.
+# 它持有一个 UI 节点（LineEdit），必须挂在画布子树中，并须经与其它交互相同的编辑端口触达模型。
+# 与 GPAnnotationEditor「持有画布引用」的形状一致。
 
 # The canvas that owns the live graph + the edit ports. / 持有实时图与编辑端口的画布。
 var gpCv: GPCanvas2D

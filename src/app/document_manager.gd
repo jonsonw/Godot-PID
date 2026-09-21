@@ -1,6 +1,6 @@
 class_name GPAppDocumentManager
 extends RefCounted
-# Application-layer document state owner (M6 of the modularisation plan).
+# Application-layer document state owner .
 # 应用层文档状态所有者（模块化方案 M6）。
 #
 # Replaces the old GPAppState autoload stub. Instead of a global singleton that every
@@ -22,8 +22,6 @@ var gpDirty: bool = false
 
 # Event channel owned by this manager. The canvas forwards onto it; widgets subscribe.
 # 本管理器持有的事件通道。画布向其转发；控件订阅之。
-# Created here on purpose: the manager is the single owner of the bus (M6).
-# 刻意在此创建：管理器是总线的唯一所有者（M6）。
 var gpBus: GPEventBus = GPEventBus.new()
 
 

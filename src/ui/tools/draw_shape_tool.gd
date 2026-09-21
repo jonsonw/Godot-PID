@@ -1,17 +1,15 @@
 # ============================================================================
-# GPDrawShapeTool — 注释图形绘制（P2 拆分 · M3 状态归位）
-# Annotation-shape drawing (P2 split · M3 state ownership).
+# GPDrawShapeTool — 注释图形绘制
+# Annotation-shape drawing .
 #
 # 持有绘图模式下的按下 / 移动 / 释放 / 按键逻辑。两点工具（直线/圆/矩形/弧）按下锚定、松开提交；
 # 折线每次点击追加顶点、Enter 或双击结束。
 # Two-point tools (line / circle / rect / arc) anchor on press and commit on release; the polyline
 # appends a vertex per click and finishes on Enter or double click.
 #
-# M3：绘图瞬态状态（起点 / 终点 / 活动标记 / 折线顶点）与三条绘图逻辑（_gpOnDrawDown /
-# _gpCommitDraw / _gpFinishPolyline）已从画布迁入本类。此前本工具只持有「动词」，状态与实现都
+# 绘图瞬态状态（起点 / 终点 / 活动标记 / 折线顶点）与三条绘图逻辑（_gpOnDrawDown() /
 # 留在画布，于是出现「工具却没有工具的状态」——每次读写都要越过 gpCv._gp*。现在本类既持有状态
-# 也持有逻辑，并自己绘制橡皮筋（经由此前声明却从未被调用的 gpDrawOverlay 钩子）。
-# M3: the transient draw state and the three draw verbs moved here from the canvas. Previously this
+# 也持有逻辑，并自己绘制橡皮筋（经由此前声明却从未被调用的 gpDrawOverlay() 钩子）。
 # tool owned only the verbs while the state and implementation stayed on the canvas — "a tool
 # without its own state" — so every read/write crossed gpCv._gp*. Now the tool owns both, and paints
 # its own rubber band through gpDrawOverlay (a hook that was declared but never called).
@@ -22,8 +20,6 @@ extends GPCanvasTool
 
 const GPMode = GPCanvasInteractState.GPMode
 
-# ---- Transient draw state owned by this tool (M3) ----
-# ---- 本工具自持的瞬态绘图状态（M3）----
 # Anchor point of a two-point drag (world). / 两点拖拽的锚点（世界坐标）。
 var _gpFrom: Vector2 = Vector2.ZERO
 
@@ -91,16 +87,14 @@ func gpCancel() -> bool:
 		_gpActive = false
 		return true
 	if not _gpPolyPts.is_empty():
-		# Cancel the half-drawn polyline (do not commit); start fresh next click.
-		# 取消半截折线（不提交）；下次点击从头开始。
+ # Cancel the half-drawn polyline (do not commit); start fresh next click.
+ # 取消半截折线（不提交）；下次点击从头开始。
 		_gpPolyPts.clear()
 		return true
 	return false
 
 
-# Paint the rubber band and the in-progress polyline. Moved here from GPCanvasOverlay (M3): these
 # visuals are driven entirely by this tool's own state, so the tool paints them.
-# 绘制橡皮筋与进行中的折线。由 GPCanvasOverlay 迁来（M3）：这些视觉完全由本工具自身状态驱动，
 # 故由本工具绘制。
 func gpDrawOverlay(gpCv: CanvasItem) -> void:
 	# In-progress rubber band for line / circle / rect.
@@ -169,17 +163,17 @@ func _gpCommitDraw(gpTo: Vector2) -> int:
 			if gpR.size.x >= 2.0 and gpR.size.y >= 2.0:
 				gpS = GPShape.gpRect(_gpFrom, gpTo)
 		GPMode.GP_DRAW_ARC:
-			# A press-drag-release defines the arc's end points; the center is their midpoint so
-			# the result is the minor arc between them (half-circle when dragged straight).
-			# 按下拖到松开定义弧的起止点；圆心取二者中点，故结果为二者间的劣弧（竖直拖出为半圆）。
+ # A press-drag-release defines the arc's end points; the center is their midpoint so
+ # the result is the minor arc between them (half-circle when dragged straight).
+ # 按下拖到松开定义弧的起止点；圆心取二者中点，故结果为二者间的劣弧（竖直拖出为半圆）。
 			if _gpFrom.distance_to(gpTo) >= 2.0:
 				var gpCtr: Vector2 = (_gpFrom + gpTo) * 0.5
 				gpS = GPShape.gpArc(gpCtr, _gpFrom, gpTo)
 	if gpS != null:
-		# M4 续：提交经画布端口进入命令层（GPEditService → GPAddShapeCommand），
-		# 于是「画一条线」也是一步可撤销的编辑。
-		# M4 cont: the commit goes through a canvas port into the command layer, so drawing a
-		# line becomes one undoable step too.
+ # M4 续：提交经画布端口进入命令层（GPEditService → GPAddShapeCommand），
+ # 于是「画一条线」也是一步可撤销的编辑。
+ # M4 cont: the commit goes through a canvas port into the command layer, so drawing a
+ # line becomes one undoable step too.
 		return gpCv.gpRequestAddShape(gpS)
 	return -1
 

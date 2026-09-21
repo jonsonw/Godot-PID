@@ -1,9 +1,9 @@
 class_name GPCanvasHitTest
 extends RefCounted
-# Pure hit-testing + node geometry lookup for the P&ID canvas (P5 extraction). Holds NO Control /
+# Pure hit-testing + node geometry lookup for the P&ID canvas . Holds NO Control /
 # Node dependency and no camera state, so it is fully headless-testable and reusable by any view
 # that needs to ask "what is under this world point?" without dragging in the canvas god-object.
-# P&ID 画布的纯命中测试 + 节点几何查找（P5 抽取）。无 Control/Node 依赖、无相机状态，可 headless
+# P&ID 画布的纯命中测试 + 节点几何查找。无 Control/Node 依赖、无相机状态，可 headless
 # 单测，任何需要「这个点下是什么？」的视图都能复用，而无需拖入画布 god-object。
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -45,18 +45,18 @@ static func gpHitNode(gpGraph: GPPIDGraph, gpBinder: GPGraphBinder, gpWorld: Vec
 # 世界点下最上层边的 id，未命中 ""。
 #
 # Hits the ROUTED polyline, not the raw from/to refs / 命中的是「已布线的折线」而非原始引用：
-#   A pipe is drawn as an L or Z with corners. Testing the straight line between the two port
-#   refs would make the user click where the pipe visibly IS and hit nothing. So the hit test
-#   re-routes the edge exactly the way the renderer does and measures against that.
-#   管线画出来是带拐角的 L 或 Z。若按两端口引用之间的直线判定，用户点管线「看起来在」的地方
-#   会什么都点不中。因此命中测试按与渲染完全相同的方式重新布线，再依此度量。
+# A pipe is drawn as an L or Z with corners. Testing the straight line between the two port
+# refs would make the user click where the pipe visibly IS and hit nothing. So the hit test
+# re-routes the edge exactly the way the renderer does and measures against that.
+# 管线画出来是带拐角的 L 或 Z。若按两端口引用之间的直线判定，用户点管线「看起来在」的地方
+# 会什么都点不中。因此命中测试按与渲染完全相同的方式重新布线，再依此度量。
 #
 # Self-contained on purpose / 刻意自足：
-#   It needs no GPGraphBinder and no view nodes — just the graph and a def lookup. That keeps it
-#   headless-testable and means the hit area can never fall out of sync with the renderer, because
-#   both call the same GPEdgeRoute.
-#   它不需要 GPGraphBinder，也不需要任何视图节点 —— 只要图与一个定义查找器。这既保持可 headless
-#   单测，又使命中区永不会与渲染器失步，因为两者调的是同一个 GPEdgeRoute。
+# It needs no GPGraphBinder and no view nodes — just the graph and a def lookup. That keeps it
+# headless-testable and means the hit area can never fall out of sync with the renderer, because
+# both call the same GPEdgeRoute.
+# 它不需要 GPGraphBinder，也不需要任何视图节点 —— 只要图与一个定义查找器。这既保持可 headless
+# 单测，又使命中区永不会与渲染器失步，因为两者调的是同一个 GPEdgeRoute。
 static func gpHitEdge(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpWorld: Vector2,
 		gpZoom: float) -> String:
 	if gpGraph == null:
@@ -87,8 +87,8 @@ static func gpPolylineHit(gpWorld: Vector2, gpPts: PackedVector2Array, gpTol: fl
 
 
 # Index of the topmost annotation shape under the world point, or -1. Tolerance scales with zoom
-# (6px at 100%). Shared with the symbol editor via GPGeometry.gpShapeHit.
-# 世界点下最上层注释图形下标，未命中 -1。容差随缩放（100% 时 6px）。经 GPGeometry.gpShapeHit
+# (6px at 100%). Shared with the symbol editor via GPGeometry.gpShapeHit().
+# 世界点下最上层注释图形下标，未命中 -1。容差随缩放（100% 时 6px）。经 GPGeometry.gpShapeHit()
 # 与符号编辑器共用。
 static func gpHitShape(gpGraph: GPPIDGraph, gpWorld: Vector2, gpZoom: float) -> int:
 	if gpGraph == null:

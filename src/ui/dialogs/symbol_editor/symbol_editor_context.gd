@@ -1,6 +1,4 @@
 # ============================================================================
-# GPSymbolEditorContext — 符号编辑器工具的共享状态持有者（M7）
-# Shared state owner for symbol-editor tools (M7).
 #
 # 对应 GPCanvasToolContext：不持有 GPCanvas2D，而是把持有工作几何模型的 GPSymbolEditor 交给工具。
 # 工具经它读写实时状态，不直接耦合 GPMakeSymbolDialog 内部结构。

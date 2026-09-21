@@ -1,15 +1,13 @@
 class_name GPReconnectEdgeCommand
 extends GPCommand
 # Copyright © 2026 Jonson Wang
-# Move one END of an existing edge to a different port, node, or to a dangling point (P3).
-# 把一条已有边的某一端改接到另一个端口、另一个节点，或改为悬空点（P3）。
 #
 # Why one command for "reconnect" and "make dangling" / 为何「改接」与「改为悬空」共用一个命令：
-#   They are the same mutation — replace one end's ref dictionary. Dragging an end off its
-#   symbol and dropping it on another nozzle are the same gesture with a different target, and
-#   the user expects one undo step either way.
-#   它们是同一个改动 —— 替换某一端的引用字典。把端点拖离图元与拖到另一个管口是同一手势、
-#   不同目标，用户期望两种情形都只产一个撤销步。
+# They are the same mutation — replace one end's ref dictionary. Dragging an end off its
+# symbol and dropping it on another nozzle are the same gesture with a different target, and
+# the user expects one undo step either way.
+# 它们是同一个改动 —— 替换某一端的引用字典。把端点拖离图元与拖到另一个管口是同一手势、
+# 不同目标，用户期望两种情形都只产一个撤销步。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。

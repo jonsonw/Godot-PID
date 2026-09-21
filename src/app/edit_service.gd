@@ -1,27 +1,25 @@
 class_name GPEditService
 extends RefCounted
-# Application editing service: user intent -> undoable command (M4 continued).
-# 应用编辑服务：把用户意图翻译成可撤销的命令（M4 续）。
+# Application editing service: user intent -> undoable command .
+# 应用编辑服务：把用户意图翻译成可撤销的命令。
 #
 # Why this layer exists / 本层存在理由:
-#   Every user-visible edit used to be inline code inside GPCanvas2D (delete, duplicate,
-#   place, connect, draw-commit), mixing "what the user asked for" with "how the canvas
-#   keeps itself in sync". This service is where that split lands: the canvas now asks
-#   "delete this selection" and gets a plain bool back, while the model mutation, the id
-#   allocation and the undo record are made here — with no reference to any widget.
-#   每项用户可见的编辑原先都是 GPCanvas2D 里的内联代码（删除 / 复制 / 放置 / 连线 / 提交绘图），
-#   把「用户要什么」与「画布如何自同步」混在一起。本服务就是那条分界线：画布现在只问
-#   「删除这个选择集」并拿回一个 bool，而模型改动、id 分配与撤销记录都在此处完成 ——
-#   全程不引用任何控件。
+# place, connect, draw-commit), mixing "what the user asked for" with "how the canvas
+# keeps itself in sync". This service is where that split lands: the canvas now asks
+# "delete this selection" and gets a plain bool back, while the model mutation, the id
+# allocation and the undo record are made here — with no reference to any widget.
+# 每项用户可见的编辑原先都是 GPCanvas2D 里的内联代码（删除 / 复制 / 放置 / 连线 / 提交绘图），
+# 把「用户要什么」与「画布如何自同步」混在一起。本服务就是那条分界线：画布现在只问
+# 「删除这个选择集」并拿回一个 bool，而模型改动、id 分配与撤销记录都在此处完成 ——
+# 全程不引用任何控件。
 #
 # Boundary / 边界:
-#   Model-only. Nothing here touches GPCanvas2D, GPEventBus or any node: mutations travel
-#   to the view through GPPIDGraph.gpGraphChanged, which the canvas already bridges (M2),
-#   and view-only consequences (selection, mode, repaint) stay with the caller that owns
-#   them. That is what lets the whole service be unit-tested without a scene tree.
-#   仅模型层。此处不触碰 GPCanvas2D、GPEventBus 或任何节点：改动经 GPPIDGraph.gpGraphChanged
-#   到达视图（画布已在 M2 桥接），而纯视图后果（选择集、模式、重绘）留给持有它们的调用方。
-#   这正是整个服务无需场景树即可单测的原因。
+# Model-only. Nothing here touches GPCanvas2D, GPEventBus or any node: mutations travel
+# and view-only consequences (selection, mode, repaint) stay with the caller that owns
+# them. That is what lets the whole service be unit-tested without a scene tree.
+# 仅模型层。此处不触碰 GPCanvas2D、GPEventBus 或任何节点：改动经 GPPIDGraph.gpGraphChanged
+# 到达视图（画布已在 M2 桥接），而纯视图后果（选择集、模式、重绘）留给持有它们的调用方。
+# 这正是整个服务无需场景树即可单测的原因。
 #
 # M6 (PIDDocumentManager) will own one instance per document; until then the canvas holds it.
 # M6（PIDDocumentManager）将为每个文档持有一份；在此之前由画布持有。
@@ -47,9 +45,7 @@ var gpLastRefusal: String = ""
 var gpLastTagMapping: Array[Dictionary] = []
 
 # Edge ids whose endpoint was downgraded to the node centre by the most recent
-# gpReplaceSymbol() (M10). Empty when every port matched — the shell turns a non-empty list
 # into the "ports went missing" warning.
-# 最近一次 gpReplaceSymbol()（M10）中端点被降级到图元中心的边 id。端口全部匹配时为空 ——
 # 外壳据此把非空列表转成「端口缺失」警告。
 var gpLastSwapWarning: Array[String] = []
 
@@ -60,22 +56,20 @@ var gpLastSwapWarning: Array[String] = []
 # [param gpGraph] the topology to edit / 待编辑的拓扑图
 # [param gpIds] shared id generator (ids stay unique across interactive + command edits)
 # [param gpIds] 共享 id 生成器（使交互改动与命令改动的 id 保持唯一）
-# [param gpTags] optional tag registry; when supplied, placement mints unique tags (M9)
-# [param gpTags] 可选的位号注册器；提供时放置会铸造唯一位号（M9）
 func gpBindGraph(gpGraph: GPPIDGraph, gpIds: GPIdGen, gpTags: GPTagRegistry = null) -> void:
 	gpCtx = GPCommandContext.new(gpGraph, gpIds, gpTags)
 	gpStack.gpClear()
 	if gpTags != null:
 		gpTags.gpGraph = gpGraph
-		# The index is a cache: re-derive it so a document that was edited before this
-		# service existed starts from the truth.
-		# 索引是缓存：重新推导它，使在本服务存在之前就被编辑过的文档从真相出发。
+ # The index is a cache: re-derive it so a document that was edited before this
+ # service existed starts from the truth.
+ # 索引是缓存：重新推导它，使在本服务存在之前就被编辑过的文档从真相出发。
 		gpTags.gpRebuild()
 
 
-# Renumber every equipment instance from the project's numbering rules (M9b). Returns false
+# Renumber every equipment instance from the project's numbering rules . Returns false
 # when the sheet has nothing to number. gpLastTagMapping carries the old->new rows afterwards.
-# 按工程的编号规则重排所有设备实例（M9b）。图纸无可编号对象时返回 false。
+# 按工程的编号规则重排所有设备实例。图纸无可编号对象时返回 false。
 # 之后 gpLastTagMapping 携带「旧→新」各行。
 func gpRenumberTags() -> bool:
 	gpLastTagMapping = []
@@ -89,10 +83,10 @@ func gpRenumberTags() -> bool:
 # Replace the project's numbering rules in one undoable-ish step. Rules are configuration,
 # not geometry: they are applied immediately and are NOT pushed onto the undo stack, because
 # undoing "change the convention" after new instances were numbered with it would leave the
-# sheet inconsistent. Renumbering (gpRenumberTags) is the undoable operation.
+# sheet inconsistent. Renumbering (gpRenumberTags()) is the undoable operation.
 # 一步替换工程的编号规则。规则是配置而非几何：立即生效，且**不**压入撤销栈——
 # 因为在新实例已按新规则编号后再撤销「改约定」会让图纸自相矛盾。
-# 重编号（gpRenumberTags）才是可撤销的操作。
+# 重编号（gpRenumberTags()）才是可撤销的操作。
 func gpSetTagRules(gpRules: GPProjectTagRules) -> bool:
 	if gpCtx.gpGraph == null or gpRules == null:
 		return false
@@ -138,8 +132,8 @@ func gpDuplicateSelection(gpNodeIds: Array[String]) -> Array[String]:
 
 # Place one symbol instance. Returns the new node's id, or "" when it could not be placed.
 # 放置一个图元实例。返回新节点 id，无法放置时返回 ""。
-# Move one instance's tag relative to its symbol (M10b). One undo step per drag.
-# 移动一个实例上标签相对其图元的位置（M10b）。每次拖拽一个撤销步。
+# Move one instance's tag relative to its symbol . One undo step per drag.
+# 移动一个实例上标签相对其图元的位置。每次拖拽一个撤销步。
 func gpSetLabelOffset(gpNodeId: String, gpOffset: Vector2) -> bool:
 	if gpNodeId == "":
 		return false
@@ -147,10 +141,8 @@ func gpSetLabelOffset(gpNodeId: String, gpOffset: Vector2) -> bool:
 	return gpStack.gpDo(gpCmd, gpCtx)
 
 
-# Swap one instance onto another SymbolDef (M10). uid / tag / property values and every
 # connection survive; only gpSymbolId changes. Edge endpoints whose port name the NEW symbol
 # does not declare are downgraded to the node centre and reported in gpLastSwapWarning.
-# 把某个实例换到另一个 SymbolDef 上（M10）。uid / 位号 / 属性值与全部连接都保留，
 # 只有 gpSymbolId 变更。新图元未声明其端口名的边端点会降级到图元中心，
 # 并记录在 gpLastSwapWarning 中。
 func gpReplaceSymbol(gpNodeId: String, gpNewDef: GPSymbolDef) -> bool:
@@ -270,9 +262,9 @@ func gpConnectEdge(gpFromRef: Dictionary, gpToRef: Dictionary, gpKind: String,
 # Draw a pipe / signal line whose MIDDLE waypoints were computed up front (auto-routing).
 # 画一条「中间折点已预先算好」的管道 / 信号线（自动布线）。
 # Why a separate intent instead of "connect then set-routing" / 为何单开意图而非「先连再改折点」：
-#   two commands would mean two undo steps for what the user experiences as ONE action ("auto
-#   connect"). Carrying the waypoints on the create command keeps it a single step.
-#   两条命令会把用户感知为「一个动作」的操作变成两个撤销步。把折点挂在创建命令上，保持一步。
+# two commands would mean two undo steps for what the user experiences as ONE action ("auto
+# connect"). Carrying the waypoints on the create command keeps it a single step.
+# 两条命令会把用户感知为「一个动作」的操作变成两个撤销步。把折点挂在创建命令上，保持一步。
 # The result is an ordinary edge with gpRouting filled in — it stays editable by every existing
 # tool, so automatic and manual routing genuinely coexist.
 # 结果就是一条填了 gpRouting 的普通边 —— 它仍可被所有既有工具编辑，故自动与手动布线真正并存。
@@ -314,6 +306,15 @@ func gpSetEdgeAttr(gpEdgeId: String, gpKey: String, gpValue: Variant) -> bool:
 func gpSetEdgeRouting(gpEdgeId: String, gpRouting: Array[Vector2]) -> bool:
 	var gpCmd: GPSetEdgeRoutingCommand = GPSetEdgeRoutingCommand.new(gpEdgeId, gpRouting)
 	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Record a drop-on-edge restore entry as one undo step, so undoing the drop also clears the
+# symbol's restore history (Feature 2: deleting a dropped symbol restores the original line).
+# 把落点恢复记录作为一步撤销写入，使撤销落点也会清除该图元的恢复历史
+# （功能 2：删除压到连线上的图元会还原原始连线）。
+func gpRecordDrop(gpSymNid: String, gpRecord: Dictionary) -> void:
+	var gpCmd: GPSetDropRestoreCommand = GPSetDropRestoreCommand.new(gpSymNid, gpRecord)
+	gpStack.gpDo(gpCmd, gpCtx)
 
 
 # Move one end of an edge to another port / node, or make it dangle.
@@ -362,8 +363,28 @@ func gpMoveNodes(gpNodeIds: Array[String], gpDelta: Vector2) -> bool:
 	return gpStack.gpDo(gpCmd, gpCtx)
 
 
-# Commit a finished annotation shape. Returns its index in gpShapes, or -1 on failure.
-# 提交一枚绘制完成的注释图形。返回它在 gpShapes 中的下标，失败返回 -1。
+# Set absolute positions of one or more nodes in one undo step (collision-avoidance push during
+# placement and dragging). Returns false for an empty target map or when no target differs from
+# the node's live position, so a placement/drag that needed no push records no extra undo step.
+# 一步设置多个节点的绝对位置（放置与拖拽时的碰撞避让推送）。目标为空、或没有任何目标与节点
+# 实时位置不同（即无需推送）时返回 false，避免多记一个撤销步。
+func gpSetNodePositions(gpTargets: Dictionary) -> bool:
+	if gpCtx.gpGraph == null or gpTargets.is_empty():
+		return false
+	var gpChanges: bool = false
+	for gpId in gpTargets.keys():
+		var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(gpId)
+		if gpN != null and (gpN.gpPosition as Vector2) != (gpTargets[gpId] as Vector2):
+			gpChanges = true
+			break
+	if not gpChanges:
+		return false
+	var gpCmd: GPSetNodePositionsCommand = GPSetNodePositionsCommand.new(gpTargets)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Commit a finished annotation shape. Returns its index in gpShapes(), or -1 on failure.
+# 提交一枚绘制完成的注释图形。返回它在 gpShapes() 中的下标，失败返回 -1。
 func gpAddShape(gpShape: GPShape) -> int:
 	if gpShape == null or gpCtx.gpGraph == null:
 		return -1

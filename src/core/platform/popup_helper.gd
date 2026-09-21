@@ -4,12 +4,11 @@ extends RefCounted
 ## Single source of truth for PopupMenu / Popup screen positioning in Godot 4.7.
 ## 在 Godot 4.7 中 PopupMenu 定位公式的单一事实来源。
 ##
-## Godot 4.7's PopupMenu exposes NO popup_at_cursor() (verified via get_method_list); popup(Rect2i) is the
+## Godot 4.7's PopupMenu exposes NO popup_at_cursor (verified via get_method_list); popup(Rect2i) is the
 ## only positioning entry, and when popups are NOT embedded (embed_subwindows=false, the default) its
-## .position is interpreted in GLOBAL SCREEN coordinates. The three call sites that previously inlined this
 ## math (main canvas, symbol editor, isolation-layer save dropdown) each got it wrong at least once — this
 ## helper removes the duplication and the recurring positioning bug.
-## Godot 4.7 的 PopupMenu 没有 popup_at_cursor()（已用 get_method_list 实测）；仅有 popup(Rect2i) 可定位，且
+## Godot 4.7 的 PopupMenu 没有 popup_at_cursor（已用 get_method_list 实测）；仅有 popup(Rect2i) 可定位，且
 ## 「非嵌入」（默认值）时其 .position 取全局屏幕坐标。主画布、符号编辑器、隔离层保存下拉三处原本各自内联该
 ## 公式，每处至少出错一次 —— 本助手消除重复与反复出现的定位 bug。
 

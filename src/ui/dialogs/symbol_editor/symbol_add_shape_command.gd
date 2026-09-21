@@ -1,6 +1,4 @@
 # ============================================================================
-# GPSymbolAddShapeCommand — 提交一枚图元到符号工作图形表（M7）
-# Commit a finished primitive to the symbol's working shape list (M7).
 #
 # 与画布 GPAddShapeCommand 同构，但作用于符号的 _gpShapes 数组。保留图形对象本身，故重做重插入
 # 同一实例（同几何、同手柄），不会与用户所绘内容漂移。复用 GPCommand 自我求逆的值对象契约。

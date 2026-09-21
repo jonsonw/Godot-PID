@@ -1,8 +1,8 @@
 class_name GPTagRuleService
 extends RefCounted
 # Copyright © 2026 Jonson Wang
-# Pure helpers behind the "tag numbering rules" dialog (M9b).
-# 「位号编号规则」对话框背后的纯逻辑（M9b）。
+# Pure helpers behind the "tag numbering rules" dialog .
+# 「位号编号规则」对话框背后的纯逻辑。
 #
 # Everything here is static and headless-testable: no Node, no I18n autoload, no widget.
 # The dialog calls it on every keystroke to re-render the preview, and the renumber command
@@ -130,8 +130,8 @@ static func gpRevertPlan(gpGraph: GPPIDGraph, gpPlan: Array[Dictionary]) -> int:
 # 把「旧→新」映射渲染为 CSV。重编号会改变现场标牌与 DCS 点表上的编号，
 # 故该映射是交付物，而非日志。
 static func gpMappingToCsv(gpPlan: Array[Dictionary]) -> String:
-	# PackedStringArray has no join() in Godot 4 — concatenate by hand.
-	# Godot 4 的 PackedStringArray 没有 join() —— 手工拼接。
+	# PackedStringArray has no join in Godot 4 — concatenate by hand.
+	# Godot 4 的 PackedStringArray 没有 join —— 手工拼接。
 	var gpOut: String = "uid,old_tag,new_tag\n"
 	for gpRow in gpPlan:
 		gpOut += "%s,%s,%s\n" % [

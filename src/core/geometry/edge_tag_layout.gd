@@ -5,12 +5,12 @@ extends RefCounted
 # 管线编号落在其管线的什么位置。
 #
 # The drafting rule / 制图规则：
-#   "number sits above a horizontal run, to the left of a vertical one". "Above / left" is
-#   defined in SCREEN space (y grows downwards), not along the line's own direction, so a pipe
-#   drawn right-to-left still gets its number above — otherwise flipping two symbols would flip
-#   the drawing convention with them.
-#   「编号位于水平管正上方、竖管左侧」。「上方 / 左侧」以屏幕空间定义（y 向下增长），而非
-#   沿管线自身方向 —— 否则把两个图元左右对调，制图约定也会跟着翻转。
+# "number sits above a horizontal run, to the left of a vertical one". "Above / left" is
+# defined in SCREEN space (y grows downwards), not along the line's own direction, so a pipe
+# drawn right-to-left still gets its number above — otherwise flipping two symbols would flip
+# the drawing convention with them.
+# 「编号位于水平管正上方、竖管左侧」。「上方 / 左侧」以屏幕空间定义（y 向下增长），而非
+# 沿管线自身方向 —— 否则把两个图元左右对调，制图约定也会跟着翻转。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -40,14 +40,14 @@ static func gpLongestSegment(gpPts: PackedVector2Array) -> int:
 
 # Place a tag on a polyline.
 # 把位号放到折线上。
-# [param gpPts]     the routed polyline / 已完成布线的折线
-# [param gpTextW]   measured text width in world units / 实测文字宽度（世界单位）
-# [param gpTextH]   measured text height in world units / 实测文字高度（世界单位）
-# [param gpRotate]  rotate the text -90 deg on a vertical run / 竖管上是否把文字旋转 -90°
-# [param gpGap]     clearance override / 净距覆盖值
+# [param gpPts] the routed polyline / 已完成布线的折线
+# [param gpTextW] measured text width in world units / 实测文字宽度（世界单位）
+# [param gpTextH] measured text height in world units / 实测文字高度（世界单位）
+# [param gpRotate] rotate the text -90 deg on a vertical run / 竖管上是否把文字旋转 -90°
+# [param gpGap] clearance override / 净距覆盖值
 # [return] {"pos": Vector2, "rot": float, "vertical": bool}
-#          pos is the text ORIGIN (draw_string's baseline start), already in world coordinates.
-#          pos 是文字原点（draw_string 的基线起点），已是世界坐标。
+# pos is the text ORIGIN (draw_string's baseline start), already in world coordinates.
+# pos 是文字原点（draw_string 的基线起点），已是世界坐标。
 static func gpPlace(gpPts: PackedVector2Array, gpTextW: float, gpTextH: float,
 		gpRotate: bool, gpGap: float = GP_GAP) -> Dictionary:
 	var gpI: int = gpLongestSegment(gpPts)
@@ -59,19 +59,19 @@ static func gpPlace(gpPts: PackedVector2Array, gpTextW: float, gpTextH: float,
 	var gpD: Vector2 = gpB - gpA
 	var gpVertical: bool = absf(gpD.y) > absf(gpD.x)
 	if not gpVertical:
-		# Horizontal run: centred, sitting on top of the line.
-		# 水平管：居中，位于管线正上方。
+ # Horizontal run: centred, sitting on top of the line.
+ # 水平管：居中，位于管线正上方。
 		return {
 			"pos": Vector2(gpMid.x - gpTextW * 0.5, gpMid.y - gpGap),
 			"rot": 0.0,
 			"vertical": false,
 		}
 	if gpRotate:
-		# Rotated -90 deg: the text baseline runs bottom-to-top, so the origin starts half a
-		# text-width BELOW the midpoint and the glyph column is nudged right by half its height
-		# so the column (not the baseline) is what sits gpGap to the left of the pipe.
-		# 旋转 -90°：文字基线自下而上，故原点起于中点「下方」半个文字宽度处；字形列再右移
-		# 半个字高，使「字形列（而非基线）」位于管线左侧 gpGap 处。
+ # Rotated -90 deg: the text baseline runs bottom-to-top, so the origin starts half a
+ # text-width BELOW the midpoint and the glyph column is nudged right by half its height
+ # so the column (not the baseline) is what sits gpGap to the left of the pipe.
+ # 旋转 -90°：文字基线自下而上，故原点起于中点「下方」半个文字宽度处；字形列再右移
+ # 半个字高，使「字形列（而非基线）」位于管线左侧 gpGap 处。
 		return {
 			"pos": Vector2(gpMid.x - gpGap + gpTextH * 0.5, gpMid.y + gpTextW * 0.5),
 			"rot": -PI * 0.5,

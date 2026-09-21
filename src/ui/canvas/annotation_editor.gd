@@ -1,21 +1,20 @@
 class_name GPAnnotationEditor
 extends RefCounted
 
-# Annotation-shape editing for GPCanvas2D (P2 split): grip drag / whole-shape move, polyline
+# Annotation-shape editing for GPCanvas2D : grip drag / whole-shape move, polyline
 # vertex + Bézier-handle editing, and "promote shapes into a symbol". These used to live inline
 # in GPCanvas2D (the 1,640-line god-object). They are pure orchestration over the canvas's live
 # graph + transient drag state, so moving them here is a relocation with no behaviour change.
-# 主画布的注释图形编辑（P2 拆分）：锚点拖拽 / 整枚图形移动、折线顶点 + 贝塞尔手柄编辑，以及
+# 主画布的注释图形编辑：锚点拖拽 / 整枚图形移动、折线顶点 + 贝塞尔手柄编辑，以及
 # 「把图形提升为图元」。这些原本内联在 GPCanvas2D（1640 行上帝对象）中。它们只是对画布实时图与
 # 瞬态拖拽状态的编排，故移至此文件属纯搬迁，行为零变更。
 #
 # Why a canvas delegate (not a free-standing pure module) / 为何是画布委托（而非独立纯模块）：
-# grip/vertex edits mutate gpGraph.gpShapes IN PLACE and emit gpGraphChanged, so they still need
+# grip/vertex edits mutate gpGraph.gpShapes() IN PLACE and emit gpGraphChanged, so they still need
 # the canvas to redraw and broadcast. M3 change: the transient drag state itself now lives HERE
-# rather than on the canvas. It was previously shared by four parties (select tool starts it, grip
 # tool executes it, the canvas dispatches on it, and this editor consumes it) — the one party that
 # actually USES the data is this editor, so it now owns it and exposes start/move/end/query instead.
-# 锚点 / 顶点编辑就地改写 gpGraph.gpShapes 并发出 gpGraphChanged，故仍需画布重绘与广播。
+# 锚点 / 顶点编辑就地改写 gpGraph.gpShapes() 并发出 gpGraphChanged，故仍需画布重绘与广播。
 # M3 变更：瞬态拖拽状态本身改由本类持有而非画布。此前它由四方共享（选择工具发起、抓取工具执行、
 # 画布据此分派、本编辑器消费）——真正「使用」这些数据的一方是本编辑器，故由它持有，并对外暴露
 # 开始 / 移动 / 结束 / 查询 四类操作，而非把内部字段敞开。
@@ -23,8 +22,6 @@ extends RefCounted
 # The canvas we edit on. / 被编辑的画布。
 var gpCv: GPCanvas2D
 
-# ---- Transient drag state owned by this editor (M3) ----
-# ---- 本编辑器自持的瞬态拖拽状态（M3）----
 # Active grip (handle) drag: {"shape": int, "role": int, "idx": int}; empty dict = none.
 # 进行中的锚点（手柄）拖拽：{"shape": 下标, "role": 角色, "idx": 顶点/角点序号}；空字典表示无。
 var _gpGrip: Dictionary = {}
@@ -46,8 +43,6 @@ func _init(gpCanvas: GPCanvas2D) -> void:
 	gpCv = gpCanvas
 
 
-# ---- Drag lifecycle: the port this editor exposes to tools and the canvas (M3) ----
-# ---- 拖拽生命周期：本编辑器对工具与画布暴露的端口（M3）----
 # True while either a grip drag or a whole-shape move is in flight.
 # 锚点拖拽或整图形移动正在进行时返回真。
 func gpIsDragging() -> bool:
@@ -78,8 +73,8 @@ func gpHitGrip(gpWorld: Vector2, gpShapeIdx: int) -> Dictionary:
 	var gpTol: float = 6.0 / gpCv.gpViewZoom
 	for gpG in GPShapeGripEditor.gpGrips(gpCv.gpGraph.gpShapes[gpShapeIdx]):
 		if gpWorld.distance_to(gpG["pos"]) <= gpTol:
-			# Tag the hit grip with its owning shape index so the drag can address the model.
-			# 给命中的锚点标注所属图形下标，使拖拽能定位到模型。
+ # Tag the hit grip with its owning shape index so the drag can address the model.
+ # 给命中的锚点标注所属图形下标，使拖拽能定位到模型。
 			var gpRes: Dictionary = gpG.duplicate()
 			gpRes["shape"] = gpShapeIdx
 			return gpRes
@@ -94,9 +89,7 @@ func gpStartGripDrag(gpGrip: Dictionary) -> void:
 	gpCv.queue_redraw()
 
 
-# Begin moving a whole annotation shape, snapshotting its geometry for a rigid replay (M3).
-# 开始整体移动一枚注释图形，快照其几何以便无漂移重放（M3）。
-# [param gpShapeIdx] index into gpGraph.gpShapes / gpGraph.gpShapes 中的下标。
+# [param gpShapeIdx] index into gpGraph.gpShapes() / gpGraph.gpShapes() 中的下标。
 # [param gpWorld] world position of the press, used to measure the delta / 按下处的世界坐标，用于测量位移。
 func gpStartShapeDrag(gpShapeIdx: int, gpWorld: Vector2) -> void:
 	gpEndDrag()
@@ -108,8 +101,6 @@ func gpStartShapeDrag(gpShapeIdx: int, gpWorld: Vector2) -> void:
 
 
 # Finish a grip drag / whole-shape move. Geometry was already mutated live during the drag, so
-# there is nothing to apply here — only the transient state is released (M3).
-# 结束锚点拖拽 / 整图形移动。几何已在拖拽过程中实时变更，故此处无需应用改动，只释放瞬态状态（M3）。
 func gpEndGripDrag() -> void:
 	_gpGrip = {}
 
@@ -300,9 +291,9 @@ func gpShapesToDraft(gpShapes: Array[GPShape]) -> Dictionary:
 							[gpS.gpPoints[1].x - gpMin.x, gpS.gpPoints[1].y - gpMin.y],
 						],
 						"closed": false,
-						# Carry Bézier handles (relative offsets) so a curved spline survives promotion.
-						# Relative offsets are translation-invariant, so -gpMin does not affect them.
-						# 携带贝塞尔手柄（相对偏移），使曲线样条经提升后仍可继续编辑；相对偏移与平移无关。
+ # Carry Bézier handles (relative offsets) so a curved spline survives promotion.
+ # Relative offsets are translation-invariant, so -gpMin does not affect them.
+ # 携带贝塞尔手柄（相对偏移），使曲线样条经提升后仍可继续编辑；相对偏移与平移无关。
 						"handles": GPShapeSpec.gpEmitHandles(gpS),
 					})
 			GPShape.GPKind.GP_POLYLINE:
@@ -310,8 +301,8 @@ func gpShapesToDraft(gpShapes: Array[GPShape]) -> Dictionary:
 				for gpP in gpS.gpPoints:
 					gpPts.append([gpP.x - gpMin.x, gpP.y - gpMin.y])
 				var gpPathD: Dictionary = {"pts": gpPts, "closed": gpS.gpClosed}
-				# Preserve Bézier handles so a curved polyline is not flattened on promotion.
-				# 保留贝塞尔手柄，避免曲线折线在提升时被展平。
+ # Preserve Bézier handles so a curved polyline is not flattened on promotion.
+ # 保留贝塞尔手柄，避免曲线折线在提升时被展平。
 				gpPathD["handles"] = GPShapeSpec.gpEmitHandles(gpS)
 				gpPaths.append(gpPathD)
 			GPShape.GPKind.GP_CIRCLE:

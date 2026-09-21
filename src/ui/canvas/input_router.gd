@@ -4,37 +4,37 @@ extends RefCounted
 # input event routing; tool dispatch
 # 输入事件路由与工具分派
 #
-# WHY THIS EXISTS / 为何存在（架构优化建议 §3.4）：
-#   GPCanvas2D was carrying many unrelated responsibilities in one file; this coordinator
-#   owns the "input event routing; tool dispatch" use case end to end, so the root keeps only
-#   assembly and forwarding.
-#   GPCanvas2D 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「输入事件路由与工具
-#   分派」这一用例，使根类只保留装配与转发。
+# WHY THIS EXISTS / 为何存在：
+# GPCanvas2D was carrying many unrelated responsibilities in one file; this coordinator
+# owns the "input event routing; tool dispatch" use case end to end, so the root keeps only
+# assembly and forwarding.
+# GPCanvas2D 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「输入事件路由与工具
+# 分派」这一用例，使根类只保留装配与转发。
 #
 # Interaction / 交互方式：
-#   - the root creates this coordinator and injects itself as gpHost (composition root);
-#     根类创建本协调者并把自身注入为 gpHost（组合根装配）；
-#   - the root forwards user actions here, never the other way round — this class drives the
-#     host only through its public ports (GPCanvas2D.gp*);
-#     根类把用户动作转发到此处，绝不反向 —— 本类只经宿主的公开端口（GPCanvas2D.gp*）驱动宿主；
-#   - the root keeps every public port it had before: callers outside the canvas are unchanged.
-#     根类保留其原有的每一个公开端口：画布外部的调用方零改动。
+# - the root creates this coordinator and injects itself as gpHost (composition root);
+# 根类创建本协调者并把自身注入为 gpHost（组合根装配）；
+# - the root forwards user actions here, never the other way round — this class drives the
+# host only through its public ports (GPCanvas2D.gp*);
+# 根类把用户动作转发到此处，绝不反向 —— 本类只经宿主的公开端口（GPCanvas2D.gp*）驱动宿主；
+# - the root keeps every public port it had before: callers outside the canvas are unchanged.
+# 根类保留其原有的每一个公开端口：画布外部的调用方零改动。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
 var gpHost: GPCanvas2D = null
 
-# ---- 输入侧委托与状态（架构优化 §3.4：随输入路由一起从画布迁入） ----
-# ---- Input-side delegates and state (architecture §3.4: moved in with the input router) ----
+# ---- 输入侧委托与状态 ----
+# ---- Input-side delegates and state ----
 # Right-click context-menu delegate: hit-test / menu build / action dispatch.
 # 右键上下文菜单委托：命中判定 / 菜单构建 / 动作分发。
 var _gpCtx: GPCanvasContextMenu = null
 # Keyboard-shortcut delegate: shared shortcuts and the progressive-ESC chain.
 # 键盘快捷键委托：共享快捷键与渐进式 ESC 链。
 var _gpShortcuts: GPCanvasShortcuts = null
-# Tool context + registry + six mode tools (P2/P3 split). CONNECT shares the select tool.
-# 工具上下文 + 注册表 + 六个模式工具（P2/P3 拆分）。连线模式复用选择工具。
+# Tool context + registry + six mode tools . CONNECT shares the select tool.
+# 工具上下文 + 注册表 + 六个模式工具。连线模式复用选择工具。
 var _gpToolCtx: GPCanvasToolContext = null
 var _gpRegistry: GPCanvasToolRegistry = null
 var _gpSelectTool: GPSelectTool = null
@@ -51,12 +51,17 @@ var _gpPanOffsetStart: Vector2 = Vector2.ZERO
 
 
 # Build the input-side delegates, the tool registry and the six mode tools. Called from the
-# canvas's _ready() (架构优化 §3.4): tools are pure input-dispatch implementation details, so
+# canvas's _ready : tools are pure input-dispatch implementation details, so
 # they live with the router instead of bloating the root.
-# 构建输入侧委托、工具注册表与六个模式工具。由画布的 _ready() 调用（架构优化 §3.4）：
+# 构建输入侧委托、工具注册表与六个模式工具。由画布的 _ready() 调用：
 # 工具只是输入分派的实现细节，故与路由同居，而不再撑大根类。
 func gpBuildTools() -> void:
 	_gpCtx = GPCanvasContextMenu.new(gpHost)
+	# Expose the menu on the canvas so tools can request a purpose-specific popup (e.g. the
+	# "dropped onto a line" choice) through gpCv instead of reaching into the router.
+	# 把菜单暴露到画布，使工具能经 gpCv 请求特定用途的弹窗（如「落到连线上」的选择），
+	# 而无需深入访问路由器。
+	gpHost.gpContextMenu = _gpCtx
 	_gpShortcuts = GPCanvasShortcuts.new(gpHost)
 	_gpToolCtx = GPCanvasToolContext.new(gpHost)
 	_gpRegistry = GPCanvasToolRegistry.new()
@@ -111,19 +116,23 @@ func gpOnLeftUp(gpScreen: Vector2) -> void:
 	if gpHost.gpPortOps != null and gpHost.gpPortOps.gpIsDragging():
 		gpHost.gpPortOps.gpFinishDrag()
 		return
-	# Grip / whole-shape drag belongs to GPGripTool (P2 split).
-	# 锚点 / 整图形拖拽由 GPGripTool 负责（P2 拆分）。
+	# Grip / whole-shape drag belongs to GPGripTool .
+	# 锚点 / 整图形拖拽由 GPGripTool 负责。
 	if gpHost.gpAnno.gpIsDragging():
 		_gpGripTool.gpOnRelease(gpWorld)
 		return
-	# Edge grip / route drag belongs to GPGripTool too (P3-4).
-	# 边抓取点 / 布线拖拽同样由 GPGripTool 负责（P3-4）。
-	if gpHost.gpEdgeGrips.gpIsDragging():
+	# Edge grip / route drag belongs to GPGripTool too . A whole-edge TRANSLATE uses
+	# gpIsMoving (not gpIsDragging()), but its release must also be routed here — otherwise the
+	# left-button up is swallowed by the active tool, gpEndEdgeMove() never runs, and the line keeps
+	# following the cursor until the program closes. / 边抓取点 / 布线拖拽同样由 GPGripTool 负责
+	#。整线平移用的是 gpIsMoving()（而非 gpIsDragging()），其释放亦须在此分派——否则左键抬起被
+	# 活动工具吞掉、gpEndEdgeMove() 永不执行，线会一直跟着光标走直到关闭程序。
+	if gpHost.gpEdgeGrips.gpIsDragging() or gpHost.gpEdgeGrips.gpIsMoving():
 		_gpGripTool.gpOnRelease(gpWorld)
 		return
-	# Tag (位号) label grip release (M10b): commit as ONE undo step. Without this branch the
+	# Tag (位号) label grip release : commit as ONE undo step. Without this branch the
 	# release fell through to the select tool and the drag was never recorded at all.
-	# 位号标签抓取点释放（M10b）：提交为**一个**撤销步。缺此分支，释放会落到选择工具上，
+	# 位号标签抓取点释放：提交为**一个**撤销步。缺此分支，释放会落到选择工具上，
 	# 这次拖拽从未被记录。
 	if gpHost.gpLabelGrips != null and gpHost.gpLabelGrips.gpIsDragging():
 		gpHost.gpLabelGrips.gpEndGripDrag()
@@ -149,8 +158,9 @@ func gpActiveTool() -> GPCanvasTool:
 # 处理鼠标左键按下。
 # [param gpShift] Shift held -> additive selection instead of a fresh one.
 # [param gpShift] 按住 Shift → 追加选择而非重新选择。
-# [param gpDouble] second click of a double click -> open the in-place block editor.
-# [param gpDouble] 双击的第二次点击 → 打开就地块编辑器。
+# [param gpDouble] second click of a double click -> forwarded to the active tool, which
+# requests opening the symbol editor dialog (the in-place block editor was removed).
+# [param gpDouble] 双击的第二次点击 → 转发给当前工具，由其请求打开图元编辑对话框（就地块编辑器已移除）。
 func gpOnLeftDown(gpScreen: Vector2, gpShift: bool, gpDouble: bool) -> void:
 	var gpWorld: Vector2 = gpHost.gpViewController.gpWorldFromScreen(gpScreen)
 	# An endpoint anchor is the smallest, most precise target on the sheet, so it wins over the
@@ -166,18 +176,18 @@ func gpOnLeftDown(gpScreen: Vector2, gpShift: bool, gpDouble: bool) -> void:
 
 # ============================ input ============================
 # ============================ 输入 ============================
-# Handle all mouse and keyboard input for the canvas. Godot calls GPCanvas2D._gui_input, which
+# Handle all mouse and keyboard input for the canvas. Godot calls GPCanvas2D._gui_input(), which
 # forwards here — the virtual itself must stay on the Control.
-# 处理画布的全部鼠标与键盘输入。Godot 调用 GPCanvas2D._gui_input 并转发到此处 ——
+# 处理画布的全部鼠标与键盘输入。Godot 调用 GPCanvas2D._gui_input() 并转发到此处 ——
 # 虚方法本身必须留在 Control 上。
 func gpOnGuiInput(gpEvent: InputEvent) -> void:
 	if gpEvent is InputEventMouseButton:
 		var gpMouseEvent: InputEventMouseButton = gpEvent as InputEventMouseButton
-		# Mouse wheel zooms in/out at the cursor position.
-		# 鼠标滚轮在光标位置缩放。
+ # Mouse wheel zooms in/out at the cursor position.
+ # 鼠标滚轮在光标位置缩放。
 		if gpMouseEvent.button_index == MOUSE_BUTTON_WHEEL_UP or gpMouseEvent.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			# P3-4: while the in-place tag editor is open, pan/zoom must stay frozen so the
-			# field cannot drift off the pipe it labels. / 边位号编辑器打开期间冻结缩放。
+ # P3-4: while the in-place tag editor is open, pan/zoom must stay frozen so the
+ # field cannot drift off the pipe it labels. / 边位号编辑器打开期间冻结缩放。
 			if gpHost.gpEdgeEditor != null and gpHost.gpEdgeEditor.gpIsEditing():
 				return
 			if gpMouseEvent.pressed:
@@ -185,10 +195,10 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
 				gpHost.gpViewController.gpZoomAt(gpMouseEvent.position, gpFactor)
 			gpHost.accept_event()
 			return
-		# Middle button starts/ends panning.
-		# 中键开始/结束平移。
+ # Middle button starts/ends panning.
+ # 中键开始/结束平移。
 		if gpMouseEvent.button_index == MOUSE_BUTTON_MIDDLE:
-			# P3-4: freeze panning while editing the tag too. / 编辑位号时同样冻结平移。
+ # P3-4: freeze panning while editing the tag too. / 编辑位号时同样冻结平移。
 			if gpHost.gpEdgeEditor != null and gpHost.gpEdgeEditor.gpIsEditing():
 				return
 			if gpMouseEvent.pressed:
@@ -199,8 +209,8 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
 				_gpPanning = false
 			gpHost.accept_event()
 			return
-		# Left button places, selects or connects symbols.
-		# 左键放置、选择或连接图元。
+ # Left button places, selects or connects symbols.
+ # 左键放置、选择或连接图元。
 		if gpMouseEvent.button_index == MOUSE_BUTTON_LEFT:
 			if gpMouseEvent.pressed:
 				gpOnLeftDown(gpMouseEvent.position, gpMouseEvent.shift_pressed, gpMouseEvent.double_click)
@@ -208,8 +218,8 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
 				gpOnLeftUp(gpMouseEvent.position)
 			gpHost.accept_event()
 			return
-		# Right button opens the context menu.
-		# 右键打开上下文菜单。
+ # Right button opens the context menu.
+ # 右键打开上下文菜单。
 		if gpMouseEvent.button_index == MOUSE_BUTTON_RIGHT:
 			if gpMouseEvent.pressed:
 				_gpCtx.gpOnRightDown(gpMouseEvent.position)
@@ -221,9 +231,9 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
 	if gpEvent is InputEventKey:
 		var gpKey: InputEventKey = gpEvent as InputEventKey
 		if gpKey.pressed and not gpKey.echo:
-			# The active tool gets first crack (e.g. Enter confirms a polyline); the canvas then
-			# handles the shared shortcuts (Delete / Ctrl+A / ESC).
-			# 活动工具优先处理（如 Enter 确认折线）；随后画布处理共享快捷键（Delete / Ctrl+A / ESC）。
+ # The active tool gets first crack (e.g. Enter confirms a polyline); the canvas then
+ # handles the shared shortcuts (Delete / Ctrl+A / ESC).
+ # 活动工具优先处理（如 Enter 确认折线）；随后画布处理共享快捷键（Delete / Ctrl+A / ESC）。
 			if gpActiveTool().gpOnKey(gpKey):
 				gpHost.accept_event()
 				return
@@ -234,8 +244,8 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
 	if gpEvent is InputEventMouseMotion:
 		var gpMotion: InputEventMouseMotion = gpEvent as InputEventMouseMotion
 		gpHost._gpLastMouseWorld = gpHost.gpViewController.gpWorldFromScreen(gpMotion.position)
-		# Panning in progress.
-		# 正在平移。
+ # Panning in progress.
+ # 正在平移。
 		if _gpPanning:
 			gpHost.gpViewOffset = _gpPanOffsetStart + (gpMotion.position - _gpPanStart)
 			gpHost.gpViewController.gpApplyCamera()
@@ -243,56 +253,59 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
 			gpHost.gpEmitStatus()
 			gpHost.accept_event()
 			return
-		# Marquee in progress: track the rubber band.
-		# 正在框选：跟踪橡皮筋。
+ # Marquee in progress: track the rubber band.
+ # 正在框选：跟踪橡皮筋。
 		if gpHost.gpMarq.gpActive:
 			gpHost.gpMarq.gpUpdate(gpMotion.position)
 			gpHost.queue_redraw()
 			gpHost.accept_event()
 			return
-		# Grip / whole-shape drag is owned by GPGripTool (P2 split).
-		# 锚点 / 整图形拖拽由 GPGripTool 负责（P2 拆分）。
+ # Grip / whole-shape drag is owned by GPGripTool .
+ # 锚点 / 整图形拖拽由 GPGripTool 负责。
 		if gpHost.gpAnno.gpIsDragging():
 			_gpGripTool.gpOnMove(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position))
 			gpHost.accept_event()
 			return
-		# Edge grip / route drag is also owned by GPGripTool (P3-4). It is checked AFTER the
-		# annotation drag so the two never fight over the same motion event.
-		# 边抓取点 / 布线拖拽同样由 GPGripTool 负责（P3-4）。它在注释拖拽之后检查，
-		# 使两者不会争抢同一移动事件。
-		if gpHost.gpEdgeGrips.gpIsDragging():
+ # Edge grip / route drag is also owned by GPGripTool . It is checked AFTER the
+ # annotation drag so the two never fight over the same motion event.
+ # 边抓取点 / 布线拖拽同样由 GPGripTool 负责。它在注释拖拽之后检查，
+ # 使两者不会争抢同一移动事件。
+ # A whole-edge translate (gpIsMoving()) is owned by GPGripTool too — must also forward motion,
+ # otherwise a straight (routing-less) edge could be grabbed but never follow the cursor.
+ # 整线平移（gpIsMoving()）同样由 GPGripTool 负责——也必须转发移动事件，否则直边被抓起后却不跟随光标。
+		if gpHost.gpEdgeGrips.gpIsDragging() or gpHost.gpEdgeGrips.gpIsMoving():
 			_gpGripTool.gpOnMove(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position))
 			gpHost.accept_event()
 			return
-		# Tag (位号) label grip drag (M10b). Checked before the port anchors so the two never
-		# fight over the same motion event; without this branch the label never followed.
-		# 位号标签抓取点拖拽（M10b）。在端点锚点之前检查，使两者不争抢同一移动事件；
-		# 缺这个分支，标签根本不会跟随。
+ # Tag (位号) label grip drag . Checked before the port anchors so the two never
+ # fight over the same motion event; without this branch the label never followed.
+ # 位号标签抓取点拖拽。在端点锚点之前检查，使两者不争抢同一移动事件；
+ # 缺这个分支，标签根本不会跟随。
 		if gpHost.gpLabelGrips != null and gpHost.gpLabelGrips.gpIsDragging():
 			gpHost.gpLabelGrips.gpOnGripMove(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position))
 			gpHost.accept_event()
 			return
-		# Endpoint-anchor drag (port-to-port connect). / 端点锚点拖拽（端对端连线）。
+ # Endpoint-anchor drag (port-to-port connect). / 端点锚点拖拽（端对端连线）。
 		if gpHost.gpPortOps != null and gpHost.gpPortOps.gpIsDragging():
 			gpHost.gpPortOps.gpUpdateDrag(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position))
 			gpHost.queue_redraw()
 			gpHost.accept_event()
 			return
-		# M10b: a move cursor over the tag grip. The handle is 9 px wide and sits OUTSIDE the
-		# glyph, so without feedback nobody ever finds it to drag it.
-		# M10b：抓取点上方显示移动光标。手柄仅 9 px 宽且位于字形**之外**，
-		# 没有反馈没人找得到它、更别说拖它。
+ # M10b: a move cursor over the tag grip. The handle is 9 px wide and sits OUTSIDE the
+ # glyph, so without feedback nobody ever finds it to drag it.
+ # M10b：抓取点上方显示移动光标。手柄仅 9 px 宽且位于字形**之外**，
+ # 没有反馈没人找得到它、更别说拖它。
 		if gpHost.gpLabelGrips != null and gpHost.gpLabelGrips.gpUpdateHoverCursor(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position)):
 			gpHost.accept_event()
 			return
-		# Hover highlight for the anchor under the cursor (outside any drag).
-		# 光标下锚点的悬停高亮（拖拽之外）。
+ # Hover highlight for the anchor under the cursor (outside any drag).
+ # 光标下锚点的悬停高亮（拖拽之外）。
 		if gpHost.gpPortOps != null:
 			gpHost.gpPortOps.gpUpdateHover(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position))
-		# Tool-specific rubber band / connect preview (select = connect preview, draw = rubber band).
-		# The tool returns true when it consumed the motion (e.g. rubber band) so we accept it.
-		# 工具专属橡皮筋 / 连接预览（select=连接预览，draw=橡皮筋）。工具消费了移动事件时返回
-		# true，画布据此 accept_event()。
+ # Tool-specific rubber band / connect preview (select = connect preview, draw = rubber band).
+ # The tool returns true when it consumed the motion (e.g. rubber band) so we accept it.
+ # 工具专属橡皮筋 / 连接预览（select=连接预览，draw=橡皮筋）。工具消费了移动事件时返回
+ # true，画布据此 accept_event。
 		if gpActiveTool().gpOnMove(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position)):
 			gpHost.accept_event()
 			return

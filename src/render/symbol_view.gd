@@ -9,10 +9,10 @@ extends Node2D
 # 它不持有权威状态；图数据是唯一真相来源。
 #
 # Two layers on purpose / 刻意分两层：
-#   this node  : world position + the label (upright, never mirrored, so text stays readable)
-#   _gpBody    : flip + rotation + the glyph + the port dots
-#   本节点    ：世界坐标 + 标签（始终正立、绝不镜像，故文字可读）
-#   _gpBody   ：翻转 + 旋转 + 字形 + 端口圆点
+# this node : world position + the label (upright, never mirrored, so text stays readable)
+# _gpBody : flip + rotation + the glyph + the port dots
+# 本节点 ：世界坐标 + 标签（始终正立、绝不镜像，故文字可读）
+# _gpBody ：翻转 + 旋转 + 字形 + 端口圆点
 # See GPSymbolBody for why the split is necessary.
 # 拆分的原因见 GPSymbolBody。
 #
@@ -51,8 +51,8 @@ var gpConnectSource: bool = false
 # 承载翻转与旋转的子层。
 var _gpBody: GPSymbolBody = null
 
-# Injected render-style snapshot (架构优化 §4.2). Replaces direct autoload reads.
-# 注入的渲染样式快照（架构优化 §4.2）。取代直接读 autoload。
+# Injected render-style snapshot. Replaces direct autoload reads.
+# 注入的渲染样式快照。取代直接读 autoload。
 var gpStyle: GPRenderStyle = null
 
 
@@ -98,12 +98,12 @@ func gpUpdateTransform() -> void:
 # 重绘「两层」：本节点画标签，body 子节点画字形与端口。少了它，「覆盖图元定义」
 # 只会刷新标签，而屏幕上仍留着旧几何。
 #
-# Why not override queue_redraw() / 为何不覆写 queue_redraw()：
-#   Godot rejects it ("overrides a method from native class ... won't be called by the engine"),
-#   and it would be a lie anyway: the engine would keep repainting only this node. An explicit
-#   second entry point is honest about what it does.
-#   Godot 会拒绝（"overrides a method from native class ... won't be called by the engine"），
-#   而且那样做本身就是假的：引擎仍只会重绘本节点。显式的第二个入口才如实表达其行为。
+# Why not override queue_redraw / 为何不覆写 queue_redraw：
+# Godot rejects it ("overrides a method from native class ... won't be called by the engine"),
+# and it would be a lie anyway: the engine would keep repainting only this node. An explicit
+# second entry point is honest about what it does.
+# Godot 会拒绝（"overrides a method from native class ... won't be called by the engine"），
+# 而且那样做本身就是假的：引擎仍只会重绘本节点。显式的第二个入口才如实表达其行为。
 func gpRepaint() -> void:
 	queue_redraw()
 	if _gpBody != null:

@@ -1,15 +1,12 @@
 # ============================================================================
-# GPSymbolEditor — 图元几何编辑器（M7）
-# Symbol geometry editor (M7).
 #
 # 持有工作模型（_gpShapes / _gpPorts）、当前交互工具，以及「生成图元」对话框的撤销 / 重做历史。
 # GPMakeSymbolDialog 原先内嵌了独立的几何编辑状态机（GPTool 枚举 + _gpDragKind/_gpDraftShape/
-# _gpPolyPts 与 _gpCommit*/_gpHit* 助手），既重复了画布工具机制、又无法接入共享的 GPCommandStack。
+# _gpPolyPts 与 _gpCommit()*/_gpHit* 助手），既重复了画布工具机制、又无法接入共享的 GPCommandStack。
 # 本类复用同一套工具抽象（GPSymbolEditorTool + GPSymbolEditorContext + 小注册表），并把每次「加 / 删 / 移」
 # 都经 GPCommandStack 走，使符号编辑器里的绘制、放置与删除和主画布一样可撤销。
 # Owns the working model (_gpShapes / _gpPorts), the active interaction tool, and the undo/redo history
-# for the Make-Symbol dialog. GPMakeSymbolDialog previously embedded its OWN geometry-editing state
-# machine (enum GPTool + _gpDragKind/_gpDraftShape/_gpPolyPts and the _gpCommit*/_gpHit* helpers) —
+# machine (enum GPTool + _gpDragKind/_gpDraftShape/_gpPolyPts and the _gpCommit()*/_gpHit* helpers) —
 # duplicating the canvas tool mechanism and unreachable by the shared GPCommandStack. This class reuses
 # the SAME tool abstraction and routes every add / delete / move through GPCommandStack, so drawing,
 # placing and deleting in the symbol editor are now undoable exactly like on the main canvas.

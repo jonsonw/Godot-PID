@@ -5,13 +5,13 @@ extends RefCounted
 # 样式表：(类型, 信号类型, 缩放) -> {宽度, 颜色, 图案}。刻意做成纯函数。
 #
 # Why not per-edge width / color fields / 为何不在每条边上存宽度与颜色：
-#   a drawing whose line weights live on 400 individual edges cannot be restyled — changing
-#   "utility lines are 1.6 wide" would need a migration pass over every archive. Keeping the
-#   mapping in one pure function means restyling is a one-line edit and old files pick it up
-#   automatically. Per-edge overrides, if ever needed, belong in gpAttrs, not in the model core.
-#   把线重存在 400 条边上的图纸无法重新配色 —— 把「公用工程线宽 1.6」改掉需要遍历每个存档迁移。
-#   映射收在一个纯函数里，改样式就是一行编辑，旧文件自动跟上。真需要逐边覆盖时应放 gpAttrs，
-#   而不是模型内核。
+# a drawing whose line weights live on 400 individual edges cannot be restyled — changing
+# "utility lines are 1.6 wide" would need a migration pass over every archive. Keeping the
+# mapping in one pure function means restyling is a one-line edit and old files pick it up
+# automatically. Per-edge overrides, if ever needed, belong in gpAttrs, not in the model core.
+# 把线重存在 400 条边上的图纸无法重新配色 —— 把「公用工程线宽 1.6」改掉需要遍历每个存档迁移。
+# 映射收在一个纯函数里，改样式就是一行编辑，旧文件自动跟上。真需要逐边覆盖时应放 gpAttrs，
+# 而不是模型内核。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -56,8 +56,8 @@ const GP_MIN_DASH_PX: float = 2.0
 # Resolve the render style for an edge. Never fails: unknown kinds fall back to a thin solid.
 # 解析一条边的渲染样式。绝不失败：未知类型回退为细实线。
 # [return] {"width": float, "color": Color, "pattern": PackedFloat32Array}
-#          pattern alternates on/off lengths in WORLD units; empty means solid.
-#          pattern 以世界单位交替表示「有墨/空白」长度；为空表示实线。
+# pattern alternates on/off lengths in WORLD units; empty means solid.
+# pattern 以世界单位交替表示「有墨/空白」长度；为空表示实线。
 static func gpStyleFor(gpKind: String, gpSignalType: String, gpZoom: float = 1.0) -> Dictionary:
 	var gpW: float = 1.6
 	var gpCol: Color = Color("#9AA6BE")
@@ -66,16 +66,16 @@ static func gpStyleFor(gpKind: String, gpSignalType: String, gpZoom: float = 1.0
 		GPPIDEdge.GP_PROCESS:
 			gpW = 3.0
 			gpCol = Color("#DCE3F0")
-			# CONTINUOUS — solid; AutoCAD linetype overlay (ADR-UI-02) keeps the
-			# semantic process colour while adopting the standard solid line.
-			# CONTINUOUS —— 实线；AutoCAD 线型叠加（ADR-UI-02）在保留语义工艺色的同时
-			# 采用标准实线。
+ # CONTINUOUS — solid; AutoCAD linetype overlay (ADR-UI-02) keeps the
+ # semantic process colour while adopting the standard solid line.
+ # CONTINUOUS —— 实线；AutoCAD 线型叠加（ADR-UI-02）在保留语义工艺色的同时
+ # 采用标准实线。
 			gpPat = GPLinetypeManager.gpPatternFor("CONTINUOUS")
 		GPPIDEdge.GP_UTILITY:
 			gpW = 1.6
 			gpCol = Color("#9AA6BE")
-			# DASHED — AutoCAD utility convention, scaled by the global LTSCALE.
-			# DASHED —— AutoCAD 公用工程线惯例，受全局 LTSCALE 缩放。
+ # DASHED — AutoCAD utility convention, scaled by the global LTSCALE.
+ # DASHED —— AutoCAD 公用工程线惯例，受全局 LTSCALE 缩放。
 			gpPat = GPLinetypeManager.gpPatternFor("DASHED")
 		GPPIDEdge.GP_SIGNAL:
 			match gpSignalType:

@@ -20,12 +20,12 @@ extends RefCounted
 # 若缺少 "box"（手写的历史形状），则按整个 100x100 单位框处理。
 # [param gpCanvas] The CanvasItem that provides draw_* methods.
 # [param gpCanvas] 提供 draw_* 方法的 CanvasItem。
-# [param gpShape]  Symbol shape dictionary produced by the generator or the symbol editor.
-# [param gpShape]  由生成器或图元编辑器产出的图元形状字典。
-# [param gpRect]   Target rectangle in local coordinates (the nominal envelope).
-# [param gpRect]   本地坐标系中的目标矩形（标称包络）。
-# [param gpFill]   Fill color for closed shapes.
-# [param gpFill]   闭合形状的填充色。
+# [param gpShape] Symbol shape dictionary produced by the generator or the symbol editor.
+# [param gpShape] 由生成器或图元编辑器产出的图元形状字典。
+# [param gpRect()] Target rectangle in local coordinates (the nominal envelope).
+# [param gpRect()] 本地坐标系中的目标矩形（标称包络）。
+# [param gpFill] Fill color for closed shapes.
+# [param gpFill] 闭合形状的填充色。
 # [param gpStroke] Line / outline color.
 # [param gpStroke] 线条/描边颜色。
 # [param gpLineWidth] Stroke width in pixels (world units for canvas, screen units for palette).

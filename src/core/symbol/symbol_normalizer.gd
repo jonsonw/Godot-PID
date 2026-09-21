@@ -14,14 +14,14 @@ extends RefCounted
 # 见《符号编辑器设计说明》§6 / §7。
 #
 # Draft shape / 草稿结构:
-#   {
-#     "id": String, "display_name": String,
-#     "shapes": {"paths": [{"pts": [[x, y], ...], "closed": bool}],
-#                "circles": [{"c": [x, y], "r": float}],
-#                "rects": [{"pos": [x, y], "size": [w, h]}]},
-#     "ports": [{"name": String, "pos": [x, y], "dir": [dx, dy]}],   # author-space pixels
-#     "attrs_schema": Dictionary
-#   }
+# {
+# "id": String, "display_name": String,
+# "shapes": {"paths": [{"pts": [[x, y], ...], "closed": bool}],
+# "circles": [{"c": [x, y], "r": float}],
+# "rects": [{"pos": [x, y], "size": [w, h]}]},
+# "ports": [{"name": String, "pos": [x, y], "dir": [dx, dy]}], # author-space pixels
+# "attrs_schema": Dictionary
+# }
 
 # Author-space coordinates are arbitrary; only their relative geometry matters.
 # 作者空间坐标是任意的，只有相对几何关系有意义。
@@ -46,10 +46,10 @@ static func gpNormalizeSymbol(gpRaw: Dictionary, gpCat: String, gpPackSizes: Dic
 	gpDef.gpDisplayName = str(gpRaw.get("display_name", gpDef.gpId))
 	gpDef.gpCategory = gpCat
 	gpDef.gpAttrsSchema = (gpRaw.get("attrs_schema", {}) as Dictionary).duplicate(true)
-	# M8: the typed property schema belongs to the TYPE layer, so it is carried through
+	# the typed property schema belongs to the TYPE layer, so it is carried through
 	# normalization as well. It runs IN PARALLEL with the legacy gpAttrsSchema (old packs
 	# still load), and GPPropertyResolver prefers gpSchema when both are present.
-	# M8：类型化属性 schema 属类型层，故归一化时一并透传。它与历史 gpAttrsSchema **并行保留**
+	# 类型化属性 schema 属类型层，故归一化时一并透传。它与历史 gpAttrsSchema **并行保留**
 	# （旧图元包仍可载入），两者并存时 GPPropertyResolver 优先 gpSchema。
 	var gpRawSchema: Array = gpRaw.get("schema", [])
 	if not gpRawSchema.is_empty():
@@ -66,8 +66,8 @@ static func gpNormalizeSymbol(gpRaw: Dictionary, gpCat: String, gpPackSizes: Dic
 	var gpRawPorts: Array = gpRaw.get("ports", [])
 
 	if gpBBox.size.x <= 0.0 and gpBBox.size.y <= 0.0:
-		# Nothing was drawn: keep an empty shape so the renderer falls back to a plain rectangle.
-		# 未绘制任何图形：保留空形状，渲染层回退为纯矩形。
+ # Nothing was drawn: keep an empty shape so the renderer falls back to a plain rectangle.
+ # 未绘制任何图形：保留空形状，渲染层回退为纯矩形。
 		gpDef.gpShapes = []
 		gpDef.gpPorts = GPPortSpec.gpFromDicts(GPSymbolCategories.gpPortsForSymbol(gpDef.gpId, gpCat))
 		return gpDef
@@ -82,7 +82,7 @@ static func gpNormalizeSymbol(gpRaw: Dictionary, gpCat: String, gpPackSizes: Dic
 	# (3) Ports: author-placed ports go through the SAME geometry as the glyph, expressed as
 	# 0..1 of the nominal envelope. Otherwise fall back to the category standard anchors.
 	# (3) 端口：作者放置的端口与字形走同一套几何变换，并以标称包络的 0..1 表达；
-	#     否则回退为类别标准锚点。
+	# 否则回退为类别标准锚点。
 	if gpRawPorts.is_empty():
 		gpDef.gpPorts = GPPortSpec.gpFromDicts(GPSymbolCategories.gpPortsForSymbol(gpDef.gpId, gpCat))
 	else:
@@ -90,8 +90,8 @@ static func gpNormalizeSymbol(gpRaw: Dictionary, gpCat: String, gpPackSizes: Dic
 	return gpDef
 
 
-# Reverse of gpNormalizeSymbol: rebuild an author-space draft from a canonical GPSymbolDef.
-# gpNormalizeSymbol 的逆操作：从规范化 GPSymbolDef 重建作者空间草稿。
+# Reverse of gpNormalizeSymbol(): rebuild an author-space draft from a canonical GPSymbolDef.
+# gpNormalizeSymbol() 的逆操作：从规范化 GPSymbolDef 重建作者空间草稿。
 # Normalization keeps only RELATIVE geometry (the author bbox is discarded), so the
 # reconstructed author frame is chosen as the unit box itself — center (50,50), bbox equal to
 # the def's own unit-space bbox. With GP_FIT_MARGIN = 1.0 this makes
@@ -104,10 +104,10 @@ static func gpNormalizeSymbol(gpRaw: Dictionary, gpCat: String, gpPackSizes: Dic
 # （已含 0.01 量化），使图元编辑器对字形的往返编辑无漂移。
 # [param gpDef] Canonical symbol definition (unit-box gpShape, 0..1 ports, envelope size).
 # [param gpDef] 规范化图元定义（单位框 gpShape、0..1 端口、包络尺寸）。
-# Returns a draft dict in the same shape as gpNormalizeSymbol's input (module header),
+# Returns a draft dict in the same shape as gpNormalizeSymbol()'s input (module header),
 # or an empty-shape draft with no ports when the def carries no geometry (forward re-derives
 # the category standard ports on the next normalize).
-# 返回与 gpNormalizeSymbol 输入同构的草稿字典；当 def 无几何时返回空形状草稿（下次归一化
+# 返回与 gpNormalizeSymbol() 输入同构的草稿字典；当 def 无几何时返回空形状草稿（下次归一化
 # 会重新推导类别标准端口）。
 static func gpDenormalizeSymbol(gpDef: GPSymbolDef) -> Dictionary:
 	var gpCat: String = gpDef.gpCategory
@@ -115,10 +115,10 @@ static func gpDenormalizeSymbol(gpDef: GPSymbolDef) -> Dictionary:
 
 	# Mirror the forward "nothing drawn" branch: empty geometry -> empty draft (ports re-derived).
 	# Check the def's typed editable shapes directly (NOT the lossy flattened gpShapeSpec() render
-	# spec) — the forward empty branch sets gpShapes = [], so is_empty() is the exact inverse.
+	# spec) — the forward empty branch sets gpShapes() = [], so is_empty is the exact inverse.
 	# 与正向「未绘制」分支对齐：空几何 → 空草稿（端口由下次归一化重新推导）。
 	# 直接检查 def 的类型化可编辑形状（而非打平的 gpShapeSpec() 渲染 spec）——正向空分支把
-	# gpShapes 置为 []，故 is_empty() 是精确的逆条件。
+	# gpShapes() 置为 []，故 is_empty 是精确的逆条件。
 	if gpDef.gpShapes.is_empty():
 		return {
 			"id": gpDef.gpId,
@@ -139,8 +139,8 @@ static func gpDenormalizeSymbol(gpDef: GPSymbolDef) -> Dictionary:
 	# 重归一化仍保留其曲线控制点。
 	var gpSpec: Dictionary = GPShapeSpec.gpEditSpec(gpDef.gpShapes)
 	# Bbox for port re-derivation, computed on the same lossless editable spec so the round-trip
-	# stays exact with what a later gpNormalizeSymbol would compute from this draft.
-	# 供端口还原的包围盒，基于同一无损可编辑 spec 计算，使往返与后续 gpNormalizeSymbol 从该草稿
+	# stays exact with what a later gpNormalizeSymbol() would compute from this draft.
+	# 供端口还原的包围盒，基于同一无损可编辑 spec 计算，使往返与后续 gpNormalizeSymbol() 从该草稿
 	# 重算的结果精确一致。
 	var gpBBox: Rect2 = gpComputeBBox(gpSpec)
 	return {
@@ -154,26 +154,26 @@ static func gpDenormalizeSymbol(gpDef: GPSymbolDef) -> Dictionary:
 	}
 
 
-# Inverse of gpNormalizePorts: map 0..1 envelope ports back to author-space pixels.
-# gpNormalizePorts 的逆：把 0..1 包络端口还原为作者空间像素。
-# Forward: nx = 0.5 + (abs.x - ctr.x) * SEff / envW,  with ctr = bbox.center (= 50 in unit frame).
+# Inverse of gpNormalizePorts(): map 0..1 envelope ports back to author-space pixels.
+# gpNormalizePorts() 的逆：把 0..1 包络端口还原为作者空间像素。
+# Forward: nx = 0.5 + (abs.x - ctr.x) * SEff / envW, with ctr = bbox.center (= 50 in unit frame).
 # 正向：nx = 0.5 + (abs.x - ctr.x) * SEff / envW，单位框下 ctr = bbox.center（= 50）。
-# Inverse: abs.x = 50 + (nx - 0.5) * envW / SEff   (and likewise for y).
+# Inverse: abs.x = 50 + (nx - 0.5) * envW / SEff (and likewise for y).
 # 逆向：abs.x = 50 + (nx - 0.5) * envW / SEff（y 同理）。
 # SEff uses the SAME gpComputeBBox(gpShape) the forward pass recomputes on re-normalize, so the
 # round-trip is exact (the denormalized shape is the unit coords copied verbatim).
 # SEff 用与正向一致的 gpComputeBBox(gpShape)（重归一化时会从草稿形状重新算出），
 # 因此往返精确（反归一化的形状即原样复制的单位坐标）。
 #
-# Why the centre is gpBBox.get_center() and not the literal 50.0 / 为何用包围盒中心而非字面 50.0：
-# the literal was a hidden ASSUMPTION that gpBBox is a unit-frame box (centre 50,50). That holds
+# Why the centre is gpBBox().get_center and not the literal 50.0 / 为何用包围盒中心而非字面 50.0：
+# the literal was a hidden ASSUMPTION that gpBBox() is a unit-frame box (centre 50,50). That holds
 # for gpDenormalizeSymbol (its shapes are already unit-frame), but NOT for the Make-Symbol
 # dialog, which denormalizes ports over a freshly drawn, arbitrarily placed author bbox. Writing
-# the general form removes the assumption without changing gpDenormalizeSymbol's behaviour —
+# the general form removes the assumption without changing gpDenormalizeSymbol()'s behaviour —
 # for a unit-frame box the centre is 50 anyway, and the 0.01 snapping absorbs the fp residue.
-# 字面量 50.0 隐含假设了 gpBBox 是单位框（中心 50,50）。该假设对 gpDenormalizeSymbol 成立
+# 字面量 50.0 隐含假设了 gpBBox() 是单位框（中心 50,50）。该假设对 gpDenormalizeSymbol() 成立
 # （其形状已是单位框），但对「生成图元」对话框不成立——后者要在刚绘制、位置任意的作者包围盒上
-# 反归一化端口。写成一般形式去掉了这一假设，且不改变 gpDenormalizeSymbol 的行为：对单位框而言
+# 反归一化端口。写成一般形式去掉了这一假设，且不改变 gpDenormalizeSymbol() 的行为：对单位框而言
 # 中心本就是 50，0.01 量化亦会吸收浮点残差。
 static func gpDenormalizePorts(gpPorts: Array, gpBBox: Rect2, gpEnv: Vector2) -> Array:
 	var gpSEff: float = gpEnvelopeScale(gpBBox, gpEnv)
@@ -239,10 +239,10 @@ static func gpNormalizePorts(gpRawPorts: Array, gpBBox: Rect2, gpEnv: Vector2) -
 			"name": gpName,
 			"pos": [snappedf(gpNx, 0.0001), snappedf(gpNy, 0.0001)],
 			"dir": gpEdgeNormal(Vector2(gpNx, gpNy)),
-			# The purpose survives normalization: a signal terminal must not come back as a
-			# process nozzle, or every signal line drawn to it would be refused.
-			# 用途在归一化中保留：信号端子绝不能在往返后变成工艺管口，否则所有连到它的信号线
-			# 都会被判为非法。
+ # The purpose survives normalization: a signal terminal must not come back as a
+ # process nozzle, or every signal line drawn to it would be refused.
+ # 用途在归一化中保留：信号端子绝不能在往返后变成工艺管口，否则所有连到它的信号线
+ # 都会被判为非法。
 			"type": str(gpP.get("type", GPPort.GP_NOZZLE)),
 		})
 	return gpOut
@@ -338,11 +338,11 @@ static func _gpTransformShapes(gpShapes: Dictionary, gpS: float, gpCtr: Vector2)
 		for gpPt in gpPts:
 			gpNew.append(_gpToUnit(Vector2(float(gpPt[0]), float(gpPt[1])), gpS, gpCtr))
 		var gpPdOut: Dictionary = {"pts": gpNew, "closed": bool(gpPd.get("closed", false))}
-		# Bézier handles are RELATIVE offsets from each vertex, so uniform scaling + translation
-		# during normalization leave them unchanged — carry them through verbatim so a curved
-		# spline keeps its curve after being made into a symbol (was flattened to a polyline).
-		# 贝塞尔手柄是「相对各顶点的偏移」，归一化的等比缩放与平移不改变它 —— 原样透传，
-		# 使弯成弧线的样条在生成图元后仍是曲线（此前被展平成折线）。
+ # Bézier handles are RELATIVE offsets from each vertex, so uniform scaling + translation
+ # during normalization leave them unchanged — carry them through verbatim so a curved
+ # spline keeps its curve after being made into a symbol (was flattened to a polyline).
+ # 贝塞尔手柄是「相对各顶点的偏移」，归一化的等比缩放与平移不改变它 —— 原样透传，
+ # 使弯成弧线的样条在生成图元后仍是曲线（此前被展平成折线）。
 		if gpPd.has("handles"):
 			gpPdOut["handles"] = gpPd["handles"]
 		gpPaths.append(gpPdOut)
@@ -361,8 +361,8 @@ static func _gpTransformShapes(gpShapes: Dictionary, gpS: float, gpCtr: Vector2)
 		var gpRr: Dictionary = gpRd as Dictionary
 		var gpRp: Vector2 = Vector2(float(gpRr["pos"][0]), float(gpRr["pos"][1]))
 		var gpRs: Vector2 = Vector2(float(gpRr["size"][0]), float(gpRr["size"][1]))
-		# Normalize to a positive-size rectangle before transforming.
-		# 变换前先规整为正尺寸矩形。
+ # Normalize to a positive-size rectangle before transforming.
+ # 变换前先规整为正尺寸矩形。
 		var gpAbsRect: Rect2 = Rect2(gpRp, gpRs).abs()
 		gpRects.append({
 			"pos": _gpToUnit(gpAbsRect.position, gpS, gpCtr),
@@ -390,9 +390,9 @@ static func _gpToUnit(gpPt: Vector2, gpS: float, gpCtr: Vector2) -> Array:
 # Internal: build a typed GPPropertySchema from an array of field dictionaries.
 # 内部：由字段字典数组构造类型化 GPPropertySchema。
 # Tolerant on purpose: a field with no key is skipped rather than fatal, so a hand-written
-# partial schema still loads (same philosophy as GPPropertyDef.gpFromDict).
+# partial schema still loads (same philosophy as GPPropertyDef.gpFromDict()).
 # 刻意宽容：无 key 的字段被跳过而非致命错误，使手写的残缺 schema 仍能载入
-# （与 GPPropertyDef.gpFromDict 同一哲学）。
+# （与 GPPropertyDef.gpFromDict() 同一哲学）。
 static func _gpSchemaFromDicts(gpFields: Array) -> GPPropertySchema:
 	var gpSc: GPPropertySchema = GPPropertySchema.new()
 	for gpF in gpFields:
@@ -406,7 +406,7 @@ static func _gpSchemaFromDicts(gpFields: Array) -> GPPropertySchema:
 
 
 # Internal: inverse of _gpSchemaFromDicts (null schema -> empty array).
-# 内部：_gpSchemaFromDicts 的逆操作（schema 为 null 时返回空数组）。
+# 内部：_gpSchemaFromDicts() 的逆操作（schema 为 null 时返回空数组）。
 static func _gpSchemaToDicts(gpSc: GPPropertySchema) -> Array:
 	var gpOut: Array = []
 	if gpSc == null:

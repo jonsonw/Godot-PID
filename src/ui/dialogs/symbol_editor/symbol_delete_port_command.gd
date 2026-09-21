@@ -1,6 +1,4 @@
 # ============================================================================
-# GPSymbolDeletePortCommand — 按下标删除端口（M7）
-# Delete ports by index (M7).
 #
 # 与 GPDeleteShapesCommand 同构，作用于 _gpPorts 数组。按下标快照对象，撤销时按下标放回。
 # Same shape as GPDeleteShapesCommand, operates on the _gpPorts array. Snapshots by index, restores

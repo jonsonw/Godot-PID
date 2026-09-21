@@ -4,20 +4,20 @@ extends RefCounted
 # edit intent facade; undo stack
 # 编辑意图门面与撤销栈
 #
-# WHY THIS EXISTS / 为何存在（架构优化建议 §3.4）：
-#   GPCanvas2D was carrying many unrelated responsibilities in one file; this coordinator
-#   owns the "edit intent facade" use case end to end, so the root keeps only assembly and forwarding.
-#   GPCanvas2D 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「编辑意图门面与撤销栈」这一用例，
-#   使根类只保留装配与转发。
+# WHY THIS EXISTS / 为何存在：
+# GPCanvas2D was carrying many unrelated responsibilities in one file; this coordinator
+# owns the "edit intent facade" use case end to end, so the root keeps only assembly and forwarding.
+# GPCanvas2D 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「编辑意图门面与撤销栈」这一用例，
+# 使根类只保留装配与转发。
 #
 # Interaction / 交互方式：
-#   - the root creates this coordinator and injects itself as gpHost (composition root);
-#     根类创建本协调者并把自身注入为 gpHost（组合根装配）；
-#   - the root forwards user actions here, never the other way round — this class drives the
-#     host only through its public ports (GPCanvas2D.gp*);
-#     根类把用户动作转发到此处，绝不反向 —— 本类只经宿主的公开端口（GPCanvas2D.gp*）驱动宿主；
-#   - the root keeps every public port it had before: callers outside the canvas are unchanged.
-#     根类保留其原有的每一个公开端口：画布外部的调用方零改动。
+# - the root creates this coordinator and injects itself as gpHost (composition root);
+# 根类创建本协调者并把自身注入为 gpHost（组合根装配）；
+# - the root forwards user actions here, never the other way round — this class drives the
+# host only through its public ports (GPCanvas2D.gp*);
+# 根类把用户动作转发到此处，绝不反向 —— 本类只经宿主的公开端口（GPCanvas2D.gp*）驱动宿主；
+# - the root keeps every public port it had before: callers outside the canvas are unchanged.
+# 根类保留其原有的每一个公开端口：画布外部的调用方零改动。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -118,6 +118,10 @@ func gpClearPortPick() -> void:
 func gpRequestSetEdgeRouting(gpEdgeId: String, gpRouting: Array[Vector2]) -> bool:
 	return gpHost.gpActions.gpSetEdgeRouting(gpEdgeId, gpRouting)
 
+# Record a drop-on-edge restore entry (Feature 2). / 记录一条落点恢复记录（功能 2）。
+func gpRequestRecordDrop(gpSymNid: String, gpRecord: Dictionary) -> void:
+	gpHost.gpActions.gpRecordDrop(gpSymNid, gpRecord)
+
 # Move one end of an edge to another port / node, or make it dangle.
 # 把一条边的一端改接到另一个端口 / 节点，或改为悬空。
 func gpRequestReconnectEdge(gpEdgeId: String, gpIsFrom: bool, gpNewRef: Dictionary) -> bool:
@@ -137,8 +141,8 @@ func gpRequestConnectEdge(gpFromRef: Dictionary, gpToRef: Dictionary, gpKind: St
 
 # Draw a pipe or a signal line between two resolved ends. Returns the new edge id, "" on refusal.
 # 在两个已解析端点之间画管道或信号线。返回新边 id，拒绝时为 ""。
-# Move the tag of one node (M10b). The offset is normalised (1.0 = half the envelope).
-# 移动某节点的位号标签（M10b）。偏移为归一化值（1.0 = 半个包络）。
+# Move the tag of one node . The offset is normalised (1.0 = half the envelope).
+# 移动某节点的位号标签。偏移为归一化值（1.0 = 半个包络）。
 func gpRequestSetLabelOffset(gpNodeId: String, gpOffset: Vector2) -> bool:
 	return gpHost.gpActions.gpSetLabelOffset(gpNodeId, gpOffset)
 
@@ -149,8 +153,14 @@ func gpRequestSetLabelOffset(gpNodeId: String, gpOffset: Vector2) -> bool:
 func gpRequestMoveNodes(gpNodeIds: Array[String], gpDelta: Vector2) -> bool:
 	return gpHost.gpActions.gpMoveNodes(gpNodeIds, gpDelta)
 
-# Commit a finished annotation shape. Returns its index in gpShapes, or -1 on failure.
-# 提交一枚绘制完成的注释图形。返回它在 gpShapes 中的下标，失败返回 -1。
+# Commit absolute node positions as one undo step (collision-avoidance push). Returns false when
+# no node actually moves, so a placement/drag that needed no push records nothing.
+# 一步提交节点绝对位置（碰撞避让推送）。无节点真正移动时返回 false，避免多余撤销步。
+func gpRequestSetNodePositions(gpTargets: Dictionary) -> bool:
+	return gpHost.gpActions.gpSetNodePositions(gpTargets)
+
+# Commit a finished annotation shape. Returns its index in gpShapes(), or -1 on failure.
+# 提交一枚绘制完成的注释图形。返回它在 gpShapes() 中的下标，失败返回 -1。
 func gpRequestAddShape(gpShape: GPShape) -> int:
 	return gpHost.gpActions.gpAddShape(gpShape)
 
@@ -192,9 +202,9 @@ func gpPruneSelection() -> void:
 	for gpI in gpHost.gpShapeSel:
 		if gpI >= 0 and gpI < gpHost.gpGraph.gpShapes.size():
 			gpShapeKeep.append(gpI)
-	# P3: an edge can be deleted by undo too; drop the selection entry so edge grips and the
+	# an edge can be deleted by undo too; drop the selection entry so edge grips and the
 	# tag editor never point at a ghost edge.
-	# P3：边也可能被撤销删除；剔除该选择项，使边抓取点与位号编辑器永不指向幽灵边。
+	# 边也可能被撤销删除；剔除该选择项，使边抓取点与位号编辑器永不指向幽灵边。
 	var gpEdgeKeep: Array[String] = []
 	for gpEid in gpHost.gpEdgeSel:
 		if gpHost.gpGraph.gpGetEdge(gpEid) != null:
@@ -269,9 +279,7 @@ func gpRequestDeleteSelected() -> void:
 	gpSetEdgeSelection([])
 	gpHost.queue_redraw()
 
-# Replace the edge selection set (P3). Edge selection is mutually exclusive with node / shape
 # selection, so setting it clears the others and refreshes the inspector via the selection event.
-# 替换边的选择集（P3）。边选择与节点 / 图形选择互斥，故设置它时清空其它两者，
 # 并经选择事件刷新属性面板。
 func gpSetEdgeSelection(gpIds: Array[String]) -> void:
 	gpHost.gpEdgeSel = gpIds.duplicate()
@@ -306,10 +314,9 @@ func gpSetSelection(gpIds: Array[String]) -> void:
 	gpHost.gpSelection = gpIds.duplicate()
 	gpHost.gpSelectedId = gpHost.gpSelection[0] if not gpHost.gpSelection.is_empty() else ""
 	gpHost.queue_redraw()
-	# M2: selection is a first-class event again. It used to be smuggled to the host inside
 	# the status snapshot, where main_window diffed the "selection" string to decide whether
 	# to refresh the inspector. Subscribers now react to this directly.
-	# M2：选择重新成为一等事件。过去它被塞进状态快照，由 main_window 比对 "selection"
+	# 选择重新成为一等事件。过去它被塞进状态快照，由 main_window 比对 "selection"
 	# 字符串来决定是否刷新属性面板；订阅者现在直接响应本事件。
 	gpHost.gpEvents.gpSelectionChanged.emit(gpHost.gpSelection)
 	gpHost.gpEmitStatus()

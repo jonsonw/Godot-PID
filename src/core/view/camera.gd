@@ -1,11 +1,11 @@
 class_name GPCanvasCamera
 extends RefCounted
-# Pure 2D pan/zoom camera used by the P&ID main canvas (P1-1a extraction). Holds the world-space
+# Pure 2D pan/zoom camera used by the P&ID main canvas . Holds the world-space
 # offset and uniform zoom factor and exposes the world <-> screen coordinate transforms plus
 # zoom-at-point math. It is a REFCOUNTED pure-data module with NO Control/Node dependency, so it
 # can be unit-tested headlessly and reused by any future view (a second canvas, a split view, a
 # 3D-correlated minimap, etc.).
-# P&ID 主画布使用的纯 2D 平移/缩放相机（P1-1a 抽取）。持有世界空间偏移与统一缩放系数，暴露
+# P&ID 主画布使用的纯 2D 平移/缩放相机。持有世界空间偏移与统一缩放系数，暴露
 # 世界 <-> 屏幕坐标变换与「以某点为中心缩放」数学。它是 RefCounted 纯数据模块，无 Control/Node
 # 依赖，可 headless 单测，并被任何未来视图（第二个画布、分屏、与 3D 联动的缩略图等）复用。
 # Coding rule: every variable must declare its type explicitly.

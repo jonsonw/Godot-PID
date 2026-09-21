@@ -5,18 +5,18 @@ extends RefCounted
 # 把「节点 + 端口名」换算为世界坐标与向外法线的唯一场所。
 #
 # Why one owner / 为何唯一持有者：
-#   GPSymbolView draws the port dots and GPEdgeView draws the pipe ends. If each did its own
-#   rotation / flip math they would drift apart the moment one of them was fixed. Both now
-#   call in here, so the dot and the pipe end can never disagree.
-#   GPSymbolView 画端口圆点、GPEdgeView 画管线端点。若各算一遍旋转/翻转，任一处被修正时两者
-#   立刻分家。现在两者都调本类，故「圆点与管线端点」永不分歧。
+# GPSymbolView draws the port dots and GPEdgeView draws the pipe ends. If each did its own
+# rotation / flip math they would drift apart the moment one of them was fixed. Both now
+# call in here, so the dot and the pipe end can never disagree.
+# GPSymbolView 画端口圆点、GPEdgeView 画管线端点。若各算一遍旋转/翻转，任一处被修正时两者
+# 立刻分家。现在两者都调本类，故「圆点与管线端点」永不分歧。
 #
 # Fault tolerance is the CONTRACT, not exactness / 契约是容错而非精确：
-#   GPConnectCommand's original note said edges must never store a port name so that editing a
-#   symbol's ports cannot silently break a connection. This resolver keeps that promise a
-#   different way: port_id is a HINT, and resolution degrades in three steps instead of failing.
-#   GPConnectCommand 原注释称边不应存端口名，以免编辑端口静默断连。本解析器以另一种方式守住
-#   该承诺：port_id 只是「提示」，解析按阶梯降级，绝不失败。
+# GPConnectCommand's original note said edges must never store a port name so that editing a
+# symbol's ports cannot silently break a connection. This resolver keeps that promise a
+# different way: port_id is a HINT, and resolution degrades in three steps instead of failing.
+# GPConnectCommand 原注释称边不应存端口名，以免编辑端口静默断连。本解析器以另一种方式守住
+# 该承诺：port_id 只是「提示」，解析按阶梯降级，绝不失败。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -63,12 +63,11 @@ static func gpPortDirOriented(gpNode: GPPIDNode, gpPort: GPPort) -> Vector2:
 # 而不会让它消失。
 #
 # Degradation ladder / 降级阶梯：
-#   1. "port"    exact port_id hit                                精确命中 port_id
-#   2. "typed"   port_id missing/renamed -> first port of the wanted type
-#                端口 id 缺失或被改名 -> 期望用途的首个端口
-#   3. "center"  no ports at all (legacy pack / general symbol)    完全无端口（老包 / general 图元）
-#   4. "free"    dangling end -> the stored point                  悬空端 -> 已存点
-#   5. "free"    node id points at a node that no longer exists    节点 id 指向已不存在的节点
+# 1. "port" exact port_id hit 精确命中 port_id
+# 2. "typed" port_id missing/renamed -> first port of the wanted type
+# 端口 id 缺失或被改名 -> 期望用途的首个端口
+# 3. "center" no ports at all (legacy pack / general symbol) 完全无端口（老包 / general 图元）
+# 4. "free" dangling end -> the stored point 悬空端 -> 已存点
 static func gpResolveEnd(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpEdge: GPPIDEdge,
 		gpIsFrom: bool, gpWantType: String = "") -> Dictionary:
 	if gpEdge == null:

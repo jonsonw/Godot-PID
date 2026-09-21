@@ -1,10 +1,10 @@
 class_name GPCanvasSelection
 extends RefCounted
-# Pure selection-set model for the P&ID canvas (P1-1b).
+# Pure selection-set model for the P&ID canvas .
 #
 # The canvas keeps TWO mutually-exclusive selection collections on the same sheet:
-#   - node annotation "graph" selection:  gpNodeIds (Array[String])  -> selected P&ID symbol instances
-#   - annotation "shape" selection:        gpShapeIdx (Array[int])   -> selected free-hand shapes
+# - node annotation "graph" selection: gpNodeIds (Array[String]) -> selected P&ID symbol instances
+# - annotation "shape" selection: gpShapeIdx (Array[int]) -> selected free-hand shapes
 # Invariant: selecting into ONE collection clears the OTHER (a sheet item is either a node
 # instance or a free annotation shape, never both in the same selection gesture).
 # A "primary" id is mirrored for single-entity operations (context menus, status, drag target).
@@ -13,10 +13,10 @@ extends RefCounted
 # sync / emptiness) so the canvas input handlers delegate one-line calls instead of re-spelling
 # the same array dance inline at ~14 sites. It is Control-free and headless-testable.
 #
-# 纯「画布选择集」模型（P1-1b）。
+# 纯「画布选择集」模型。
 # 主画布在同一图纸上维护两套互斥选择：
-#   - 节点标注「图形」选择：gpNodeIds（Array[String]）→ 选中的 P&ID 图元实例
-#   - 注释「图形」选择：    gpShapeIdx（Array[int]） → 选中的自由手绘图形
+# - 节点标注「图形」选择：gpNodeIds（Array[String]）→ 选中的 P&ID 图元实例
+# - 注释「图形」选择： gpShapeIdx（Array[int]） → 选中的自由手绘图形
 # 不变式：向任一个集合「设选」会清空另一个（图纸元素要么是图元实例、要么是自由注释图形，
 # 一次选择手势不会同时命中两者）。另有 primary 镜像供单实体操作（右键菜单/状态/拖动目标）。
 # 本模块集中这些不变式（设选互斥 / toggle / erase / clear / primary 同步 / 空判定），
@@ -48,8 +48,8 @@ func gpIsSingle() -> bool:
 
 
 # Node selection state, as the live array (for read-heavy hot paths). Callers must not mutate it
-# directly; use the gpSetNodes / gpToggleNode helpers so the invariants stay intact.
-# 节点选择状态（活数组，供读密集型热路径）。调用方不得直接修改，须经 gpSetNodes/gpToggleNode 保持不变式。
+# directly; use the gpSetNodes() / gpToggleNode() helpers so the invariants stay intact.
+# 节点选择状态（活数组，供读密集型热路径）。调用方不得直接修改，须经 gpSetNodes()/gpToggleNode() 保持不变式。
 func gpNodes() -> Array[String]:
 	return gpNodeIds
 
@@ -133,8 +133,8 @@ func gpToggleNode(gpId: String, gpShift: bool) -> void:
 		gpSetNodes([gpId])
 
 
-# Toggle gpIdx in the shape selection. Same shift semantics as gpToggleNode.
-# 在图形选择中切换 gpIdx。shift 语义与 gpToggleNode 相同。
+# Toggle gpIdx in the shape selection. Same shift semantics as gpToggleNode().
+# 在图形选择中切换 gpIdx。shift 语义与 gpToggleNode() 相同。
 func gpToggleShape(gpIdx: int, gpShift: bool) -> void:
 	if gpShift:
 		if gpShapeIdx.has(gpIdx):

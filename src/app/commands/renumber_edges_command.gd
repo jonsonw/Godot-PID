@@ -1,8 +1,6 @@
 class_name GPRenumberCommand
 extends GPCommand
 # Copyright © 2026 Jonson Wang
-# Renumber every process / utility pipe on the sheet with fresh, never-recycled PL tags (P4).
-# 用全新的、绝不回收的 PL 位号重排图纸上每条工艺 / 公用工程管线（P4）。
 #
 # Edges whose tag was set by hand (gpAttrs["tag_manual"]) are skipped so a deliberate choice is
 # never overwritten; signal lines carry no tag by convention and are skipped too. One undo step

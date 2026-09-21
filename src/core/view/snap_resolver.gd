@@ -5,12 +5,12 @@ extends RefCounted
 # 把一次原始世界点击换算为「用户想连到哪里」的唯一场所。
 #
 # Why a pure static module / 为何是纯静态模块：
-#   Both the pipe tool and the signal tool need the same answer, and the answer must be
-#   testable without a canvas: given a graph and a point, which feature (if any) is meant?
-#   Putting this in a tool would force a fake canvas into the test; here it is a pure function
-#   of the graph + the snap state passed IN by the caller.
-#   管道工具与信号线工具需要同一个答案，且该答案必须无需画布即可测试：给定图与点，指的是哪个
-#   特征？若放进工具里，测试就得伪造画布；放在此处则是图与「传入的捕捉状态」的纯函数。
+# Both the pipe tool and the signal tool need the same answer, and the answer must be
+# testable without a canvas: given a graph and a point, which feature (if any) is meant?
+# Putting this in a tool would force a fake canvas into the test; here it is a pure function
+# of the graph + the snap state passed IN by the caller.
+# 管道工具与信号线工具需要同一个答案，且该答案必须无需画布即可测试：给定图与点，指的是哪个
+# 特征？若放进工具里，测试就得伪造画布；放在此处则是图与「传入的捕捉状态」的纯函数。
 #
 # Snap state is passed IN, never read from the global SnapState autoload — keeping core free of
 # any autoload dependency is a hard architectural constraint. The pipe tool maps
@@ -19,15 +19,15 @@ extends RefCounted
 # 硬约束。管道工具把 SnapState.GP_SNAP_TYPE 映射到下方的 GP_KIND_* 常量（一一对应）。
 #
 # The priority ladder (ENDPOINT mode) is deliberate / 优先级阶梯（ENDPOINT 模式）是刻意设计的：
-#   1. a port whose TYPE the tool wants     类型被工具期望的端口
-#   2. any other port                        任何其他端口
-#   3. the node centre                       节点中心
-#   4. the 50-unit grid                      50 单位网格
-#   Step 2 exists so the tool can say "this port is the wrong kind" instead of silently
-#   snapping to nothing — a user who clicks an actuator with the pipe tool must be TOLD, not
-#   quietly given a dangling end.
-#   第 2 步的存在，是为了让工具能说「这个端口类型不对」，而不是静默地什么都不吸 ——
-#   用管道工具点到执行机构时，必须「告知」用户，而不是悄悄给他一个悬空端。
+# 1. a port whose TYPE the tool wants 类型被工具期望的端口
+# 2. any other port 任何其他端口
+# 3. the node centre 节点中心
+# 4. the 50-unit grid 50 单位网格
+# Step 2 exists so the tool can say "this port is the wrong kind" instead of silently
+# snapping to nothing — a user who clicks an actuator with the pipe tool must be TOLD, not
+# quietly given a dangling end.
+# 第 2 步的存在，是为了让工具能说「这个端口类型不对」，而不是静默地什么都不吸 ——
+# 用管道工具点到执行机构时，必须「告知」用户，而不是悄悄给他一个悬空端。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -35,14 +35,14 @@ extends RefCounted
 # Snap radius in SCREEN pixels. Divided by zoom, so the magnet stays equally forgiving when the
 # user zooms out — a fixed world radius would make ports impossible to hit at 25%.
 # 吸附半径（屏幕像素）。除以 zoom，使缩小后磁力同样宽容 —— 固定的世界半径会让 25% 时根本点不中端口。
-const GP_SNAP_PX: float = 12.0
+const GP_SNAP_PX: float = GPConstants.GP_SNAP_PX
 
 # Fallback grid step in world units, matching the grid the overlay actually draws.
 # 回退网格步长（世界单位），与覆盖层实际画出的网格一致。
 # NOTE: named GP_GRID_STEP (not GP_GRID) to avoid colliding with the GP_GRID result-kind
 # string below — Godot forbids redeclaring a constant in the same script.
 # 注意：命名为 GP_GRID_STEP（而非 GP_GRID），以免与下方 GP_GRID 结果种类字符串重名。
-const GP_GRID_STEP: float = 50.0
+const GP_GRID_STEP: float = GPConstants.GP_GRID_STEP
 
 # Result kinds / 结果种类。
 const GP_PORT: String = "port"  # snapped to a port / 吸附到端口
@@ -62,12 +62,19 @@ const GP_KIND_MIDPOINT: int = 1
 const GP_KIND_INTERSECTION: int = 2
 const GP_KIND_PERPENDICULAR: int = 3
 
+# Hard ceiling on intersection candidates. Even on a pathological sheet where every edge
+# overlaps every other, we never test more than this many edges, so the worst case stays
+# bounded instead of quadratic.
+# 交点候选的硬上限。即使在一张病态图纸上所有边都互相重叠，也绝不超过此数去测试 ——
+# 最坏情况保持有界，而不会退化成二次。
+const GP_INTER_MAX_CAND: int = 96
+
 
 # Resolve a world click into a snap target.
 # 把一次世界点击解析为吸附目标。
 #
-# [param gpGraph] the topology to search / 待搜索的拓扑图
-# [param gpDefLookup] symbol-id -> GPSymbolDef (may be invalid) / 符号 id -> 定义（可为无效 Callable）
+# [param gpGraph] the topology to search() / 待搜索的拓扑图
+# [param gpDefLookup()] symbol-id -> GPSymbolDef (may be invalid) / 符号 id -> 定义（可为无效 Callable）
 # [param gpWorld] the click in world coordinates / 点击的世界坐标
 # [param gpZoom] current view zoom (radius is screen-relative) / 当前缩放（半径为屏幕相对）
 # [param gpWantTypes] accepted GPPort types; EMPTY means "any port" / 可接受的端口用途；空表示「任意端口」
@@ -200,17 +207,55 @@ static func _gpSnapPerp(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpWorld: Vec
 
 # Snap to the nearest intersection of TWO edges.
 # 吸附到「两条边」的交点中最接近的一个。
+#
+# Complexity / 复杂度：
+# BEFORE: _gpEdgePolyline() was called INSIDE the pair loop, so every edge got re-resolved
+# O(E) times -> O(E^2) port resolutions and O(E^2 * V^2) segment tests per mouse move.
+# AFTER: polylines are budgeted once (O(E)), then two cheap AABB gates prune the pairs:
+# gate 1 - an edge whose bounds miss "click +/- radius" can never host a winning point;
+# gate 2 - only pairs whose bounds mutually overlap are tested at segment level.
+# Result: O(E) resolutions + O(C^2 * V^2) segment tests where C is the small candidate set.
+# 改前：_gpEdgePolyline() 被放在边对循环内部，每条边被重复解析 O(E) 次 ——
+# 每次鼠标移动就是 O(E^2) 次端口解析与 O(E^2 * V^2) 次线段测试。
+# 改后：折线一次性预算（O(E)），再用两道廉价的 AABB 闸门剪枝：
+# 闸门 1 —— 包围盒没进入「点击 ± 半径」范围的边不可能承载获胜交点；
+# 闸门 2 —— 只有包围盒互相重叠的边对才进入线段级测试。
+# 结果：O(E) 次解析 + O(C^2 * V^2) 次线段测试（C 为很小的候选集）。
 static func _gpSnapIntersection(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpWorld: Vector2,
 		gpR: float) -> Dictionary:
-	var gpEdges: Array = []
-	if gpGraph != null:
-		gpEdges = gpGraph.gpEdges
+	# Budget once per call: geometry stays live (nothing cached ACROSS calls) but each edge
+	# is resolved exactly once instead of once per partner.
+	# 每次调用预算一次：几何保持实时（跨调用不缓存），但每条边恰好只解析一次，而非每个搭档一次。
+	var gpPolys: Array[PackedVector2Array] = _gpBudgetPolylines(gpGraph, gpDefLookup)
+	if gpPolys.is_empty():
+		return _gpGrid(gpWorld)
+	var gpBounds: Array[Rect2] = []
+	for gpI in range(gpPolys.size()):
+		gpBounds.append(_gpPolylineBounds(gpPolys[gpI]))
+
+	# Gate 1: only edges reaching within gpR of the click can win.
+	# 闸门 1：只有进入点击点 gpR 范围内的边才可能获胜。
+	var gpRoI: Rect2 = Rect2(gpWorld - Vector2(gpR, gpR), Vector2(gpR * 2.0, gpR * 2.0))
+	var gpCand: Array[int] = []
+	for gpI in range(gpPolys.size()):
+		if gpPolys[gpI].size() >= 2 and gpBounds[gpI].intersects(gpRoI):
+			gpCand.append(gpI)
+	if gpCand.size() > GP_INTER_MAX_CAND:
+		gpCand = _gpKeepNearest(gpCand, gpBounds, gpWorld, GP_INTER_MAX_CAND)
+
+	# Gate 2: only mutually-overlapping pairs reach segment level.
+	# 闸门 2：只有互相重叠的边对才进入线段级。
 	var gpBest: Dictionary = {}
 	var gpBestD: float = gpR
-	for gpI in range(gpEdges.size()):
-		var gpP1: PackedVector2Array = _gpEdgePolyline(gpGraph, gpDefLookup, gpEdges[gpI])
-		for gpJ in range(gpI + 1, gpEdges.size()):
-			var gpP2: PackedVector2Array = _gpEdgePolyline(gpGraph, gpDefLookup, gpEdges[gpJ])
+	for gpI in gpCand:
+		var gpP1: PackedVector2Array = gpPolys[gpI]
+		var gpB1: Rect2 = gpBounds[gpI]
+		for gpJ in gpCand:
+			if gpJ <= gpI:
+				continue
+			if not gpB1.intersects(gpBounds[gpJ]):
+				continue
+			var gpP2: PackedVector2Array = gpPolys[gpJ]
 			for gpA in range(gpP1.size() - 1):
 				for gpB in range(gpP2.size() - 1):
 					var gpPt: Vector2 = _gpSegIntersect(gpP1[gpA], gpP1[gpA + 1], gpP2[gpB], gpP2[gpB + 1])
@@ -237,6 +282,53 @@ static func _gpEdgePolyline(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpEdge: 
 	var gpFrom: Dictionary = GPPortResolver.gpResolveEnd(gpGraph, gpDefLookup, gpEdge, true, "")
 	var gpTo: Dictionary = GPPortResolver.gpResolveEnd(gpGraph, gpDefLookup, gpEdge, false, "")
 	return GPEdgeRoute.gpRoute(gpFrom, gpTo, gpEdge.gpRouting, gpEdge.gpOrtho)
+
+
+# World-space polylines for ALL edges, computed once. Used by the intersection search() so a
+# large sheet does not re-resolve the same edge once per partner.
+# 所有边的世界折线，一次算完。供交点搜索使用，避免大图把同一条边按搭档数重复解析。
+static func _gpBudgetPolylines(gpGraph: GPPIDGraph, gpDefLookup: Callable) -> Array[PackedVector2Array]:
+	var gpOut: Array[PackedVector2Array] = []
+	if gpGraph == null:
+		return gpOut
+	for gpE in gpGraph.gpEdges:
+		gpOut.append(_gpEdgePolyline(gpGraph, gpDefLookup, gpE))
+	return gpOut
+
+
+# Axis-aligned bounds of a polyline; empty Rect2 when it carries no segment.
+# 折线的轴对齐包围盒；无线段时返回空 Rect2。
+static func _gpPolylineBounds(gpPoly: PackedVector2Array) -> Rect2:
+	if gpPoly.size() < 2:
+		return Rect2()
+	var gpMin: Vector2 = gpPoly[0]
+	var gpMax: Vector2 = gpPoly[0]
+	for gpI in range(1, gpPoly.size()):
+		gpMin = gpMin.min(gpPoly[gpI])
+		gpMax = gpMax.max(gpPoly[gpI])
+	return Rect2(gpMin, gpMax - gpMin)
+
+
+# Trim a candidate list to the gpMax edges whose bounds sit nearest to the click. Selection
+# sort on purpose: it only runs when the candidate set blows past the ceiling, and it keeps
+# the hot path free of lambdas/allocations.
+# 把候选表裁剪为包围盒离点击最近的 gpMax 条边。刻意用选择排序：它只在候选数冲破上限时才跑，
+# 且让热路径免于 lambda 与额外分配。
+static func _gpKeepNearest(gpCand: Array[int], gpBounds: Array[Rect2], gpWorld: Vector2,
+		gpMax: int) -> Array[int]:
+	var gpOut: Array[int] = []
+	var gpPool: Array[int] = gpCand.duplicate()
+	while gpOut.size() < gpMax and not gpPool.is_empty():
+		var gpBestAt: int = 0
+		var gpBestD: float = gpBounds[gpPool[0]].get_center().distance_squared_to(gpWorld)
+		for gpK in range(1, gpPool.size()):
+			var gpD: float = gpBounds[gpPool[gpK]].get_center().distance_squared_to(gpWorld)
+			if gpD < gpBestD:
+				gpBestD = gpD
+				gpBestAt = gpK
+		gpOut.append(gpPool[gpBestAt])
+		gpPool.remove_at(gpBestAt)
+	return gpOut
 
 
 # Closest point on segment AB to P (clamped to the segment).

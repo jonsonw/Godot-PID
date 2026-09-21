@@ -93,9 +93,9 @@ func gpFailedWith(gpWantCode: String) -> bool:
 	return (not gpOk) and gpCode == gpWantCode
 
 
-# Human-readable text. gpTr must be a Callable taking an i18n key and returning a String
-# (typically `I18n.gpTr`), injected by the UI layer so core stays autoload-free.
-# 可读文本。gpTr 须是「接收 i18n 键、返回 String」的 Callable（通常为 `I18n.gpTr`），
+# Human-readable text. gpTr() must be a Callable taking an i18n key and returning a String
+# (typically `I18n.gpTr()`), injected by the UI layer so core stays autoload-free.
+# 可读文本。gpTr() 须是「接收 i18n 键、返回 String」的 Callable（通常为 `I18n.gpTr()`），
 # 由界面层注入，使 core 保持无 autoload 依赖。
 func gpText(gpTr: Callable) -> String:
 	if gpMessageKey == "":

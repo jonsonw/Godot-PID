@@ -1,12 +1,10 @@
 # ============================================================================
-# GPSymbolEditorTool — 图元编辑器交互工具基类（M7）
-# Symbol-editor interaction tool base (M7).
 #
 # 照搬主画布的 GPCanvasTool 抽象，使符号编辑器复用与主画布同一套工具派发，取代原先内嵌在
-# GPMakeSymbolDialog 里的 GPTool 枚举 + _gpDragKind/_gpDraftShape/_gpPolyPts 与 _gpCommit*/_gpHit*
+# GPMakeSymbolDialog 里的 GPTool 枚举 + _gpDragKind/_gpDraftShape/_gpPolyPts 与 _gpCommit()*/_gpHit*
 # 状态机。工具只持有「某一种交互」的按下 / 移动 / 释放 / 按键 / 覆盖层绘制；编辑器持有状态与编排。
 # Mirrors the canvas GPCanvasTool abstraction so the symbol editor reuses the SAME tool dispatch
-# the main canvas uses, instead of the old bespoke GPTool enum + _gpCommit*/_gpHit* state machine
+# the main canvas uses, instead of the old bespoke GPTool enum + _gpCommit()*/_gpHit* state machine
 # that lived inside GPMakeSymbolDialog. A tool owns one interaction's press/move/release/key/overlay;
 # the editor owns state + orchestration.
 # Copyright © 2026 Jonson Wang

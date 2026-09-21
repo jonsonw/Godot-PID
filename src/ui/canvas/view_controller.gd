@@ -4,20 +4,20 @@ extends RefCounted
 # camera transform; zoom and pan
 # 相机变换与视口缩放平移
 #
-# WHY THIS EXISTS / 为何存在（架构优化建议 §3.4）：
-#   GPCanvas2D was carrying many unrelated responsibilities in one file; this coordinator
-#   owns the "camera transform" use case end to end, so the root keeps only assembly and forwarding.
-#   GPCanvas2D 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「相机变换与视口缩放平移」这一用例，
-#   使根类只保留装配与转发。
+# WHY THIS EXISTS / 为何存在：
+# GPCanvas2D was carrying many unrelated responsibilities in one file; this coordinator
+# owns the "camera transform" use case end to end, so the root keeps only assembly and forwarding.
+# GPCanvas2D 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「相机变换与视口缩放平移」这一用例，
+# 使根类只保留装配与转发。
 #
 # Interaction / 交互方式：
-#   - the root creates this coordinator and injects itself as gpHost (composition root);
-#     根类创建本协调者并把自身注入为 gpHost（组合根装配）；
-#   - the root forwards user actions here, never the other way round — this class drives the
-#     host only through its public ports (GPCanvas2D.gp*);
-#     根类把用户动作转发到此处，绝不反向 —— 本类只经宿主的公开端口（GPCanvas2D.gp*）驱动宿主；
-#   - the root keeps every public port it had before: callers outside the canvas are unchanged.
-#     根类保留其原有的每一个公开端口：画布外部的调用方零改动。
+# - the root creates this coordinator and injects itself as gpHost (composition root);
+# 根类创建本协调者并把自身注入为 gpHost（组合根装配）；
+# - the root forwards user actions here, never the other way round — this class drives the
+# host only through its public ports (GPCanvas2D.gp*);
+# 根类把用户动作转发到此处，绝不反向 —— 本类只经宿主的公开端口（GPCanvas2D.gp*）驱动宿主；
+# - the root keeps every public port it had before: callers outside the canvas are unchanged.
+# 根类保留其原有的每一个公开端口：画布外部的调用方零改动。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。

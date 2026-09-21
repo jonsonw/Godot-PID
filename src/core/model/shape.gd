@@ -1,8 +1,6 @@
 class_name GPShape
 extends Resource
-# UNIFIED MODEL (P0): extends Resource (not RefCounted) so GPSymbolDef can @export
 # Array[GPShape] — Godot's @export only accepts built-in / Resource / Node / enum types.
-# 统一模型（P0）：继承 Resource（而非 RefCounted），使 GPSymbolDef 能 @export
 # Array[GPShape] —— Godot 的 @export 仅接受内建/Resource/Node/枚举类型。
 
 # Copyright © 2026 Jonson Wang
@@ -48,18 +46,16 @@ var gpColor: Color = Color(0.92, 0.94, 0.98)
 # its grip carries its handles along automatically.
 # 逐顶点的贝塞尔切线手柄，以「相对顶点的偏移」存储，与 gpPoints 平行：gpHandles[i] = [入偏移, 出偏移]。
 # 两者皆零 => 直线（拐角）节点。拉出手柄使相邻段变为曲线。相对存储使顶点经抓取点拖动时手柄自动跟随。
-# NOTE: `Array[T]()` is NOT valid GDScript 4 — a typed array has no callable constructor and
+# NOTE: `Array[T]` is NOT valid GDScript 4 — a typed array has no callable constructor and
 # parsing it fails with "Cannot call on an expression" (which surfaces as the very confusing
 # "Could not parse global class GPShape" cascade everywhere GPShape is referenced).
-# 注意：`Array[T]()` 在 GDScript 4 中不合法——类型化数组无可调用的构造函数，解析时报
+# 注意：`Array[T]` 在 GDScript 4 中不合法——类型化数组无可调用的构造函数，解析时报
 # "Cannot call on an expression"（并级联成所有引用 GPShape 处那句极费解的
 # "Could not parse global class GPShape"）。
 var gpHandles: Array[PackedVector2Array] = []
 
-# ---- identity & properties (M8) ----
-# ---- 标识与属性（M8） ----
-# Cross-document technical id, e.g. "a3f9k2m1-s3". Assigned by GPIdGen.gpNextGlobal.
-# 跨文档技术号，如 "a3f9k2m1-s3"。由 GPIdGen.gpNextGlobal 分配。
+# Cross-document technical id, e.g. "a3f9k2m1-s3". Assigned by GPIdGen.gpNextGlobal().
+# 跨文档技术号，如 "a3f9k2m1-s3"。由 GPIdGen.gpNextGlobal() 分配。
 var gpUid: String = ""
 
 # Human name for the annotation, e.g. "界区线". Shown in the inspector only.
@@ -278,8 +274,8 @@ func gpBBox() -> Rect2:
 			if gpPoints.size() >= 2:
 				return Rect2(gpPoints[0], gpPoints[1] - gpPoints[0]).abs()
 		GPKind.GP_ARC:
-			# Sample the arc (the 3 stored points include the center, so a raw point-min/max is wrong).
-			# 沿弧采样（三个存储点含圆心，直接取点的包围盒会出错）。
+ # Sample the arc (the 3 stored points include the center, so a raw point-min/max is wrong).
+ # 沿弧采样（三个存储点含圆心，直接取点的包围盒会出错）。
 			var gpSamp: PackedVector2Array = gpArcSample(24)
 			if gpSamp.size() >= 1:
 				var gpMin := Vector2(INF, INF)
@@ -325,8 +321,6 @@ func gpToDict() -> Dictionary:
 				gpOut = gpHandles[gpI][1]
 			gpHs.append([[gpIn.x, gpIn.y], [gpOut.x, gpOut.y]])
 		gpD["handles"] = gpHs
-	# Identity & properties (M8): emitted only when non-default, to keep flat files clean.
-	# 标识与属性（M8）：仅在非默认时输出，保持扁平文件整洁。
 	if gpUid != "":
 		gpD["uid"] = gpUid
 	if gpName != "":
@@ -338,8 +332,8 @@ func gpToDict() -> Dictionary:
 	return gpD
 
 
-# Restore from a dictionary (inverse of gpToDict).
-# 从字典还原（gpToDict 的逆操作）。
+# Restore from a dictionary (inverse of gpToDict()).
+# 从字典还原（gpToDict() 的逆操作）。
 func gpFromDict(gpD: Dictionary) -> void:
 	gpKind = int(gpD.get("kind", GPKind.GP_LINE))
 	var gpRaw: Array = gpD.get("pts", [])
@@ -370,8 +364,6 @@ func gpFromDict(gpD: Dictionary) -> void:
 				if gpPair.size() >= 2:
 					gpOut = Vector2(float(gpPair[1][0]), float(gpPair[1][1]))
 			gpHandles.append(PackedVector2Array([gpIn, gpOut]))
-	# Identity & properties (M8): all optional, so pre-M8 archives load unchanged.
-	# 标识与属性（M8）：全部可选，故 M8 之前的存档加载行为不变。
 	gpUid = gpD.get("uid", "")
 	gpName = gpD.get("name", "")
 	gpLayer = gpD.get("layer", "ANNOTATION")

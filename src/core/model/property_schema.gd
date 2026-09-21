@@ -68,9 +68,9 @@ func gpOrderedKeys() -> Array[String]:
 # "the library changed since this drawing was saved" at open time.
 # 字段集合指纹（键 + 类型 + 类型敏感默认值），用于打开图纸时检测「库自上次保存后已变更」。
 func gpFingerprint() -> String:
-	# Built by concatenation: neither Array[String] nor PackedStringArray offers join() in
+	# Built by concatenation: neither Array[String] nor PackedStringArray offers join in
 	# Godot 4.7, and a hand-rolled join avoids depending on either.
-	# 手工拼接：Godot 4.7 中 Array[String] 与 PackedStringArray 都没有 join()，
+	# 手工拼接：Godot 4.7 中 Array[String] 与 PackedStringArray 都没有 join，
 	# 手工拼接可避免依赖任何一方。
 	var gpJoined: String = ""
 	var gpKeysSorted: Array[String] = gpKeys()
@@ -105,9 +105,9 @@ func gpToDict() -> Dictionary:
 	return gpD
 
 
-# Restore in place (inverse of gpToDict). gpFields is CLEARED first so the declared typed-array
+# Restore in place (inverse of gpToDict()). gpFields is CLEARED first so the declared typed-array
 # type survives (re-assigning a new Array would be fine too, but clearing is the safe idiom).
-# 就地还原（gpToDict 的逆操作）。先清空 gpFields，以保留已声明的类型化数组类型
+# 就地还原（gpToDict() 的逆操作）。先清空 gpFields，以保留已声明的类型化数组类型
 # （重新赋值新 Array 也可，但清空是更安全的写法）。
 func gpFromDict(gpD: Dictionary) -> void:
 	gpVersion = int(gpD.get("version", 1))

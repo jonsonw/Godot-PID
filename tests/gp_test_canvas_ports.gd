@@ -1,11 +1,11 @@
 extends "res://tests/gp_test.gd"
-# 架构优化 §3.4：钉住 GPCanvas2D 的对外门面（1 root + 4 实现类拆分之后）。
-# Architecture §3.4: pin GPCanvas2D's public facade after the 1-root + 4-impl split.
+# 钉住 GPCanvas2D 的对外门面（1 root + 4 实现类拆分之后）。
+# pin GPCanvas2D's public facade after the 1-root + 4-impl split.
 #
 # Why this exists / 为何存在：
-#   canvas_2d.gd（1,347 行）按 §3.4 拆成 GPCanvasViewController / GPCanvasInputRouter /
+#   canvas_2d.gd（1,347 行）拆成 GPCanvasViewController / GPCanvasInputRouter /
 #   GPCanvasEditFacade / GPCanvasSymbolLayer 四个实现类。根类把 41 个公开端口全部保留为
-#   「单行转发壳」，外部调用方（main_window、属性面板、工具）零改动 —— 这是本次重构的
+#   「单行转发壳」，外部调用方（main_window、属性面板、工具）零改动 —— 这是该拆分的
 #   核心不变量。转发壳一旦被误删或改签名，编译期**不会**报错（Godot 允许任意方法集），
 #   只有运行时才炸，故必须用测试钉住。
 #

@@ -1,15 +1,13 @@
 class_name GPSetEdgeTagCommand
 extends GPCommand
 # Copyright © 2026 Jonson Wang
-# Rename one edge's line number (P3). Used by the double-click tag editor.
-# 修改一条边的管线号（P3）。由双击编号编辑器调用。
 #
 # Duplicate numbers are NOT refused / 重号不作拒绝：
-#   Two branches legitimately carry the same line number on a real P&ID, so refusing would be
-#   wrong. The caller surfaces a status-bar warning and sets gpAttrs["tag_manual"], which makes
-#   a future "renumber all" skip this edge instead of overwriting a deliberate choice.
-#   真实 P&ID 上两条支管完全可以同号，故拒绝是错的。调用方给出状态栏警告并置
-#   gpAttrs["tag_manual"]，使将来的「全部重新编号」跳过本边，而非覆盖一次刻意的选择。
+# Two branches legitimately carry the same line number on a real P&ID, so refusing would be
+# wrong. The caller surfaces a status-bar warning and sets gpAttrs["tag_manual"], which makes
+# a future "renumber all" skip this edge instead of overwriting a deliberate choice.
+# 真实 P&ID 上两条支管完全可以同号，故拒绝是错的。调用方给出状态栏警告并置
+# gpAttrs["tag_manual"]，使将来的「全部重新编号」跳过本边，而非覆盖一次刻意的选择。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。

@@ -4,20 +4,20 @@ extends RefCounted
 # Tag-rule dialog orchestration and the renumber workflow
 # 位号规则对话框编排与重编号工作流
 #
-# WHY THIS EXISTS / 为何存在（架构优化建议 §3.2）：
-#   GPMainWindow was carrying many unrelated responsibilities in one file; this coordinator
-#   owns the "Tag-rule dialog orchestration and the renumber workflow" use case end to end, so the root keeps only assembly and forwarding.
-#   GPMainWindow 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「位号规则对话框编排与重编号工作流」这一用例，
-#   使根类只保留装配与转发。
+# WHY THIS EXISTS / 为何存在：
+# GPMainWindow was carrying many unrelated responsibilities in one file; this coordinator
+# owns the "Tag-rule dialog orchestration and the renumber workflow" use case end to end, so the root keeps only assembly and forwarding.
+# GPMainWindow 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「位号规则对话框编排与重编号工作流」这一用例，
+# 使根类只保留装配与转发。
 #
 # Interaction / 交互方式：
-#   - the root creates this coordinator and injects itself as gpHost (composition root);
-#     根类创建本协调者并把自身注入为 gpHost（组合根装配）；
-#   - the root forwards menu / toolbar actions here, never the other way round — this class
-#     does not reach back into menus or the ribbon;
-#     根类把菜单/工具栏动作转发到此处，绝不反向 —— 本类不回指菜单或 Ribbon；
-#   - UI refresh goes through gpHost._gpSetState / the docks the root owns.
-#     UI 刷新经由 gpHost._gpSetState 及根类持有的停靠栏完成。
+# - the root creates this coordinator and injects itself as gpHost (composition root);
+# 根类创建本协调者并把自身注入为 gpHost（组合根装配）；
+# - the root forwards menu / toolbar actions here, never the other way round — this class
+# does not reach back into menus or the ribbon;
+# 根类把菜单/工具栏动作转发到此处，绝不反向 —— 本类不回指菜单或 Ribbon；
+# - UI refresh goes through gpHost.gpSetState() / the docks the root owns.
+# UI 刷新经由 gpHost.gpSetState() 及根类持有的停靠栏完成。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -32,10 +32,10 @@ func gpDoRenumberTags() -> void:
 	if gpCanvas == null:
 		return
 	if not gpCanvas.gpActions.gpRenumberTags():
-		gpHost._gpSetState("tag_rule.applied")
+		gpHost.gpSetState("tag_rule.applied")
 		return
 	var gpChanged: int = GPTagRuleService.gpChangedCount(gpCanvas.gpActions.gpLastTagMapping)
-	gpHost._gpSetState("tag_rule.renumbered", [gpChanged])
+	gpHost.gpSetState("tag_rule.renumbered", [gpChanged])
 	gpCanvas.queue_redraw()
 	gpHost.gpSelCoord.gpRefreshSelection()
 
@@ -55,7 +55,7 @@ func gpConfirmRenumberTags() -> void:
 		return
 	var gpCount: int = gpCanvas.gpGraph.gpNodes.size()
 	if gpCount == 0:
-		gpHost._gpSetState("tag_rule.applied")
+		gpHost.gpSetState("tag_rule.applied")
 		return
 	var gpDlg: ConfirmationDialog = ConfirmationDialog.new()
 	gpDlg.title = I18n.gpTr("tag_rule.confirm_title")
@@ -76,19 +76,22 @@ func gpOnTagRulesApplied(gpRules: GPProjectTagRules, gpRenumber: bool) -> void:
 		return
 	gpCanvas.gpActions.gpSetTagRules(gpRules)
 	if not gpRenumber:
-		gpHost._gpSetState("tag_rule.applied")
+		gpHost.gpSetState("tag_rule.applied")
 		return
 	gpConfirmRenumberTags()
 
-# Menu 项目 / 位号编号规则 (M9b). The dialog edits a copy and hands it back; renumbering
+# Menu 项目 / 位号编号规则 . The dialog edits a copy and hands it back; renumbering
 # is a separate, confirmed, single-undo-step operation.
-# 菜单「项目 / 位号编号规则」（M9b）。对话框编辑副本并交回；重编号是独立的、
+# 菜单「项目 / 位号编号规则」。对话框编辑副本并交回；重编号是独立的、
 # 需确认的、单撤销步操作。
 func gpOpenTagRuleDialog() -> void:
 	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
 	if gpCanvas == null:
 		return
-	var gpDlg: GPTagRuleDialog = GPTagRuleDialog.new()
+	# 刻意不写类型标注：一旦标注，编译器会在启动期解析该类并把它拉进启动依赖图。
+	# Deliberately UNTYPED: annotating it would resolve the class at startup and pull it into
+	# the startup dependency graph.
+	var gpDlg = (load("res://src/ui/dialogs/tag_rule_dialog.gd") as GDScript).new()
 	gpHost.add_child(gpDlg)
 	gpDlg.gpRulesApplied.connect(gpOnTagRulesApplied)
 	gpDlg.gpShowRules(gpCanvas.gpActions.gpTagRules(), gpCanvas.gpGraph.gpNodes.size())

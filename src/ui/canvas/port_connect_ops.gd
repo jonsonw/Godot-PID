@@ -9,10 +9,10 @@
 # pushed down into GPPortAnchor (core/view, pure static, headless-testable).
 #
 # Interaction contract / 交互契约：
-#   单击端点      = 拾取（供「自动连线」选端点，再点一次取消）
-#   从端点拖到另一端点 = 直接连线（合法才连，非法落点拒绝并提示）
-#   click an anchor          = pick it (auto-connect endpoint; click again to drop)
-#   drag anchor -> anchor    = connect (only when legal; an illegal drop refuses out loud)
+# 单击端点 = 拾取（供「自动连线」选端点，再点一次取消）
+# 从端点拖到另一端点 = 直接连线（合法才连，非法落点拒绝并提示）
+# click an anchor = pick it (auto-connect endpoint; click again to drop)
+# drag anchor -> anchor = connect (only when legal; an illegal drop refuses out loud)
 # ============================================================================
 
 class_name GPPortConnectOps
@@ -147,8 +147,8 @@ func gpFinishDrag() -> bool:
 	if (not gpTarget.is_empty()) and (not GPPortAnchor.gpSamePort(gpFrom, gpTarget)):
 		var gpWhy: String = GPPortAnchor.gpValidatePair(gpFrom, gpTarget)
 		if gpWhy != GPPortAnchor.GP_REFUSAL_NONE:
-			# An illegal drop must SAY why instead of silently doing nothing.
-			# 非法落点必须「说出原因」，而不是静默地什么都不做。
+ # An illegal drop must SAY why instead of silently doing nothing.
+ # 非法落点必须「说出原因」，而不是静默地什么都不做。
 			gpCv.gpReportRefusal(gpWhy)
 			return false
 		var gpKind: String = GPPortAnchor.gpConnectKindFor(str(gpFrom.get("type", "")),
@@ -205,9 +205,9 @@ func gpDrawPorts(gpTarget: CanvasItem) -> void:
 	var gpDragging: bool = gpIsDragging()
 	var gpNodeIds: Array[String] = []
 	if not gpDragging:
-		# Anchors are exposed by SELECTED symbols only (plus the picked pair, so an auto-connect
-		# selection stays visible even after the symbol is deselected).
-		# 锚点仅由「已选中」的图元暴露（外加已拾取的那对，使自动连线的选择在取消选中图元后依然可见）。
+ # Anchors are exposed by SELECTED symbols only (plus the picked pair, so an auto-connect
+ # selection stays visible even after the symbol is deselected).
+ # 锚点仅由「已选中」的图元暴露（外加已拾取的那对，使自动连线的选择在取消选中图元后依然可见）。
 		if gpCv.gpSelection.is_empty() and gpCv.gpPortPick.is_empty():
 			return
 		gpNodeIds = gpCv.gpSelection.duplicate()
@@ -245,8 +245,8 @@ func _gpStateOf(gpA: Dictionary, gpDragging: bool) -> int:
 			return GP_STATE_SOURCE
 		if not _gpTarget.is_empty() and GPPortAnchor.gpSamePort(gpA, _gpTarget):
 			return GP_STATE_OK if _gpValid else GP_STATE_BAD
-		# Every other anchor is tinted by whether it COULD accept this line.
-		# 其余锚点按「能否接受本条线」着色。
+ # Every other anchor is tinted by whether it COULD accept this line.
+ # 其余锚点按「能否接受本条线」着色。
 		if GPPortAnchor.gpValidatePair(_gpFrom, gpA) == GPPortAnchor.GP_REFUSAL_NONE:
 			return GP_STATE_OK
 		return GP_STATE_BAD

@@ -1,7 +1,7 @@
 extends SceneTree
-# Headless smoke for the §3.4 input split: GPCanvas2D._gui_input now only forwards to
+# Headless smoke for the input split: GPCanvas2D._gui_input now only forwards to
 # GPCanvasInputRouter, which owns panning, the tool registry and the tool dispatch.
-# 架构优化 §3.4 输入拆分的无界面冒烟：GPCanvas2D._gui_input 现只转发给 GPCanvasInputRouter，
+# 输入拆分的无界面冒烟：GPCanvas2D._gui_input 现只转发给 GPCanvasInputRouter，
 # 平移、工具注册表与工具分派都由后者持有。
 #
 # Why deferred / 为何用延迟调用：

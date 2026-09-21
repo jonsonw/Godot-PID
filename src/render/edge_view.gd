@@ -21,17 +21,11 @@ extends Node2D
 # 是最糟的表达方式。
 const GP_TAG_PLACEHOLDER: String = "<?>"
 
-# GPU dashed-line path (Line2D + Linetype shader). Default OFF so the validated CPU
-# dash (GPEdgeDash) stays the active renderer; flip to true to use the shader for
-# non-selected dashed edges (the perf path for 500+ edges). Selection still paints
-# via _draw so the bright outline stays above the ink.
-# GPU 虚线路径（Line2D + Linetype 着色器）。默认关闭，使已验证的 CPU 虚线
-#（GPEdgeDash）仍为活动渲染器；置 true 即对「非选中虚线边」走着色器（500+ 边时的性能路径）。
-# 选中态仍由 _draw 绘制，使亮色描边始终位于墨线之上。
-const GP_GPU_DASH: bool = false
-
-# Dashed ink as a Line2D child (only used when GP_GPU_DASH is on). Created once.
-# 虚线墨线（仅 GP_GPU_DASH 为真时使用）的 Line2D 子节点，建一次。
+# The pipe BODY is drawn by a single Line2D child (gpInkLine) for every edge kind. Solid edges use
+# a plain material; dashed edges attach the Linetype shader clone. Driving the body through this node
+# lets gpApplyGeometry() push live geometry during a drag with no queue_redraw dependency.
+# 管线主体由单一 Line2D 子节点（gpInkLine）为所有连线类型绘制。实线用普通材质；虚线挂线型
+# 着色器克隆。把主体交给此节点，gpApplyGeometry() 就能在拖拽时同步推送实时几何，不依赖 queue_redraw。
 var gpInkLine: Line2D = null
 
 # Bound graph edge id.
@@ -56,9 +50,9 @@ var gpDefLookup: Callable = Callable()
 # 当前画布缩放；驱动屏幕空间下限。
 var gpZoom: float = 1.0
 
-# Injected render-style snapshot (架构优化 §4.2). Replaces direct autoload reads; null only
+# Injected render-style snapshot. Replaces direct autoload reads; null only
 # in hand-built tests that skip injection (defaults below then kick in).
-# 注入的渲染样式快照（架构优化 §4.2）。取代直接读 autoload；仅在跳过注入的手工测试中为 null（下方有默认兜底）。
+# 注入的渲染样式快照。取代直接读 autoload；仅在跳过注入的手工测试中为 null（下方有默认兜底）。
 var gpStyle: GPRenderStyle = null
 
 # Selection / hover / editing state (painted as a halo under the ink).
@@ -70,6 +64,12 @@ var gpHovered: bool = false
 # so "selected" and "actively editing" are visually separate.
 # 本边抓取点正被拖拽（编辑态）时为真。驱动橙色高亮，使「选中」与「正在编辑」视觉分离。
 var gpEditing: bool = false
+
+# Linetype shader material clone for this edge (dashed rendering). Solid edges render with a
+# plain (null) material. Captured once in _ready() so it survives the body-paint toggling.
+# 本边专用的线型着色器材质克隆（虚线渲染）。实线用普通（空）材质。于 _ready() 捕获一次，
+# 以免在「实线/虚线」切换时丢失。
+var _gpLinetypeMat: ShaderMaterial = null
 
 # Bind this view to a graph edge.
 # 将本视图绑定到一条图边。
@@ -88,7 +88,20 @@ func _ready() -> void:
 	gpInkLine = Line2D.new()
 	gpInkLine.name = "InkGPU"
 	gpInkLine.visible = false
+	# gpInkLine is the SYNCHRONOUS drag-follow layer only. During a live drag gpApplyGeometry()
+	# pushes the live polyline here directly (zero queue_redraw dependency) so a moved node's pipe
+	# follows on top without lag. The moment _draw() runs it HIDES gpInkLine, because the authoritative
+	# static body is painted by this view's own _draw (GPEdgePainter.gpDrawInk()) which always sits
+	# ABOVE the canvas background and BELOW the overlays (halo / arrow / tag). z_index is kept high so
+	# the brief on-top drag frame can never be occluded by a sibling.
+	# gpInkLine 仅作「拖拽中」的同步跟随层：拖拽时 gpApplyGeometry() 把实时折线直接写于此
+	#（不依赖 queue_redraw），使被移动图元的管线无滞后地顶层跟随。一旦 _draw() 执行即隐藏它，
+	# 因为权威的静态主体由本视图自身 _draw()（GPEdgePainter.gpDrawInk()）绘制，它恒在画布背景之上、
+	# 覆盖层（光晕 / 箭头 / 位号）之下。z_index 取高值仅为使那一瞬的顶层帧不被兄弟节点遮挡。
+	gpInkLine.z_index = 20
+	gpInkLine.z_as_relative = true
 	gpInkLine.material = GPLinetypeMaterial.gpMake()
+	_gpLinetypeMat = gpInkLine.material as ShaderMaterial
 	add_child(gpInkLine)
 
 
@@ -111,6 +124,32 @@ func gpPolyline() -> PackedVector2Array:
 	var gpFrom: Dictionary = GPPortResolver.gpResolveEnd(gpGraph, gpDefLookup, gpEdge, true, gpWant)
 	var gpTo: Dictionary = GPPortResolver.gpResolveEnd(gpGraph, gpDefLookup, gpEdge, false, gpWant)
 	return GPEdgeRoute.gpRoute(gpFrom, gpTo, gpEdge.gpRouting, gpEdge.gpOrtho)
+
+
+# Push the live polyline straight into the GPU ink Line2D (the dashed / solid body) so a moved
+# node's pipe follows IMMEDIATELY, with zero dependence on queue_redraw/viewport timing. This is
+# the synchronous half of the drag-follow fix and works for EVERY edge kind (solid PROCESS lines
+# included — the previous build only updated the ink line for dashed edges, so solid pipes stayed
+# frozen at the old position until the drag released).
+# 把实时折线直接写进 GPU 墨线 Line2D（实线 / 虚线主体），使被移动图元的管线「即刻」跟随，
+# 完全不依赖 queue_redraw/视口时序。这是拖拽跟随修复的同步半边，且对「所有」连线类型都有效
+func gpApplyGeometry() -> void:
+	if gpInkLine == null or gpGraph == null or gpEdge == null:
+		return
+	var gpWant: String = GPPortResolver.gpWantTypeFor(gpEdge)
+	var gpFrom: Dictionary = GPPortResolver.gpResolveEnd(gpGraph, gpDefLookup, gpEdge, true, gpWant)
+	var gpTo: Dictionary = GPPortResolver.gpResolveEnd(gpGraph, gpDefLookup, gpEdge, false, gpWant)
+	var gpPts: PackedVector2Array = GPEdgeRoute.gpRoute(gpFrom, gpTo, gpEdge.gpRouting, gpEdge.gpOrtho)
+	if gpPts.size() < 2:
+		return
+	var gpSt: Dictionary = GPEdgeStyle.gpStyleFor(gpEdge.gpKind, gpEdge.gpSignalType, gpZoom)
+	var gpW: float = float(gpSt.get("width", 1.6))
+	var gpCol: Color = gpSt.get("color", Color(0.6, 0.65, 0.75))
+	var gpPat: PackedFloat32Array = gpSt.get("pattern", PackedFloat32Array())
+	if gpStyle != null and gpStyle.gpScreenConstantWidth:
+		gpW = gpW / gpZoom
+	gpW = maxf(gpW, GPEdgeStyle.GP_MIN_PX / gpZoom)
+	_gpPaintInkBody(gpPts, gpCol, gpW, gpPat)
 
 
 # Resolve the two ends once and paint the whole edge.
@@ -148,16 +187,15 @@ func _draw() -> void:
 	elif gpHovered:
 		GPEdgePainter.gpDrawHalo(self, gpPts, GPEdgeStyle.GP_HOVER_HALO, gpW + 6.0 / gpZoom)
 
-	# Ink: GPU dashed path (Line2D + shader) for non-selected dashed edges, else the
-	# validated CPU dash. Selection still draws via _draw so the bright outline stays on top.
-	# 墨线：非选中虚线边走 GPU 虚线路径（Line2D + 着色器），否则走已验证的 CPU 虚线。
-	# 选中态仍由 _draw 绘制，使亮色描边位于墨线之上。
-	if gpInkLine != null:
-		gpInkLine.visible = false
-	if GP_GPU_DASH and gpPat.size() >= 2 and not (gpSelected or gpEditing):
-		_gpDrawInkGPU(gpPts, gpCol, gpW, gpPat)
-	else:
-		GPEdgePainter.gpDrawInk(self, gpPts, gpCol, gpW, gpPat)
+	# Ink (static body): painted by THIS view's own _draw() so it always sits ABOVE the canvas
+	# background and BELOW the overlays (halo / selection / arrow / tag) drawn right after it.
+	# gpInkLine is only the synchronous drag-follow layer (gpApplyGeometry()); hide it here so the CPU
+	# body is the single authoritative render and the selected/hover outline stays on top.
+	# 墨线（静态主体）：由本视图「自身」_draw() 绘制，恒在画布背景之上、其后覆盖层
+	#（光晕 / 选中 / 箭头 / 位号）之下。gpInkLine 仅是拖拽同步跟随层（gpApplyGeometry()）；
+	# 此处隐藏它，使 CPU 主体成为唯一权威渲染、选中 / 悬停描边始终位于其之上。
+	GPEdgePainter.gpDrawInk(self, gpPts, gpCol, gpW, gpPat)
+	gpInkLine.visible = false
 
 	# Selected / editing: overlay a thin bright core stroke ON TOP of the ink so the WHOLE path
 	# lights up (the halo alone can read as just a thicker glow). Keeps the original colour visible.
@@ -183,36 +221,44 @@ func _draw() -> void:
 		_gpDrawTag(gpPts, gpCol)
 
 
-# GPU dashed ink: drive the Line2D child + Linetype shader. The shader dashes along the
-# polyline's UV, so the dash phase stays continuous across segments. Selection is NOT drawn
-# here (it stays in _draw), so this is only ever called for unselected edges.
-# GPU 虚线墨线：驱动 Line2D 子节点 + Linetype 着色器。着色器沿折线 UV 做虚线，故划相位
-# 跨段连续。选中态不在此绘制（仍在 _draw），故仅对非选中边调用。
-func _gpDrawInkGPU(gpPts: PackedVector2Array, gpColor: Color, gpWidth: float,
+# Paint the pipe BODY into the gpInkLine Line2D child — the single visible geometry for the edge.
+# 把管线主体绘入 gpInkLine（Line2D 子节点）—— 本边唯一的可见几何。
+# Solid edges (empty pattern) use a plain material (clean continuous stroke); dashed edges use the
+# Linetype shader clone so the dash phase stays continuous across segments. Called both from _draw()
+# and from gpApplyGeometry() so the body follows a moved node synchronously, never depending on
+# queue_redraw timing.
+# 实线（空图案）用普通材质（干净连续笔触）；虚线用线型着色器克隆，使划相位跨段连续。
+# 既由 _draw() 又由 gpApplyGeometry() 调用，故主体同步跟随被移动节点，永不依赖 queue_redraw 时序。
+func _gpPaintInkBody(gpPts: PackedVector2Array, gpColor: Color, gpWidth: float,
 		gpPattern: PackedFloat32Array) -> void:
 	if gpInkLine == null or gpPts.size() < 2:
-		GPEdgePainter.gpDrawInk(self, gpPts, gpColor, gpWidth, gpPattern)
 		return
 	gpInkLine.points = gpPts
 	gpInkLine.width = gpWidth
 	gpInkLine.default_color = gpColor
 	gpInkLine.visible = true
-	var gpMat: ShaderMaterial = gpInkLine.material as ShaderMaterial
-	if gpMat != null and gpMat.shader != null:
-		# Min-dash protection in world units so a dash never collapses below one pixel.
-		# 世界单位下的最小划长保护，使单段划长不塌缩至一像素以下。
-		var gpMin: float = GPEdgeStyle.GP_MIN_DASH_PX / gpZoom
-		var gpZoomed: PackedFloat32Array = PackedFloat32Array()
-		for gpV in gpPattern:
-			gpZoomed.append(maxf(gpV, gpMin))
-		gpMat.set_shader_parameter("pattern", gpZoomed)
-		gpMat.set_shader_parameter("pattern_count", gpZoomed.size())
-		gpMat.set_shader_parameter("linetype_scale", GPLinetypeManager.gpLinetypeScale)
-		var gpLen: float = 0.0
-		for gpI in range(gpPts.size() - 1):
-			gpLen += gpPts[gpI].distance_to(gpPts[gpI + 1])
-		gpMat.set_shader_parameter("line_length", maxf(gpLen, 1.0))
-		gpMat.set_shader_parameter("color", gpColor)
+	if gpPattern.size() >= 2 and _gpLinetypeMat != null:
+		gpInkLine.material = _gpLinetypeMat
+		var gpMat: ShaderMaterial = _gpLinetypeMat
+		if gpMat.shader != null:
+ # Min-dash protection in world units so a dash never collapses below one pixel.
+ # 世界单位下的最小划长保护，使单段划长不塌缩至一像素以下。
+			var gpMin: float = GPEdgeStyle.GP_MIN_DASH_PX / gpZoom
+			var gpZoomed: PackedFloat32Array = PackedFloat32Array()
+			for gpV in gpPattern:
+				gpZoomed.append(maxf(gpV, gpMin))
+			gpMat.set_shader_parameter("pattern", gpZoomed)
+			gpMat.set_shader_parameter("pattern_count", gpZoomed.size())
+			gpMat.set_shader_parameter("linetype_scale", GPLinetypeManager.gpLinetypeScale)
+			var gpLen: float = 0.0
+			for gpI in range(gpPts.size() - 1):
+				gpLen += gpPts[gpI].distance_to(gpPts[gpI + 1])
+			gpMat.set_shader_parameter("line_length", maxf(gpLen, 1.0))
+			gpMat.set_shader_parameter("color", gpColor)
+	else:
+ # Solid line: plain (null) material renders a clean continuous stroke; no dash shader.
+ # 实线：普通（空）材质即得干净连续笔触，无需虚线着色器。
+		gpInkLine.material = null
 
 
 # Pipes always show a number (placeholder when missing); signal lines stay clean by default.
@@ -237,8 +283,8 @@ func _gpDrawTag(gpPts: PackedVector2Array, gpCol: Color) -> void:
 	var gpText: String = gpEdge.gpTag
 	var gpColor: Color = gpCol
 	if gpText == "":
-		# Unnumbered pipe: shout instead of staying silent.
-		# 未编号管道：显式提示，而非沉默。
+ # Unnumbered pipe: shout instead of staying silent.
+ # 未编号管道：显式提示，而非沉默。
 		gpText = GP_TAG_PLACEHOLDER
 		gpColor = GPEdgeStyle.GP_DANGLING
 	# The per-edge "tag_rotate" attribute overrides the global default when present; otherwise

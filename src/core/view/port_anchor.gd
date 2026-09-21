@@ -6,13 +6,13 @@ extends RefCounted
 # 连接锚点：图元暴露的可拾取端点，以及判定两个端点能否相连的规则。
 #
 # Why a pure static module / 为何是纯静态模块：
-#   The canvas paints the anchors, the select tool drags between them and the auto-router walks
-#   from one to another. All three need EXACTLY the same answer to "where is this port?" and
-#   "may these two be joined?" — putting the rules here means a drawn anchor, a dropped
-#   connection and a routed path can never disagree, and every rule is headless-testable.
-#   画布绘制锚点、选择工具在其间拖拽、自动布线从一个走到另一个。三者对「这个端口在哪」与
-#   「这两端能否相接」需要完全一致的答案 —— 把规则放在此处，可使「画出的锚点」「落下的连线」
-#   与「生成的路径」永不分歧，且每条规则都能 headless 单测。
+# The canvas paints the anchors, the select tool drags between them and the auto-router walks
+# from one to another. All three need EXACTLY the same answer to "where is this port?" and
+# "may these two be joined?" — putting the rules here means a drawn anchor, a dropped
+# connection and a routed path can never disagree, and every rule is headless-testable.
+# 画布绘制锚点、选择工具在其间拖拽、自动布线从一个走到另一个。三者对「这个端口在哪」与
+# 「这两端能否相接」需要完全一致的答案 —— 把规则放在此处，可使「画出的锚点」「落下的连线」
+# 与「生成的路径」永不分歧，且每条规则都能 headless 单测。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -113,7 +113,7 @@ static func gpAnchors(gpGraph: GPPIDGraph, gpDefLookup: Callable,
 
 # Nearest anchor to a world point, or an EMPTY dictionary when none is within the pick radius.
 # 距世界点最近的锚点；拾取半径内没有时返回空字典。
-# [param gpNodeIds] restrict the search to these nodes; EMPTY = every node.
+# [param gpNodeIds] restrict the search() to these nodes; EMPTY = every node.
 # [param gpNodeIds] 限定在这些节点内搜索；为空 = 每个节点。
 static func gpHitPort(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpWorld: Vector2,
 		gpZoom: float, gpNodeIds: Array[String] = []) -> Dictionary:
@@ -152,8 +152,8 @@ static func gpWishFor(gpType: String) -> String:
 		GPPort.GP_ACTUATOR, GPPort.GP_SIGNAL:
 			return "signal"
 		_:
-			# TERMINAL and any future purpose accept either kind of line.
-			# TERMINAL 及今后新增的用途都接受两类线。
+ # TERMINAL and any future purpose accept either kind of line.
+ # TERMINAL 及今后新增的用途都接受两类线。
 			return "any"
 
 
@@ -172,8 +172,8 @@ static func gpConnectKindFor(gpTypeA: String, gpTypeB: String) -> String:
 			return GPPIDEdge.GP_PROCESS
 		if gpWa == "signal":
 			return GPPIDEdge.GP_SIGNAL
-		# Both are "any" (TERMINAL <-> TERMINAL): a pipe is the honest default.
-		# 两端都是 "any"（TERMINAL 对 TERMINAL）：管道是最诚实的默认。
+ # Both are "any" (TERMINAL <-> TERMINAL): a pipe is the honest default.
+ # 两端都是 "any"（TERMINAL 对 TERMINAL）：管道是最诚实的默认。
 		return GPPIDEdge.GP_PROCESS
 	# One end is undecided: follow the end that has an opinion.
 	# 一端无偏好：听有意见的那一端。

@@ -1,6 +1,4 @@
 # ============================================================================
-# GPSymbolSelectTool — 选择 / 移动已有图形或端口（M7）
-# Select / move an existing shape or port in the symbol editor (M7).
 #
 # 对应画布 GPSelectTool 的选择+拖拽逻辑，但作用于符号的 _gpShapes / _gpPorts 模型。拖拽为实时反馈，
 # 释放时把整段移动收口为一条可撤销命令（先记起点快照，命令重放同一位移，绝不被叠加两次）。

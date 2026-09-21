@@ -3,7 +3,6 @@ extends RefCounted
 
 ## Pure 2D geometry helpers shared by every canvas (main P&ID view + symbol editor).
 ## 各画布（主 P&ID 视图与符号编辑器）共用的纯 2D 几何助手。
-## Centralizing here removes the duplicated copies that previously lived in canvas_2d.gd and
 ## glyph_canvas.gd — one source of truth, headless-unit-testable, no Control instance needed.
 ## 集中于此可消除原本散落在两处画布的重复实现：单一事实来源、可在 headless 下单测、无需实例化 Control。
 
@@ -107,12 +106,12 @@ static func gpRenderPoints(gpS: GPShape, gpSteps: int = 8) -> PackedVector2Array
 		if gpSegmentCurved(gpS, gpI):
 			var gpCtrl: PackedVector2Array = gpS.gpSegmentControls(gpI)
 			if gpCtrl.size() == 4:
-				# Subdivide adaptively so a curve stays visually smooth at any zoom: pick a segment
-				# count that keeps successive sample points close together. The subdivision count is
-				# driven by the cubic's control-polygon length, floored so short bulges never look
-				# faceted. This is what removes the "angular / not smooth enough" appearance.
-				# 自适应细分，使曲线在任何缩放下都保持视觉顺滑：细分数量由三次贝塞尔控制多边形长度决定，
-				# 并设下限使小幅凸起也不会呈块状——这正是消除「有棱角/不够顺」观感的关键。
+ # Subdivide adaptively so a curve stays visually smooth at any zoom: pick a segment
+ # count that keeps successive sample points close together. The subdivision count is
+ # driven by the cubic's control-polygon length, floored so short bulges never look
+ # faceted. This is what removes the "angular / not smooth enough" appearance.
+ # 自适应细分，使曲线在任何缩放下都保持视觉顺滑：细分数量由三次贝塞尔控制多边形长度决定，
+ # 并设下限使小幅凸起也不会呈块状——这正是消除「有棱角/不够顺」观感的关键。
 				var gpLen: float = gpCtrl[0].distance_to(gpCtrl[1]) + gpCtrl[1].distance_to(gpCtrl[2]) + gpCtrl[2].distance_to(gpCtrl[3])
 				var gpSub: int = maxi(16, int(ceilf(gpLen / 2.0)))
 				gpSub = mini(gpSub, 256)
@@ -137,9 +136,9 @@ static func gpShapeHit(gpPt: Vector2, gpS: GPShape, gpTol: float) -> bool:
 			if gpS.gpPoints.size() >= 2:
 				return Rect2(gpS.gpPoints[0], (gpS.gpPoints[1] - gpS.gpPoints[0]).abs()).grow(gpTol).has_point(gpPt)
 		_:
-			# Sample first: a curved polyline's raw vertices are only its control nodes, so the
-			# distance test must run against the flattened curve, not the vertex polygon.
-			# 先采样：曲线折线的原始顶点只是其控制节点，故距离测试须针对展平后的曲线，而非顶点多边形。
+ # Sample first: a curved polyline's raw vertices are only its control nodes, so the
+ # distance test must run against the flattened curve, not the vertex polygon.
+ # 先采样：曲线折线的原始顶点只是其控制节点，故距离测试须针对展平后的曲线，而非顶点多边形。
 			var gpPts: PackedVector2Array = gpRenderPoints(gpS, 8)
 			for gpI in range(gpPts.size() - 1):
 				if gpDistPointSeg(gpPt, gpPts[gpI], gpPts[gpI + 1]) <= gpTol:

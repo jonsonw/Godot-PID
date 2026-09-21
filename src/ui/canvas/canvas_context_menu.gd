@@ -1,6 +1,6 @@
 # ============================================================================
-# GPCanvasContextMenu — 右键上下文菜单（P2 拆分）
-# Right-click context menu (P2 split).
+# GPCanvasContextMenu — 右键上下文菜单
+# Right-click context menu .
 #
 # 持有右键菜单的「行为」：命中判定、菜单构建、动作分发；菜单的状态（当前命中节点 id、
 # 命中顶点下标）也随行为一起内聚到本类，画布仅保留一份委托引用 _gpCtx。
@@ -54,6 +54,15 @@ const GP_CTX_AUTO_CONNECT: int = 27
 # Bump-anchor action (shown when right-click lands on an existing orange bump anchor).
 # 鼓包锚点操作（右键命中既有橙色锚点时显示）。
 const GP_CTX_DELETE_BUMP: int = 30
+# Add-anchor action (shown when right-click lands on an EMPTY segment, so creating the orange
+# corner goes through the menu rather than a silent direct insert). / 增加锚点操作（右键落在空白
+# 线段时显示，使橙色角点经菜单创建而非静默直接插入）。
+const GP_CTX_ADD_ANCHOR: int = 31
+# Drop-a-symbol-on-a-line actions: let the pipe go around the new symbol, or split into two that
+# feed through it. Id space kept clear of the edge block above.
+# 图元落到连线上的两个动作：让管线绕开新图元 / 拆成两根穿过它。id 空间与上方边级块错开。
+const GP_CTX_DROP_REROUTE: int = 32
+const GP_CTX_DROP_SPLIT: int = 33
 
 # Canvas this menu acts on (state owner).
 # 本菜单作用的画布（状态持有者）。
@@ -73,10 +82,21 @@ var _gpCtxEdge: String = ""
 var _gpCtxVertex: int = -1
 
 # Bump anchor the right-click menu was opened on ("" / -1 when not on a bump). Cleared at the top of
-# gpOnRightDown so a non-bump right-click never leaves a stale target. / 右键菜单打开时所处的鼓包锚点
-#（非锚点时为空 / -1）。在 gpOnRightDown 顶部清零，非锚点右键绝不残留旧目标。
+# gpOnRightDown() so a non-bump right-click never leaves a stale target. / 右键菜单打开时所处的鼓包锚点
+#（非锚点时为空 / -1）。在 gpOnRightDown() 顶部清零，非锚点右键绝不残留旧目标。
 var _gpCtxBumpEid: String = ""
 var _gpCtxBumpAi: int = -1
+# Segment world position where right-click landed (so "增加锚点" can create the orange corner there).
+# Cleared at the top of gpOnRightDown() so a non-segment right-click never leaves a stale target.
+# 右键落点的线段世界坐标（供「增加锚点」在该处生成橙色角点）。在 gpOnRightDown() 顶部清零，
+# 非线段右键绝不残留旧目标。
+var _gpCtxBumpWorld: Vector2 = Vector2.ZERO
+
+# Symbol + edge of a pending "dropped onto a line" choice. Set while the popup is open so the
+# handler knows what to act on; cleared once the choice is dispatched.
+# 待处理的「落到连线上」选择所属的图元与边。弹窗期间记录供处理器定位；分派后即清空。
+var _gpDropSymNid: String = ""
+var _gpDropEdgeId: String = ""
 
 
 func _init(gpCanvas: GPCanvas2D) -> void:
@@ -95,6 +115,7 @@ func gpOnRightDown(gpScreen: Vector2) -> void:
 	_gpCtxEdge = ""
 	_gpCtxBumpEid = ""
 	_gpCtxBumpAi = -1
+	_gpCtxBumpWorld = Vector2.ZERO
 	var gpHit: String = gpCv.gpHitTest(gpWorld)
 	if gpHit != "":
 		if not gpCv.gpSelection.has(gpHit):
@@ -109,11 +130,11 @@ func gpOnRightDown(gpScreen: Vector2) -> void:
 		if not gpCv.gpShapeSel.has(gpSh):
 			gpCv.gpShapeSel = [gpSh]
 			gpCv.gpSetSelection([])
-		# Remember which vertex of a single selected polyline was right-clicked so the menu can offer
-		# vertex-only actions (smooth / corner / delete this vertex). Right-click on the empty inside
-		# of the polyline leaves _gpCtxVertex = -1 (the shape-level menu shows instead).
-		# 记住「单选折线」被右键点击的是哪个顶点，使菜单能提供仅针对顶点的操作（平滑 / 拐角 / 删除此顶点）。
-		# 右键点在折线内部空白处时 _gpCtxVertex 保持 -1（显示图形级菜单）。
+ # Remember which vertex of a single selected polyline was right-clicked so the menu can offer
+ # vertex-only actions (smooth / corner / delete this vertex). Right-click on the empty inside
+ # of the polyline leaves _gpCtxVertex = -1 (the shape-level menu shows instead).
+ # 记住「单选折线」被右键点击的是哪个顶点，使菜单能提供仅针对顶点的操作（平滑 / 拐角 / 删除此顶点）。
+ # 右键点在折线内部空白处时 _gpCtxVertex 保持 -1（显示图形级菜单）。
 		var gpVGrip: Dictionary = gpCv.gpAnno.gpHitPolylineVertexGrip(gpWorld)
 		if not gpVGrip.is_empty():
 			_gpCtxVertex = int(gpVGrip["gi"])
@@ -128,18 +149,23 @@ func gpOnRightDown(gpScreen: Vector2) -> void:
 	if gpEid != "":
 		if not gpCv.gpEdgeSel.has(gpEid):
 			gpCv.gpSetEdgeSelection([gpEid])
-		# Right-click on an EXISTING orange bump anchor -> open a delete-anchor menu (do NOT create a
-		# new one). / 右键命中既有橙色锚点 -> 弹出「删除此锚点」菜单（不新建）。
+ # Right-click on an EXISTING orange bump anchor -> open a delete-anchor menu (do NOT create a
+ # new one). / 右键命中既有橙色锚点 -> 弹出「删除锚点」菜单（不新建）。
 		var gpExisting: Dictionary = gpCv.gpEdgeGrips.gpHitBump(gpWorld, gpEid)
 		if not gpExisting.is_empty():
 			_gpCtxBumpEid = gpEid
 			_gpCtxBumpAi = int(gpExisting["anchor"])
 			gpShowContextMenu("")
 			return
-		# Empty segment -> create a new orange bump anchor there (scheme b). / 空白线段 -> 新建橙色锚点。
-		gpCv.gpEdgeGrips.gpStartBump(gpEid, gpWorld)
-		_gpCtxEdge = ""
+ # Empty segment -> open a menu with "增加锚点" (the orange corner is created only when that
+ # item is chosen, so adding an anchor goes through an explicit action instead of a silent
+ # insert). Remember the edge id and the click world position for the menu handler.
+ # 空白线段 -> 弹出含「增加锚点」的菜单（橙色角点仅在选中该项时创建，使加锚点成为显式动作
+ # 而非静默插入）。记下边 id 与落点，供菜单处理器调用 gpStartBump()。
+		_gpCtxEdge = gpEid
+		_gpCtxBumpWorld = gpWorld
 		_gpCtxHit = ""
+		gpShowContextMenu("")
 		return
 	# Empty area: open the menu against the current selection (no new hit target).
 	# 空白处：基于当前选择打开菜单（无新命中目标）。
@@ -181,6 +207,11 @@ func gpShowContextMenu(gpNodeHit: String) -> void:
 	# 鼓包锚点目标：提供删除。与整条边菜单互斥（下方已压制），避免同时出现「删锚点」与「删连线」。
 	if _gpCtxBumpAi >= 0:
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_delete_bump"), GP_CTX_DELETE_BUMP)
+	# Add-anchor target: right-click landed on an EMPTY segment (not on an existing anchor). Offer
+	# "增加锚点" so creating the orange corner goes through the menu. Shown ABOVE the edge-level items.
+	# 增加锚点目标：右键落在空白线段（非既有锚点）。提供「增加锚点」使橙色角点经菜单创建，位于边级项上方。
+	if _gpCtxBumpWorld != Vector2.ZERO:
+		gpMenu.add_item(I18n.gpTr("canvas.ctx_add_anchor"), GP_CTX_ADD_ANCHOR)
 	# Edge-targeted actions: a single edge hit or already selected.
 	# 边级操作：单击命中或已选中的单条边。
 	var gpEdgeCtx: bool = (_gpCtxEdge != "" or gpCv.gpEdgeSel.size() == 1) and _gpCtxBumpAi < 0
@@ -220,14 +251,13 @@ func gpShowContextMenu(gpNodeHit: String) -> void:
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_auto_connect"), GP_CTX_AUTO_CONNECT)
 	gpMenu.id_pressed.connect(gpOnContext)
 	gpCv.add_child(gpMenu)
-	# Godot 4's PopupMenu/Popup exposes NO popup_at_cursor(); the only positioning entry is popup(), and
+	# Godot 4's PopupMenu/Popup exposes NO popup_at_cursor; the only positioning entry is popup, and
 	# when popups are NOT embedded (embed_subwindows=false, the default) its .position is interpreted in
 	# GLOBAL SCREEN coordinates. Positioning is centralized in GPPopupHelper.gpPopupAtMouse (single source
-	# of truth for the window-screen formula that was previously duplicated and error-prone across call
 	# sites). Menu top-left anchors at the pointer and opens down-right (the convention). (2,2) nudges
 	# the cursor off.
-	# Godot 4 的 PopupMenu/Popup 没有 popup_at_cursor()，仅 popup() 可定位；「非嵌入」（默认值）时其
-	# .position 取「全局屏幕」坐标。菜单定位统一交由 GPPopupHelper.gpPopupAtMouse（窗口屏幕坐标公式的
+	# Godot 4 的 PopupMenu/Popup 没有 popup_at_cursor，仅 popup 可定位；「非嵌入」（默认值）时其
+	# .position 取「全局屏幕」坐标。菜单定位统一交由 GPPopupHelper.gpPopupAtMouse()（窗口屏幕坐标公式的
 	# 单一事实来源）。菜单左上角锚定在指针、向右下展开（符合惯例）。(2,2) 微调让光标落在菜单角外侧。
 	GPPopupHelper.gpPopupAtMouse(gpMenu, gpCv)
 	# Free the menu after it closes; a leaked PopupMenu keeps its parent alive.
@@ -250,23 +280,23 @@ func gpOnContext(gpId: int) -> void:
 		GP_CTX_DELETE:
 			gpCv.gpRequestDeleteSelected()
 		GP_CTX_SMOOTH_VERTEX:
-			# Pull handles out of the right-clicked vertex (make it smooth). Only valid when a single
-			# polyline is selected and that vertex was the right-click target.
-			# 拉出被右键顶点的两侧手柄（转为平滑）。仅当单选折线且该顶点正是右键目标时有效。
+ # Pull handles out of the right-clicked vertex (make it smooth). Only valid when a single
+ # polyline is selected and that vertex was the right-click target.
+ # 拉出被右键顶点的两侧手柄（转为平滑）。仅当单选折线且该顶点正是右键目标时有效。
 			var gpSmoothShape: GPShape = gpCv.gpAnno.gpSingleSelectedShape()
 			if gpSmoothShape != null and _gpCtxVertex >= 0:
 				gpCv.gpAnno.gpPullHandles(gpSmoothShape, _gpCtxVertex)
 			_gpCtxVertex = -1
 		GP_CTX_CORNER_VERTEX:
-			# Collapse the handles of the right-clicked vertex back onto it (make it a corner).
-			# 收起被右键顶点的两侧手柄（转为拐角）。
+ # Collapse the handles of the right-clicked vertex back onto it (make it a corner).
+ # 收起被右键顶点的两侧手柄（转为拐角）。
 			var gpCornerShape: GPShape = gpCv.gpAnno.gpSingleSelectedShape()
 			if gpCornerShape != null and _gpCtxVertex >= 0:
 				gpCv.gpAnno.gpCollapseHandles(gpCornerShape, _gpCtxVertex)
 			_gpCtxVertex = -1
 		GP_CTX_DELETE_VERTEX:
-			# Remove just the right-clicked vertex, keeping the rest of the polyline connected.
-			# 仅删除被右键的顶点，折线其余部分保持连接。
+ # Remove just the right-clicked vertex, keeping the rest of the polyline connected.
+ # 仅删除被右键的顶点，折线其余部分保持连接。
 			var gpDelShape: GPShape = gpCv.gpAnno.gpSingleSelectedShape()
 			if gpDelShape != null and _gpCtxVertex >= 0:
 				gpCv.gpAnno.gpRemoveVertex(gpDelShape, _gpCtxVertex)
@@ -312,3 +342,60 @@ func gpOnContext(gpId: int) -> void:
 				_gpCtxBumpEid = ""
 				_gpCtxBumpAi = -1
 			gpCv.queue_redraw()
+		GP_CTX_ADD_ANCHOR:
+ # Create the orange corner at the remembered right-click position on the remembered edge.
+ # 在记下的边、记下的右键落点处生成橙色角点。
+			if _gpCtxEdge != "" and _gpCtxBumpWorld != Vector2.ZERO:
+				gpCv.gpEdgeGrips.gpStartBump(_gpCtxEdge, _gpCtxBumpWorld)
+				_gpCtxBumpWorld = Vector2.ZERO
+				_gpCtxEdge = ""
+			gpCv.queue_redraw()
+
+
+# ============================ 放到连线上 ============================
+# ==================== Dropped-on-a-line choice ====================
+# GPPlaceTool calls this after a placement lands on an existing pipe. Two outcomes are offered:
+# route the pipe AROUND the new symbol, or SPLIT it into two feeding through the symbol's ports.
+# GPPlaceTool 在「放置落点压到既有管线」后调用本函数。提供两个结果：让管线绕开新图元，
+# 或把它拆成两根经图元端口穿过。
+# [param gpSymNid] instance id of the just-placed symbol / 刚放置图元的实例 id
+# [param gpEdgeId] id of the pipe running under it / 从其下方穿过的那条管线 id
+func gpPromptDropOnEdge(gpSymNid: String, gpEdgeId: String) -> void:
+	_gpDropSymNid = gpSymNid
+	_gpDropEdgeId = gpEdgeId
+	var gpM: PopupMenu = PopupMenu.new()
+	gpM.add_item(I18n.gpTr("canvas.ctx_drop_reroute"), GP_CTX_DROP_REROUTE)
+	gpM.add_item(I18n.gpTr("canvas.ctx_drop_split"), GP_CTX_DROP_SPLIT)
+	gpM.id_pressed.connect(_gpOnDropContext)
+	gpCv.add_child(gpM)
+	# The cursor is at the drop point right now, so anchor the menu at the pointer.
+	# 此刻光标正位于落点，故把菜单锚定在指针处。
+	GPPopupHelper.gpPopupAtMouse(gpM, gpCv)
+	gpM.popup_hide.connect(gpM.queue_free)
+
+
+# Dispatch the drop choice. Splitting can be refused (symbol has <2 ports) -> then explain why.
+# 分派「落到连线」的选择。拆分可能被拒（图元端口 <2）——此时说明原因。
+func _gpOnDropContext(gpId: int) -> void:
+	if gpId == GP_CTX_DROP_REROUTE:
+		gpCv.gpEdgeGrips.gpRerouteAround(_gpDropEdgeId, _gpDropSymNid)
+	elif gpId == GP_CTX_DROP_SPLIT:
+		if not gpCv.gpEdgeGrips.gpSplitThroughSymbol(_gpDropEdgeId, _gpDropSymNid):
+			_gpRefuseDrop()
+	gpCv.queue_redraw()
+	_gpDropSymNid = ""
+	_gpDropEdgeId = ""
+
+
+# A symbol with fewer than two ports cannot be spliced into a pipe — tell the user to add ports.
+# 端口少于两个的图元无法串进管线 —— 提示用户去增加端点。
+func _gpRefuseDrop() -> void:
+	var gpDlg: AcceptDialog = AcceptDialog.new()
+	gpDlg.title = I18n.gpTr("canvas.ctx_drop_title")
+	gpDlg.dialog_text = I18n.gpTr("canvas.ctx_drop_needs_ports")
+	gpCv.add_child(gpDlg)
+	gpDlg.popup_centered()
+	# Free on either outcome, else the dialog leaks and keeps the canvas alive.
+	# 两种结局都释放，否则对话框泄漏并使画布无法释放。
+	gpDlg.confirmed.connect(gpDlg.queue_free)
+	gpDlg.popup_hide.connect(gpDlg.queue_free)

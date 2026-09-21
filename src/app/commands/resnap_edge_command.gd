@@ -1,10 +1,8 @@
 class_name GPResnapEdgeCommand
 extends GPCommand
 # Copyright © 2026 Jonson Wang
-# Re-resolve an edge's ends to real ports (P4). Legacy files store an end as node_id with an
 # empty port_id, which the live resolver downgrades to the node CENTRE; this snaps it to the
 # first matching port so the pipe visibly connects to the symbol's port instead of its middle.
-# 把一条边的两端重新吸附到真实端口（P4）。老档把端点存为 node_id + 空 port_id，实时解析器会
 # 退化到节点「中心」；本命令将其吸附到首个匹配端口，使管线明显连到图元端口而非正中。
 #
 # Only the port_id is rewritten; the geometry the resolver computes live is untouched, so an
@@ -40,7 +38,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	gpE.gpToRef = GPPortResolver.gpSnapRef(gpCtx.gpGraph, _gpDefLookup, gpE, false)
 	_gpChanged = (gpE.gpFromRef != _gpOldFrom) or (gpE.gpToRef != _gpOldTo)
 	if not _gpChanged:
-		# Restore so undo/redo stay no-ops. / 还原，使撤销/重做为空操作。
+ # Restore so undo/redo stay no-ops. / 还原，使撤销/重做为空操作。
 		gpE.gpFromRef = _gpOldFrom
 		gpE.gpToRef = _gpOldTo
 		return false

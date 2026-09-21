@@ -42,10 +42,10 @@ func gpSetAvailWidth(gpW: float) -> void:
 # thumbnail + label block scales together with the symbol text drawn on the canvas.
 # 根据当前图元字号重算单元格（近似方形）尺寸，使缩略图 + 文字块与画布上的图元文字同步缩放。
 func _gpCellSize() -> float:
-	# Mirror GPSymbolPaletteItem._gpCalcSizes / custom_minimum_size.y:
+	# Mirror GPSymbolPaletteItem._gpCalcSizes() / custom_minimum_size.y:
 	# thumbnail side = fontSize + 8, label font size = fontSize, plus 4 top margin +
 	# 4 gap + 4 bottom pad = +12. The cell must be at least this tall to avoid clipping.
-	# 与 GPSymbolPaletteItem._gpCalcSizes / custom_minimum_size.y 一致：缩略图边长=字号+8，
+	# 与 GPSymbolPaletteItem._gpCalcSizes() / custom_minimum_size.y 一致：缩略图边长=字号+8，
 	# 标签字号=字号，再加顶距4 + 间距4 + 底距4 = 共+12。单元格至少这么高才不裁切。
 	var gpFontSize: float = float(Settings.gpSymbolFontSize)
 	return (gpFontSize + 8.0) + gpFontSize + 12.0

@@ -8,13 +8,13 @@ extends RefCounted
 # 属性面板、画布标签、设备清单、W10 校验 —— 都必须经过这里；禁止直接读 node.gpProps。
 #
 # The merge rule / 合并规则：
-#   library default  ↓  (only when the instance never overrode it / 仅当实例从未覆盖)
-#   instance value   ↓  (wins as soon as the key exists / 键一存在即胜出)
-#   -> effective value
-# Distinguishing "never touched" from "set back to the default" is exactly what `has()` buys:
+# library default ↓ (only when the instance never overrode it / 仅当实例从未覆盖)
+# instance value ↓ (wins as soon as the key exists / 键一存在即胜出)
+# -> effective value
+# Distinguishing "never touched" from "set back to the default" is exactly what `has` buys:
 # an instance that explicitly stores the default keeps its own value when the library default
 # later changes.
-# 用 `has()` 才能区分「从未动过」与「又改回了默认值」：显式存了默认值的实例，在库默认值
+# 用 `has` 才能区分「从未动过」与「又改回了默认值」：显式存了默认值的实例，在库默认值
 # 日后变更时保留自己的值。
 #
 # Coding rule: every variable declares its type explicitly; all functions are static (pure).
@@ -60,7 +60,6 @@ static func gpIsOverridden(gpProps: Dictionary, gpKey: String) -> bool:
 # Keys present on the instance but no longer declared by the library — orphaned values.
 # They stay in gpProps and are surfaced by the inspector under "removed from library".
 # 实例上有、但库中已不再声明的键 —— 孤儿值。它们留在 gpProps 中，由面板在
-# 「库中已删除」分组中露出。
 static func gpOrphanKeys(gpSchema: GPPropertySchema, gpProps: Dictionary) -> Array[String]:
 	var gpOut: Array[String] = []
 	if gpSchema == null:
@@ -76,11 +75,11 @@ static func gpOrphanKeys(gpSchema: GPPropertySchema, gpProps: Dictionary) -> Arr
 # Apply gpRenameFrom migrations — old key values move onto the new key.
 # 应用 gpRenameFrom 迁移 —— 旧键值搬到新键下。
 # Rules / 规则：
-#  - the new key wins when BOTH exist (the user already re-entered it) and the stale old key
-#    is dropped, so the migration is idempotent and converges;
-#    新旧键同时存在时以新键为准（用户已重新录入），并丢弃过期的旧键，故迁移幂等且收敛；
-#  - returns a NEW dictionary; the caller assigns it. Nothing is written to disk here.
-#    返回**新**字典，由调用方赋值；此处不落盘。
+# - the new key wins when BOTH exist (the user already re-entered it) and the stale old key
+# is dropped, so the migration is idempotent and converges;
+# 新旧键同时存在时以新键为准（用户已重新录入），并丢弃过期的旧键，故迁移幂等且收敛；
+# - returns a NEW dictionary; the caller assigns it. Nothing is written to disk here.
+# 返回**新**字典，由调用方赋值；此处不落盘。
 static func gpMigrateProps(gpSchema: GPPropertySchema, gpProps: Dictionary) -> Dictionary:
 	var gpOut: Dictionary = {}
 	if gpSchema == null:
@@ -94,8 +93,8 @@ static func gpMigrateProps(gpSchema: GPPropertySchema, gpProps: Dictionary) -> D
 			continue
 		gpOut[gpS] = gpProps[gpK]
 	for gpNewK in gpPending.keys():
-		# Only fill in when the instance has no value under the new key yet.
-		# 仅当实例在新键下尚无取值时才填入。
+ # Only fill in when the instance has no value under the new key yet.
+ # 仅当实例在新键下尚无取值时才填入。
 		if not gpOut.has(gpNewK):
 			gpOut[gpNewK] = gpPending[gpNewK]
 	return gpOut
@@ -116,8 +115,8 @@ static func gpEffectiveProps(gpSchema: GPPropertySchema, gpProps: Dictionary) ->
 
 
 # Display name with locale fallback: exact locale -> GP_FALLBACK_LOCALE -> the library's
-# gpDisplayName -> the tag itself (so a label is never blank).
-# 带语种回落的名称显示：精确语种 -> GP_FALLBACK_LOCALE -> 库的 gpDisplayName -> 位号本身
+# gpDisplayName() -> the tag itself (so a label is never blank).
+# 带语种回落的名称显示：精确语种 -> GP_FALLBACK_LOCALE -> 库的 gpDisplayName() -> 位号本身
 # （保证标签永不为空）。
 static func gpDisplayName(gpNames: Dictionary, gpLibraryName: String, gpLocale: String, gpTag: String = "") -> String:
 	if gpNames.has(gpLocale) and str(gpNames[gpLocale]).strip_edges() != "":
@@ -190,17 +189,17 @@ static func gpDriftedSymbols(gpLive: Dictionary, gpStored: Dictionary) -> Array[
 	for gpId in gpStored:
 		var gpS: String = str(gpId)
 		var gpWas: String = str(gpStored[gpS])
-		# MIGRATION / 迁移：an EMPTY stored fingerprint means this drawing was saved before the
-		# typed schema was wired up, back when gpSchema was always null and every fingerprint
-		# was "". There is no baseline to compare against, so it must NOT count as drift —
-		# otherwise wiring the schema up flags every symbol of every existing drawing at once.
-		# 空指纹意味着该图纸保存于类型化 schema 通电之前 —— 当时 gpSchema 恒为 null、指纹全是 ""。
-		# 没有可比的基线，故不得计为漂移；否则通电会让所有存量图纸的全部图元同时报警。
-		# Trade-off / 取舍：a symbol that has vanished from the library is likewise not reported
-		# while its stored fingerprint is ""; it is caught on the next save, which stores real
-		# values. We accept missing that one case rather than crying wolf on every old drawing.
-		# 取舍：指纹为 "" 的图元即便已从库中消失也暂不报出；下次保存（写入真实值）会捕获它。
-		# 宁可漏掉这一例，也不对所有存量图纸狼来了。
+ # MIGRATION / 迁移：an EMPTY stored fingerprint means this drawing was saved before the
+ # typed schema was wired up, back when gpSchema was always null and every fingerprint
+ # was "". There is no baseline to compare against, so it must NOT count as drift —
+ # otherwise wiring the schema up flags every symbol of every existing drawing at once.
+ # 空指纹意味着该图纸保存于类型化 schema 通电之前 —— 当时 gpSchema 恒为 null、指纹全是 ""。
+ # 没有可比的基线，故不得计为漂移；否则通电会让所有存量图纸的全部图元同时报警。
+ # Trade-off / 取舍：a symbol that has vanished from the library is likewise not reported
+ # while its stored fingerprint is ""; it is caught on the next save, which stores real
+ # values. We accept missing that one case rather than crying wolf on every old drawing.
+ # 取舍：指纹为 "" 的图元即便已从库中消失也暂不报出；下次保存（写入真实值）会捕获它。
+ # 宁可漏掉这一例，也不对所有存量图纸狼来了。
 		if gpWas == "":
 			continue
 		if not gpLive.has(gpS) or str(gpLive[gpS]) != gpWas:
@@ -212,7 +211,6 @@ static func gpDriftedSymbols(gpLive: Dictionary, gpStored: Dictionary) -> Array[
 # Apply gpRenameFrom migrations to every node. Returns how many nodes actually changed, so the
 # shell can report "3 instances were migrated" instead of a vague "something happened".
 # 对每个节点应用 gpRenameFrom 迁移。返回实际变化的节点数，使外壳能报
-# 「3 个实例已迁移」而非含糊的「有变化发生」。
 static func gpMigrateGraph(gpGraph: GPPIDGraph, gpDefs: Array[GPSymbolDef]) -> int:
 	var gpChanged: int = 0
 	if gpGraph == null:
@@ -224,10 +222,10 @@ static func gpMigrateGraph(gpGraph: GPPIDGraph, gpDefs: Array[GPSymbolDef]) -> i
 		if gpDef == null or gpDef.gpSchema == null:
 			continue
 		var gpMigrated: Dictionary = gpMigrateProps(gpDef.gpSchema, gpN.gpProps)
-		# Compare by hash: Dictionary != is deep, but hashing is the comparison the engine
-		# guarantees for nested payloads (an orphan value can itself be a Dictionary).
-		# 用 hash 比较：Dictionary 的 != 虽是深比较，但对嵌套载荷（孤儿值本身可能是字典）
-		# 引擎保证可靠的是 hash。
+ # Compare by hash: Dictionary != is deep, but hashing is the comparison the engine
+ # guarantees for nested payloads (an orphan value can itself be a Dictionary).
+ # 用 hash 比较：Dictionary 的 != 虽是深比较，但对嵌套载荷（孤儿值本身可能是字典）
+ # 引擎保证可靠的是 hash。
 		if gpMigrated.hash() != gpN.gpProps.hash():
 			gpN.gpProps = gpMigrated
 			gpChanged += 1

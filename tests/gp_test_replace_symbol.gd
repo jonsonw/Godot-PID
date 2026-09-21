@@ -8,9 +8,8 @@ extends "res://tests/gp_test.gd"
 #      gpUid / 位号 / 属性 / 坐标全部保留 —— 换了型号的泵仍是同一台设备，
 #      图纸上与 DCS 点表里的位号都不变。
 #   2. An edge whose port name the NEW symbol does not declare DOWNGRADES to the node centre
-#      (still connected) and is reported in gpLastSwapWarning — decided 2026-09-09.
+#      (still connected) and is reported in gpLastSwapWarning — decided.
 #      新图元未声明其端口名的边**降级**到图元中心（仍连通），并记入 gpLastSwapWarning
-#      —— 2026-09-09 拍板。
 #   3. Undo restores both the symbol id and every port name verbatim.
 #      撤销同时还原图元 id 与每个端口名。
 

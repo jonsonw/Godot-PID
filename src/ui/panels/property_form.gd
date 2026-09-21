@@ -1,25 +1,22 @@
 class_name GPPropertyForm
 extends RefCounted
 # Copyright © 2026 Jonson Wang
-# Pure panel LOGIC for the inspector (M10): which fields exist, in what order, in which
 # group, with which effective value — and what several selected instances share.
-# 属性面板的**纯逻辑**（M10）：有哪些字段、按什么顺序、属于哪个分组、有效值是多少，
 # 以及多选时若干实例共有的取值。
 #
 # Why this file exists / 本文件为何存在：
-#   The inspector used to build widgets straight from an untyped `gpAttrsSchema` Dictionary,
-#   so "which fields show" and "what their values are" could only be tested by building a UI.
-#   Splitting the descriptor logic out makes both headless-testable and keeps the inspector
-#   down to "draw what this descriptor says".
-#   属性面板原先直接按无类型的 `gpAttrsSchema` 字典建控件，于是「显示哪些字段」与「取值如何」
-#   只能靠搭界面才能验证。把描述逻辑拆出来后两者都可 headless 测试，面板只剩
-#   「按描述符画控件」这一件事。
+# The inspector used to build widgets straight from an untyped `gpAttrsSchema` Dictionary,
+# so "which fields show" and "what their values are" could only be tested by building a UI.
+# Splitting the descriptor logic out makes both headless-testable and keeps the inspector
+# down to "draw what this descriptor says".
+# 只能靠搭界面才能验证。把描述逻辑拆出来后两者都可 headless 测试，面板只剩
+# 「按描述符画控件」这一件事。
 #
 # Boundary / 边界:
-#   Every read goes through GPPropertyResolver — never `node.gpProps` directly. That is the
-#   rule that makes "edit the library, every project follows" true.
-#   所有读取都经 GPPropertyResolver —— 绝不直接读 node.gpProps。
-#   这正是「改图元库、全项目同步」得以成立的规则。
+# Every read goes through GPPropertyResolver — never `node.gpProps` directly. That is the
+# rule that makes "edit the library, every project follows" true.
+# 所有读取都经 GPPropertyResolver —— 绝不直接读 node.gpProps。
+# 这正是「改图元库、全项目同步」得以成立的规则。
 #
 # Coding rule: every variable declares its type explicitly; all functions are static (pure).
 # 编码规范：所有变量均显式声明类型；函数全部为静态（纯函数）。
@@ -47,13 +44,13 @@ static func gpFieldLabel(gpField: GPPropertyDef) -> String:
 
 
 # Panel sections in display order: ascending group, then gpOrder, then declaration order
-# (GPPropertySchema.gpOrderedKeys already guarantees that order).
+# (GPPropertySchema.gpOrderedKeys() already guarantees that order).
 # 按显示顺序返回面板分组：先分组名升序，再 gpOrder，最后声明顺序
-#（GPPropertySchema.gpOrderedKeys 已保证该顺序）。
+#（GPPropertySchema.gpOrderedKeys() 已保证该顺序）。
 # Each section: {"group": String, "fields": Array of field rows}.
 # 每个分组：{"group": 分组名, "fields": 字段行数组}。
 # Each field row: {"key","label","kind","value","overridden","required","read_only",
-#                  "options","unit","min","max"}.
+# "options","unit","min","max"}.
 static func gpSections(gpSchema: GPPropertySchema, gpProps: Dictionary) -> Array[Dictionary]:
 	var gpOut: Array[Dictionary] = []
 	if gpSchema == null:

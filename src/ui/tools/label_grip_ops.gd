@@ -1,8 +1,8 @@
 class_name GPLabelGripOps
 extends RefCounted
 # Copyright © 2026 Jonson Wang
-# Label (位号) placement on the sheet: geometry plus the drag interaction (M10b).
-# 图纸上的标签（位号）定位：几何 + 拖拽交互（M10b）。
+# Label (位号) placement on the sheet: geometry plus the drag interaction .
+# 图纸上的标签（位号）定位：几何 + 拖拽交互。
 #
 # Everything above the "drag state" divider is PURE and headless-testable: given a node and
 # its definition it answers "where does the tag sit?" and "what offset does this drag mean?".
@@ -183,6 +183,13 @@ func _init(gpCanvas: GPCanvas2D) -> void:
 # （使端口悬停不会与之争抢）。
 func gpUpdateHoverCursor(gpWorld: Vector2) -> bool:
 	if gpCv == null:
+		return false
+	# 放置虚影预览期间让出光标控制权：input_router 在本函数返回 true 时会直接 return，链末的
+	# GPPlaceTool.gpOnMove() 便不会执行，手型会被锁在本函数设的 MOVE 上、虚影也不跟随。返回 false
+	# 让位给 PlaceTool，由它独占手型。/ Yield the cursor while a symbol is pending: input_router
+	# returns early when this handler reports true, which would skip GPPlaceTool.gpOnMove() at the end
+	# of the chain and freeze the cursor on MOVE. False hands control back to PlaceTool.
+	if gpCv.gpPendingDef != null:
 		return false
 	if _gpNodeId != "":
 		gpCv.mouse_default_cursor_shape = Control.CURSOR_MOVE

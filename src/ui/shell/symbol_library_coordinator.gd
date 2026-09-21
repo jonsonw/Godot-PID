@@ -4,20 +4,20 @@ extends RefCounted
 # Symbol library cascade delete, swap/rename, drift reconciliation, user packs and the symbol editor host
 # 图元库级联删除、替换与重命名、漂移对账、用户包加载与符号编辑器宿主
 #
-# WHY THIS EXISTS / 为何存在（架构优化建议 §3.2）：
-#   GPMainWindow was carrying many unrelated responsibilities in one file; this coordinator
-#   owns the "Symbol library cascade delete, swap/rename, drift reconciliation, user packs and the symbol editor host" use case end to end, so the root keeps only assembly and forwarding.
-#   GPMainWindow 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「图元库级联删除、替换与重命名、漂移对账、用户包加载与符号编辑器宿主」这一用例，
-#   使根类只保留装配与转发。
+# WHY THIS EXISTS / 为何存在：
+# GPMainWindow was carrying many unrelated responsibilities in one file; this coordinator
+# owns the "Symbol library cascade delete, swap/rename, drift reconciliation, user packs and the symbol editor host" use case end to end, so the root keeps only assembly and forwarding.
+# GPMainWindow 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「图元库级联删除、替换与重命名、漂移对账、用户包加载与符号编辑器宿主」这一用例，
+# 使根类只保留装配与转发。
 #
 # Interaction / 交互方式：
-#   - the root creates this coordinator and injects itself as gpHost (composition root);
-#     根类创建本协调者并把自身注入为 gpHost（组合根装配）；
-#   - the root forwards menu / toolbar actions here, never the other way round — this class
-#     does not reach back into menus or the ribbon;
-#     根类把菜单/工具栏动作转发到此处，绝不反向 —— 本类不回指菜单或 Ribbon；
-#   - UI refresh goes through gpHost._gpSetState / the docks the root owns.
-#     UI 刷新经由 gpHost._gpSetState 及根类持有的停靠栏完成。
+# - the root creates this coordinator and injects itself as gpHost (composition root);
+# 根类创建本协调者并把自身注入为 gpHost（组合根装配）；
+# - the root forwards menu / toolbar actions here, never the other way round — this class
+# does not reach back into menus or the ribbon;
+# 根类把菜单/工具栏动作转发到此处，绝不反向 —— 本类不回指菜单或 Ribbon；
+# - UI refresh goes through gpHost.gpSetState() / the docks the root owns.
+# UI 刷新经由 gpHost.gpSetState() 及根类持有的停靠栏完成。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -27,9 +27,9 @@ var gpHost: GPMainWindow = null
 
 # The edited geometry was re-registered under the SAME id, so every placed instance repaints.
 # 编辑后的几何已按同一 id 重新注册，故所有已放置实例都会重绘。
-# gpDefaultDefs() returns a stable-identity array that gpRegisterDefs patched in place, so the
+# gpDefaultDefs() returns a stable-identity array that gpRegisterDefs() patched in place, so the
 # canvases already see the new object; only the palette and the paint need refreshing.
-# gpDefaultDefs() 返回的数组身份稳定且已被 gpRegisterDefs 就地修补，故各画布已看到新对象；
+# gpDefaultDefs() 返回的数组身份稳定且已被 gpRegisterDefs() 就地修补，故各画布已看到新对象；
 # 只需刷新图元库与重绘。
 func gpOnSymbolSaved(gpSymbolId: String) -> void:
 	gpHost.gpDefs = GPSymbolLibrary.gpDefaultDefs()
@@ -39,8 +39,8 @@ func gpOnSymbolSaved(gpSymbolId: String) -> void:
 	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
 	if gpCanvas != null:
 		gpCanvas.queue_redraw()
-	gpHost._gpRefreshSelection()
-	gpHost._gpSetState("status.symbol_saved", [gpSymbolId])
+	gpHost.gpRefreshSelection()
+	gpHost.gpSetState("status.symbol_saved", [gpSymbolId])
 
 
 # Delete every selected node and any edges connected to them (menu 编辑 / 删除).
@@ -49,15 +49,14 @@ func gpOnSymbolSaved(gpSymbolId: String) -> void:
 # 委托给画布执行，使多选状态只有一处真相来源。
 
 func gpOnSymbolEditRequested(gpSymbolId: String) -> void:
-	# The in-place symbol editor was removed (P4 refactor). Editing an existing placed symbol now
+	# The in-place symbol editor was removed . Editing an existing placed symbol now
 	# re-opens the Make-Symbol dialog seeded with that symbol's geometry; confirming under the same
 	# display name overwrites the def (built-ins derive a C-rule copy per decision D3).
-	# 就地图元编辑器已移除（P4 重构）。编辑已放置图元改为用「生成图元」对话框带入该图元几何；
 	# 以相同显示名确定即覆盖该 def（内置图元按决策 D3 派生 C 规则副本）。
 	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
 	if gpCanvas == null or gpHost.gpCenter == null:
 		return
-	var gpDef: GPSymbolDef = gpHost._gpDefFor(gpSymbolId)
+	var gpDef: GPSymbolDef = gpHost.gpDefFor(gpSymbolId)
 	if gpDef == null:
 		return
 	# D3: built-in symbols are read-only → derive a copy under a fresh C-rule id
@@ -85,14 +84,13 @@ func gpOnSymbolEditRequested(gpSymbolId: String) -> void:
 	# Convert the def's EDITABLE shape spec (raw control points + Bézier handles) into the dialog
 	# draft, so editing an existing curved symbol keeps its curve control points. gpShapeSpec() is
 	# the flattened render spec (painter); it would drop handles and degrade a curve to straight
-	# segments. gpEditSpec() is the lossless inverse of what the dialog re-imports via gpFromSpec.
+	# segments. gpEditSpec() is the lossless inverse of what the dialog re-imports via gpFromSpec().
 	# 把 def 的「可编辑」形状规格（原始控制点 + 贝塞尔手柄）转成对话框 draft，使编辑已有曲线图元时
 	# 保留其曲线控制点。gpShapeSpec() 是给 painter 打平的渲染 spec，会丢手柄、把曲线退化成直线；
-	# gpEditSpec() 是无损的，能被对话框经 gpFromSpec 无损还原。
+	# gpEditSpec() 是无损的，能被对话框经 gpFromSpec() 无损还原。
 	var gpDraft: Dictionary = GPShapeSpec.gpEditSpec(gpEditDef.gpShapes)
 	gpDraft.erase("box")
 	# Carry the symbol's current ports into the editor so editing preserves connection points
-	# instead of silently dropping them (previously the dialog always started with zero ports).
 	# 把图元当前端口带入编辑器，使编辑保留连接点而非静默丢弃（此前对话框总是从零端口起步）。
 	# Seed the ID field with the symbol's real ID (uniqueness is judged by id, NOT display
 	# name) and prefill the display-name field separately. A built-in's display name is an
@@ -105,17 +103,20 @@ func gpOnSymbolEditRequested(gpSymbolId: String) -> void:
 	gpOpenMakeSymbolDialog(gpDraft, gpEditDef.gpId, gpAllowOverwrite, gpEditDef.gpPorts, gpEditDisplay)
 
 # Open the Make-Symbol dialog converged from the two handlers (promote-from-shapes and
-# edit-existing) that previously duplicated gpOpen + gpMadeSymbol.connect. gpOpen adds the
 # dialog as a child Window, so it is handed the actual main Window (not this Control). On confirm
-# the shared gpOnSymbolSaved refreshes the palette + canvas.
+# the shared gpOnSymbolSaved() refreshes the palette + canvas.
 # 打开「生成图元」对话框的收敛助手——统一了「从图形提升」与「编辑已有图元」两个处理器此前重复的
-# gpOpen + gpMadeSymbol.connect 逻辑。gpOpen 把对话框作为子 Window 添加，故传入真正的主 Window
-# （而非本 Control）。确定后由共享的 gpOnSymbolSaved 刷新图元库与画布。
+# gpOpen() + gpMadeSymbol.connect 逻辑。gpOpen() 把对话框作为子 Window 添加，故传入真正的主 Window
+# （而非本 Control）。确定后由共享的 gpOnSymbolSaved() 刷新图元库与画布。
 func gpOpenMakeSymbolDialog(gpDraft: Dictionary, gpInitialName: String, gpAllowOverwrite: bool, gpInitialPorts: Array[GPPort] = [], gpInitialDisplay: String = "") -> void:
 	var gpWin: Window = gpHost.get_window()
 	if gpWin == null or gpHost.gpCenter == null:
 		return
-	var gpDlg: GPMakeSymbolDialog = GPMakeSymbolDialog.gpOpen(gpWin, gpDraft, gpInitialName, gpAllowOverwrite, gpInitialPorts, gpInitialDisplay)
+	# 刻意不写类型标注：一旦标注，编译器会在启动期解析该类并连带 symbol_editor 子树，
+	# 使每次启动都为「用户可能永不打开的对话框」付费。改为调用时解析脚本。
+	# Deliberately UNTYPED: annotating it would resolve the class and the symbol_editor subtree
+	# at startup, making every launch pay for a dialog the user may never open.
+	var gpDlg = (load("res://src/ui/dialogs/make_symbol_dialog.gd") as GDScript).gpOpen(gpWin, gpDraft, gpInitialName, gpAllowOverwrite, gpInitialPorts, gpInitialDisplay)
 	if gpDlg == null:
 		return
 	gpDlg.gpMadeSymbol.connect(gpOnSymbolSaved)
@@ -124,31 +125,31 @@ func gpOnMakeSymbolFromShapes(gpDraft: Dictionary) -> void:
 	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
 	if gpCanvas == null or gpHost.gpCenter == null:
 		return
-	# gpOpen adds the dialog as a child Window, so hand it the actual main Window (not this Control).
-	# gpOpen 会把对话框作为子 Window 添加，故传入真正的主 Window（而非本 Control）。
+	# gpOpen() adds the dialog as a child Window, so hand it the actual main Window (not this Control).
+	# gpOpen() 会把对话框作为子 Window 添加，故传入真正的主 Window（而非本 Control）。
 	var gpWin: Window = gpHost.get_window()
 	if gpWin == null:
 		return
 	gpOpenMakeSymbolDialog(gpDraft, "", true)
 
-# M12: drop the orphaned values of one instance, on the user's explicit request.
-# M12：按用户明确请求，清除某个实例上的孤儿值。
+# drop the orphaned values of one instance, on the user's explicit request.
+# 按用户明确请求，清除某个实例上的孤儿值。
 func gpOnCleanOrphans(gpNodeId: String) -> void:
 	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
 	if gpCanvas == null or gpCanvas.gpGraph == null:
 		return
-	var gpNode: GPPIDNode = gpHost._gpNodeFor(gpNodeId)
+	var gpNode: GPPIDNode = gpHost.gpNodeFor(gpNodeId)
 	if gpNode == null:
 		return
-	var gpDef: GPSymbolDef = gpHost._gpDefFor(gpNode.gpSymbolId)
+	var gpDef: GPSymbolDef = gpHost.gpDefFor(gpNode.gpSymbolId)
 	var gpSchema: GPPropertySchema = gpDef.gpSchema if gpDef != null else null
 	var gpRemoved: int = GPPropertyResolver.gpCleanOrphans(gpNode, gpSchema)
 	if gpRemoved <= 0:
 		return
 	gpCanvas.gpGraph.gpGraphChanged.emit()
 	gpCanvas.queue_redraw()
-	gpHost._gpRefreshSelection()
-	gpHost._gpSetState("lib.orphans_cleaned", [gpRemoved])
+	gpHost.gpRefreshSelection()
+	gpHost.gpSetState("lib.orphans_cleaned", [gpRemoved])
 
 
 # React to an attribute edit in the edge form: route each key to the matching undoable
@@ -157,10 +158,10 @@ func gpOnCleanOrphans(gpNodeId: String) -> void:
 # 响应边表单中的属性编辑：把每个键路由到编辑服务上对应的可撤销意图，随后重绘并重建表单
 #（使依赖类型的字段——signal_type 与 dn/medium/insulation——按新类型正确显隐）。
 
-# M12: reconcile a freshly opened drawing against the CURRENT library. Renamed fields carry
+# reconcile a freshly opened drawing against the CURRENT library. Renamed fields carry
 # their values across; deleted fields leave ORPHANS that are kept (never swept) and merely
 # counted, so the user decides whether to clean them.
-# M12：把刚打开的图纸与**当前**图元库对账。改名字段带着取值迁移；删除字段留下孤儿值
+# 把刚打开的图纸与**当前**图元库对账。改名字段带着取值迁移；删除字段留下孤儿值
 # —— 保留（绝不自动清扫）并只做计数，是否清理由用户决定。
 func gpReconcileLibraryDrift(gpGraph: GPPIDGraph) -> void:
 	if gpGraph == null:
@@ -175,7 +176,7 @@ func gpReconcileLibraryDrift(gpGraph: GPPIDGraph) -> void:
 		return
 	var gpMigrated: int = GPPropertyResolver.gpMigrateGraph(gpGraph, gpHost.gpDefs)
 	var gpOrphans: int = GPPropertyResolver.gpOrphanCount(gpGraph, gpHost.gpDefs)
-	gpHost._gpSetState("lib.drift", [gpDrift.size(), gpMigrated, gpOrphans])
+	gpHost.gpSetState("lib.drift", [gpDrift.size(), gpMigrated, gpOrphans])
 
 # Hand the live library to the inspector so its "更换图元" dropdown follows every reload.
 # 把活动库交给属性面板，使其「更换图元」下拉跟随每次库重载。
@@ -183,40 +184,38 @@ func gpSyncInspectorDefs() -> void:
 	if gpHost.gpInspector != null:
 		gpHost.gpInspector.gpHost.gpDefs = gpHost.gpDefs
 
-# Swap one instance onto another symbol (M10). uid, tag, property values and every
 # connection survive; only gpSymbolId changes. Missing ports are downgraded to the node
 # centre rather than severed, and the count is surfaced as a warning.
-# 把某个实例换到另一个图元上（M10）。uid、位号、属性值与全部连接都保留，只有 gpSymbolId 变更。
 # 缺失的端口降级到图元中心而非被切断，并把数量以警告形式告知用户。
 func gpOnSymbolSwap(gpNodeId: String, gpNewSymbolId: String) -> void:
 	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
 	if gpCanvas == null or gpCanvas.gpGraph == null:
 		return
-	var gpNewDef: GPSymbolDef = gpHost._gpDefFor(gpNewSymbolId)
+	var gpNewDef: GPSymbolDef = gpHost.gpDefFor(gpNewSymbolId)
 	if gpNewDef == null:
-		gpHost._gpSetState("swap.no_such_symbol", [gpNewSymbolId])
+		gpHost.gpSetState("swap.no_such_symbol", [gpNewSymbolId])
 		return
 	if not gpCanvas.gpActions.gpReplaceSymbol(gpNodeId, gpNewDef):
 		return
 	gpCanvas.queue_redraw()
-	gpHost._gpRefreshSelection()
-	# "Allowed but warned" (decided 2026-09-09): the pipes still connect, they just lost the
+	gpHost.gpRefreshSelection()
+	# "Allowed but warned" (decided: the pipes still connect, they just lost the
 	# exact nozzle they were drawn onto — the user decides whether to re-seat them.
-	# 「允许但警告」（2026-09-09 拍板）：管路仍然连通，只是失去了原本吸附的管口
+	# 「允许但警告」拍板）：管路仍然连通，只是失去了原本吸附的管口
 	# —— 是否重新落位由用户决定。
 	var gpDowngraded: Array[String] = gpCanvas.gpActions.gpLastSwapWarning
 	if gpDowngraded.size() > 0:
-		gpHost._gpSetState("swap.warn_ports", [gpDowngraded.size()])
+		gpHost.gpSetState("swap.warn_ports", [gpDowngraded.size()])
 	else:
-		gpHost._gpSetState("swap.done", [I18n.gpTr(gpNewDef.gpDisplayName, gpNewDef.gpDisplayName)])
+		gpHost.gpSetState("swap.done", [I18n.gpTr(gpNewDef.gpDisplayName, gpNewDef.gpDisplayName)])
 
-# Delete a symbol from the library and re-render the left palette. gpDefs shares identity
-# with the live library array, so it already shrank; gpPopulate re-renders the views.
-# 从图元库删除图元并重渲染左侧图元库。gpDefs 与活动库数组共享身份、已随之缩减；gpPopulate 重渲染。
+# Delete a symbol from the library and re-render the left palette. gpDefs() shares identity
+# with the live library array, so it already shrank; gpPopulate() re-renders the views.
+# 从图元库删除图元并重渲染左侧图元库。gpDefs() 与活动库数组共享身份、已随之缩减；gpPopulate() 重渲染。
 func gpDeleteSymbolAndRefresh(gpId: String) -> void:
 	GPSymbolLibrary.gpDeleteDef(gpId)
 	gpHost.gpLeftDock.gpPopulate(gpHost.gpDefs)
-	gpHost._gpSetState("status.symbol_deleted", [gpId])
+	gpHost.gpSetState("status.symbol_deleted", [gpId])
 
 
 # ============================ canvas changes ============================
@@ -234,11 +233,8 @@ func gpCascadeDeleteSymbol(gpId: String) -> void:
 			if gpRemoved > 0:
 				gpC.gpClearSelection()
 				gpC.queue_redraw()
-				# (M2) No manual emit any more: gpRemoveSymbolInstances emits the core graph
-				# signal, and the canvas now binds that signal and funnels it to the bus.
-				# Previously the UI had to remember to emit "on behalf of" the data layer.
-				# （M2）不再手动发射：gpRemoveSymbolInstances 会发射 core 图信号，画布已绑定
-				# 该信号并汇入总线。此前 UI 必须记得「代数据层」发射一次。
+ # signal, and the canvas now binds that signal and funnels it to the bus.
+ # 该信号并汇入总线。此前 UI 必须记得「代数据层」发射一次。
 	gpDeleteSymbolAndRefresh(gpId)
 
 # Ask the user to confirm deletion when the symbol is in use on the canvas. Cascade removal

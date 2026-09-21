@@ -19,6 +19,33 @@ var gpLocale: String = "zh"
 # Translation table: key -> { "zh": ..., "en": ... }.
 # 翻译表：键 -> { "zh": ..., "en": ... }。
 const GP_STRINGS: Dictionary = {
+	# ---- 图元显示名（pack_iso_10628）----
+	# ---- Symbol display names (pack_iso_10628) ----
+	"iso.lvalve001":        { "zh": "球阀", "en": "Ball Valve" },
+	"iso.lvalve002":        { "zh": "止回阀", "en": "Check Valve" },
+	"iso.lvalve003":        { "zh": "调节阀", "en": "Control Valve" },
+	"iso.lpump001":         { "zh": "压缩机", "en": "Compressor" },
+	"iso.lvalve004":        { "zh": "隔膜阀", "en": "Diaphragm Valve" },
+	"iso.lgeneral001":      { "zh": "电气线（点划线）001", "en": "Electrical Line (Dash-Dot) 001" },
+	"iso.linstrument001":   { "zh": "现场接线箱", "en": "Field Junction Box" },
+	"iso.linstrument002":   { "zh": "流量指示器", "en": "Flow Indicator" },
+	"iso.linstrument003":   { "zh": "流量变送器", "en": "Flow Transmitter" },
+	"iso.lvalve005":        { "zh": "截止阀", "en": "Globe Valve" },
+	"iso.lvalve006":        { "zh": "闸阀", "en": "Gate Valve" },
+	"iso.lheat001":         { "zh": "换热器", "en": "Heat Exchanger" },
+	"iso.lgeneral002":      { "zh": "仪表线（虚线）001", "en": "Instrument Line (Dashed) 001" },
+	"iso.linstrument004":   { "zh": "液位指示器", "en": "Level Indicator" },
+	"iso.linstrument005":   { "zh": "液位变送器", "en": "Level Transmitter" },
+	"iso.lpump002":         { "zh": "容积泵", "en": "Positive Displacement Pump" },
+	"iso.linstrument006":   { "zh": "压力指示器", "en": "Pressure Indicator" },
+	"iso.linstrument007":   { "zh": "压力变送器", "en": "Pressure Transmitter" },
+	"iso.lvalve007":        { "zh": "阀门定位器", "en": "Valve Positioner" },
+	"iso.lpump003":         { "zh": "离心泵", "en": "Centrifugal Pump" },
+	"iso.lgeneral003":      { "zh": "工艺线（实线）001", "en": "Process Line (Solid) 001" },
+	"iso.linstrument008":   { "zh": "温度指示器", "en": "Temperature Indicator" },
+	"iso.ltank001":         { "zh": "储罐", "en": "Storage Tank" },
+	"iso.linstrument009":   { "zh": "温度变送器", "en": "Temperature Transmitter" },
+	"iso.lvalve008":        { "zh": "阀门执行器", "en": "Valve Actuator" },
 	# ---- app chrome ----
 	"symbol_lib.title":        { "zh": "图元库",           "en": "Symbol Library" },
 	"symbol_lib.search":       { "zh": "搜索图元名称 / 类目…", "en": "Search symbols / categories…" },
@@ -48,8 +75,6 @@ const GP_STRINGS: Dictionary = {
 	"prop.info":    { "zh": "选型",   "en": "Spec" },
 	"prop.doc":     { "zh": "文档",   "en": "Document" },
 
-	# ---- inspector (M10): identity, symbol swap, typed property fields ----
-	# ---- 属性面板（M10）：标识、更换图元、类型化属性字段 ----
 	"inspector.identity":      { "zh": "标识",     "en": "Identity" },
 	"inspector.properties":    { "zh": "工艺属性", "en": "Process Properties" },
 	"inspector.label":         { "zh": "标签",     "en": "Label" },
@@ -82,14 +107,12 @@ const GP_STRINGS: Dictionary = {
 	"info.category": { "zh": "类目",   "en": "Category" },
 	"info.size":     { "zh": "尺寸",   "en": "Size" },
 
-	# ---- edge / connection refusals (P3) ----
 	"edge.port_type_mismatch":   { "zh": "端口类型不符：管道只能连管口，信号线只能连信号 / 执行机构端。", "en": "Port type mismatch: pipes connect nozzles only; signal lines connect signal / actuator ends only." },
 	"edge.pipe_needs_one_bound": { "zh": "管道至少需连接一端。", "en": "A pipe needs at least one bound end." },
 	"edge.edge_self_loop":       { "zh": "不能连到同一端口。", "en": "Cannot connect to the same port." },
 	"edge.port_missing":         { "zh": "端点无法解析（图元或端口缺失）。", "en": "Endpoint could not be resolved (symbol or port missing)." },
 	"edge.edge_duplicate":       { "zh": "该连线已存在。", "en": "This connection already exists." },
 
-	# ---- connectivity tool status (P3) ----
 	"status.mode_pipe":   { "zh": "管道模式", "en": "Pipe mode" },
 	"status.mode_signal": { "zh": "信号线模式", "en": "Signal mode" },
 
@@ -237,7 +260,14 @@ const GP_STRINGS: Dictionary = {
 	"canvas.ctx_smooth_vertex":  { "zh": "顶点转为平滑（拉出手柄）", "en": "Smooth Vertex (pull handles)" },
 	"canvas.ctx_corner_vertex":  { "zh": "顶点转为拐角（收起手柄）", "en": "Corner Vertex (collapse handles)" },
 	"canvas.ctx_delete_vertex":  { "zh": "删除此顶点", "en": "Delete This Vertex" },
-	"canvas.ctx_delete_bump":    { "zh": "删除鼓包锚点", "en": "Delete Bump Anchor" },
+	"canvas.ctx_add_anchor":     { "zh": "增加锚点", "en": "Add Anchor" },
+	"canvas.ctx_delete_bump":    { "zh": "删除锚点", "en": "Delete Anchor" },
+	# 图元放置到连线上时的二选一，以及「端口不足无法拆分」的提示。
+	# The two-way choice when a symbol is dropped onto a line, plus the "too few ports" note.
+	"canvas.ctx_drop_reroute":      { "zh": "让连线绕过图元", "en": "Route line around the symbol" },
+	"canvas.ctx_drop_split":        { "zh": "把连线拆成两根接入图元", "en": "Split line through the symbol" },
+	"canvas.ctx_drop_title":        { "zh": "无法拆分连线", "en": "Cannot split line" },
+	"canvas.ctx_drop_needs_ports":  { "zh": "该图元的端点少于两个，无法拆分连线；请修改图元并增加至少两个端点。", "en": "This symbol has fewer than two ports; cannot split the line. Edit the symbol and add at least two ports." },
 
 	# ---- Main-canvas annotation draw tools / 主画布注释绘图工具 ----
 	"canvas.tool_polyline":   { "zh": "折线", "en": "Polyline" },
@@ -290,7 +320,6 @@ const GP_STRINGS: Dictionary = {
 	"center.fullscreen_exit": { "zh": "退出全屏", "en": "Exit fullscreen" },
 	"center.fullscreen_tip":  { "zh": "隐藏左右面板，绘图区占满窗口", "en": "Hide side panels, expand the canvas" },
 
-	# ---- edge / connection inspector (P4) ----
 	"prop.edge":            { "zh": "连线", "en": "Connection" },
 	"edge.kind":            { "zh": "类型", "en": "Kind" },
 	"edge.signal_type":     { "zh": "信号类型", "en": "Signal Type" },
@@ -320,7 +349,6 @@ const GP_STRINGS: Dictionary = {
 	"line_type_capillary":  { "zh": "毛细管信号", "en": "Capillary Signal" },
 	"line_type_unknown":    { "zh": "未知线型", "en": "Unknown Line Type" },
 
-	# ---- edge context menu (P4) ----
 	"canvas.ctx_delete_edge":    { "zh": "删除连线", "en": "Delete Connection" },
 	"canvas.ctx_set_process":    { "zh": "改为主工艺管线", "en": "Set as Process Line" },
 	"canvas.ctx_set_utility":    { "zh": "改为公用工程管线", "en": "Set as Utility Line" },
@@ -330,7 +358,6 @@ const GP_STRINGS: Dictionary = {
 	"canvas.ctx_renumber":       { "zh": "重新编号", "en": "Renumber" },
 	"canvas.ctx_auto_connect":   { "zh": "自动连线", "en": "Auto-Connect" },
 
-	# ---- edge status messages (P4) ----
 	"status.edge_tag_manual": { "zh": "位号已手工指定（重新编号将跳过）", "en": "Line number set manually (renumber will skip it)" },
 	"status.renumbered":      { "zh": "已重新编号 %d 条管线", "en": "Renumbered %d lines" },
 	"status.resnapped":       { "zh": "已重新吸附端点", "en": "Ends re-snapped" },
@@ -346,12 +373,12 @@ const GP_STRINGS: Dictionary = {
 	"status.tmp_cleaned":     { "zh": "已清理上次未完成的写入残留：%s",
 								"en": "Cleaned up a leftover partial write: %s" },
 
-	# ---- project menu (M9b) ----
+	# ---- project menu ----
 	"menu.project":               { "zh": "项目", "en": "Project" },
 	"menu.project_tag_rules":     { "zh": "位号编号规则…", "en": "Tag Numbering Rules…" },
 	"menu.project_export_list":   { "zh": "导出设备清单…", "en": "Export Equipment List…" },
 
-	# ---- tag numbering rules dialog (M9b) ----
+	# ---- tag numbering rules dialog ----
 	"tag_rule.title":         { "zh": "位号编号规则", "en": "Tag Numbering Rules" },
 	"tag_rule.template":      { "zh": "模板（须含 {seq}）", "en": "Template (must contain {seq})" },
 	"tag_rule.numbers":       { "zh": "序号", "en": "Sequence" },
@@ -378,7 +405,6 @@ const GP_STRINGS: Dictionary = {
 								  "en": "This will renumber %d tags. Tags feed the DCS point list and physical nameplates — continue?" },
 	"tag_rule.confirm_title": { "zh": "确认重排位号", "en": "Confirm Renumbering" },
 
-	# ---- tag uniqueness (M9) ----
 	"tag.err_duplicate":      { "zh": "位号已被占用", "en": "Tag already in use" },
 	"tag.err_no_uid":         { "zh": "缺少实例标识", "en": "Missing instance id" },
 }

@@ -29,8 +29,8 @@ var gpName: String = ""
 # 在标签栏中的位置（从 0 起）。载入时重新推导，故永不出现空位。
 var gpIndex: int = 0
 
-# The sheet's own geometry. Never null after gpFromDict.
-# 本图纸自己的几何。经 gpFromDict 后绝不为 null。
+# The sheet's own geometry. Never null after gpFromDict().
+# 本图纸自己的几何。经 gpFromDict() 后绝不为 null。
 var gpGraph: GPPIDGraph = null
 
 

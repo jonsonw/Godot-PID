@@ -5,20 +5,19 @@ extends RefCounted
 ## 橡皮筋框选状态及其 CAD 窗口 / 交叉规则。
 ##
 ## Why it exists / 为何存在：
-## the marquee used to be four loose fields on GPCanvas2D (_gpMarqueeing/_gpMarqueeFrom/
 ## _gpMarqueeTo/_gpMarqueeAdd) with its window-vs-crossing rule written out twice — once in
 ## _gpDrawMarquee (to pick a colour) and once in _gpCommitMarquee (to pick a hit rule). Two
 ## copies of one rule is exactly how "dragging right selects differently than it looks" bugs
 ## are born. Both now call gpIsWindow().
 ## 框选原是 GPCanvas2D 上四个松散字段（_gpMarqueeing/_gpMarqueeFrom/_gpMarqueeTo/_gpMarqueeAdd），
-## 其「窗口 vs 交叉」规则被写了两遍——一次在 _gpDrawMarquee（选颜色），一次在 _gpCommitMarquee（选命中规则）。
+## 其「窗口 vs 交叉」规则被写了两遍——一次在 _gpDrawMarquee()（选颜色），一次在 _gpCommitMarquee()（选命中规则）。
 ## 同一规则两份实现，正是「向右拖动的实际选中与观感不符」这类缺陷的温床。现二者都调用 gpIsWindow()。
 ##
 ## CAD convention / CAD 惯例：
-##   drag left -> right : WINDOW   — only fully enclosed shapes are picked (blue)
-##   drag right -> left : CROSSING — anything the band touches is picked (green)
-##   左→右拖动：窗口模式 —— 仅选中被完全包含的图形（蓝色）
-##   右→左拖动：交叉模式 —— 选框碰到即选中（绿色）
+## drag left -> right : WINDOW — only fully enclosed shapes are picked (blue)
+## drag right -> left : CROSSING — anything the band touches is picked (green)
+## 左→右拖动：窗口模式 —— 仅选中被完全包含的图形（蓝色）
+## 右→左拖动：交叉模式 —— 选框碰到即选中（绿色）
 
 # Minimum drag distance (px) before a press is treated as a marquee rather than a click.
 # 按下被视为框选（而非单击）前的最小拖动距离（像素）。
@@ -50,8 +49,8 @@ var gpTo: Vector2 = Vector2.ZERO
 var gpAdditive: bool = false
 
 
-# Start a band at gpAt. gpAdd marks an additive (Shift) selection.
-# 在 gpAt 处开始选框。gpAdd 表示追加式（Shift）选择。
+# Start a band at gpAt. gpAdd() marks an additive (Shift) selection.
+# 在 gpAt 处开始选框。gpAdd() 表示追加式（Shift）选择。
 func gpBegin(gpAt: Vector2, gpAdd: bool = false) -> void:
 	gpActive = true
 	gpFrom = gpAt

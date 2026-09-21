@@ -1,17 +1,15 @@
 class_name GPMoveNodesCommand
 extends GPCommand
-# Translate one or more nodes by a delta (M4).
-# 按位移量平移一个或多个节点（M4）。
 #
 # Why it emits the signal itself / 为何自行发射信号:
-#   GPPIDNode.gpPosition is a plain property, so writing it does not notify anyone.
-#   Every other mutation goes through GPPIDGraph helpers that emit gpGraphChanged. To
-#   keep "mutate the model, the view follows" true for dragging too, the command emits
-#   the model signal once after the whole group has moved — one notification per
-#   command, not one per node.
-#   GPPIDNode.gpPosition 是普通属性，写入不会通知任何人。其它改动都经由会发射
-#   gpGraphChanged 的 GPPIDGraph 辅助方法。为让「改模型、视图自随之」对拖拽同样成立，
-#   命令在整组移动完成后发射一次模型信号——每条命令一次通知，而非每节点一次。
+# GPPIDNode.gpPosition is a plain property, so writing it does not notify anyone.
+# Every other mutation goes through GPPIDGraph helpers that emit gpGraphChanged. To
+# keep "mutate the model, the view follows" true for dragging too, the command emits
+# the model signal once after the whole group has moved — one notification per
+# command, not one per node.
+# GPPIDNode.gpPosition 是普通属性，写入不会通知任何人。其它改动都经由会发射
+# gpGraphChanged 的 GPPIDGraph 辅助方法。为让「改模型、视图自随之」对拖拽同样成立，
+# 命令在整组移动完成后发射一次模型信号——每条命令一次通知，而非每节点一次。
 
 # Ids of the nodes to translate.
 # 待平移的节点 id。
@@ -65,7 +63,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 
 
 # Re-apply the same delta. Re-executing is idempotent here, so the default redo
-# (which calls gpExecute) is already correct.
-# 重新应用同一位移量。此处重执行是幂等的，因此默认重做（调用 gpExecute）即可。
+# (which calls gpExecute()) is already correct.
+# 重新应用同一位移量。此处重执行是幂等的，因此默认重做（调用 gpExecute()）即可。
 func gpRedo(gpCtx: GPCommandContext) -> void:
 	gpExecute(gpCtx)

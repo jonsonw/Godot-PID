@@ -24,7 +24,7 @@ var gpMeta: Dictionary = {
 # All symbol instances (nodes) in this sheet — strongly typed.
 # 本图纸内所有图元实例（节点）——强类型。
 # Not @export: Godot only exports built-ins / Resources / Nodes / enums, and GPPIDNode
-# is a custom RefCounted. Serialization is manual via gpToDict() (JSON), so no export needed.
+# is a custom RefCounted. Serialization is manual via gpToDict (JSON), so no export needed.
 # 不加 @export：Godot 仅允许导出内置类型 / Resource / Node / 枚举，而 GPPIDNode 是自定义
 # RefCounted。序列化走手动 gpToDict()（JSON），故无需导出。
 var gpNodes: Array[GPPIDNode] = []
@@ -50,18 +50,14 @@ var gpUserSymbolPacks: Array[GPSymbolPack] = []
 # 往返后保持一致。
 var gpShapes: Array[GPShape] = []
 
-# Project-wide tag numbering rules (M9). They travel with the file, NOT with the symbol
 # library: a project's numbering convention belongs to the project, so reopening the
 # archive years later reproduces the same convention (data sovereignty).
-# 工程级位号编号规则（M9）。它们随文件走，而非随图元库走：编号约定属于该工程，
 # 故多年后重开存档仍能复现同一套约定（数据主权）。
 # Null until first touched; gpTagRulesOrCreate() materialises it.
 # 首次使用前为 null；gpTagRulesOrCreate() 负责建立。
 var gpTagRules: GPProjectTagRules = null
 
-# Snapshot of the symbol library's property-schema fingerprints at SAVE time (M12),
 # keyed by symbol id: {"LPUMP003": "-12093481"}.
-# 存盘那一刻图元库属性 schema 的指纹快照（M12），按图元 id 索引：{"LPUMP003": "-12093481"}。
 # Comparing it against the live library on load is how a drawing can tell that a field was
 # added, renamed or deleted since it was saved — without that, "edit the library, every
 # project follows" would silently diverge from the archived values.
@@ -115,10 +111,10 @@ func gpNewEdge(gpId: String, gpFromId: String, gpToId: String, gpAttrs: Dictiona
 
 # Port-aware edge factory. Both refs accept any of the three end shapes documented on
 # GPPIDEdge (port-bound / node-bound / dangling), so one factory covers every case the pipe
-# and signal tools can produce. gpNewEdge stays as-is so its existing callers and tests are
+# and signal tools can produce. gpNewEdge() stays as-is so its existing callers and tests are
 # untouched.
 # 端口感知的边工厂。两端引用接受 GPPIDEdge 上记载的三种端点形态之一（端口绑定 / 节点绑定 /
-# 悬空），故一个工厂即覆盖管道与信号工具能产出的全部情形。gpNewEdge 保持原样，其既有
+# 悬空），故一个工厂即覆盖管道与信号工具能产出的全部情形。gpNewEdge() 保持原样，其既有
 # 调用点与测试不受影响。
 func gpNewEdgeEx(gpId: String, gpFrom: Dictionary, gpTo: Dictionary, gpKind: String,
 		gpSignalType: String = "", gpTag: String = "", gpAttrs: Dictionary = {}) -> GPPIDEdge:
@@ -223,11 +219,11 @@ func gpInsertShape(gpShape: GPShape, gpAt: int = -1) -> void:
 
 
 # Remove an annotation shape by object identity. Returns whether it was found.
-# Going through the model (instead of splicing gpShapes from a command) keeps "every
-# topology mutation notifies from one place" true — see gpRemoveEdge.
+# Going through the model (instead of splicing gpShapes() from a command) keeps "every
+# topology mutation notifies from one place" true — see gpRemoveEdge().
 # 按对象同一性移除一枚注释图形，返回是否找到。
-# 经由模型（而非由命令直接拼接 gpShapes）可保持「拓扑的每次改动都从一处通知」成立
-# —— 参见 gpRemoveEdge。
+# 经由模型（而非由命令直接拼接 gpShapes()）可保持「拓扑的每次改动都从一处通知」成立
+# —— 参见 gpRemoveEdge()。
 func gpRemoveShape(gpShape: GPShape) -> bool:
 	var gpAt: int = gpShapes.find(gpShape)
 	if gpAt < 0:
@@ -283,8 +279,8 @@ func gpRemoveSymbolInstances(gpSymbolId: String) -> int:
 	if gpCount == 0:
 		return 0
 	gpNodes = gpKeepNodes
-	# Drop every edge attached to a removed instance (mirrors gpRemoveNodeWithEdges).
-	# 删除每个被移除实例的连线（与 gpRemoveNodeWithEdges 一致）。
+	# Drop every edge attached to a removed instance (mirrors gpRemoveNodeWithEdges()).
+	# 删除每个被移除实例的连线（与 gpRemoveNodeWithEdges() 一致）。
 	var gpKeepEdges: Array[GPPIDEdge] = []
 	for gpE in gpEdges:
 		var gpFrom: String = gpE.gpFromRef.get("node_id", "")
@@ -308,6 +304,93 @@ func gpEmbedUserPacks(gpPacks: Array[GPSymbolPack]) -> void:
 	gpUserSymbolPacks = gpPacks.duplicate()
 
 
+# ============================================================================
+# Drop-on-edge restore registry (「图元压到连线」-> 删除时还原原始连线).
+# 落点（图元压到连线上）恢复注册表。
+#
+# Why graph-level and not on the node / 为何位于图层级而非节点上:
+# The records must survive the symbol being deleted (node gone) so the delete command can
+# find them by id. They are also persisted so a save+reload still restores on delete.
+# 记录必须在图元被删除（节点已不在）后仍存在，如此删除命令才能按 id 找到它们。一并持久化，
+# 使存档重载后删除仍可还原。
+#
+# Schema / 记录形态:
+# reroute: {"kind":"reroute", "edge_id":String, "orig_routing":Array[Vector2]}
+# split: {"kind":"split", "orig":Dictionary (edge.gpToDict()), "orig_index":int}
+# Every record carries a monotonic "_rid" so records of one symbol stay distinguishable.
+# 每条记录带单调 "_rid"，使同一图元的多条记录彼此可区分。
+var gpDropRestore: Dictionary = {}
+
+# Monotonic record id source (NOT serialized; restored from the max loaded rid).
+# 单调记录 id 源（不序列化；从载入的最大 rid 恢复）。
+var _gpDropSeq: int = 0
+
+
+# Append a restore record for [param gpSymNid]. Returns the assigned record id so the caller can
+# remove exactly this record on undo. / 为 [param gpSymNid] 追加一条恢复记录，返回所分配 id 供撤销时精确移除。
+func gpRecordDrop(gpSymNid: String, gpRecord: Dictionary) -> int:
+	if not gpDropRestore.has(gpSymNid):
+		gpDropRestore[gpSymNid] = []
+	var gpList: Array = gpDropRestore[gpSymNid]
+	_gpDropSeq += 1
+	gpRecord["_rid"] = _gpDropSeq
+	gpList.append(gpRecord)
+	return _gpDropSeq
+
+
+# Records for [param gpSymNid], or [] when none. / [param gpSymNid] 的全部记录，无则 []。
+func gpDropRecords(gpSymNid: String) -> Array:
+	if not gpDropRestore.has(gpSymNid):
+		return []
+	return gpDropRestore[gpSymNid].duplicate()
+
+
+# Remove the record with [param gpRid] from [param gpSymNid]'s list. No-op when absent.
+# 移除 [param gpSymNid] 列表中 id 为 [param gpRid] 的记录；不存在时为空操作。
+func gpRemoveDrop(gpSymNid: String, gpRid: int) -> void:
+	if not gpDropRestore.has(gpSymNid):
+		return
+	var gpList: Array = gpDropRestore[gpSymNid]
+	for gpI in range(gpList.size() - 1, -1, -1):
+		var gpR: Dictionary = gpList[gpI]
+		if int(gpR.get("_rid", -1)) == gpRid:
+			gpList.remove_at(gpI)
+			break
+	if gpList.is_empty():
+		gpDropRestore.erase(gpSymNid)
+
+
+# Remove every record for [param gpSymNid] (called after the delete command has replayed them).
+# 移除 [param gpSymNid] 的全部记录（在删除命令重放后调用）。
+func gpClearDrops(gpSymNid: String) -> void:
+	gpDropRestore.erase(gpSymNid)
+
+
+# Persist a record to the archive-friendly plain shape (Vector2 routing -> [x,y] pairs).
+# 把记录转为可存档的普通形态（Vector2 走线 -> [x,y] 数组对）。
+static func _gpDropRecordToDict(gpR: Dictionary) -> Dictionary:
+	var gpOut: Dictionary = gpR.duplicate()
+	if gpR.get("kind", "") == "reroute":
+		var gpRouted: Array = []
+		for gpP in gpR.get("orig_routing", []):
+			if gpP is Vector2:
+				gpRouted.append([gpP.x, gpP.y])
+		gpOut["orig_routing"] = gpRouted
+	return gpOut
+
+
+# Inverse of _gpDropRecordToDict(). / _gpDropRecordToDict() 的逆操作。
+static func _gpDropRecordFromDict(gpRD: Dictionary) -> Dictionary:
+	var gpR: Dictionary = gpRD.duplicate()
+	if gpRD.get("kind", "") == "reroute":
+		var gpRouted: Array[Vector2] = []
+		for gpP in gpRD.get("orig_routing", []):
+			if gpP is Array and gpP.size() >= 2:
+				gpRouted.append(Vector2(float(gpP[0]), float(gpP[1])))
+		gpR["orig_routing"] = gpRouted
+	return gpR
+
+
 # Serialize the graph to a plain dictionary (object graph -> dict graph).
 # 将图序列化为普通字典（对象图 → 字典图）。
 func gpToDict() -> Dictionary:
@@ -327,9 +410,9 @@ func gpToDict() -> Dictionary:
 	var gpPacksOut: Array = []
 	for gpPack in gpUserSymbolPacks:
 		gpPacksOut.append(gpPack.gpToDict())
-	# M12: the library fingerprint snapshot travels INSIDE meta, so a reader that knows
+	# the library fingerprint snapshot travels INSIDE meta, so a reader that knows
 	# nothing about it still sees an ordinary meta dictionary.
-	# M12：库指纹快照放在 meta **内部**，故不认识它的读取方看到的仍是一个普通的 meta 字典。
+	# 库指纹快照放在 meta **内部**，故不认识它的读取方看到的仍是一个普通的 meta 字典。
 	var gpMetaOut: Dictionary = gpMeta.duplicate()
 	if not gpSchemaFingerprints.is_empty():
 		gpMetaOut["schema_fingerprints"] = gpSchemaFingerprints.duplicate()
@@ -345,6 +428,16 @@ func gpToDict() -> Dictionary:
 	# 逐字节保持 v1 形态。
 	if gpTagRules != null:
 		gpOut["tag_rules"] = gpTagRules.gpToDict()
+	# Persist drop-restore records only when non-empty, so an untouched file keeps its byte shape.
+	# 仅当非空时持久化落点恢复记录，使未触及本功能的文件保持原字节形态。
+	if not gpDropRestore.is_empty():
+		var gpDR: Array = []
+		for gpSym in gpDropRestore.keys():
+			var gpOutRecs: Array = []
+			for gpRec in gpDropRestore[gpSym]:
+				gpOutRecs.append(_gpDropRecordToDict(gpRec))
+			gpDR.append({"sym": gpSym, "recs": gpOutRecs})
+		gpOut["drop_restore"] = gpDR
 	return gpOut
 
 
@@ -354,8 +447,8 @@ static func gpFromDict(gpData: Dictionary) -> GPPIDGraph:
 	var gpG: GPPIDGraph = GPPIDGraph.new()
 	if gpData.has("meta"):
 		gpG.gpMeta = gpData["meta"].duplicate()
-		# M12: restore the library fingerprint snapshot (absent in every pre-M12 file).
-		# M12：恢复库指纹快照（M12 之前的文件都没有）。
+ # restore the library fingerprint snapshot (absent in every pre-M12 file).
+ # 恢复库指纹快照。
 		var gpFp: Variant = gpG.gpMeta.get("schema_fingerprints", null)
 		if gpFp is Dictionary:
 			gpG.gpSchemaFingerprints = (gpFp as Dictionary).duplicate()
@@ -394,4 +487,22 @@ static func gpFromDict(gpData: Dictionary) -> GPPIDGraph:
 				gpRestoredDefs.append(gpSym)
 		if gpRestoredDefs.size() > 0:
 			GPSymbolLibrary.gpRegisterDefs(gpRestoredDefs)
+	# Restore drop-restore records (absent in every pre-feature file). The sequence counter is
+	# re-seeded from the max loaded rid so freshly recorded entries never collide with them.
+	# 恢复落点恢复记录（本功能之前的文件均无此键）。单调 id 源从载入的最大 rid 重置，
+	# 使新记录的 id 不会与之冲突。
+	if gpData.has("drop_restore"):
+		var gpMaxRid: int = 0
+		for gpEntry in gpData["drop_restore"]:
+			var gpSym: String = str(gpEntry.get("sym", ""))
+			if gpSym == "":
+				continue
+			var gpRecs: Array = []
+			for gpRD in gpEntry.get("recs", []):
+				var gpR: Dictionary = _gpDropRecordFromDict(gpRD)
+				gpMaxRid = maxi(gpMaxRid, int(gpR.get("_rid", 0)))
+				gpRecs.append(gpR)
+			if not gpRecs.is_empty():
+				gpG.gpDropRestore[gpSym] = gpRecs
+		gpG._gpDropSeq = gpMaxRid
 	return gpG

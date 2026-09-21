@@ -5,25 +5,25 @@ extends ScrollContainer
 # 属性面板（右栏「属性」页）—— M10 重建。
 #
 # What this panel shows, in order / 本面板自上而下显示：
-#   1. the SYMBOL NAME (read-only) — the library type, whose home is this panel and never
-#      the canvas; plus a category-grouped dropdown to SWAP the symbol;
-#      图元名称（只读）—— 库里的类型，它的家是本面板而非画布；外加按类目分组的
-#      「更换图元」下拉；
-#   2. 位号 (tag) and 名称 (multi-language) — the instance identity the user owns;
-#      位号与名称（多语言）—— 用户自有的实例标识；
-#   3. label placement (anchor) — the coarse choice; fine dragging happens on the canvas (M10b);
-#      标签位置（锚点）—— 粗粒度选择；精细拖拽在画布上完成（M10b）；
-#   4. the typed property fields resolved from the LIBRARY schema + this instance's values
-#      (GPPropertyForm + GPPropertyResolver), grouped and ordered by the schema itself.
-#      由**库 schema** 与本实例取值解析出的类型化属性字段（GPPropertyForm + GPPropertyResolver），
-#      分组与顺序由 schema 自身决定。
+# 1. the SYMBOL NAME (read-only) — the library type, whose home is this panel and never
+# the canvas; plus a category-grouped dropdown to SWAP the symbol;
+# 图元名称（只读）—— 库里的类型，它的家是本面板而非画布；外加按类目分组的
+# 「更换图元」下拉；
+# 2. 位号 (tag) and 名称 (multi-language) — the instance identity the user owns;
+# 位号与名称（多语言）—— 用户自有的实例标识；
+# 3. label placement (anchor) — the coarse choice; fine dragging happens on the canvas ;
+# 标签位置（锚点）—— 粗粒度选择；精细拖拽在画布上完成；
+# 4. the typed property fields resolved from the LIBRARY schema + this instance's values
+# (GPPropertyForm + GPPropertyResolver), grouped and ordered by the schema itself.
+# 由**库 schema** 与本实例取值解析出的类型化属性字段（GPPropertyForm + GPPropertyResolver），
+# 分组与顺序由 schema 自身决定。
 #
 # Two rules that make "edit the library, every project follows" true / 两条让
 # 「改图元库、全项目同步」成立的规则：
-#   - field DEFINITIONS are read from gpDef.gpSchema and never copied into the node;
-#     字段**定义**读自 gpDef.gpSchema，绝不复制进节点；
-#   - field VALUES are read through GPPropertyResolver (default vs override by `has()`).
-#     字段**取值**经 GPPropertyResolver 读取（用 `has()` 区分默认与覆盖）。
+# - field DEFINITIONS are read from gpDef.gpSchema and never copied into the node;
+# 字段**定义**读自 gpDef.gpSchema，绝不复制进节点；
+# - field VALUES are read through GPPropertyResolver (default vs override by `has`).
+# 字段**取值**经 GPPropertyResolver 读取（用 `has` 区分默认与覆盖）。
 #
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -42,15 +42,11 @@ signal gpEdgeAttrChanged(gpEdgeId: String, key: String, val)
 # 用户在「更换图元」下拉中选了另一个图元：节点 id、新图元 id。
 signal gpSymbolSwapRequested(gpNodeId: String, gpNewSymbolId: String)
 
-# One edit applied to a whole selection: node ids, attribute key, new value (M11).
 # Batched on purpose: the host turns the whole id set into ONE undo step.
-# 一次编辑作用到整个选择集：节点 id 数组、属性键、新值（M11）。
 # 刻意成批发送：宿主据此把整个 id 集合合成**一个**撤销步。
 signal gpBatchAttrChanged(gpIds: Array[String], key: String, val)
 
-# The user asked to drop this instance's orphaned values (M12). Explicit by design: an
 # orphan is a value the user typed, so only the user may discard it.
-# 用户请求清除本实例的孤儿值（M12）。刻意要求显式：孤儿是用户录入的值，
 # 只有用户本人才能丢弃它。
 signal gpCleanOrphansRequested(gpNodeId: String)
 
@@ -90,9 +86,8 @@ var gpDefs: Array[GPSymbolDef] = []
 var _gpSwapIds: Array[String] = []
 
 # Non-empty when several instances of the SAME symbol are selected: every edit is emitted
-# once per id, so one keystroke lands on the whole selection (M10 "多选批量生效").
+# once per id, so one keystroke lands on the whole selection .
 # 选中同一图元的多个实例时非空：每次编辑按 id 各发一次，一次录入落到整个选择集
-#（M10「多选批量生效」）。
 var _gpBatchIds: Array[String] = []
 
 # The nodes behind _gpBatchIds, kept so a locale change can rebuild the batch form.
@@ -129,9 +124,9 @@ func gpShow(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> void:
 # Show the form for several selected instances of the SAME symbol. Edits apply to all of them.
 # 显示同一图元的多个选中实例的表单。编辑将作用于全部实例。
 # Mixed-type selections must NOT call this: a property that only some instances declare would
-# be written onto instances that never had it. The shell calls gpShow for those.
+# be written onto instances that never had it. The shell calls gpShow() for those.
 # 混合类型选择**不可**调用本方法：只有部分实例声明的属性会被写到从未有过该属性的实例上。
-# 外壳对混合选择调用 gpShow。
+# 外壳对混合选择调用 gpShow()。
 func gpShowMulti(gpDef: GPSymbolDef, gpNodes: Array[GPPIDNode]) -> void:
 	_gpBatchNodes = []
 	_gpBatchIds = []
@@ -146,8 +141,8 @@ func gpShowMulti(gpDef: GPSymbolDef, gpNodes: Array[GPPIDNode]) -> void:
 	_gpBuildNodeForm(gpDef, _gpBatchNodes)
 
 
-# Build the shared node form. gpNodes is 1 (single) or N (batch) instances of gpDef.
-# 构建共用的节点表单。gpNodes 为 gpDef 的 1 个（单选）或 N 个（批量）实例。
+# Build the shared node form. gpNodes() is 1 (single) or N (batch) instances of gpDef.
+# 构建共用的节点表单。gpNodes() 为 gpDef 的 1 个（单选）或 N 个（批量）实例。
 func _gpBuildNodeForm(gpDef: GPSymbolDef, gpNodes: Array[GPPIDNode]) -> void:
 	_gpClearForm()
 	gpCurrentEdge = null
@@ -213,8 +208,8 @@ func _gpBuildNodeForm(gpDef: GPSymbolDef, gpNodes: Array[GPPIDNode]) -> void:
 		_gpAddHead(I18n.gpTr("inspector.orphan"))
 		for gpRow in gpOrphans:
 			_gpAddTextField(str(gpRow["key"]), str(gpRow["value"]), "", true)
-		# Cleaning is ONE explicit button, never an automatic sweep.
-		# 清理是**一个明确的按钮**，绝不是自动清扫。
+ # Cleaning is ONE explicit button, never an automatic sweep.
+ # 清理是**一个明确的按钮**，绝不是自动清扫。
 		var gpBtn: Button = Button.new()
 		gpBtn.text = I18n.gpTr("inspector.clean_orphans") % [gpOrphans.size()]
 		gpBtn.size_flags_horizontal = SIZE_EXPAND_FILL
@@ -322,10 +317,10 @@ func _gpAddPropertyRow(gpRow: Dictionary, gpSchema: GPPropertySchema,
 		GPPropertyDef.GPKind.GP_MULTILANG:
 			_gpAddTextField(gpLabel, _gpMultilangText(gpValue), gpKey, gpReadOnly)
 		_:
-			# GP_STRING / GP_TEXT: a single-line field. Committing on Enter (not per keystroke)
-			# keeps one edit == one undo step once M11 lands.
-			# GP_STRING / GP_TEXT：单行输入。回车提交（而非逐键）可保证「一次编辑 = 一个撤销步」
-			# —— M11 落地后即成立。
+ # GP_STRING / GP_TEXT: a single-line field. Committing on Enter (not per keystroke)
+ # keeps one edit == one undo step once M11 lands.
+ # GP_STRING / GP_TEXT：单行输入。回车提交（而非逐键）可保证「一次编辑 = 一个撤销步」
+ # —— M11 落地后即成立。
 			_gpAddTextField(gpLabel, str(gpValue), gpKey, gpReadOnly)
 
 
@@ -341,8 +336,6 @@ func _gpMultilangText(gpValue: Variant) -> String:
 # ============================ widget helpers / 控件辅助 ============================
 
 # Announce one edit. In batch mode the WHOLE selection travels in a single signal so the host
-# can record one undo step (M11); emitting once per node would need N presses of Ctrl+Z.
-# 宣告一次编辑。批量模式下**整个选择集**装在单个信号里发出，使宿主记录一个撤销步（M11）；
 # 每节点发一次会让用户按 N 次 Ctrl+Z。
 func _gpEmit(gpKey: String, gpVal: Variant) -> void:
 	if gpKey == "":
@@ -393,8 +386,8 @@ static func gpAnchorRows() -> Array[Dictionary]:
 	]
 
 
-# Dropdown for the coarse label position. Fine positioning is the canvas grip's job (M10b).
-# 粗粒度标签位置下拉。精细定位由画布上的抓取点负责（M10b）。
+# Dropdown for the coarse label position. Fine positioning is the canvas grip's job .
+# 粗粒度标签位置下拉。精细定位由画布上的抓取点负责。
 func _gpAddAnchorRow(gpNode: GPPIDNode) -> void:
 	var gpRow: HBoxContainer = _gpFieldRow(I18n.gpTr("inspector.anchor"))
 	var gpOpt: OptionButton = OptionButton.new()
@@ -619,16 +612,16 @@ func _gpAddEdgeField(gpEdge: GPPIDEdge, gpKey: String) -> void:
 				gpEdgeAttrChanged.emit(gpEdge.gpInstanceId, gpKey, gpV))
 			gpRow.add_child(gpChk)
 		_:
-			# tag / dn / medium / spec / insulation -> a single-line text field.
-			# tag / dn / medium / spec / insulation -> 单行文本字段。
+ # tag / dn / medium / spec / insulation -> a single-line text field.
+ # tag / dn / medium / spec / insulation -> 单行文本字段。
 			var gpEdit: LineEdit = LineEdit.new()
 			gpEdit.size_flags_horizontal = SIZE_EXPAND_FILL
 			if gpKey == "tag":
 				gpEdit.text = gpEdge.gpTag
 			else:
 				gpEdit.text = str(gpEdge.gpAttrs.get(gpKey, ""))
-			# Commit on Enter, not on every keystroke, so the form is not rebuilt mid-typing.
-			# 在回车时提交而非每次按键，避免输入途中重建表单。
+ # Commit on Enter, not on every keystroke, so the form is not rebuilt mid-typing.
+ # 在回车时提交而非每次按键，避免输入途中重建表单。
 			gpEdit.text_submitted.connect(func(gpV: String) -> void:
 				gpEdgeAttrChanged.emit(gpEdge.gpInstanceId, gpKey, gpV))
 			gpRow.add_child(gpEdit)

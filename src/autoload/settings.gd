@@ -6,16 +6,17 @@ extends Node
 # 全局设置单例：把界面字号、界面字体、图元字号、图元字体与语言持久化到
 # user://settings.cfg，并应用到全应用。
 #
-# Bundled fonts: the project ships real CJK-capable font files under
-# res://assets/fonts/ (ArialUnicode.ttf and HiraginoSansGB.ttc, copied from the
-# macOS system fonts). Godot's built-in default font has no CJK glyphs, so Chinese
-# previously fell back to a low-quality bitmap font and looked blurry. By loading
-# these bundled outline fonts we render Chinese crisply and stay host-independent
-# (works on Windows/Linux too, since the files travel with the project).
-# 内置字体：工程随附真正支持中文的字体文件于 res://assets/fonts/
-#（ArialUnicode.ttf 与 HiraginoSansGB.ttc，拷自 macOS 系统字体）。Godot 内置默认
-# 字体不含中日韩字形，中文此前回退到模糊位图字体而发虚；改用这些随工程的矢量字体
-# 后中文清晰，且不依赖宿主机字体（Windows/Linux 同样可用）。
+# Fonts: resolved from the HOST by family name (SystemFont) instead of shipping
+# (45.6 MB combined) forced a ~17-21 MB .fontdata deserialize on every editor and
+# runtime start; they were also macOS system fonts, a redistribution risk for an
+# MIT-licensed project. SystemFont is resolved lazily by the OS, so startup pays
+# nothing up front and Chinese stays crisp via PingFang SC / Microsoft YaHei /
+# Noto Sans CJK SC.
+# 字体：改为按字体族名从宿主机解析（SystemFont），不再随包字体文件。此前内置的
+# ArialUnicode.ttf 与 HiraginoSansGB.ttc（合计 45.6 MB）会在每次编辑器与运行时启动时
+# 强制反序列化约 17~21 MB 的 .fontdata；且二者系 macOS 系统字体，对 MIT 许可项目存在
+# 再分发风险。SystemFont 由操作系统惰性解析，启动期零开销，中文经
+# PingFang SC / Microsoft YaHei / Noto Sans CJK SC 保持清晰。
 #
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -25,16 +26,12 @@ extends Node
 const GP_CONFIG_PATH: String = "user://settings.cfg"
 
 # Font preset registry: key -> { "zh", "en", "res" | "names" }.
-# "res"  = a bundled font file under res:// (preferred, host-independent).
+# "res" = a bundled font file under res:// (preferred, host-independent).
 # "names"= OS font family names tried in order (cross-platform fallback).
 # 字体预设登记表：键 -> { "zh", "en", "res" | "names" }。
-# "res"  = res:// 下的内置字体文件（首选，不依赖宿主）；
+# "res" = res:// 下的内置字体文件（首选，不依赖宿主）；
 # "names"= 系统字体族名（按序回退，跨平台）。
 const GP_FONT_PRESETS: Dictionary = {
-	"arial_cjk": { "zh": "Arial Unicode（内置）", "en": "Arial Unicode (bundled)",
-				   "res": "res://assets/fonts/ArialUnicode.ttf" },
-	"hiragino":  { "zh": "冬青黑体（内置）", "en": "Hiragino Sans GB (bundled)",
-				   "res": "res://assets/fonts/HiraginoSansGB.ttc" },
 	"system":    { "zh": "系统默认（含中文）", "en": "System (with CJK)",
 				   "names": ["PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", "Helvetica Neue", "Arial"] },
 	"pingfang":  { "zh": "苹方 PingFang SC", "en": "PingFang SC",
@@ -52,18 +49,18 @@ const GP_FONT_PRESETS: Dictionary = {
 var gpFontSize: int = 16
 
 # Current locale code.
-# 当前语言代码。声明默认与 gpLoad 回退（"zh"）及 I18n 默认一致，避免首启未加载前的窗口期出现 en。
-# The declared default matches the gpLoad fallback ("zh") and the I18n default, so there is no
+# 当前语言代码。声明默认与 gpLoad() 回退（"zh"）及 I18n 默认一致，避免首启未加载前的窗口期出现 en。
+# The declared default matches the gpLoad() fallback ("zh") and the I18n default, so there is no
 # "en" window before the saved config is loaded on first boot.
 var gpLocale: String = "zh"
 
 # Current UI font preset key.
 # 当前界面字体预设键。
-var gpFontKey: String = "arial_cjk"
+var gpFontKey: String = "system"
 
 # Current symbol font preset key.
 # 当前图元字体预设键。
-var gpSymbolFontKey: String = "hiragino"
+var gpSymbolFontKey: String = "system"
 
 # Current symbol font size.
 # 当前图元字号。
@@ -127,21 +124,21 @@ func _ready() -> void:
 
 
 # Build a Font resource from a preset key. Always returns a usable Font
-# (falls back to the bundled "arial_cjk" preset if the key is unknown).
-# 按预设键构造 Font 资源，始终返回可用字体（键未知时回退到内置 arial_cjk 预设）。
+# (falls back to the "system" preset if the key is unknown).
+# 按预设键构造 Font 资源，始终返回可用字体（键未知时回退到 system 预设）。
 func gpLoadFont(p_gpKey: String) -> Font:
-	var gpSpec: Dictionary = GP_FONT_PRESETS.get(p_gpKey, GP_FONT_PRESETS["arial_cjk"])
+	var gpSpec: Dictionary = GP_FONT_PRESETS.get(p_gpKey, GP_FONT_PRESETS["system"])
 	# 1) Bundled font file: host-independent, always available.
 	# 1) 内置字体文件：不依赖宿主，始终可用。
 	if gpSpec.has("res") and str(gpSpec["res"]) != "":
 		var gpRes: Resource = load(gpSpec["res"])
 		if gpRes is FontFile:
 			return gpRes as FontFile
-		# Not imported yet (very first launch before the import scan). In the editor
-		# we can build it from raw bytes; in a headless/script run we fall back to the
-		# engine default to avoid allocating a large glyph cache without a display.
-		# 尚未导入（首次启动导入扫描前）。编辑器内可用原始字节构造；无显示的
-		# headless 脚本运行则回退引擎默认，避免在无窗口环境分配大字形缓存而崩溃。
+ # Not imported yet (very first launch before the import scan). In the editor
+ # we can build it from raw bytes; in a headless/script run we fall back to the
+ # engine default to avoid allocating a large glyph cache without a display.
+ # 尚未导入（首次启动导入扫描前）。编辑器内可用原始字节构造；无显示的
+ # headless 脚本运行则回退引擎默认，避免在无窗口环境分配大字形缓存而崩溃。
 		if OS.has_feature("editor"):
 			var gpBytes: PackedByteArray = FileAccess.get_file_as_bytes(gpSpec["res"])
 			if gpBytes != null and gpBytes.size() > 0:
@@ -161,6 +158,15 @@ func gpLoadFont(p_gpKey: String) -> Font:
 	return ThemeDB.fallback_font
 
 
+# Normalize a persisted font preset key: unknown or removed keys fall back to
+# "system" so a stale config can never resurrect a bundled-font load.
+# 使陈旧配置无法再次触发内置字体加载。
+func _gpSanitizeFontKey(p_gpKey: String) -> String:
+	if GP_FONT_PRESETS.has(p_gpKey):
+		return p_gpKey
+	return "system"
+
+
 # Load settings from disk, using defaults if the file is missing.
 # 从磁盘加载设置；文件不存在时使用默认值。
 func gpLoad() -> void:
@@ -169,9 +175,9 @@ func gpLoad() -> void:
 		return
 	gpFontSize = gpCfg.get_value("ui", "font_size", 24)
 	gpLocale = gpCfg.get_value("ui", "locale", "zh")
-	gpFontKey = gpCfg.get_value("ui", "font", "arial_cjk")
+	gpFontKey = _gpSanitizeFontKey(gpCfg.get_value("ui", "font", "system"))
 	gpSymbolFontSize = gpCfg.get_value("symbol", "font_size", 16)
-	gpSymbolFontKey = gpCfg.get_value("symbol", "font", "hiragino")
+	gpSymbolFontKey = _gpSanitizeFontKey(gpCfg.get_value("symbol", "font", "system"))
 	gpAutoScale = gpCfg.get_value("ui", "auto_scale", true)
 	gpPipeTagRotate = gpCfg.get_value("pipe", "tag_rotate", true)
 	gpPipeTagFontSize = gpCfg.get_value("pipe", "tag_font_size", 0)

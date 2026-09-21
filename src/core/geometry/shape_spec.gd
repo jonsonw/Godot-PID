@@ -38,9 +38,9 @@ static func gpBuild(gpShapes: Array[GPShape]) -> Dictionary:
 					var gpSz: Vector2 = Vector2(absf(gpBp.x - gpA.x), absf(gpBp.y - gpA.y))
 					gpRects.append({"pos": [gpPos.x, gpPos.y], "size": [gpSz.x, gpSz.y]})
 			GPShape.GPKind.GP_ARC:
-				# Store center + radius + sweep angles so the arc edits faithfully (grips change
-				# radius + sweep) instead of being flattened to a sampled polyline.
-				# 存圆心 + 半径 + 扫掠角，使弧可被忠实编辑（抓取点改变半径与扫掠），而非压平为采样折线。
+ # Store center + radius + sweep angles so the arc edits faithfully (grips change
+ # radius + sweep) instead of being flattened to a sampled polyline.
+ # 存圆心 + 半径 + 扫掠角，使弧可被忠实编辑（抓取点改变半径与扫掠），而非压平为采样折线。
 				if gpS.gpPoints.size() >= 3 and gpS.gpRadius > 0.0:
 					var gpAng: Dictionary = gpS.gpArcAngles()
 					gpArcs.append({
@@ -50,7 +50,7 @@ static func gpBuild(gpShapes: Array[GPShape]) -> Dictionary:
 						"a1": gpAng["a1"],
 					})
 			_:  # GP_LINE and GP_POLYLINE both render as polylines
-				# GP_LINE 与 GP_POLYLINE 均以折线方式渲染。
+ # GP_LINE 与 GP_POLYLINE 均以折线方式渲染。
 				var gpPts: Array = []
 				var gpN: int = gpS.gpPoints.size()
 				for gpI in range(gpN):
@@ -62,9 +62,9 @@ static func gpBuild(gpShapes: Array[GPShape]) -> Dictionary:
 							gpJ = 0
 						else:
 							break
-					# Sample this segment: a curved (handle-pulled) segment becomes several Bézier
-					# samples, a straight one stays the two endpoints. The painter needs no Bézier logic.
-					# 采样该段：被拉出手柄的曲线段变为若干贝塞尔采样点，直线段仍取两端点。渲染器无需懂贝塞尔。
+ # Sample this segment: a curved (handle-pulled) segment becomes several Bézier
+ # samples, a straight one stays the two endpoints. The painter needs no Bézier logic.
+ # 采样该段：被拉出手柄的曲线段变为若干贝塞尔采样点，直线段仍取两端点。渲染器无需懂贝塞尔。
 					if _gpSegmentCurved(gpS, gpI):
 						var gpCtrl: PackedVector2Array = gpS.gpSegmentControls(gpI)
 						if gpCtrl.size() == 4:
@@ -81,14 +81,14 @@ static func gpBuild(gpShapes: Array[GPShape]) -> Dictionary:
 	return {"paths": gpPaths, "circles": gpCircles, "rects": gpRects, "arcs": gpArcs, "box": gpBox}
 
 
-# Lossless, *editable* spec: mirrors gpBuild's shape structure but emits raw polyline control
+# Lossless, *editable* spec: mirrors gpBuild()'s shape structure but emits raw polyline control
 # points + Bézier handles (never flattens curves). It is the exact inverse of gpFromSpec (which
-# calls gpRestoreHandles), so gpFromSpec(gpEditSpec(shapes)) reproduces the original editable
+# calls gpRestoreHandles()), so gpFromSpec(gpEditSpec(shapes)) reproduces the original editable
 # GPShape[] — used by the "edit an existing symbol" dialog seed where curves must stay editable.
-# Contrast gpBuild, which flattens curved polylines into sampled points for the painter.
-# 无损、可编辑的规格：结构同 gpBuild，但折线输出「原始控制点 + 贝塞尔手柄」（绝不打平曲线）。它是
-# gpFromSpec（内部调 gpRestoreHandles）的精确逆操作，故 gpFromSpec(gpEditSpec(shapes)) 能还原原始
-# 可编辑的 GPShape[] —— 用于「编辑已有图元」对话框种子，曲线必须保持可编辑。区别于 gpBuild（为
+# Contrast gpBuild(), which flattens curved polylines into sampled points for the painter.
+# 无损、可编辑的规格：结构同 gpBuild()，但折线输出「原始控制点 + 贝塞尔手柄」（绝不打平曲线）。它是
+# gpFromSpec()（内部调 gpRestoreHandles()）的精确逆操作，故 gpFromSpec(gpEditSpec(shapes)) 能还原原始
+# 可编辑的 GPShape[] —— 用于「编辑已有图元」对话框种子，曲线必须保持可编辑。区别于 gpBuild()（为
 # painter 把曲线折线打平成采样点）。
 static func gpEditSpec(gpShapes: Array[GPShape]) -> Dictionary:
 	var gpPaths: Array = []
@@ -125,13 +125,13 @@ static func gpEditSpec(gpShapes: Array[GPShape]) -> Dictionary:
 						"a1": gpAng["a1"],
 					})
 			_:  # GP_LINE / GP_POLYLINE: raw control points + handles (lossless, editable)
-				# GP_LINE / GP_POLYLINE：原始控制点 + 手柄（无损、可编辑）。
+ # GP_LINE / GP_POLYLINE：原始控制点 + 手柄（无损、可编辑）。
 				var gpPts: Array = []
 				for gpP in gpS.gpPoints:
 					gpPts.append([gpP.x, gpP.y])
 				var gpPd: Dictionary = {"pts": gpPts, "closed": gpS.gpClosed}
-				# Emit handles whenever any is pulled out (relative offsets, parallel to vertices).
-				# 只要拉出任意手柄就输出（相对偏移，与顶点平行）。
+ # Emit handles whenever any is pulled out (relative offsets, parallel to vertices).
+ # 只要拉出任意手柄就输出（相对偏移，与顶点平行）。
 				if gpS.gpHasCurve():
 					gpPd["handles"] = gpEmitHandles(gpS)
 				gpPaths.append(gpPd)
@@ -145,7 +145,7 @@ static func gpEditSpec(gpShapes: Array[GPShape]) -> Dictionary:
 # 由历史 {paths,circles,rects} 规格构建 GPShape 原语。
 # A 2-point open path maps to GP_LINE; longer / closed paths map to GP_POLYLINE, so the
 # conversion is lossless against gpBuild (a GP_LINE serializes back to a 2-point open path).
-# 两点开放路径映射为 GP_LINE；更长或闭合路径映射为 GP_POLYLINE，故相对 gpBuild 无损
+# 两点开放路径映射为 GP_LINE；更长或闭合路径映射为 GP_POLYLINE，故相对 gpBuild() 无损
 # （GP_LINE 会序列化回两点开放路径）。
 static func gpFromSpec(gpSpec: Dictionary) -> Array[GPShape]:
 	var gpOut: Array[GPShape] = []
@@ -162,9 +162,9 @@ static func gpFromSpec(gpSpec: Dictionary) -> Array[GPShape]:
 			gpNew = GPShape.gpLine(gpVecs[0], gpVecs[1])
 		else:
 			gpNew = GPShape.gpPolyline(gpVecs, bool(gpPd.get("closed", false)))
-		# Restore Bézier handles carried in the path dict (relative offsets, parallel to vertices)
-		# so a curved spline survives promotion / save without being flattened back to straight ink.
-		# 还原路径字典里携带的贝塞尔手柄（相对偏移，与顶点平行），使曲线样条经提升 / 保存后不被展平。
+ # Restore Bézier handles carried in the path dict (relative offsets, parallel to vertices)
+ # so a curved spline survives promotion / save without being flattened back to straight ink.
+ # 还原路径字典里携带的贝塞尔手柄（相对偏移，与顶点平行），使曲线样条经提升 / 保存后不被展平。
 		gpRestoreHandles(gpNew, gpPd.get("handles", []))
 		gpOut.append(gpNew)
 	for gpC in gpSpec.get("circles", []):
@@ -187,8 +187,8 @@ static func gpFromSpec(gpSpec: Dictionary) -> Array[GPShape]:
 	return gpOut
 
 
-# Build GPShape primitives from an array of GPShape dicts (gpToDict output).
-# 由 GPShape 字典数组（gpToDict 输出）构建 GPShape 原语。
+# Build GPShape primitives from an array of GPShape dicts (gpToDict() output).
+# 由 GPShape 字典数组（gpToDict() 输出）构建 GPShape 原语。
 static func gpFromDicts(gpArr: Array) -> Array[GPShape]:
 	var gpOut: Array[GPShape] = []
 	for gpD in gpArr:
@@ -202,9 +202,9 @@ static func gpFromDicts(gpArr: Array) -> Array[GPShape]:
 # next vertex has a pulled-out in-handle). Used to decide straight vs sampled rendering.
 # 离开顶点 gpI 的段是否为曲线（顶点 i 出手柄被拉出，或下一顶点入手柄被拉出）。用于判定直线/采样渲染。
 # Delegated to GPGeometry so the main canvas, the symbol editor and the symbol painter all share
-# ONE Bézier implementation (see GPGeometry.gpSegmentCurved / gpCubic / gpRenderPoints).
+# ONE Bézier implementation (see GPGeometry.gpSegmentCurved() / gpCubic() / gpRenderPoints()).
 # 委托给 GPGeometry，使主画布、符号编辑器与图元渲染器共用同一份贝塞尔实现
-# （见 GPGeometry.gpSegmentCurved / gpCubic / gpRenderPoints）。
+# （见 GPGeometry.gpSegmentCurved() / gpCubic() / gpRenderPoints()）。
 static func _gpSegmentCurved(gpS: GPShape, gpI: int) -> bool:
 	return GPGeometry.gpSegmentCurved(gpS, gpI)
 

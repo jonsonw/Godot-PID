@@ -1,6 +1,4 @@
 # ============================================================================
-# GPSymbolMovePortCommand — 移动端口（M7）
-# Move a port (M7).
 #
 # 捕获前后归一化位置，使撤销 / 重做恢复确切位置。无变化（前后一致）时返回 false，栈丢弃之。
 # Captures before/after normalized positions so undo/redo restore the exact location. Returns false

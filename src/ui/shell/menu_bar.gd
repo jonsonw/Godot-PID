@@ -98,7 +98,7 @@ const GP_MENUS: Dictionary = {
 # 保存是绘图工具里唯一绝不能让用户在菜单里翻找的动作，故在所有平台上都采用约定俗成的
 # 绑定：Ctrl+S（Win/Linux）/ Cmd+S（macOS），带 Shift 的变体为「另存为」。
 # See 持久化实现方案 §5.0 / ADR-7 (explicit save first).
-# 见「持久化实现方案」§5.0 / ADR-7（显式保存优先）。
+# 见 ADR-7（显式保存优先）。
 const GP_SHORTCUTS: Dictionary = {
 	"file_save": [KEY_S, false],
 	"file_save_as": [KEY_S, true],
@@ -110,7 +110,7 @@ const GP_SHORTCUTS: Dictionary = {
 # 构建菜单栏并连接语言刷新。
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
-	# 左内边距 + 菜单间距，提升留白精致度（spacer 非 MenuButton，_gpRebuild 不清除）。
+	# 左内边距 + 菜单间距，提升留白精致度（spacer 非 MenuButton，_gpRebuild() 不清除）。
 	add_theme_constant_override("separation", 6)
 	var gpInset: Control = Control.new()
 	gpInset.custom_minimum_size = Vector2(6.0, 0.0)
@@ -162,10 +162,10 @@ func _gpFillPopup(gpPopup: PopupMenu, gpItems: Array) -> void:
 			gpPopup.add_separator()
 			gpIdx += 1
 			continue
-		# A Dictionary entry opens a submenu. Godot requires the submenu to be a CHILD of
-		# the parent popup and referenced by its node name.
-		# Dictionary 条目展开一个子菜单。Godot 要求子菜单是父弹出菜单的**子节点**，
-		# 并以节点名引用。
+ # A Dictionary entry opens a submenu. Godot requires the submenu to be a CHILD of
+ # the parent popup and referenced by its node name.
+ # Dictionary 条目展开一个子菜单。Godot 要求子菜单是父弹出菜单的**子节点**，
+ # 并以节点名引用。
 		if gpEntry is Dictionary:
 			var gpSpec: Dictionary = gpEntry as Dictionary
 			var gpSub: PopupMenu = PopupMenu.new()
@@ -180,16 +180,16 @@ func _gpFillPopup(gpPopup: PopupMenu, gpItems: Array) -> void:
 		var gpAction: String = gpEntryArr[1]
 		gpPopup.add_item(I18n.gpTr(gpLabelKey), gpIdx)
 		gpPopup.set_item_metadata(gpIdx, gpAction)
-		# Accelerator: registered as a GLOBAL shortcut so it fires even while the popup is
-		# closed, and so Godot renders it at the right edge of the menu item — a shortcut the
-		# user cannot see is a shortcut the user will not find.
-		# 加速键：注册为**全局**快捷方式，使弹出菜单关闭时也能触发，并让 Godot 把它渲染在
-		# 菜单项右端 —— 用户看不见的快捷键，等于用户找不到的快捷键。
-		# _unhandled_input was deliberately NOT used: an input field (the inspector's property
-		# form) consumes key events first, so Ctrl+S typed while editing a property would be
-		# swallowed — exactly the moment a user is most likely to save.
-		# 刻意未用 _unhandled_input：输入框（属性面板表单）会先消费按键事件，
-		# 故编辑属性时按下的 Ctrl+S 会被吞掉 —— 而那恰恰是用户最可能想保存的时刻。
+ # Accelerator: registered as a GLOBAL shortcut so it fires even while the popup is
+ # closed, and so Godot renders it at the right edge of the menu item — a shortcut the
+ # user cannot see is a shortcut the user will not find.
+ # 加速键：注册为**全局**快捷方式，使弹出菜单关闭时也能触发，并让 Godot 把它渲染在
+ # 菜单项右端 —— 用户看不见的快捷键，等于用户找不到的快捷键。
+ # _unhandled_input was deliberately NOT used: an input field (the inspector's property
+ # form) consumes key events first, so Ctrl+S typed while editing a property would be
+ # swallowed — exactly the moment a user is most likely to save.
+ # 刻意未用 _unhandled_input：输入框（属性面板表单）会先消费按键事件，
+ # 故编辑属性时按下的 Ctrl+S 会被吞掉 —— 而那恰恰是用户最可能想保存的时刻。
 		if GP_SHORTCUTS.has(gpAction):
 			var gpShortcutSpec: Array = GP_SHORTCUTS[gpAction]
 			gpPopup.set_item_shortcut(gpIdx,
@@ -221,8 +221,8 @@ func gpSetActionEnabled(gpAction: String, gpEnabled: bool) -> void:
 		if not is_instance_valid(gpPopup):
 			continue
 		for gpI in range(gpPopup.item_count):
-			# Separators carry null metadata and never match an action id.
-			# 分隔线的 metadata 为 null，永不匹配动作 id。
+ # Separators carry null metadata and never match an action id.
+ # 分隔线的 metadata 为 null，永不匹配动作 id。
 			if gpPopup.get_item_metadata(gpI) != gpAction:
 				continue
 			gpPopup.set_item_disabled(gpI, not gpEnabled)

@@ -177,6 +177,39 @@ func gpTestSnapIntersection() -> void:
 	gpApprox(float(gpS.get("pos").y), 200.0, 0.01, "inter y is the crossing")
 
 
+# Regression nail for the P2-1 optimizer: with MANY crossings present, the AABB gates must
+# prune work without ever dropping the pair that owns the NEAREST intersection. Clicking
+# (205,195) on a 4x4 crossing grid must return (200,200), not some farther crossing.
+# P2-1 优化的回归钉：在存在大量交点时，AABB 闸门必须只剪掉无用计算，而绝不漏掉
+# 承载「最近交点」的那一对边。在 4x4 交叉网格上点击 (205,195) 必须返回 (200,200)，
+# 而不是某个更远的交点。
+func gpTestSnapIntersectionPicksNearestAmongMany() -> void:
+	var g: GPPIDGraph = GPPIDGraph.new()
+	for gpI in range(4):
+		var gpY: float = 100.0 * float(gpI)
+		var gpE: GPPIDEdge = GPPIDEdge.new()
+		gpE.gpInstanceId = "h%d" % gpI
+		gpE.gpFromRef = {"node_id": "", "port_id": "", "point": [0.0, gpY]}
+		gpE.gpToRef = {"node_id": "", "port_id": "", "point": [300.0, gpY]}
+		gpE.gpOrtho = false
+		gpE.gpRouting = []
+		g.gpAddEdge(gpE)
+	for gpI in range(4):
+		var gpX: float = 100.0 * float(gpI)
+		var gpE2: GPPIDEdge = GPPIDEdge.new()
+		gpE2.gpInstanceId = "v%d" % gpI
+		gpE2.gpFromRef = {"node_id": "", "port_id": "", "point": [gpX, 0.0]}
+		gpE2.gpToRef = {"node_id": "", "port_id": "", "point": [gpX, 300.0]}
+		gpE2.gpOrtho = false
+		gpE2.gpRouting = []
+		g.gpAddEdge(gpE2)
+	var gpS: Dictionary = GPSnapResolver.gpSnap(g, _gpNoLookup(), Vector2(205.0, 195.0), 1.0, [],
+		true, GPSnapResolver.GP_KIND_INTERSECTION)
+	gpEq(gpS.get("kind"), GPSnapResolver.GP_INTER, "a crossing is found on a dense grid")
+	gpApprox(float(gpS.get("pos").x), 200.0, 0.01, "nearest crossing x is 200, not a farther one")
+	gpApprox(float(gpS.get("pos").y), 200.0, 0.01, "nearest crossing y is 200, not a farther one")
+
+
 # When no feature is within reach, a feature mode falls back to the grid (consistent with
 # ENDPOINT mode), so the click still lands on something aligned.
 # 当附近无特征时，特征模式回落网格（与 ENDPOINT 模式一致），点击仍落在对齐的位置上。

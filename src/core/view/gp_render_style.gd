@@ -1,8 +1,8 @@
 class_name GPRenderStyle
 extends RefCounted
 # Copyright © 2026 Jonson Wang
-# 渲染样式快照值对象（架构优化 §4.2）。
-# Render-style snapshot value object (architecture optimization §4.2).
+# 渲染样式快照值对象。
+# Render-style snapshot value object.
 #
 # 取代 render 层（GPEdgeView / GPSymbolView）直接读 Settings / I18n 自动加载单例的做法：
 # 由 ui 层（GPCanvas2D）在装配时从 Settings / I18n 构造本快照并注入每个视图，语言或字号变化时

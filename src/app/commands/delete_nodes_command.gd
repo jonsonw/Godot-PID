@@ -1,15 +1,13 @@
 class_name GPDeleteNodesCommand
 extends GPCommand
-# Delete one or more nodes together with every edge touching them (M4).
-# 删除一个或多个节点及其所有关联边（M4）。
 #
 # Invertibility / 可逆性:
-#   Deletion is destructive only if you throw the objects away. This command snapshots
-#   the node objects AND the edge objects before removing them, so undo puts back the
-#   very same instances (same ids, same attributes, same routing) rather than
-#   reconstructed copies that would drift from the original.
-#   删除之所以不可逆，只因为把对象丢了。本命令在移除前快照节点对象与边对象，
-#   因此撤销放回的是同一批实例（同 id、同属性、同走线），而非会与原对象漂移的重建副本。
+# Deletion is destructive only if you throw the objects away. This command snapshots
+# the node objects AND the edge objects before removing them, so undo puts back the
+# very same instances (same ids, same attributes, same routing) rather than
+# reconstructed copies that would drift from the original.
+# 删除之所以不可逆，只因为把对象丢了。本命令在移除前快照节点对象与边对象，
+# 因此撤销放回的是同一批实例（同 id、同属性、同走线），而非会与原对象漂移的重建副本。
 
 # Ids to delete. Captured at construction so the selection can change freely afterwards.
 # 待删除的 id。构造时捕获，此后选择集可随意变化而不影响本命令。
@@ -76,7 +74,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 
 
 # Re-snapshot and delete again. The graph is intact at this point, so re-running
-# gpExecute collects the same objects.
-# 重新快照并再次删除。此刻图是完整的，因此重跑 gpExecute 会收集到相同对象。
+# gpExecute() collects the same objects.
+# 重新快照并再次删除。此刻图是完整的，因此重跑 gpExecute() 会收集到相同对象。
 func gpRedo(gpCtx: GPCommandContext) -> void:
 	gpExecute(gpCtx)

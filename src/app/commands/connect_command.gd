@@ -1,7 +1,5 @@
 class_name GPConnectCommand
 extends GPCommand
-# Create one edge between two nodes (M4).
-# 在两个节点之间创建一条连线（M4）。
 #
 # Kept deliberately narrow: it knows the two endpoint ids and nothing about ports. P&ID
 # edges in this model store endpoint NODE ids only (never a port name) so that editing a

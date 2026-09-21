@@ -20,10 +20,10 @@ static var _gpCachedDefs: Array[GPSymbolDef] = []
 static var _gpCacheValid: bool = false
 
 # Number of built-in defs currently in _gpCachedDefs; everything at or after this
-# index is a runtime-registered extra that gpRegisterDefs / gpClearRegistered patch
+# index is a runtime-registered extra that gpRegisterDefs() / gpClearRegistered() patch
 # in place (no pack reload).
 # 当前 _gpCachedDefs 中内置图元的数量；此下标及之后均为运行期注册的额外项，
-# 由 gpRegisterDefs / gpClearRegistered 原地修补（无需重载图元包）。
+# 由 gpRegisterDefs() / gpClearRegistered() 原地修补（无需重载图元包）。
 static var _gpBuiltinCount: int = 0
 
 # Directory where user-authored symbol packs are persisted across sessions.
@@ -54,10 +54,10 @@ static func gpDefaultDefs() -> Array[GPSymbolDef]:
 # Built-ins first, then user-authored defs, so custom symbols are easy to spot.
 # 先内置图元，再用户自建图元，便于识别自定义图元。
 # _gpBuiltinCount records where the extra segment begins so later in-place updates
-# (gpRegisterDefs / gpClearRegistered) can patch the SAME array instead of reloading
+# (gpRegisterDefs() / gpClearRegistered()) can patch the SAME array instead of reloading
 # every pack — that reload froze headless validation and is an O(n^2) regression in the
 # editor when several symbols are exported in a row.
-# _gpBuiltinCount 记录额外段起点，使后续原地更新（gpRegisterDefs / gpClearRegistered）
+# _gpBuiltinCount 记录额外段起点，使后续原地更新（gpRegisterDefs() / gpClearRegistered()）
 # 能就地修补同一数组而非重载所有包——该重载会冻结 headless 校验，也是编辑器里连续
 # 导出多个图元时的 O(n^2) 性能回归。
 static func _gpRebuildCache() -> void:
@@ -99,15 +99,15 @@ static func gpRegisterDefs(gpDefs: Array[GPSymbolDef]) -> void:
 	for gpD in gpDefs:
 		var gpIdx: int = _gpIndexOfId(gpD.gpId)
 		if gpIdx >= 0:
-			# Replace in BOTH the extra slot and the cached array (same identity), so
-			# every holder of the array reference transparently observes the new object.
-			# 同时替换额外槽与缓存数组（同一身份），使持有该数组引用的调用方都能
-			# 透明看到新对象。
+ # Replace in BOTH the extra slot and the cached array (same identity), so
+ # every holder of the array reference transparently observes the new object.
+ # 同时替换额外槽与缓存数组（同一身份），使持有该数组引用的调用方都能
+ # 透明看到新对象。
 			_gpExtraDefs[gpIdx] = gpD
 			_gpCachedDefs[_gpBuiltinCount + gpIdx] = gpD
 		else:
-			# Append to BOTH so every holder of the array identity sees it immediately.
-			# 同时追加到两处，使持有该数组身份的调用方立即看到。
+ # Append to BOTH so every holder of the array identity sees it immediately.
+ # 同时追加到两处，使持有该数组身份的调用方立即看到。
 			_gpExtraDefs.append(gpD)
 			_gpCachedDefs.append(gpD)
 	# The cached array is already fresh — no full pack reload needed.
@@ -146,18 +146,18 @@ static func gpDeleteDef(gpId: String) -> bool:
 		return false
 	# Remove in place from BOTH arrays, preserving their shared identity so every holder
 	# (main window, left palette, graph binder) transparently observes the removal — this
-	# is exactly the gpRegisterDefs surgery performed in reverse. Because gpDefaultDefs()
-	# hands out the SAME array identity, the toolbar's gpDefs list shrinks too.
+	# is exactly the gpRegisterDefs() surgery performed in reverse. Because gpDefaultDefs()
+	# hands out the SAME array identity, the toolbar's gpDefs() list shrinks too.
 	# 同时原地移除两数组中的元素，保持共享身份不变，使所有持有者（主窗口、左图元库、
-	# 图绑定器）都能透明看到本次删除 —— 正是 gpRegisterDefs 的逆操作。由于 gpDefaultDefs()
-	# 始终交出同一数组身份，工具栏的 gpDefs 列表也随之缩减。
+	# 图绑定器）都能透明看到本次删除 —— 正是 gpRegisterDefs() 的逆操作。由于 gpDefaultDefs()
+	# 始终交出同一数组身份，工具栏的 gpDefs() 列表也随之缩减。
 	_gpExtraDefs.remove_at(gpExtraIdx)
 	_gpCachedDefs.remove_at(_gpBuiltinCount + gpExtraIdx)
 	_gpCacheValid = true
 	# Delete the persisted user pack file (user://symbol_packs/<id>.json). A single symbol
-	# is stored as one pack file, written by GPMakeSymbolDialog._gpPersist.
+	# is stored as one pack file, written by GPMakeSymbolDialog._gpPersist().
 	# 删除持久化的用户包文件（user://symbol_packs/<id>.json）。单个图元存为一个包文件，
-	# 由 GPMakeSymbolDialog._gpPersist 写入。
+	# 由 GPMakeSymbolDialog._gpPersist() 写入。
 	var gpPath: String = "%s/%s.json" % [GP_USER_PACKS_DIR, gpId]
 	if FileAccess.file_exists(gpPath):
 		var gpErr: Error = DirAccess.remove_absolute(gpPath)
@@ -172,7 +172,7 @@ static func gpDeleteDef(gpId: String) -> bool:
 # No registration: this is the shared reader used by both gpLoadUserPacks (which
 # then registers the symbols into the live library) and gpUserPacks (which hands
 # them to the save/export path so they can be embedded into the *.pid.json file).
-# 不做注册：这是被 gpLoadUserPacks（随后把图元注册进活动图元库）与 gpUserPacks
+# 不做注册：这是被 gpLoadUserPacks()（随后把图元注册进活动图元库）与 gpUserPacks()
 #（交给存盘/导出路径、以便嵌入 *.pid.json）共用的读取器。
 static func _gpReadUserPackFiles() -> Array[GPSymbolPack]:
 	var gpPacks: Array[GPSymbolPack] = []
@@ -186,8 +186,8 @@ static func _gpReadUserPackFiles() -> Array[GPSymbolPack]:
 	gpDir.list_dir_begin()
 	var gpFileName: String = gpDir.get_next()
 	while gpFileName != "":
-		# Only consider top-level .json files (each is one exported symbol pack).
-		# 只处理顶层 .json 文件（每个文件即一个导出的图元包）。
+ # Only consider top-level .json files (each is one exported symbol pack).
+ # 只处理顶层 .json 文件（每个文件即一个导出的图元包）。
 		if not gpDir.current_is_dir() and gpFileName.ends_with(".json"):
 			var gpPath: String = "%s/%s" % [GP_USER_PACKS_DIR, gpFileName]
 			var gpText: String = _gpReadFile(gpPath)
@@ -215,9 +215,9 @@ static func gpUserPacks() -> Array[GPSymbolPack]:
 
 # Load every persisted user pack from GP_USER_PACKS_DIR back into the live library.
 # 把 GP_USER_PACKS_DIR 下所有持久化的用户图元包读回活动图元库。
-# Called once at startup (see main_window._ready) so symbols authored in a previous
+# Called once at startup (see main_window._ready()) so symbols authored in a previous
 # session re-appear in the left palette and on the canvas after a restart.
-# 启动时调用一次（见 main_window._ready），使上一会话中自建的图元在重启后
+# 启动时调用一次（见 main_window._ready()），使上一会话中自建的图元在重启后
 # 重新出现在左侧图元库与画布中。
 # Returns the number of symbol definitions restored.
 # 返回恢复出的图元定义数量。
@@ -248,9 +248,9 @@ static func _gpReadFile(gpPath: String) -> String:
 # Look up one definition by id across built-ins, packs and runtime registrations.
 # 跨内置图元、图元包与运行期注册按 id 查找单个定义。
 # Legacy-tolerant: a pre-rule id ("P_CentrifugalPump_001") is translated through
-# GPSymbolNaming.gpMigrate first, so *.pid.json files written before the L/C naming rule
+# GPSymbolNaming.gpMigrate() first, so *.pid.json files written before the L/C naming rule
 # keep resolving instead of turning every placed instance into an orphan.
-# 兼容旧 id：规则变更前的 id（"P_CentrifugalPump_001"）先经 GPSymbolNaming.gpMigrate
+# 兼容旧 id：规则变更前的 id（"P_CentrifugalPump_001"）先经 GPSymbolNaming.gpMigrate()
 # 翻译，使命名规则生效前落盘的 *.pid.json 仍能解析，而非让已放置实例全部变成孤儿。
 static func gpFindById(gpId: String) -> GPSymbolDef:
 	var gpWant: String = GPSymbolNaming.gpMigrate(gpId)
@@ -268,9 +268,9 @@ static func gpFindById(gpId: String) -> GPSymbolDef:
 	return null
 
 
-# Every id currently in the library. Feeds GPSymbolNaming.gpAllocate so a freshly
+# Every id currently in the library. Feeds GPSymbolNaming.gpAllocate() so a freshly
 # allocated id cannot collide with one that is already taken.
-# 图元库中当前的全部 id。供 GPSymbolNaming.gpAllocate 使用，使新分配的 id 不会与已有者冲突。
+# 图元库中当前的全部 id。供 GPSymbolNaming.gpAllocate() 使用，使新分配的 id 不会与已有者冲突。
 static func gpTakenIds() -> Array[String]:
 	var gpOut: Array[String] = []
 	for gpD in gpDefaultDefs():

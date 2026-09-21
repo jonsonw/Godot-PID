@@ -1,19 +1,19 @@
 class_name GPDpiWindow
 extends RefCounted
-# Window / HiDPI / multi-monitor POLICY helpers (P1-2b).
+# Window / HiDPI / multi-monitor POLICY helpers .
 #
 # Pure, headless-testable window-management decisions that main_window delegates to:
-#  - content_scale_factor must be pinned to 1.0 (Godot 4 on macOS already reports window geometry
-#    in LOGICAL POINTS and renders the backing store at the display's native pixel ratio; setting
-#    content_scale_factor = screen scale DOUBLE-COUNTS the Retina scale and clips the UI).
-#  - maximize only when the window is not already maximized / fullscreen.
-#  - cross-screen change detection given the last screen index.
+# - content_scale_factor must be pinned to 1.0 (Godot 4 on macOS already reports window geometry
+# in LOGICAL POINTS and renders the backing store at the display's native pixel ratio; setting
+# content_scale_factor = screen scale DOUBLE-COUNTS the Retina scale and clips the UI).
+# - maximize only when the window is not already maximized / fullscreen.
+# - cross-screen change detection given the last screen index.
 #
 # The module takes a Window purely as a parameter (it never instantiates one), so it stays free of
 # scene/UI plumbing. The UI-side side effects (font re-apply, split re-apply, deferred layout,
 # last-screen tracking) remain in the caller.
 #
-# 窗口 / HiDPI / 多显示器「策略」辅助（P1-2b）。
+# 窗口 / HiDPI / 多显示器「策略」辅助。
 # 纯窗口管理决策、可 headless 单测，由 main_window 委托：csf 须钉 1.0、仅在未最大化/全屏时最大化、
 # 给定上一屏幕号判断是否跨屏。模块把 Window 仅作参数接收（不实例化），故不依赖场景/UI 布线；
 # 字体重刷、分隔重排、延迟布局、上一屏记录等 UI 副作用仍在调用方。

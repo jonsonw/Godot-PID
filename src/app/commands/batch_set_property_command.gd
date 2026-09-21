@@ -1,22 +1,20 @@
 class_name GPBatchSetPropertyCommand
 extends GPCommand
 # Copyright © 2026 Jonson Wang
-# Apply ONE edit to a whole selection as a SINGLE undo step (M11).
-# 把一次编辑作用到整个选择集，且只产生**一个**撤销步（M11）。
 #
 # Why one command and not N / 为何是一条命令而非 N 条：
-#   Ctrl+Z after a batch edit must undo the whole selection at once. Pushing one command per
-#   node would make the user press Ctrl+Z forty times — and, worse, leave the sheet in forty
-#   intermediate states that never existed on screen.
-#   批量编辑后按一次 Ctrl+Z 必须**整体**撤销。每个节点压一条命令会让用户按四十次 Ctrl+Z
-#   —— 更糟的是会留下四十个屏幕上从未存在过的中间状态。
+# Ctrl+Z after a batch edit must undo the whole selection at once. Pushing one command per
+# node would make the user press Ctrl+Z forty times — and, worse, leave the sheet in forty
+# intermediate states that never existed on screen.
+# 批量编辑后按一次 Ctrl+Z 必须**整体**撤销。每个节点压一条命令会让用户按四十次 Ctrl+Z
+# —— 更糟的是会留下四十个屏幕上从未存在过的中间状态。
 #
 # Deliberate refusal / 刻意拒绝：
-#   "tag" is NOT batchable. Tags are unique project-wide, so writing one tag onto forty
-#   instances would create forty duplicates; the panel disables the tag field in batch mode and
-#   this command refuses it as a second line of defence.
-#   "tag" **不可**批量。位号工程级唯一，把一个位号写到四十个实例上就造出四十个重复；
-#   面板在批量模式下禁用位号字段，本命令再拒一次作为第二道防线。
+# "tag" is NOT batchable. Tags are unique project-wide, so writing one tag onto forty
+# instances would create forty duplicates; the panel disables the tag field in batch mode and
+# this command refuses it as a second line of defence.
+# "tag" **不可**批量。位号工程级唯一，把一个位号写到四十个实例上就造出四十个重复；
+# 面板在批量模式下禁用位号字段，本命令再拒一次作为第二道防线。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -53,9 +51,9 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	_gpOld = []
 	if _gpNewVal is String and str(_gpNewVal) == "" and _gpKey != GP_KEY_ANCHOR \
 			and not _gpKey.begins_with(GP_NAME_PREFIX):
-		# Empty means "reset to the library default" — only instances that actually carry a
-		# value are affected.
-		# 空意为「复位到库默认值」—— 只有确实带值的实例受影响。
+ # Empty means "reset to the library default" — only instances that actually carry a
+ # value are affected.
+ # 空意为「复位到库默认值」—— 只有确实带值的实例受影响。
 		for gpId in _gpIds:
 			var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(gpId)
 			if gpN == null or not gpN.gpProps.has(_gpKey):

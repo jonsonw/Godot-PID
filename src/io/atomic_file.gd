@@ -7,20 +7,20 @@ extends RefCounted
 # writing straight into the target path (FileAccess.open(WRITE) + store_string) leaves a
 # TRUNCATED file whenever the process dies mid-write — power loss, a crash, a force quit.
 # The archive is then unparseable and the drawing is gone. The only reliable fix is to never
-# write in place: build a complete temporary file, then rename it over the target. rename()
+# write in place: build a complete temporary file, then rename it over the target. rename
 # within one filesystem is atomic, so at every instant the target path holds either the old
 # complete file or the new complete file — never a half-written one.
 # 直接写目标路径（FileAccess.open(WRITE) + store_string）在写入途中进程死亡时会留下
 # **被截断的文件** —— 断电、崩溃、强制退出皆然。存档随即无法解析，图纸就此丢失。
 # 唯一可靠的修正是「绝不原地写」：先写出一个完整的临时文件，再 rename 覆盖目标。
-# 同一文件系统内的 rename() 是原子的，因而目标路径在任意时刻都持有「旧的完整文件」
+# 同一文件系统内的 rename 是原子的，因而目标路径在任意时刻都持有「旧的完整文件」
 # 或「新的完整文件」，绝不可能是写了一半的东西。
 #
 # LAYER RULE / 分层约束：this is the ONLY place allowed to touch FileAccess / DirAccess for
 # archives. Everything above it (GPProjectIO, export, session services) talks in GPIOResult.
 # 本类是唯一被允许为存档触碰 FileAccess / DirAccess 的地方。其上的一切
 # （GPProjectIO、导出、会话服务）一律用 GPIOResult 交流。
-# See 架构/交付/持久化实现方案_2026-09-11.md §5.3 and ADR-4.
+# See 架构/交付/持久化实现方案_.md §5.3 and ADR-4.
 # 见「持久化实现方案」§5.3 与 ADR-4。
 
 
@@ -88,8 +88,8 @@ static func gpWriteAtomic(gpPath: String, gpText: String) -> GPIOResult:
 	# ---- 4) rename the temp file into place (the atomic step) ----
 	# ---- 4) 把临时文件 rename 到位（原子那一步）----
 	if DirAccess.rename_absolute(gpTmpPath, gpPath) != OK:
-		# Roll back: put the old file back, then drop the temp file.
-		# 回滚：先把旧文件放回去，再删掉临时文件。
+ # Roll back: put the old file back, then drop the temp file.
+ # 回滚：先把旧文件放回去，再删掉临时文件。
 		if gpHadTarget and FileAccess.file_exists(gpBakPath):
 			DirAccess.rename_absolute(gpBakPath, gpPath)
 		_gpRemoveFile(gpTmpPath)

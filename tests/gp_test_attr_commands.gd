@@ -1,7 +1,7 @@
 extends "res://tests/gp_test.gd"
-# M11: every attribute edit is now an undoable command — tag / name / property / label anchor,
+# every attribute edit is now an undoable command — tag / name / property / label anchor,
 # plus the single-step batch form.
-# M11：每个属性编辑现在都是可撤销的命令 —— 位号 / 名称 / 属性 / 标签锚点，
+# 每个属性编辑现在都是可撤销的命令 —— 位号 / 名称 / 属性 / 标签锚点，
 # 以及「一个撤销步」的批量形式。
 #
 # Why this matters / 为何重要：
