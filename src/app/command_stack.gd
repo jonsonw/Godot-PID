@@ -1,22 +1,22 @@
 class_name GPCommandStack
 extends RefCounted
-# Undo/redo history (M4 of the modularisation plan).
+# Undo/redo history .
 # 撤销 / 重做历史（模块化方案 M4）。
 #
 # Scope / 范围:
-#   Deliberately a plain RefCounted, NOT a Node and NOT Godot's built-in UndoRedo.
-#   Godot's UndoRedo is node-oriented and wants live object references to call methods
-#   on; our commands are value objects that invert themselves, which is what makes the
-#   whole history testable without booting a scene tree.
-#   刻意做成普通 RefCounted，而非 Node，也不用 Godot 内置 UndoRedo。
-#   内置 UndoRedo 面向节点、要求持有活对象引用来回调方法；而我们的命令是自我求逆的
-#   值对象，这使整条历史无需启动场景树即可测试。
+# Deliberately a plain RefCounted, NOT a Node and NOT Godot's built-in UndoRedo.
+# Godot's UndoRedo is node-oriented and wants live object references to call methods
+# on; our commands are value objects that invert themselves, which is what makes the
+# whole history testable without booting a scene tree.
+# 刻意做成普通 RefCounted，而非 Node，也不用 Godot 内置 UndoRedo。
+# 内置 UndoRedo 面向节点、要求持有活对象引用来回调方法；而我们的命令是自我求逆的
+# 值对象，这使整条历史无需启动场景树即可测试。
 #
 # Rule / 规则:
-#   Any new gpDo() clears the redo stack — that is the standard "a fresh edit invalidates
-#   the redo branch" behaviour users expect from every editor.
-#   任何一次 gpDo() 都会清空重做栈——这是用户在所有编辑器里都熟悉的
-#   「新编辑使重做分支失效」行为。
+# Any new gpDo() clears the redo stack — that is the standard "a fresh edit invalidates
+# the redo branch" behaviour users expect from every editor.
+# 任何一次 gpDo() 都会清空重做栈——这是用户在所有编辑器里都熟悉的
+# 「新编辑使重做分支失效」行为。
 
 # Hard cap on retained undo steps. Keeps a long session from growing without bound;
 # the oldest step is dropped first.

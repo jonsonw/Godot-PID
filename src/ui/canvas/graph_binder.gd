@@ -25,9 +25,9 @@ var gpWorldRoot: Node2D = null
 # 由所属画布推送的当前缩放。连线视图需要它来把线宽、虚线、箭头与光晕保持在屏幕空间下限之上。
 var gpZoom: float = 1.0
 
-# Injected render-style snapshot (架构优化 §4.2). Passed to every view so the render layer
+# Injected render-style snapshot. Passed to every view so the render layer
 # stays autoload-free; rebuilt and re-pushed by the owning canvas on locale / font change.
-# 注入的渲染样式快照（架构优化 §4.2）。传给每个视图，使 render 层不依赖 autoload；
+# 注入的渲染样式快照。传给每个视图，使 render 层不依赖 autoload；
 # 语言 / 字号变化时由所属画布重建并重推。
 var gpStyle: GPRenderStyle = null
 
@@ -44,9 +44,9 @@ func gpDefFor(gpTypeId: String) -> GPSymbolDef:
 			return gpD
 	return null
 
-# Callable wrapper of gpDefFor, handed to GPEdgeView so it can resolve port positions without
+# Callable wrapper of gpDefFor(), handed to GPEdgeView so it can resolve port positions without
 # knowing the binder or the library.
-# gpDefFor 的 Callable 包装，交给 GPEdgeView，使其无需知晓绑定器或图元库即可解析端口位置。
+# gpDefFor() 的 Callable 包装，交给 GPEdgeView，使其无需知晓绑定器或图元库即可解析端口位置。
 func _gpLookupDef(gpTypeId: String) -> GPSymbolDef:
 	return gpDefFor(gpTypeId)
 
@@ -101,8 +101,8 @@ func gpSync(gpG: GPPIDGraph, gpD: Array[GPSymbolDef], gpSelection: Array[String]
 	_gpSyncSymbolViews(gpSelection, gpConnectFrom)
 	_gpSyncEdgeViews(gpSelection, gpEdgeSelection, gpEditingEdgeId)
 
-# Incrementally sync symbol view nodes with gpGraph.gpNodes.
-# 增量同步图元视图节点与 gpGraph.gpNodes。
+# Incrementally sync symbol view nodes with gpGraph.gpNodes().
+# 增量同步图元视图节点与 gpGraph.gpNodes()。
 func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> void:
 	var gpFresh: Dictionary = {}
 	for gpN in gpGraph.gpNodes:
@@ -111,35 +111,35 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
 			continue
 		var gpV: GPSymbolView = null
 		if _gpSymbolViews.has(gpId):
-			# Reuse existing view and rebind ALL authoritative data.
-			# 复用已有视图并重绑全部权威数据。
+ # Reuse existing view and rebind ALL authoritative data.
+ # 复用已有视图并重绑全部权威数据。
 			gpV = _gpSymbolViews[gpId] as GPSymbolView
 			gpV.gpNode = gpN
 			gpV.gpNodeId = gpId
-			# Rebind the definition too. When a symbol is re-exported, gpRegisterDefs()
-			# replaces the GPSymbolDef object behind the SAME id, so a view that keeps
-			# its old reference would silently keep painting the stale geometry.
-			# This single line is what makes "overwrite a symbol -> every placed
-			# instance refreshes" actually work.
-			# 同时重绑定义。重新导出图元时 gpRegisterDefs() 会替换同一 id 背后的
-			# GPSymbolDef 对象，若视图保留旧引用，就会静默地继续绘制过期几何。
-			# 这一行正是「覆盖图元 → 所有已放置实例同步刷新」得以生效的关键。
+ # Rebind the definition too. When a symbol is re-exported, gpRegisterDefs()
+ # replaces the GPSymbolDef object behind the SAME id, so a view that keeps
+ # its old reference would silently keep painting the stale geometry.
+ # This single line is what makes "overwrite a symbol -> every placed
+ # instance refreshes" actually work.
+ # 同时重绑定义。重新导出图元时 gpRegisterDefs() 会替换同一 id 背后的
+ # GPSymbolDef 对象，若视图保留旧引用，就会静默地继续绘制过期几何。
+ # 这一行正是「覆盖图元 → 所有已放置实例同步刷新」得以生效的关键。
 			gpV.gpDef = gpDefFor(gpN.gpSymbolId)
 			gpV.gpUpdateTransform()
-			# The definition drives the painted geometry, so a rebind needs a repaint of BOTH
-			# layers (label on the view, glyph + ports on the body child).
-			# 定义驱动所绘几何，故重绑后必须重绘「两层」（视图上的标签，body 子节点上的字形与端口）。
+ # The definition drives the painted geometry, so a rebind needs a repaint of BOTH
+ # layers (label on the view, glyph + ports on the body child).
+ # 定义驱动所绘几何，故重绑后必须重绘「两层」（视图上的标签，body 子节点上的字形与端口）。
 			gpV.gpRepaint()
 		else:
-			# Create a new view for this node.
-			# 为该节点创建新视图。
+ # Create a new view for this node.
+ # 为该节点创建新视图。
 			gpV = GPSymbolView.new()
 			var gpDef: GPSymbolDef = gpDefFor(gpN.gpSymbolId)
 			gpV.gpInit(gpN, gpDef)
 			gpV.gpStyle = gpStyle
 			gpWorldRoot.add_child(gpV)
-		# Multi-select: every id in the selection set lights up, not just the primary one.
-		# 多选：选择集中的每个 id 都会高亮，而不只是主选项。
+ # Multi-select: every id in the selection set lights up, not just the primary one.
+ # 多选：选择集中的每个 id 都会高亮，而不只是主选项。
 		gpV.gpSetSelected(gpSelection.has(gpId))
 		gpV.gpSetConnectSource(gpId == gpConnectFrom)
 		gpFresh[gpId] = gpV
@@ -165,23 +165,23 @@ func _gpSyncEdgeViews(gpSelection: Array[String], gpEdgeSelection: Array[String]
 			continue
 		var gpV: GPEdgeView = null
 		if _gpEdgeViews.has(gpId):
-			# Reuse existing view and update its bound data.
-			# 复用已有视图并更新绑定数据。
+ # Reuse existing view and update its bound data.
+ # 复用已有视图并更新绑定数据。
 			gpV = _gpEdgeViews[gpId] as GPEdgeView
 			gpV.gpEdge = gpE
 			gpV.queue_redraw()
 		else:
-			# Create a new view for this edge.
-			# 为该连线创建新视图。
+ # Create a new view for this edge.
+ # 为该连线创建新视图。
 			gpV = GPEdgeView.new()
 			gpV.gpInit(gpE, gpGraph, Callable(self, "_gpLookupDef"))
 			gpV.gpStyle = gpStyle
 			gpWorldRoot.add_child(gpV)
-		# Edge ids live in their OWN selection array (gpEdgeSel), so selection must be tested against
-		# BOTH the node set and the edge set — otherwise an edge's halo never lights up and the user
-		# only sees the grip triangles. Edit state is set when this edge is the one being dragged.
-		# 边 id 存于独立的选择数组（gpEdgeSel），故需同时比对节点集与边集 —— 否则边的光晕永远不亮，
-		# 用户只会看到抓取点三角。编辑态在本边正是被拖拽的那条时置真。
+ # Edge ids live in their OWN selection array (gpEdgeSel), so selection must be tested against
+ # BOTH the node set and the edge set — otherwise an edge's halo never lights up and the user
+ # only sees the grip triangles. Edit state is set when this edge is the one being dragged.
+ # 边 id 存于独立的选择数组（gpEdgeSel），故需同时比对节点集与边集 —— 否则边的光晕永远不亮，
+ # 用户只会看到抓取点三角。编辑态在本边正是被拖拽的那条时置真。
 		var gpIsSel: bool = gpSelection.has(gpId) or gpEdgeSelection.has(gpId)
 		gpV.gpSetView(gpZoom, gpIsSel, false, gpId == gpEditingEdgeId)
 		gpFresh[gpId] = gpV
@@ -207,7 +207,45 @@ func gpRefreshEdges() -> void:
 		var gpV: GPEdgeView = _gpEdgeViews[gpId] as GPEdgeView
 		gpV.queue_redraw()
 
-# 架构优化 §4.2：重新注入渲染样式快照（语言 / 字号变化时由画布调用）。
+
+# Redraw only the edge views whose ends touch one of the given nodes, and return their ids.
+# 仅重绘「端口触碰给定节点集中任一节点」的连线视图，并返回其 id 列表。
+#
+# Why this exists / 为何需要它：
+# An edge's endpoints are resolved LIVE from node positions inside GPEdgeView._draw(), so a node
+# that moves during a drag must redraw its own pipes too — otherwise the pipe ends lag behind the
+# symbol and then snap to the final position only when the drag commits (gpGraphChanged on release).
+# 连线端点是在 GPEdgeView._draw() 内依节点位置实时解析的，故拖拽中被移动的图元必须让其管线
+# 同步重绘，否则管线端点会滞后于图元、直到拖拽提交（释放时的 gpGraphChanged）才突跳到位。
+# Redrawing the whole sheet every frame would work but is wasteful; this touches only the affected
+# edges. Returning the id list lets callers assert / observe exactly which edges were marked.
+# 每帧全图重绘虽可行但浪费，本函数只触碰受影响的边。返回 id 列表便于调用方精确断言 / 观察。
+func gpRedrawEdgesForNodes(gpNodeIds: Array[String]) -> Array[String]:
+	var gpOut: Array[String] = []
+	if gpNodeIds.is_empty() or _gpEdgeViews.is_empty():
+		return gpOut
+	var gpTouched: Dictionary = {}
+	for gpId in gpNodeIds:
+		gpTouched[gpId] = true
+	for gpE in gpGraph.gpEdges:
+		if gpE == null:
+			continue
+		var gpFrom: String = str((gpE.gpFromRef if gpE.gpFromRef != null else {}).get("node_id", ""))
+		var gpTo: String = str((gpE.gpToRef if gpE.gpToRef != null else {}).get("node_id", ""))
+		if gpTouched.has(gpFrom) or gpTouched.has(gpTo):
+			var gpV: GPEdgeView = _gpEdgeViews.get(gpE.gpInstanceId, null) as GPEdgeView
+			if gpV != null:
+ # Synchronous: push the live polyline into the GPU ink line now, so the
+ # endpoint follows the node this very frame with no redraw-timing dependency.
+ # 同步半边：立刻把实时折线写入 GPU 墨线，使端点当帧即跟随图元，不依赖重绘时序。
+				gpV.gpApplyGeometry()
+ # Deferred: also request _draw() for the CPU (selected-edge) path.
+ # 延迟半边：同时请求 _draw()，覆盖 CPU（选中边）路径。
+				gpV.queue_redraw()
+				gpOut.append(gpE.gpInstanceId)
+	return gpOut
+
+# 重新注入渲染样式快照（语言 / 字号变化时由画布调用）。
 # 把新快照写入所有已有视图并显式请求重绘，使切换语言后旧视图不残留旧字号 / 文字。
 # Re-push a fresh render-style snapshot (called by the canvas on locale / font change):
 # write it into every existing view and request a repaint so stale views never linger.

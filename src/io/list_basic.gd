@@ -2,14 +2,12 @@ class_name GPListBasic
 extends RefCounted
 # Copyright © 2026 Jonson Wang
 # Bill-of-materials style lists: one CSV per symbol category, carrying TAG + NAME + the
-# effective value of every property the library declares (M13).
-# 物料清单式清单：每个图元类别一张 CSV，含位号 + 名称 + 库声明的每个属性的**有效值**（M13）。
 #
 # Why TAG is the row key / 为何以位号作为行键：
-#   A list is a DELIVERABLE that工艺 / DCS 点表 / 现场标牌 read, and those documents speak in
-#   tags — never in uids. Re-import therefore matches rows back to nodes BY TAG.
-#   清单是给工艺 / DCS 点表 / 现场标牌读的**交付物**，那些文档只认位号、不认 uid，
-#   故回灌按**位号**把行匹配回节点。
+# A list is a DELIVERABLE that工艺 / DCS 点表 / 现场标牌 read, and those documents speak in
+# tags — never in uids. Re-import therefore matches rows back to nodes BY TAG.
+# 清单是给工艺 / DCS 点表 / 现场标牌读的**交付物**，那些文档只认位号、不认 uid，
+# 故回灌按**位号**把行匹配回节点。
 #
 # Every read goes through GPPropertyResolver — never node.gpProps directly — so an exported
 # value is byte-for-byte what the inspector and W10 validation show.
@@ -17,13 +15,11 @@ extends RefCounted
 # 与属性面板、W10 校验所见逐字节一致。
 #
 # ROUND-TRIP RULE (the subtle one) / 往返规则（最关键的一条）：
-#   gpProps.has(key) is what separates "never touched" from "explicitly set to the default"
-#   (M8). A naive re-import would write EVERY column and destroy that distinction, so
-#   gpApplyList only writes a cell when it actually DIFFERS from the current effective value
-#   — and ERASES the key when the cell is blank ("follow the library default again").
-#   gpProps.has(key) 区分「从未动过」与「显式设为默认值」（M8）。朴素的回灌会把每一列都写回去，
-#   从而摧毁该区分，故 gpApplyList 仅在单元格与当前有效值**确有差异**时才写入；
-#   单元格为空则**删除该键**（意为「重新跟随库默认」）。
+# gpProps.has(key) is what separates "never touched" from "explicitly set to the default"
+# gpApplyList() only writes a cell when it actually DIFFERS from the current effective value
+# — and ERASES the key when the cell is blank ("follow the library default again").
+# 从而摧毁该区分，故 gpApplyList() 仅在单元格与当前有效值**确有差异**时才写入；
+# 单元格为空则**删除该键**（意为「重新跟随库默认」）。
 #
 # Coding rule: every variable declares its type explicitly; all functions are static (pure).
 # 编码规范：所有变量均显式声明类型；函数全部为静态（纯函数）。
@@ -40,11 +36,11 @@ const GP_LIST_EXT: String = ".csv"
 # ==================== building / 构建 ====================
 
 # One EXPORT row per node of gpCategory: tag + name + every effective property.
-# Values are rendered for text (see _gpValueText) — these rows feed the CSV, not the model.
+# Values are rendered for text (see _gpValueText()) — these rows feed the CSV, not the model.
 # 某类别每个节点一行**导出行**：位号 + 名称 + 全部有效属性。取值已渲染为文本
-# （见 _gpValueText）—— 这些行供 CSV 使用，不是模型对象。
-# gpDefs falls back to the live symbol library when omitted.
-# 省略 gpDefs 时回落到活动图元库。
+# （见 _gpValueText()）—— 这些行供 CSV 使用，不是模型对象。
+# gpDefs() falls back to the live symbol library when omitted.
+# 省略 gpDefs() 时回落到活动图元库。
 static func gpBuildList(gpGraph: GPPIDGraph, gpCategory: String,
 		gpDefs: Array[GPSymbolDef] = []) -> Array[Dictionary]:
 	var gpOut: Array[Dictionary] = []
@@ -55,9 +51,9 @@ static func gpBuildList(gpGraph: GPPIDGraph, gpCategory: String,
 		if gpN == null:
 			continue
 		var gpDef: GPSymbolDef = GPPropertyResolver.gpDefById(gpAll, gpN.gpSymbolId)
-		# A node whose symbol vanished from the library has no schema to export — skip it
-		# rather than emitting a row that cannot be matched back.
-		# 图元已从库中消失的节点没有可导出的 schema —— 跳过，而非产出无法回灌的行。
+ # A node whose symbol vanished from the library has no schema to export — skip it
+ # rather than emitting a row that cannot be matched back.
+ # 图元已从库中消失的节点没有可导出的 schema —— 跳过，而非产出无法回灌的行。
 		if gpDef == null or gpDef.gpCategory != gpCategory:
 			continue
 		gpOut.append(_gpRow(gpN, gpDef))
@@ -133,8 +129,8 @@ static func gpColumns(gpRows: Array[Dictionary]) -> Array[String]:
 # 把行渲染为 CSV（表头行 + 每行一行）。
 static func gpListToCsv(gpRows: Array[Dictionary]) -> String:
 	var gpCols: Array[String] = gpColumns(gpRows)
-	# Neither Array[String] nor PackedStringArray offers join() in Godot 4 — concatenate by hand.
-	# Godot 4 中 Array[String] 与 PackedStringArray 都没有 join() —— 手工拼接。
+	# Neither Array[String] nor PackedStringArray offers join in Godot 4 — concatenate by hand.
+	# Godot 4 中 Array[String] 与 PackedStringArray 都没有 join —— 手工拼接。
 	var gpOut: String = ""
 	for gpI in range(gpCols.size()):
 		if gpI > 0:
@@ -158,10 +154,10 @@ static func _gpCellText(gpRow: Dictionary, gpKey: String) -> String:
 	return str(gpRow[gpKey])
 
 
-# Parse CSV back into rows (inverse of gpListToCsv). Every value is a String — coercion to the
-# declared kind happens in gpApplyList, which is the only place that knows the schema.
-# 把 CSV 解析回行（gpListToCsv 的逆操作）。每个取值都是字符串 —— 到声明类型的强制转换
-# 发生在 gpApplyList，因为只有它知道 schema。
+# Parse CSV back into rows (inverse of gpListToCsv()). Every value is a String — coercion to the
+# declared kind happens in gpApplyList(), which is the only place that knows the schema.
+# 把 CSV 解析回行（gpListToCsv() 的逆操作）。每个取值都是字符串 —— 到声明类型的强制转换
+# 发生在 gpApplyList()，因为只有它知道 schema。
 static func gpCsvToList(gpText: String) -> Array[Dictionary]:
 	var gpOut: Array[Dictionary] = []
 	var gpLines: PackedStringArray = gpText.split("\n", false)
@@ -171,9 +167,9 @@ static func gpCsvToList(gpText: String) -> Array[Dictionary]:
 	for gpI in range(1, gpLines.size()):
 		var gpCells: Array[String] = _gpSplitLine(_gpStripCr(gpLines[gpI]))
 		var gpRow: Dictionary = {}
-		# A short line keeps the trailing columns blank instead of dropping them — a
-		# hand-edited CSV must not silently truncate a row.
-		# 短行把尾部列留空而非丢弃 —— 手工编辑过的 CSV 不该静默截断一行。
+ # A short line keeps the trailing columns blank instead of dropping them — a
+ # hand-edited CSV must not silently truncate a row.
+ # 短行把尾部列留空而非丢弃 —— 手工编辑过的 CSV 不该静默截断一行。
 		for gpJ in range(gpHeader.size()):
 			gpRow[gpHeader[gpJ]] = gpCells[gpJ] if gpJ < gpCells.size() else ""
 		gpOut.append(gpRow)
@@ -191,7 +187,7 @@ static func _gpSplitLine(gpLine: String) -> Array[String]:
 		var gpC: String = gpLine.substr(gpI, 1)
 		if gpInQuotes:
 			if gpC == "\"":
-				# "" inside quotes is one literal quote. / 引号内的 "" 是一个字面引号。
+ # "" inside quotes is one literal quote. / 引号内的 "" 是一个字面引号。
 				if gpI + 1 < gpLine.length() and gpLine.substr(gpI + 1, 1) == "\"":
 					gpCur += "\""
 					gpI += 1
@@ -246,17 +242,17 @@ static func gpExportLists(gpGraph: GPPIDGraph, gpDir: String,
 # Write imported rows back onto the graph, MATCHED BY TAG. Returns how many nodes changed.
 # 把导入的行写回图，**按位号匹配**。返回发生变化的节点数。
 # Rules / 规则：
-#  - the tag column is the KEY and is never written: renumbering belongs to the renumber
-#    command, which alone keeps the project tag registry consistent;
-#    位号列是**键**且绝不写回：重编号属于重编号命令，只有它能保持项目位号注册表一致；
-#  - the name column writes into the fallback locale when non-empty;
-#    名称列非空时写入回落语种；
-#  - a property column is written ONLY when the node's own symbol declares that key, and is
-#    coerced to the declared kind — a stray column can never invent a property;
-#    属性列仅在节点自身图元声明了该键时才写入，并强制转换为声明类型 —— 多余列绝不会凭空造属性；
-#  - a BLANK cell ERASES the key, meaning "follow the library default again" (see the
-#    round-trip rule in this file's header).
-#    空单元格**删除**该键，意为「重新跟随库默认」（见本文件头部的往返规则）。
+# - the tag column is the KEY and is never written: renumbering belongs to the renumber
+# command, which alone keeps the project tag registry consistent;
+# 位号列是**键**且绝不写回：重编号属于重编号命令，只有它能保持项目位号注册表一致；
+# - the name column writes into the fallback locale when non-empty;
+# 名称列非空时写入回落语种；
+# - a property column is written ONLY when the node's own symbol declares that key, and is
+# coerced to the declared kind — a stray column can never invent a property;
+# 属性列仅在节点自身图元声明了该键时才写入，并强制转换为声明类型 —— 多余列绝不会凭空造属性；
+# - a BLANK cell ERASES the key, meaning "follow the library default again" (see the
+# round-trip rule in this file's header).
+# 空单元格**删除**该键，意为「重新跟随库默认」（见本文件头部的往返规则）。
 static func gpApplyList(gpGraph: GPPIDGraph, gpRows: Array[Dictionary],
 		gpDefs: Array[GPSymbolDef] = []) -> int:
 	if gpGraph == null:
@@ -297,11 +293,11 @@ static func _gpApplyRow(gpNode: GPPIDNode, gpRow: Dictionary, gpDef: GPSymbolDef
 	var gpBeforeNames: int = gpNode.gpNames.hash()
 	var gpNameIn: String = str(gpRow.get(GP_COL_NAME, "")).strip_edges()
 	if gpNameIn != "" and gpDef != null:
-		# Only write on a real difference. The export falls back to the library display name,
-		# so even a never-named instance carries text in the name column — writing it back
-		# would fabricate a name out of the fallback and count as a change.
-		# 仅在确有差异时写入。导出会回落到库显示名，故连从未命名的实例在名称列里也有文本 ——
-		# 原样写回等于凭回落值凭空造出一个名称，还会被计为一次变更。
+ # Only write on a real difference. The export falls back to the library display name,
+ # so even a never-named instance carries text in the name column — writing it back
+ # would fabricate a name out of the fallback and count as a change.
+ # 仅在确有差异时写入。导出会回落到库显示名，故连从未命名的实例在名称列里也有文本 ——
+ # 原样写回等于凭回落值凭空造出一个名称，还会被计为一次变更。
 		var gpCurrentName: String = GPPropertyResolver.gpDisplayName(
 			gpNode.gpNames, gpDef.gpDisplayName, GPPropertyResolver.GP_FALLBACK_LOCALE, gpNode.gpTag)
 		if gpNameIn != gpCurrentName:
@@ -316,8 +312,8 @@ static func _gpApplyRow(gpNode: GPPIDNode, gpRow: Dictionary, gpDef: GPSymbolDef
 		var gpCurrent: Variant = GPPropertyResolver.gpEffectiveValue(
 			gpDef.gpSchema, gpNode.gpProps, gpK)
 		if gpRaw == "":
-			# Cleared in Excel — drop the override and follow the library default again.
-			# 在 Excel 里被清空 —— 删除覆盖，重新跟随库默认。
+ # Cleared in Excel — drop the override and follow the library default again.
+ # 在 Excel 里被清空 —— 删除覆盖，重新跟随库默认。
 			if gpNode.gpProps.has(gpK):
 				gpNode.gpProps.erase(gpK)
 			continue
@@ -330,10 +326,10 @@ static func _gpApplyRow(gpNode: GPPIDNode, gpRow: Dictionary, gpDef: GPSymbolDef
 			gpNode.gpProps[gpK] = gpMl
 			continue
 		var gpCoerced: Variant = gpField.gpCoerce(gpRaw)
-		# Only write on a real difference: re-importing an untouched export must leave
-		# gpProps exactly as it was, or "never touched" would be lost (see header).
-		# 仅在确有差异时写入：回灌一份未改动的导出必须让 gpProps 原封不动，
-		# 否则「从未动过」这一信息就丢了（见文件头部）。
+ # Only write on a real difference: re-importing an untouched export must leave
+ # gpProps exactly as it was, or "never touched" would be lost (see header).
+ # 仅在确有差异时写入：回灌一份未改动的导出必须让 gpProps 原封不动，
+ # 否则「从未动过」这一信息就丢了（见文件头部）。
 		if gpCoerced != gpCurrent:
 			gpNode.gpProps[gpK] = gpCoerced
 	return gpNode.gpProps.hash() != gpBefore or gpNode.gpNames.hash() != gpBeforeNames

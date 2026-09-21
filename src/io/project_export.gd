@@ -3,9 +3,9 @@ extends RefCounted
 
 # Build and write the three export containers (ADR-2: one format, three `kind` values).
 # 构建并写出三种导出容器（ADR-2：一种格式、三种 `kind` 取值）。
-#   project -> sheets + library + config + tag_rules (the deliverable / 交付物)
-#   library -> library only (symbol distribution / 图元库分发)
-#   config   -> config + tag_rules (template reuse / 模板复用)
+# project -> sheets + library + config + tag_rules (the deliverable / 交付物)
+# library -> library only (symbol distribution / 图元库分发)
+# config -> config + tag_rules (template reuse / 模板复用)
 #
 # EXPORT IS NOT SAVE-AS / 「导出」不是「另存为」：
 # exporting never touches the in-memory graph and never reassigns gpCurrentPath. Save-as
@@ -16,8 +16,6 @@ extends RefCounted
 # See 持久化实现方案 §8 (导出流程) / 见「持久化实现方案」§8。
 # Coding rule: every variable must declare its type explicitly. / 编码规范：变量显式类型。
 
-# Warn above this size: a fully embedded library can dwarf the drawing itself (E13).
-# 超过此体积即预警：完整内嵌的图元库可能让图纸本身相形见绌（E13）。
 const GP_SIZE_WARN_BYTES: int = 20 * 1024 * 1024
 
 
@@ -126,9 +124,7 @@ static func gpStatsOf(gpContainer: Dictionary) -> Dictionary:
 
 
 # Serialize -> sanitize -> stringify. Sanitizing is mandatory: JSON has no NaN/Infinity,
-# and one stray NaN would make the whole exported archive unparseable (E14).
 # 序列化 -> 净化 -> stringify。净化是强制的：JSON 没有 NaN/Infinity，
-# 一个游离的 NaN 就会让整个导出存档无法解析（E14）。
 static func gpTextOf(gpContainer: Dictionary) -> String:
 	var gpSafe: Variant = GPSchemaMigrate.gpSanitizeJson(gpContainer)
 	if gpSafe is Dictionary:

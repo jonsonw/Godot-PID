@@ -6,7 +6,6 @@ extends RefCounted
 ## 字形预览的纯坐标映射：预览本地像素 <-> 作者空间，以及工作端口表所用的归一化（0..1）端口空间。
 ##
 ## Why it exists / 为何存在：
-## these six helpers used to be private methods of GPMakeSymbolDialog. They are pure math over
 ## (view size, glyph bbox) with no Control dependency, so they were both untestable and
 ## unreusable — yet the W8 symbol-library work and any future "edit symbol in place" surface
 ## need exactly the same mapping. Extracting them makes the round-trip assertable in headless.
@@ -37,8 +36,8 @@ var gpViewSize: Vector2 = Vector2.ZERO
 var gpBox: Rect2 = Rect2(Vector2.ZERO, Vector2(GP_UNIT_BOX, GP_UNIT_BOX))
 
 
-# Build a transform for gpShapes inside a preview of gpViewSize pixels.
-# 为 gpShapes 构造「gpViewSize 像素预览内」的变换。
+# Build a transform for gpShapes() inside a preview of gpViewSize pixels.
+# 为 gpShapes() 构造「gpViewSize 像素预览内」的变换。
 static func gpForShapes(gpShapes: Array[GPShape], gpViewSize: Vector2) -> GPPreviewTransform:
 	var gpT: GPPreviewTransform = GPPreviewTransform.new()
 	gpT.gpViewSize = gpViewSize
@@ -46,9 +45,9 @@ static func gpForShapes(gpShapes: Array[GPShape], gpViewSize: Vector2) -> GPPrev
 	return gpT
 
 
-# Author-space bbox of gpShapes, falling back to the canonical unit box when there is no
+# Author-space bbox of gpShapes(), falling back to the canonical unit box when there is no
 # usable geometry (empty list, or a degenerate zero-area box).
-# gpShapes 的作者空间包围盒；无可用几何（空列表或零面积退化框）时回退为规范单位框。
+# gpShapes() 的作者空间包围盒；无可用几何（空列表或零面积退化框）时回退为规范单位框。
 static func gpBoxOf(gpShapes: Array[GPShape]) -> Rect2:
 	var gpSpec: Dictionary = GPShapeSpec.gpBuild(gpShapes)
 	var gpArr: Array = gpSpec.get("box", [])

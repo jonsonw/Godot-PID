@@ -1,15 +1,13 @@
 class_name GPDeleteEdgesCommand
 extends GPCommand
 # Copyright © 2026 Jonson Wang
-# Delete one or more edges as a single undo step, restoring them at their original indices (P3).
-# 把一条或多条边作为一步删除，并按原下标恢复（P3）。
 #
 # Why indices matter / 为何下标要紧：
-#   Pipes are drawn in creation order, so the array order IS the paint order. Restoring a
-#   deleted pipe by appending it would make it jump in front of everything drawn since — a
-#   visible reordering the user never asked for. This mirrors GPDeleteNodesCommand's contract.
-#   管线按创建顺序绘制，故数组次序就是绘制次序。若用追加方式恢复一条被删的管线，它会跳到此后
-#   绘制的一切之前 —— 这是用户从未要求的可见重排。此处与 GPDeleteNodesCommand 的契约一致。
+# Pipes are drawn in creation order, so the array order IS the paint order. Restoring a
+# deleted pipe by appending it would make it jump in front of everything drawn since — a
+# visible reordering the user never asked for. This mirrors GPDeleteNodesCommand's contract.
+# 管线按创建顺序绘制，故数组次序就是绘制次序。若用追加方式恢复一条被删的管线，它会跳到此后
+# 绘制的一切之前 —— 这是用户从未要求的可见重排。此处与 GPDeleteNodesCommand 的契约一致。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。

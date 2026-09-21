@@ -206,11 +206,17 @@ func _gpDefById(gpId: String) -> GPSymbolDef:
 # Look-up by display name. Since the L/C naming rule an id is ALLOCATED from the category,
 # so the sequence part shifts whenever a symbol is inserted before another one; tests that
 # name ids would break on every such insertion. The display name is the stable handle.
+# A display name may now be an i18n key ("iso.xxx"), so it is compared both raw and
+# translated — that keeps these tests readable in Chinese while the pack stores keys.
 # 按显示名查找。自 L/C 命名规则起，id 由类别「分配」而来，一旦在某个图元之前插入新图元，
 # 其后的序号就会平移；写死 id 的测试会在每次插入时失效。显示名才是稳定句柄。
+# 显示名如今可能是 i18n 键（"iso.xxx"），故同时按「原值」与「翻译值」比较 ——
+# 这样符号包存键，而测试仍可用中文名书写，保持可读。
 func _gpDefByDisplayName(gpName: String) -> GPSymbolDef:
 	for gpD in _gpBuiltinDefs():
 		if gpD.gpDisplayName == gpName:
+			return gpD
+		if I18n.gpTr(gpD.gpDisplayName, gpD.gpDisplayName) == gpName:
 			return gpD
 	return null
 

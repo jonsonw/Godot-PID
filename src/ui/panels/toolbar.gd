@@ -1,7 +1,7 @@
 class_name GPPIDToolbar
 extends VBoxContainer
 
-# Left symbol-library dock. The FRAME is built once here (title + search box +
+# Left symbol-library dock. The FRAME is built once here (title + search() box +
 # scroll container + tool group); the symbol BUTTONS are injected by code from
 # SymbolLibrary so custom symbol packs drop in without touching the layout.
 # 左侧图元库停靠栏。框架在此一次性搭好（标题 + 搜索框 + 滚动容器 + 工具组）；
@@ -26,7 +26,7 @@ signal gpToolSelected(type: String)
 # 当前显示的图元定义。
 var gpDefs: Array[GPSymbolDef] = []
 
-# Per-category collapse state (true = folded). Preserved across search / locale re-renders.
+# Per-category collapse state (true = folded). Preserved across search() / locale re-renders.
 # 每个类目的折叠状态（true = 已折叠）。在搜索 / 语言切换的重渲染中保持不变。
 var gpCollapsed: Dictionary = {}
 
@@ -75,7 +75,7 @@ func _ready() -> void:
 	gpTitle = Label.new()
 	add_child(gpTitle)
 
-	# ---- frozen frame: search box ----
+	# ---- frozen frame: search() box ----
 	# ---- 固化框架：搜索框 ----
 	gpSearchBox = LineEdit.new()
 	gpSearchBox.text_changed.connect(_gpOnSearch)
@@ -152,7 +152,7 @@ func gpPopulate(gpDefsIn: Array[GPSymbolDef]) -> void:
 	_gpRender(gpDefs)
 
 
-# React to search text changes.
+# React to search() text changes.
 # 响应搜索文本变化。
 func _gpOnSearch(gpQ: String) -> void:
 	_gpRender(_gpFilter(gpQ))
@@ -206,8 +206,8 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 		gpGroup.add_theme_constant_override("separation", 2)
 		gpVbox.add_child(gpGroup)
 
-		# Clickable category header: toggles the group when pressed.
-		# 可点击的类目标题：点击折叠 / 展开本组。
+ # Clickable category header: toggles the group when pressed.
+ # 可点击的类目标题：点击折叠 / 展开本组。
 		var gpHeader: Button = Button.new()
 		gpHeader.size_flags_horizontal = SIZE_FILL
 		gpHeader.alignment = HORIZONTAL_ALIGNMENT_LEFT
@@ -215,8 +215,8 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 		gpHeader.add_theme_font_size_override("font_size", Settings.gpEffectiveFontSize())
 		gpHeader.text = ("▾ " if not gpCollapsedNow else "▸ ") + I18n.gpTr(gpCat)
 		gpGroup.add_child(gpHeader)
-		# 类目标题：克制的浅背景（仅比 dock 略亮）+ 1px 发丝底线，
-		# 取代原先"接近画布亮色的粗填充带"，边界细腻而不抢眼。
+ # 类目标题：克制的浅背景（仅比 dock 略亮）+ 1px 发丝底线，
+ # 取代原先"接近画布亮色的粗填充带"，边界细腻而不抢眼。
 		var gpHdrBg: StyleBoxFlat = StyleBoxFlat.new()
 		gpHdrBg.bg_color = Color(0.108, 0.120, 0.150)
 		gpHdrBg.content_margin_left = 6.0
@@ -230,16 +230,16 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 		gpHeader.add_theme_stylebox_override("pressed", gpHdrBg)
 		gpHeader.add_theme_color_override("font_color", Color(0.80, 0.84, 0.90))
 
-		# Multi-column, width-adaptive thumbnail grid. Its minimum width is forced
-		# to the viewport width by _gpReflow so it always fills and re-derives its
-		# column count from the real width (see symbol_grid.gd).
-		# 多列、随宽度自适应的缩略图网格。其最小宽由 _gpReflow 强制设为视口宽，
-		# 从而始终填满并按真实宽度重排列数（见 symbol_grid.gd）。
+ # Multi-column, width-adaptive thumbnail grid. Its minimum width is forced
+ # to the viewport width by _gpReflow so it always fills and re-derives its
+ # column count from the real width (see symbol_grid.gd).
+ # 多列、随宽度自适应的缩略图网格。其最小宽由 _gpReflow 强制设为视口宽，
+ # 从而始终填满并按真实宽度重排列数（见 symbol_grid.gd）。
 		var gpGrid: GPSymbolGrid = GPSymbolGrid.new()
 		gpGrid.size_flags_horizontal = SIZE_FILL
-		# Keep the grid's column-count floor aligned with the left dock minimum so a
-		# narrow dock still derives a sensible (>=1) column count from GP_LEFT_MIN.
-		# 让网格列数下限与左停靠栏最小宽对齐，窄停靠栏仍按 GP_LEFT_MIN 推导出合理（≥1）列数。
+ # Keep the grid's column-count floor aligned with the left dock minimum so a
+ # narrow dock still derives a sensible (>=1) column count from GP_LEFT_MIN.
+ # 让网格列数下限与左停靠栏最小宽对齐，窄停靠栏仍按 GP_LEFT_MIN 推导出合理（≥1）列数。
 		gpGrid.gpMinWidth = gpMinWidth
 		gpGrid.visible = not gpCollapsedNow
 		gpGroup.add_child(gpGrid)
@@ -271,11 +271,10 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 # 已关闭）铺满停靠栏，因此绝不能把网格「最小宽」钉成停靠栏宽：非零最小宽会沿 VBox 链向上
 # 冒泡到左停靠栏，把 HSplitContainer 分隔条锁死在「曾达到的最宽」（只能加宽、拖不回去）。
 # 网格最小宽保持 0，正是分隔条能自由双向拖动的关键。
-# Public port (架构优化 §5 P3 #1): previously a private `_gpReflow`, called cross-object by
 # GPLayoutCoordinator. Promoting it closes that encapsulation leak; the toolbar still calls it
 # internally on resize and at first build.
-# 公开端口（架构优化 §5 P3 #1）：原为私有 `_gpReflow`，被 GPLayoutCoordinator 跨对象调用。
-# 提升为公开端口消除该封装泄漏；工具栏自身在缩放与首次构建时仍内部调用它。
+# 公开端口：GPLayoutCoordinator 会跨对象调用它，故不能是私有；工具栏自身在缩放与首次构建时
+# 仍内部调用它。以公开端口暴露，可避免调用方窥探私有成员。
 func gpReflow(gpForcedWidth: float = -1.0) -> void:
 	# Always feed the grid the real ScrollContainer viewport width. Relying on the
 	# grid's own size.x inside NOTIFICATION_SORT_CHILDREN is unreliable because the
@@ -289,13 +288,13 @@ func gpReflow(gpForcedWidth: float = -1.0) -> void:
 		gpW = gpListRoot.size.x
 	for gpG in gpGrids:
 		if gpG != null and is_instance_valid(gpG):
-			# Zero minimum width: no bubble, no splitter lock.
-			# 最小宽归零：不冒泡、不锁分隔条。
+ # Zero minimum width: no bubble, no splitter lock.
+ # 最小宽归零：不冒泡、不锁分隔条。
 			gpG.custom_minimum_size.x = 0.0
 			if gpW > 0.0:
-				# Pass the real dock width directly so columns are derived from the
-				# dragged/allocated width, not from a possibly stale size.x.
-				# 直接把真实停靠栏宽度传给网格，使列数按拖拽/分配后的宽度计算，而非可能过期的 size.x。
+ # Pass the real dock width directly so columns are derived from the
+ # dragged/allocated width, not from a possibly stale size.x.
+ # 直接把真实停靠栏宽度传给网格，使列数按拖拽/分配后的宽度计算，而非可能过期的 size.x。
 				gpG.gpSetAvailWidth(gpW)
 			else:
 				gpG.queue_sort()
@@ -355,15 +354,15 @@ func _gpOnPick(gpTypeId: String) -> void:
 
 # A palette item requested deletion: forward to the main window, which owns the graphs
 # (to cascade-remove canvas instances) and the live library. The local re-render happens
-# there via gpPopulate after the symbol is actually removed.
+# there via gpPopulate() after the symbol is actually removed.
 # 图元条目请求删除：转发给主窗口，由它持有图（级联清理画布实例）与活动图元库。本地重渲染
-# 在图元确实被移除后由主窗口经 gpPopulate 完成。
+# 在图元确实被移除后由主窗口经 gpPopulate() 完成。
 func _gpOnDeleteRequested(gpId: String) -> void:
 	gpSymbolDeleteRequested.emit(gpId)
 
 
 # 视觉分层：左停靠栏显式刷 DOCK 背景（受控的深色档），接缝发丝线由顶层叠加层绘制。
 # Visual layering: paint the left dock's controlled DOCK background; the seam hairline is
-# drawn by the top overlay. _draw content sits beneath child controls.
+# drawn by the top overlay. _draw() content sits beneath child controls.
 func _draw() -> void:
 	GPChromeStyle.gpDraw(self, GPChromeStyle.GP_DOCK_BG, 0)

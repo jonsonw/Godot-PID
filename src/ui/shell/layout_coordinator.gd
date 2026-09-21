@@ -4,20 +4,20 @@ extends RefCounted
 # Splitter ratios, DPI scaling, window resize handling and maximised start-up
 # 分隔条比例、DPI 缩放、窗口尺寸响应与最大化
 #
-# WHY THIS EXISTS / 为何存在（架构优化建议 §3.2）：
-#   GPMainWindow was carrying many unrelated responsibilities in one file; this coordinator
-#   owns the "Splitter ratios, DPI scaling, window resize handling and maximised start-up" use case end to end, so the root keeps only assembly and forwarding.
-#   GPMainWindow 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「分隔条比例、DPI 缩放、窗口尺寸响应与最大化」这一用例，
-#   使根类只保留装配与转发。
+# WHY THIS EXISTS / 为何存在：
+# GPMainWindow was carrying many unrelated responsibilities in one file; this coordinator
+# owns the "Splitter ratios, DPI scaling, window resize handling and maximised start-up" use case end to end, so the root keeps only assembly and forwarding.
+# GPMainWindow 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「分隔条比例、DPI 缩放、窗口尺寸响应与最大化」这一用例，
+# 使根类只保留装配与转发。
 #
 # Interaction / 交互方式：
-#   - the root creates this coordinator and injects itself as gpHost (composition root);
-#     根类创建本协调者并把自身注入为 gpHost（组合根装配）；
-#   - the root forwards menu / toolbar actions here, never the other way round — this class
-#     does not reach back into menus or the ribbon;
-#     根类把菜单/工具栏动作转发到此处，绝不反向 —— 本类不回指菜单或 Ribbon；
-#   - UI refresh goes through gpHost._gpSetState / the docks the root owns.
-#     UI 刷新经由 gpHost._gpSetState 及根类持有的停靠栏完成。
+# - the root creates this coordinator and injects itself as gpHost (composition root);
+# 根类创建本协调者并把自身注入为 gpHost（组合根装配）；
+# - the root forwards menu / toolbar actions here, never the other way round — this class
+# does not reach back into menus or the ribbon;
+# 根类把菜单/工具栏动作转发到此处，绝不反向 —— 本类不回指菜单或 Ribbon；
+# - UI refresh goes through gpHost.gpSetState() / the docks the root owns.
+# UI 刷新经由 gpHost.gpSetState() 及根类持有的停靠栏完成。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -47,15 +47,15 @@ func gpOnBodyDragged(gpOffset: int) -> void:
 	var gpLeftDist: float = absf(gpOffsetF - gpLeftPos)
 	var gpRightDist: float = absf(gpOffsetF - gpRightPos)
 	if gpLeftDist < gpRightDist:
-		# Left splitter: offset == left-dock width. Feed the new width to the palette
-		# grid so it recomputes its column count immediately.
-		# 左分隔条：偏移即左栏宽度。把新宽度传给图元网格，使其立即重算列数。
+ # Left splitter: offset == left-dock width. Feed the new width to the palette
+ # grid so it recomputes its column count immediately.
+ # 左分隔条：偏移即左栏宽度。把新宽度传给图元网格，使其立即重算列数。
 		gpHost.gpLeftWidthPx = clampf(gpOffsetF, GPMainWindow.GP_LEFT_MIN, gpBW - GPMainWindow.GP_RIGHT_MIN - 80.0)
 		if gpHost.gpLeftDock != null and gpHost.gpLeftDock.has_method("gpReflow"):
 			gpHost.gpLeftDock.gpReflow(gpHost.gpLeftWidthPx)
 	else:
-		# Right splitter: offset == left+center span, so right width = body - offset.
-		# 右分隔条：偏移即左+中跨度，故右栏宽度 = 主体宽度 - 偏移。
+ # Right splitter: offset == left+center span, so right width = body - offset.
+ # 右分隔条：偏移即左+中跨度，故右栏宽度 = 主体宽度 - 偏移。
 		var gpRightPx: float = gpBW - gpOffsetF
 		gpHost.gpRightWidthPx = clampf(gpRightPx, GPMainWindow.GP_RIGHT_MIN, gpBW - GPMainWindow.GP_LEFT_MIN - 80.0)
 	# Re-apply the split immediately so the splitter position and the palette reflow
@@ -73,9 +73,9 @@ func gpOnBodyDragged(gpOffset: int) -> void:
 # 按 id 查找图元定义。
 
 # Initial dock widths: wait until the split container has a real laid-out width
-# (a few frames after _ready), then· seed the stored widths from the docks' floors
+# (a few frames after _ready()), then· seed the stored widths from the docks' floors
 # and pin both docks so the canvas fills the rest.
-# 初始停靠栏宽度：等待分隔容器获得已布局的真实宽度（_ready 后若干帧），再用两栏
+# 初始停靠栏宽度：等待分隔容器获得已布局的真实宽度（_ready() 后若干帧），再用两栏
 # 下限初始化存储宽度，并钉死两栏使画布填满剩余空间。
 func gpInitSplits() -> void:
 	for _gpI in range(10):
@@ -197,7 +197,7 @@ func gpOpenMaximized(gpWin: Window) -> void:
 func gpApplyDpiScale() -> void:
 	# KEEP content_scale_factor at 1.0. Godot 4 on macOS ALREADY reports window geometry in
 	# LOGICAL POINTS and renders the backing store at the display's native pixel ratio (2x on
-	# Retina). Forcing content_scale_factor = screen_get_scale() (=2.0 here) DOUBLE-COUNTS that
+	# Retina). Forcing content_scale_factor = screen_get_scale (=2.0 here) DOUBLE-COUNTS that
 	# Retina scale: Godot then treats the visible logical viewport as design/csf = 1600/2 = 800
 	# wide, so the whole 1600-wide UI is drawn 2x too large and clipped (measured: host window
 	# 3024x1890 px @ csf 2.0 yields a logical viewport of only ~800x500). With csf pinned to 1.0
@@ -206,7 +206,7 @@ func gpApplyDpiScale() -> void:
 	# keep correct proportions on ANY monitor / DPI. Text crispness is handled by the fonts'
 	# oversampling (4.0) in their .import settings, not by content_scale_factor.
 	# 把 content_scale_factor 固定为 1.0。Godot 4 在 macOS 上已用「逻辑点」报告窗口几何，并以显示器的
-	# 原生像素比（Retina 为 2x）渲染背板。若再把 content_scale_factor 设成 screen_get_scale()（此处
+	# 原生像素比（Retina 为 2x）渲染背板。若再把 content_scale_factor 设成 screen_get_scale（此处
 	# =2.0），就会把 Retina 缩放算两遍：Godot 会把可见逻辑视口当作 design/csf = 1600/2 = 800 宽，
 	# 整幅 1600 宽的界面被放大 2 倍并裁切（实测：宿主窗 3024x1890px、csf 2.0 时逻辑视口仅约 800x500）。
 	# 把 csf 钉在 1.0 并配合 stretch 模式 canvas_items，1600x900 设计画布以 1:1 逻辑点映射，由引擎缩放到

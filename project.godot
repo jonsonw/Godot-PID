@@ -41,9 +41,9 @@ window/size/display_scale=1
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/gut/plugin.cfg")
+"#GUTisavendoredtestframework(259files).Keepingitenabledcosts~2.3-2.6s#onEVERYeditorstart#pluginenabled,soitstaysofffordailywork.Re-enablewhenyouneedthepanel.#GUTæ¯vendoredçæµè¯æ¡æ¶ï¼259æä»¶ï¼ãå¸¸é©»å¯ç¨ä¼è®©æ¯æ¬¡æå¼ç¼è¾å¨å¤èçº¦#2.3~2.6ç§ï¼CIé¨ç¦éè¿gut_cmdln.gdè¿è¡ï¼å¹¶ä¸éè¦æä»¶å¯ç¨ï¼ææ¥å¸¸ä¿æå³é­ã#éè¦GUTé¢æ¿æ¶åå¯ç¨ãenabled"=PackedStringArray()
 
 [rendering]
 
 textures/vram_compression/import_etc2_astc=true
-anti_aliasing/quality/msaa_2d=3
+"#MSAA2D:8x->2x.P&IDsheetsarevectorlineartwhere8xMSAAcostsfarmoreGPU#thanthevisualgainjustifies#MSAA2Dï¼8Ãéä¸º2ÃãP&IDå¾çº¸æ¯ç¢éçº¿ç¨¿ï¼8ÃçGPUä»£ä»·è¿å¤§äºè§ææ¶çï¼#2Ãå·²è¶³å¤ä¿æè¾¹ç¼å¹²åãanti_aliasing/quality/msaa_2d"=1

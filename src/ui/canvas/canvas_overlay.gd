@@ -4,7 +4,6 @@ extends RefCounted
 # Drawing layer for GPCanvas2D. Owns NO state of its own — it reads the live canvas
 # (a CanvasItem) and paints the background grid, annotation shapes, their grips, the
 # rubber-band marquee and the connect-preview line. Splitting this out of GPCanvas2D
-# (P2) keeps the Control file focused on input + orchestration; the draw math is unchanged.
 # 画布绘制层。自身不持有任何状态——它读取实时画布（一个 CanvasItem）并绘制背景网格、
 # 注释图形、其抓取点、橡皮筋框选与连线预览线。P2 将其从 GPCanvas2D 抽出，使 Control 文件
 # 专注于输入与编排；绘制数学完全一致，行为零变更。
@@ -12,14 +11,14 @@ extends RefCounted
 # Why a delegate instead of free functions / why the canvas reference / 为何用委托而非自由函数、为何持有画布引用：
 # Godot's draw_* family is a method on CanvasItem, so the only natural home for the drawing is
 # "something that has a CanvasItem". Passing the canvas in and calling gpCv.draw_* keeps the
-# coordinate transform (gpScreenFromWorld) and the live marquee state (gpMarq) in one place, so
+# coordinate transform (gpScreenFromWorld()) and the live marquee state (gpMarq) in one place, so
 # the split is a pure relocation with no behaviour change.
 # Godot 的 draw_* 是 CanvasItem 的方法，绘制唯一自然的归宿是「持有 CanvasItem 的对象」。把画布传入
-# 并调用 gpCv.draw_*，使坐标变换（gpScreenFromWorld）与实时框选状态（gpMarq）仍在一处，拆分即纯
+# 并调用 gpCv.draw_*，使坐标变换（gpScreenFromWorld()）与实时框选状态（gpMarq）仍在一处，拆分即纯
 # 搬迁，行为零变更。
-# M3: the draw-tool visuals (rubber band / polyline preview) no longer live here — see
-# GPDrawShapeTool.gpDrawOverlay. This file now paints only what is genuinely shared.
-# M3：绘图工具的视觉（橡皮筋 / 折线预览）不再位于此处——见 GPDrawShapeTool.gpDrawOverlay。
+# the draw-tool visuals (rubber band / polyline preview) no longer live here — see
+# GPDrawShapeTool.gpDrawOverlay(). This file now paints only what is genuinely shared.
+# 绘图工具的视觉（橡皮筋 / 折线预览）不再位于此处——见 GPDrawShapeTool.gpDrawOverlay()。
 # 本文件现在只绘制真正共享的内容。
 
 # Mirror of GPCanvas2D.GPMode so the literal GPMode.GP_* spellings keep compiling here.
@@ -143,25 +142,25 @@ func _gpDrawShapes() -> void:
 		if gpSelIdx >= 0 and gpSelIdx < gpCv.gpGraph.gpShapes.size():
 			var gpGrips: Array[Dictionary] = GPShapeGripEditor.gpGrips(gpCv.gpGraph.gpShapes[gpSelIdx])
 			var gpGs: float = 8.0
-			# Vertex grips first (drawn as plain squares); handle grips get a tie-line to their
-			# owning vertex drawn first so the squares sit on top of the line.
-			# 先处理顶点抓取点（普通方块）；手柄抓取点先画到所属顶点的连线，使方块盖在连线上。
+ # Vertex grips first (drawn as plain squares); handle grips get a tie-line to their
+ # owning vertex drawn first so the squares sit on top of the line.
+ # 先处理顶点抓取点（普通方块）；手柄抓取点先画到所属顶点的连线，使方块盖在连线上。
 			for gpG in gpGrips:
 				var gpP: Vector2 = gpCv.gpScreenFromWorld(gpG["pos"])
 				var gpRect: Rect2 = Rect2(gpP - Vector2(gpGs * 0.5, gpGs * 0.5), Vector2(gpGs, gpGs))
 				if int(gpG["role"]) == GPShapeGripEditor.GP_GRIP_HANDLE_IN or int(gpG["role"]) == GPShapeGripEditor.GP_GRIP_HANDLE_OUT:
-					# The handle grip is stored as a RELATIVE offset on its vertex, so the owner of the
-					# tie-line is the vertex itself (gpPoints[gi]); the grip position is the handle end.
-					# 手柄以「相对所属顶点的偏移」存储，故连线的所属端点就是顶点本身（gpPoints[gi]），
-					# 抓取点位置则是手柄末端。
+ # The handle grip is stored as a RELATIVE offset on its vertex, so the owner of the
+ # tie-line is the vertex itself (gpPoints[gi]); the grip position is the handle end.
+ # 手柄以「相对所属顶点的偏移」存储，故连线的所属端点就是顶点本身（gpPoints[gi]），
+ # 抓取点位置则是手柄末端。
 					var gpOwner: Vector2 = gpCv.gpGraph.gpShapes[gpSelIdx].gpPoints[int(gpG["gi"])]
 					gpCv.draw_line(gpCv.gpScreenFromWorld(gpOwner), gpP, Color(gpSelCol, 0.5), 1.0)
 				gpCv.draw_rect(gpRect, Color(1.0, 1.0, 1.0), true)
 				gpCv.draw_rect(gpRect, Color(0.20, 0.50, 1.0), false, 1.5)
-	# M3: the in-progress rubber band (line / circle / rect) and the in-progress polyline preview
-	# moved to GPDrawShapeTool.gpDrawOverlay — they are that tool's own state, so it paints them.
+	# the in-progress rubber band (line / circle / rect) and the in-progress polyline preview
+	# moved to GPDrawShapeTool.gpDrawOverlay() — they are that tool's own state, so it paints them.
 	# The canvas calls the hook right after gpDraw(), so the z-order is unchanged.
-	# M3：进行中的橡皮筋（直线/圆/矩形）与折线预览已迁至 GPDrawShapeTool.gpDrawOverlay——它们属于
+	# 进行中的橡皮筋（直线/圆/矩形）与折线预览已迁至 GPDrawShapeTool.gpDrawOverlay()——它们属于
 	# 该工具自己的状态，故由其绘制。画布在 gpDraw() 之后立即调用该钩子，层序不变。
 
 
@@ -180,8 +179,8 @@ func _gpDrawOneShape(gpS: GPShape, gpInk: Color) -> void:
 				var gpR: Rect2 = Rect2(gpCv.gpScreenFromWorld(gpS.gpPoints[0]), (gpS.gpPoints[1] - gpS.gpPoints[0]).abs() * gpCv.gpViewZoom)
 				gpCv.draw_rect(gpR, gpInk, false, 2.0)
 		GPShape.GPKind.GP_POLYLINE:
-			# Sample the polyline (Bézier-handle aware) so pulled-out handles render as curves.
-			# 沿折线采样（感知贝塞尔手柄），使拉出的手柄渲染成曲线。
+ # Sample the polyline (Bézier-handle aware) so pulled-out handles render as curves.
+ # 沿折线采样（感知贝塞尔手柄），使拉出的手柄渲染成曲线。
 			var gpSamp: PackedVector2Array = GPGeometry.gpRenderPoints(gpS, 8)
 			var gpV: PackedVector2Array = PackedVector2Array()
 			for gpP in gpSamp:
@@ -191,8 +190,8 @@ func _gpDrawOneShape(gpS: GPShape, gpInk: Color) -> void:
 			if gpV.size() >= 2:
 				gpCv.draw_polyline(gpV, gpInk, 2.0)
 		GPShape.GPKind.GP_ARC:
-			# Sample the arc through the shared renderer (gpArcSample) so it matches the painter.
-			# 经共享渲染器（gpArcSample）采样圆弧，使主画布与符号绘制器表现一致。
+ # Sample the arc through the shared renderer (gpArcSample()) so it matches the painter.
+ # 经共享渲染器（gpArcSample()）采样圆弧，使主画布与符号绘制器表现一致。
 			var gpArcPts: PackedVector2Array = GPGeometry.gpRenderPoints(gpS, 8)
 			var gpArcV: PackedVector2Array = PackedVector2Array()
 			for gpP in gpArcPts:

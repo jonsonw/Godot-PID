@@ -36,10 +36,10 @@ enum GPSymbolCategory { GP_EQUIPMENT, GP_VALVE, GP_PIPE, GP_FITTING, GP_INSULATI
 
 # Vector shape primitives for native rendering, in a 100x100 UNIT BOX.
 # 用于原生渲染的矢量形状原语，位于 100x100 单位框内。
-# UNIFIED MODEL (P0 refactor): the symbol editor and the main canvas now share this single
+# UNIFIED MODEL : the symbol editor and the main canvas now share this single
 # GPShape type, so grip / hit-test / geometry utilities can be reused across both. The
 # legacy dict spec (paths/circles/rects/box) is only a derived render spec — see gpShapeSpec().
-# 统一模型（P0 重构）：图元编辑器与主画布现共用这一 GPShape 类型，使抓取点 / 命中 /
+# 统一模型：图元编辑器与主画布现共用这一 GPShape 类型，使抓取点 / 命中 /
 # 几何工具可在两处复用。历史字典规格（paths/circles/rects/box）仅是派生的渲染规格 —— 见 gpShapeSpec()。
 @export var gpShapes: Array[GPShape] = []
 
@@ -54,15 +54,13 @@ enum GPSymbolCategory { GP_EQUIPMENT, GP_VALVE, GP_PIPE, GP_FITTING, GP_INSULATI
 # 用户可填写的属性模板（历史遗留，无类型）。保留以兼容旧图元包往返；新代码用下方的 gpSchema。
 @export var gpAttrsSchema: Dictionary = {}
 
-# Typed property schema (M8). Field DEFINITIONS live here, in the TYPE layer, so editing the
 # library propagates to every instance in every project — instances only store values.
-# 类型化属性 schema（M8）。字段**定义**位于此处（类型层），故改库会传播到所有项目的所有实例
 # —— 实例只存值。
 @export var gpSchema: GPPropertySchema = null
 
 # Tag prefix used by automatic numbering, e.g. "P" for pumps, "XV" for on/off valves.
-# Overridable per project by the numbering rule panel (M9b).
-# 自动编号所用的位号前缀，如泵的 "P"、开关阀的 "XV"。可由编号规则面板按项目覆盖（M9b）。
+# Overridable per project by the numbering rule panel .
+# 自动编号所用的位号前缀，如泵的 "P"、开关阀的 "XV"。可由编号规则面板按项目覆盖。
 @export var gpTagPrefix: String = ""
 
 # Canvas label template. DEFAULT SHOWS THE TAG ONLY — the library display name belongs to the
@@ -104,8 +102,8 @@ func gpPortLocal(gpPort: GPPort) -> Vector2:
 	var gpX: float = gpPos.x
 	var gpY: float = gpPos.y
 	if absf(gpX) > GP_UNIT_PORT_LIMIT or absf(gpY) > GP_UNIT_PORT_LIMIT:
-		# Legacy pixel offset — already node-centered, pass through unchanged.
-		# 历史像素偏移 —— 已是节点中心坐标，原样透传。
+ # Legacy pixel offset — already node-centered, pass through unchanged.
+ # 历史像素偏移 —— 已是节点中心坐标，原样透传。
 		return Vector2(gpX, gpY)
 	return (Vector2(gpX, gpY) - Vector2(0.5, 0.5)) * gpDefaultSize
 
@@ -158,8 +156,8 @@ func gpPortNamesUnique() -> bool:
 	return true
 
 
-# Derived render spec: rebuild the legacy {paths,circles,rects,box} dict from gpShapes.
-# 派生渲染规格：由 gpShapes 重建历史 {paths,circles,rects,box} 字典。
+# Derived render spec: rebuild the legacy {paths,circles,rects,box} dict from gpShapes().
+# 派生渲染规格：由 gpShapes() 重建历史 {paths,circles,rects,box} 字典。
 # Kept so the mature, ISO-compliant painter / normalizer keep working unchanged.
 # 保留此规格，使已成熟、符合 ISO 的渲染器 / 归一化器无需改动即可继续工作。
 func gpShapeSpec() -> Dictionary:
@@ -195,8 +193,8 @@ func gpToDict() -> Dictionary:
 	return gpOut
 
 
-# Rebuild this symbol definition from a dictionary (inverse of gpToDict).
-# 从字典重建本图元定义（gpToDict 的逆操作）。
+# Rebuild this symbol definition from a dictionary (inverse of gpToDict()).
+# 从字典重建本图元定义（gpToDict() 的逆操作）。
 # Accepts the new "shapes" (Array[GPShape dict]) / "ports" (Array[dict]) form, OR the legacy
 # "shape" dict / top-level paths-circles-rects spec, so existing packs still load.
 # 接受新格式 "shapes"（GPShape 字典数组）/ "ports"（字典数组），或历史 "shape" 字典 /
@@ -232,9 +230,7 @@ func gpFromDict(gpD: Dictionary) -> void:
 	gpAttrsSchema = gpD.get("attrs_schema", {})
 	gpBuiltin = gpD.get("builtin", false)
 
-	# Typed schema (M8). Absent in every pre-M8 pack, hence the null default — this is the
 	# "read new fields with .get(key, default)" rule that keeps old archives loadable.
-	# 类型化 schema（M8）。M8 之前的图元包都没有，故默认 null —— 这正是
 	# 「新增字段一律 .get(key, default) 读取」规则，保证旧存档仍可载入。
 	gpSchema = null
 	var gpSchemaIn: Variant = gpD.get("schema", null)

@@ -1,27 +1,23 @@
 class_name GPCommandContext
 extends RefCounted
-# Everything a command is allowed to touch (M4 of the modularisation plan).
+# Everything a command is allowed to touch .
 # 命令允许接触的全部依赖（模块化方案 M4）。
 #
 # Why this exists / 存在理由:
-#   Commands used to be inline code inside GPCanvas2D (delete / duplicate / move / ...),
-#   mixing "what the user asked for" with "how the canvas keeps itself in sync". The
-#   context object is the seam: a command receives the graph and the id generator, and
-#   nothing else. It cannot reach into widgets, so it cannot acquire UI coupling by
-#   accident, and the very same command runs headless in a unit test.
-#   命令原先是 GPCanvas2D 里的内联代码（删除 / 复制 / 移动…），把「用户要什么」和
-#   「画布如何自同步」混在一起。上下文对象就是那条缝：命令只拿到图与 id 生成器，
-#   拿不到任何控件，因此无法意外引入 UI 耦合，同一条命令也能在 headless 单测里跑。
+# mixing "what the user asked for" with "how the canvas keeps itself in sync". The
+# context object is the seam: a command receives the graph and the id generator, and
+# nothing else. It cannot reach into widgets, so it cannot acquire UI coupling by
+# accident, and the very same command runs headless in a unit test.
+# 「画布如何自同步」混在一起。上下文对象就是那条缝：命令只拿到图与 id 生成器，
+# 拿不到任何控件，因此无法意外引入 UI 耦合，同一条命令也能在 headless 单测里跑。
 #
 # Deliberately NOT injected / 刻意不注入:
-#   - GPCanvas2D: commands mutate the model only. View refresh is a consequence of
-#     GPPIDGraph.gpGraphChanged, which the canvas already bridges onto GPEventBus (M2).
-#     画布：命令只改模型。视图刷新是 gpGraphChanged 的结果，画布已把它桥接到总线（M2）。
-#   - GPEventBus: the model signal already reaches the bus through the canvas bridge,
-#     so a command emitting on the bus directly would double-notify every subscriber.
-#     事件总线：模型信号已通过画布桥到达总线，命令直接发总线会让订阅者收到两次。
-#   M6 (PIDDocumentManager) will own this context; until then the canvas builds it.
-#   M6（PIDDocumentManager）将持有此上下文；在此之前由画布构建。
+# - GPCanvas2D: commands mutate the model only. View refresh is a consequence of
+# - GPEventBus: the model signal already reaches the bus through the canvas bridge,
+# so a command emitting on the bus directly would double-notify every subscriber.
+# 事件总线：模型信号已通过画布桥到达总线，命令直接发总线会让订阅者收到两次。
+# M6 (PIDDocumentManager) will own this context; until then the canvas builds it.
+# M6（PIDDocumentManager）将持有此上下文；在此之前由画布构建。
 
 # The topology being edited. Commands add/remove/mutate nodes, edges and shapes on it.
 # 正在编辑的拓扑图。命令在其上增 / 删 / 改节点、边与注释图形。
@@ -35,18 +31,16 @@ var gpIds: GPIdGen = null
 
 
 # Both collaborators may be supplied up front; a null graph simply makes every command
-# refuse to run (gpIsReady) instead of crashing on a nil dereference.
-# 两个协作者可在构造时一次给全；图为 null 时命令只是拒绝执行（gpIsReady），而非空引用崩溃。
-# Tag uniqueness guard (M9). Optional: without it commands still run, they just cannot mint
+# refuse to run (gpIsReady()) instead of crashing on a nil dereference.
+# 两个协作者可在构造时一次给全；图为 null 时命令只是拒绝执行（gpIsReady()），而非空引用崩溃。
 # or refuse a tag — which is exactly how every pre-M9 command behaves in the tests.
-# 位号唯一性守卫（M9）。可选：没有它命令照常运行，只是不能铸造或拒绝位号
 # ——这正是 M9 之前每条命令在测试中的行为。
 var gpTags: GPTagRegistry = null
 
 
 # Both collaborators may be supplied up front; a null graph simply makes every command
-# refuse to run (gpIsReady) instead of crashing on a nil dereference.
-# 两个协作者可在构造时一次给全；图为 null 时命令只是拒绝执行（gpIsReady），而非空引用崩溃。
+# refuse to run (gpIsReady()) instead of crashing on a nil dereference.
+# 两个协作者可在构造时一次给全；图为 null 时命令只是拒绝执行（gpIsReady()），而非空引用崩溃。
 func _init(gpInGraph: GPPIDGraph = null, gpInIds: GPIdGen = null,
 		gpInTags: GPTagRegistry = null) -> void:
 	gpGraph = gpInGraph

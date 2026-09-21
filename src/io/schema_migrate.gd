@@ -10,12 +10,12 @@ extends RefCounted
 #
 # Three shapes must all load, and all converge on v3:
 # 三种形态都必须能载入，并统一收敛到 v3：
-#   v1  {meta, nodes:[{id,type,label,pos,attr_values}], edges:[{id,from,to}]}
-#   v2  {meta, nodes:[{instance_id,symbol_id,uid,props}], tag_rules, user_symbol_packs}
-#   v3  {format, format_version, kind, sheets:[...], library:{...}, config:{...}}
+# v1 {meta, nodes:[{id,type,label,pos,attr_values}], edges:[{id,from,to}]}
+# v2 {meta, nodes:[{instance_id,symbol_id,uid,props}], tag_rules, user_symbol_packs}
+# v3 {format, format_version, kind, sheets:[...], library:{...}, config:{...}}
 # Plus the HISTORIC multi-document shape found in docs/samples/pani_detox.pid.json:
 # 以及 docs/samples/pani_detox.pid.json 中的历史多文档形态：
-#   {meta, documents:[{id,title,graph:{meta,nodes,edges}}], cross_links:[...]}
+# {meta, documents:[{id,title,graph:{meta,nodes,edges}}], cross_links:[...]}
 # See 持久化实现方案 §7 (版本演进与迁移链) / 见「持久化实现方案」§7。
 # Coding rule: every variable must declare its type explicitly. / 编码规范：变量显式类型。
 
@@ -27,9 +27,6 @@ const GP_FORMAT: String = "g-pid"
 const GP_FORMAT_VERSION: int = 3
 
 # Highest format_version this build can open. Anything above is refused for writing
-# (E6) so a newer file is never silently downgraded by an older build.
-# 本构建可打开的最高 format_version。高于它的文件拒绝写入型打开（E6），
-# 使新版本文件永不被旧版本静默降级。
 const GP_MAX_SUPPORTED: int = 3
 
 # Recursion guard for deeply nested (or hand-crafted malicious) JSON.
@@ -79,8 +76,6 @@ static func _gpHasV2Features(gpData: Dictionary) -> bool:
 	return false
 
 
-# True when gpData is a G-PID archive (any version). Used to reject foreign JSON (E7).
-# gpData 是否为 G-PID 存档（任意版本）。用于拒绝外来 JSON（E7）。
 static func gpIsGPidArchive(gpData: Dictionary) -> bool:
 	if str(gpData.get("format", "")) == GP_FORMAT:
 		return true
@@ -123,7 +118,7 @@ static func gpSanitizeJson(gpValue: Variant, gpDepth: int = 0) -> Variant:
 		var gpD: Dictionary = gpValue as Dictionary
 		var gpOutD: Dictionary = {}
 		for gpKey in gpD.keys():
-			# JSON object keys must be strings. / JSON 对象键必须是字符串。
+ # JSON object keys must be strings. / JSON 对象键必须是字符串。
 			gpOutD[str(gpKey)] = gpSanitizeJson(gpD[gpKey], gpDepth + 1)
 		return gpOutD
 	# Anything else (Object, Callable, RID, ...) has no JSON representation.
@@ -203,7 +198,6 @@ static func gpMigrate(gpData: Dictionary) -> Dictionary:
 	# --- v2 -> v3：sheets[] + library + config ------------------------------
 	gpOut["sheets"] = gpSheetsOut
 	# Drop the legacy carry-overs so the v3 container has exactly one place for data.
-	# 丢弃旧版遗留键，使 v3 容器只有一处存放数据。
 	gpOut.erase("nodes")
 	gpOut.erase("edges")
 	gpOut.erase("shapes")
@@ -250,9 +244,7 @@ static func gpMigrate(gpData: Dictionary) -> Dictionary:
 
 # Flatten a v3 container into the shape GPPIDGraph.gpFromDict() understands.
 # 把 v3 容器展平为 GPPIDGraph.gpFromDict() 能理解的形状。
-# The full `sheets` array is kept in the output so multi-sheet work (P2) can consume it
 # without re-reading the file; gpFromDict() ignores unknown keys.
-# 输出中保留完整 `sheets` 数组，使多图纸工作（P2）无需重读文件即可消费；
 # gpFromDict() 会忽略未知键。
 static func gpToGraphDict(gpData: Dictionary, gpSheetIndex: int = 0) -> Dictionary:
 	var gpV3: Dictionary = gpMigrate(gpData)
@@ -268,7 +260,7 @@ static func gpToGraphDict(gpData: Dictionary, gpSheetIndex: int = 0) -> Dictiona
 		"shapes": _gpArrayOfDicts(gpPick.get("shapes", [])).duplicate(true),
 		"user_symbol_packs": _gpArrayOfDicts(
 			(gpV3.get("library") as Dictionary).get("packs", [])).duplicate(true),
-		# Carried through for P2; harmless to gpFromDict(). / 为 P2 透传；对 gpFromDict() 无害。
+ # Carried through for P2; harmless to gpFromDict(). / 为 P2 透传；对 gpFromDict() 无害。
 		"sheets": gpSheets,
 		"doc_id": str(gpV3.get("doc_id", "")),
 		"config": (gpV3.get("config") as Dictionary).duplicate(true),
@@ -280,7 +272,6 @@ static func gpToGraphDict(gpData: Dictionary, gpSheetIndex: int = 0) -> Dictiona
 	return gpOut
 
 
-# How many sheets a (possibly legacy) archive holds. / 一个（可能是旧版的）存档含多少图纸。
 static func gpSheetCount(gpData: Dictionary) -> int:
 	var gpV3: Dictionary = gpMigrate(gpData)
 	return _gpArrayOfDicts(gpV3.get("sheets", [])).size()
@@ -385,8 +376,8 @@ static func _gpNormalizeEdge(gpE: Dictionary) -> Dictionary:
 	}
 
 
-# Heuristic: does gpText look like a P&ID tag (P-1001, FV-101, PL-201) rather than a name?
-# 启发式：gpText 看起来像位号（P-1001、FV-101、PL-201）而不是名称吗？
+# Heuristic: does gpText() look like a P&ID tag (P-1001, FV-101, PL-201) rather than a name?
+# 启发式：gpText() 看起来像位号（P-1001、FV-101、PL-201）而不是名称吗？
 # Deliberately ASCII-only: any CJK character immediately means "this is a name".
 # 刻意只认 ASCII：任何 CJK 字符立刻意味着「这是名称」。
 static func gpLooksLikeTag(gpText: String) -> bool:
@@ -455,9 +446,9 @@ static func _gpRawSheetList(gpData: Dictionary) -> Array:
 
 
 # The meta dictionary, or {} when the container has none at all. A `config` or `library`
-# export carries no meta, and `null as Dictionary` would crash on the next .get().
+# export carries no meta, and `null as Dictionary` would crash on the next .get.
 # meta 字典，容器根本没有时返回 {}。`config` / `library` 导出不含 meta，
-# 而 `null as Dictionary` 会在紧接着的 .get() 上崩溃。
+# 而 `null as Dictionary` 会在紧接着的 .get 上崩溃。
 static func _gpMetaOf(gpData: Dictionary) -> Dictionary:
 	if gpData.get("meta") is Dictionary:
 		return gpData.get("meta") as Dictionary
@@ -527,13 +518,13 @@ static func _gpFillConfig(gpIn: Dictionary) -> Dictionary:
 	var gpOut: Dictionary = (gpIn as Dictionary).duplicate(true)
 	for gpKey in gpDef.keys():
 		if not gpOut.has(gpKey):
-			# Not every default is a Dictionary ("schema" is an int). `int as Dictionary`
-			# yields null, and null.duplicate() raises a runtime error that GDScript
-			# SWALLOWS — the function then returns an empty dict and the config silently
-			# vanishes. Copy by value kind instead.
-			# 并非每个默认值都是字典（"schema" 是 int）。`int as Dictionary` 得到 null，
-			# 而 null.duplicate() 会抛出**被 GDScript 静默吞掉**的运行时错误 ——
-			# 函数随后返回空字典，config 就无声无息地消失了。故按值的类型复制。
+ # Not every default is a Dictionary ("schema" is an int). `int as Dictionary`
+ # yields null, and null.duplicate raises a runtime error that GDScript
+ # SWALLOWS — the function then returns an empty dict and the config silently
+ # vanishes. Copy by value kind instead.
+ # 并非每个默认值都是字典（"schema" 是 int）。`int as Dictionary` 得到 null，
+ # 而 null.duplicate 会抛出**被 GDScript 静默吞掉**的运行时错误 ——
+ # 函数随后返回空字典，config 就无声无息地消失了。故按值的类型复制。
 			var gpVal: Variant = gpDef[gpKey]
 			gpOut[gpKey] = (gpVal as Dictionary).duplicate(true) if gpVal is Dictionary else gpVal
 			continue
@@ -565,7 +556,7 @@ static func gpGeneratorInfo() -> Dictionary:
 	}
 
 
-# Current UTC time as ISO-8601 with a Z suffix (E28: one timezone on disk, always).
-# 当前 UTC 时间，ISO-8601 带 Z 后缀（E28：磁盘上永远只有一种时区）。
+# Current UTC time as ISO-8601 with a Z suffix .
+# 当前 UTC 时间，ISO-8601 带 Z 后缀。
 static func gpNowIso() -> String:
 	return Time.get_datetime_string_from_system(true)

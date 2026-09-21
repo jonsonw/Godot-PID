@@ -11,9 +11,9 @@ extends RefCounted
 
 # Cross-document technical id, e.g. "a3f9k2m1-n17". NEVER changes once assigned: edges and
 # off-page cross references point at this, so renaming a tag can never break a pipe.
-# Allocated by GPIdGen.gpNextGlobal (M8 field, wired in M9/M11).
+# Allocated by GPIdGen.gpNextGlobal() .
 # 跨文档技术号，如 "a3f9k2m1-n17"。一旦分配**永不改变**：边与跨页互引都指向它，
-# 故改位号绝不会断线。由 GPIdGen.gpNextGlobal 分配（M8 建字段，M9/M11 接线）。
+# 故改位号绝不会断线。由 GPIdGen.gpNextGlobal() 分配。
 var gpUid: String = ""
 
 # Per-drawing instance id, e.g. "u-1". Kept as the in-file key; gpUid supersedes it for any
@@ -95,11 +95,10 @@ func gpToDict() -> Dictionary:
 	return gpD
 
 
-# Restore this node from a dictionary (inverse of gpToDict).
-# 从字典还原本节点（gpToDict 的逆操作）。
+# Restore this node from a dictionary (inverse of gpToDict()).
+# 从字典还原本节点（gpToDict() 的逆操作）。
 # Tolerant of the old dictionary-graph shape (id/type/label/pos/attrs) so legacy
 # *.pid.json files still load.
-# 兼容旧字典图形状（id/type/label/pos/attrs），使旧版 *.pid.json 仍可载入。
 func gpFromDict(gpD: Dictionary) -> void:
 	# New object-graph key first, fall back to the old dictionary-graph key.
 	# 优先用对象图新键，再兜底旧字典图键。
@@ -136,9 +135,8 @@ func gpFromDict(gpD: Dictionary) -> void:
 
 
 # Effective uid: an archive written before M8 has none, so the per-drawing id doubles as the
-# reference key until it is upgraded (M12 migration backfills real uids).
+# reference key until it is upgraded .
 # 生效的 uid：M8 之前的存档没有该字段，故在升级前用单图纸 id 兼任引用键
-# （M12 迁移会回填真正的 uid）。
 func gpRefId() -> String:
 	if gpUid != "":
 		return gpUid

@@ -1,19 +1,17 @@
 class_name GPAddShapeCommand
 extends GPCommand
-# Commit a finished annotation shape (line / circle / rect / arc / polyline) to the sheet (M4).
-# 把绘制完成的注释图形（直线 / 圆 / 矩形 / 弧 / 折线）提交到图纸（M4）。
 #
 # Index rule / 下标规则:
-#   Shapes are stored in z-order, so undo must put the shape back at the SAME index it came
-#   from rather than appending it — otherwise undo silently restacks the drawing order.
-#   图形按叠放顺序存储，故撤销必须把图形放回它原来所在的下标，而非追加到末尾，
-#   否则撤销会静默改变叠放顺序。
+# Shapes are stored in z-order, so undo must put the shape back at the SAME index it came
+# from rather than appending it — otherwise undo silently restacks the drawing order.
+# 图形按叠放顺序存储，故撤销必须把图形放回它原来所在的下标，而非追加到末尾，
+# 否则撤销会静默改变叠放顺序。
 #
 # Identity rule / 同一性规则:
-#   The shape OBJECT is kept, so redo re-inserts the very same instance (same id, same
-#   bezier handles) instead of a rebuilt copy that would drift from what the user drew.
-#   保留图形对象本身，故重做重新插入的是同一实例（同 id、同贝塞尔手柄），
-#   而非会与用户所绘内容漂移的重建副本。
+# The shape OBJECT is kept, so redo re-inserts the very same instance (same id, same
+# bezier handles) instead of a rebuilt copy that would drift from what the user drew.
+# 保留图形对象本身，故重做重新插入的是同一实例（同 id、同贝塞尔手柄），
+# 而非会与用户所绘内容漂移的重建副本。
 
 # The shape to add. Built by the drawing tool before it asks for a commit.
 # 待加入的图形。由绘图工具在请求提交之前构造好。

@@ -5,14 +5,14 @@ extends RefCounted
 # Visual layering palette (refined dark gradient).
 #
 # 设计原则 / Design intent:
-#   - 中心画布最亮（工作区聚焦），向外逐层变暗：画布 > Ribbon > 侧栏 > 菜单/状态栏。
-#     The canvas is brightest (working-area focus), darkening outward:
-#     canvas > ribbon > dock > menu/status chrome.
-#   - 边界线比所有背景亮一档，形成清晰但不刺眼的 1px 分隔，解决五区块"连成一片"。
-#     Border lines sit one tier brighter than any background, giving a crisp 1px
-#     divider without harshness — fixes the "blocks merge into one" problem.
-#   - 颜色均为数据自包含常量，便于统一微调（改这里即改全界面）。
-#     Colours are self-contained constants so a single edit restyles the whole UI.
+# - 中心画布最亮（工作区聚焦），向外逐层变暗：画布 > Ribbon > 侧栏 > 菜单/状态栏。
+# The canvas is brightest (working-area focus), darkening outward:
+# canvas > ribbon > dock > menu/status chrome.
+# - 边界线比所有背景亮一档，形成清晰但不刺眼的 1px 分隔，解决五区块"连成一片"。
+# Border lines sit one tier brighter than any background, giving a crisp 1px
+# divider without harshness — fixes the "blocks merge into one" problem.
+# - 颜色均为数据自包含常量，便于统一微调（改这里即改全界面）。
+# Colours are self-contained constants so a single edit restyles the whole UI.
 # 编码规范：所有变量均显式声明类型。
 
 # 菜单栏 / 状态栏（最暗一档 chrome）

@@ -1,21 +1,20 @@
 # ============================================================================
-# GPCanvasShortcuts — 画布键盘快捷键（M4 续 · 自 canvas_2d 迁出）
-# Canvas keyboard shortcuts (M4 cont · moved out of canvas_2d).
+# GPCanvasShortcuts — 画布键盘快捷键
+# Canvas keyboard shortcuts .
 #
 # 承接画布的共享快捷键（Delete / Ctrl+A / ESC / Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z）与渐进式 ESC
-# 取消链。原先这段代码内联在 canvas_2d._gpOnKey / _gpOnEscape 中，与输入分发、相机、绘制混在
+# 取消链。原先这段代码内联在 canvas_2d._gpOnKey() / _gpOnEscape 中，与输入分发、相机、绘制混在
 # 一起；迁出后画布只剩「把按键交给快捷键委托」一行，与 P2 的其它委托（overlay / 注释编辑 /
 # 上下文菜单）保持同一种形状。
 # Owns the canvas's shared shortcuts (Delete / Ctrl+A / ESC / Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z)
-# and the progressive-ESC cancellation chain. This code used to be inline in
-# canvas_2d._gpOnKey / _gpOnEscape, mixed in with input dispatch, camera and painting. After
+# canvas_2d._gpOnKey() / _gpOnEscape, mixed in with input dispatch, camera and painting. After
 # the move the canvas is left with a single line — "hand the key to the shortcuts delegate" —
 # matching the shape of the other P2 delegates (overlay / annotation editor / context menu).
 #
-# 本委托只经公开端口访问画布（gpRequest* / gpSetSelection / gpMarq / gpAnno / gpUndo / gpRedo），
+# 本委托只经公开端口访问画布（gpRequest* / gpSetSelection() / gpMarq / gpAnno / gpUndo() / gpRedo()），
 # 不读任何 _gp* 私有字段。
-# This delegate reaches the canvas only through public ports (gpRequest* / gpSetSelection /
-# gpMarq / gpAnno / gpUndo / gpRedo) and reads no _gp* private field.
+# This delegate reaches the canvas only through public ports (gpRequest* / gpSetSelection() /
+# gpMarq / gpAnno / gpUndo() / gpRedo()) and reads no _gp* private field.
 # ============================================================================
 
 class_name GPCanvasShortcuts
@@ -42,8 +41,8 @@ func gpHandleKey(gpKey: InputEventKey) -> bool:
 	var gpCtrl: bool = gpKey.ctrl_pressed or gpKey.meta_pressed
 	match gpKey.keycode:
 		KEY_DELETE, KEY_BACKSPACE:
-			# A selected bump anchor takes priority: Del removes just that anchor, not the whole edge.
-			# 选中的鼓包锚点优先：Del 只删该锚点，而非整条边。
+ # A selected bump anchor takes priority: Del removes just that anchor, not the whole edge.
+ # 选中的鼓包锚点优先：Del 只删该锚点，而非整条边。
 			var gpBump: Dictionary = gpCv.gpEdgeGrips.gpSelectedBump()
 			if not gpBump.is_empty():
 				gpCv.gpEdgeGrips.gpDeleteBump(gpBump.get("eid", ""), int(gpBump.get("ai", -1)))
@@ -56,9 +55,9 @@ func gpHandleKey(gpKey: InputEventKey) -> bool:
 				return true
 		KEY_Z:
 			if gpCtrl:
-				# Ctrl+Z undoes; Ctrl+Shift+Z redoes — the spelling every other editor uses,
-				# so it needs no discoverability effort from the user.
-				# Ctrl+Z 撤销；Ctrl+Shift+Z 重做 —— 所有编辑器通用的写法，无需用户额外学习。
+ # Ctrl+Z undoes; Ctrl+Shift+Z redoes — the spelling every other editor uses,
+ # so it needs no discoverability effort from the user.
+ # Ctrl+Z 撤销；Ctrl+Shift+Z 重做 —— 所有编辑器通用的写法，无需用户额外学习。
 				if gpKey.shift_pressed:
 					gpCv.gpRedo()
 				else:
@@ -66,7 +65,7 @@ func gpHandleKey(gpKey: InputEventKey) -> bool:
 				return true
 		KEY_Y:
 			if gpCtrl:
-				# Windows/Linux muscle memory for redo. / Windows / Linux 上重做的习惯键。
+ # Windows/Linux muscle memory for redo. / Windows / Linux 上重做的习惯键。
 				gpCv.gpRedo()
 				return true
 		KEY_ESCAPE:

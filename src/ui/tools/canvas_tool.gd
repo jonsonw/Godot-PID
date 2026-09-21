@@ -1,14 +1,14 @@
 # ============================================================================
-# GPCanvasTool — 画布交互工具基类（P2 拆分）
-# Canvas interaction tool base class (P2 split).
+# GPCanvasTool — 画布交互工具基类
+# Canvas interaction tool base class .
 #
 # 每个交互工具是一个 RefCounted 委托，经 GPCanvasToolContext 读写画布实时状态。画布只持
 # 有瞬态拖拽状态与编排逻辑，工具负责「某一种交互」的按下 / 移动 / 释放 / 按键 / 覆盖层绘制。
-# 新增交互 = 新增一个文件 + 注册表加一行，画布主体一行不改（见 docs/架构优化方案 §5）。
+# 新增交互 = 新增一个文件 + 注册表加一行，画布主体一行不改。
 # Every interaction tool is a RefCounted delegate that reads/writes live canvas state through
 # GPCanvasToolContext. The canvas keeps transient drag state + orchestration; each tool owns one
 # interaction's press / move / release / key / overlay. Adding an interaction = one file + one
-# registry line, the canvas body unchanged (docs/架构优化方案 §5).
+# registry line, the canvas body unchanged.
 # ============================================================================
 
 class_name GPCanvasTool
@@ -22,8 +22,8 @@ var gpCtx: GPCanvasToolContext
 func gpOnActivate() -> void: pass
 func gpOnDeactivate() -> void: pass
 
-# Input hooks. Return true when consumed (canvas will accept_event()).
-# 输入钩子。返回 true 表示事件已被消费（画布将 accept_event()）。
+# Input hooks. Return true when consumed (canvas will accept_event).
+# 输入钩子。返回 true 表示事件已被消费（画布将 accept_event）。
 func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool: return false
 func gpOnMove(gpWorld: Vector2) -> bool: return false
 func gpOnRelease(gpWorld: Vector2) -> bool: return false

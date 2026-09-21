@@ -5,13 +5,13 @@ extends RefCounted
 # 单调递增、绝不回收的工艺位号分配器（如 PL-1001、PL-1002 ...）。
 #
 # Why not GPIdGen / 为何不用 GPIdGen：
-#   GPIdGen's counter is shared by nodes and edges and is reset by File > New. A pipe number
-#   must survive a save/load round trip and must NEVER be reused after a delete — otherwise two
-#   different pipes in the project's history carry the same number, which is a drafting defect,
-#   not a cosmetic one. So the high-water marks live in gpGraph.gpMeta and travel with the file.
-#   GPIdGen 的计数器由节点与边共用，且「文件 > 新建」会重置它。而管道号必须经存/读往返存活，
-#   且删除后绝不重用 —— 否则工程历史里两条不同管线同号，这是制图缺陷而非外观问题。
-#   因此水位线落在 gpGraph.gpMeta，随文件一同旅行。
+# GPIdGen's counter is shared by nodes and edges and is reset by File > New. A pipe number
+# must survive a save/load round trip and must NEVER be reused after a delete — otherwise two
+# different pipes in the project's history carry the same number, which is a drafting defect,
+# not a cosmetic one. So the high-water marks live in gpGraph.gpMeta and travel with the file.
+# GPIdGen 的计数器由节点与边共用，且「文件 > 新建」会重置它。而管道号必须经存/读往返存活，
+# 且删除后绝不重用 —— 否则工程历史里两条不同管线同号，这是制图缺陷而非外观问题。
+# 因此水位线落在 gpGraph.gpMeta，随文件一同旅行。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。

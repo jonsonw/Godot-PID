@@ -1,22 +1,20 @@
 class_name GPPipeTool
 extends GPCanvasTool
 # Copyright © 2026 Jonson Wang
-# Two-press pipe drawing: pick a start nozzle, preview, pick an end nozzle (P3).
-# 两段式管道绘制：选起点管口 → 预览 → 选终点管口（P3）。
 #
 # Why a new mode instead of reusing GP_CONNECT / 为何新开模式而非复用 GP_CONNECT：
-#   GP_CONNECT means "node to node, no ports, no line type". Six call sites read it. Changing
-#   its meaning would change six contracts at once; a new mode is dispatched by the existing
-#   registry and leaves the old path byte-for-byte intact.
-#   GP_CONNECT 的语义是「节点到节点、无端口、无线型」，有六处代码在读它。改语义等于同时改六份
-#   契约；新开模式由既有注册表分派，旧路径逐字节不变。
+# GP_CONNECT means "node to node, no ports, no line type". Six call sites read it. Changing
+# its meaning would change six contracts at once; a new mode is dispatched by the existing
+# registry and leaves the old path byte-for-byte intact.
+# GP_CONNECT 的语义是「节点到节点、无端口、无线型」，有六处代码在读它。改语义等于同时改六份
+# 契约；新开模式由既有注册表分派，旧路径逐字节不变。
 #
 # The preview uses the SAME router and painter as the committed edge / 预览与提交的边用同一套
-#   router 与 painter：
-#   This is the whole point of "what you see is what you get". If the preview drew a straight
-#   line while the committed edge was routed orthogonally, the pipe would jump the instant the
-#   user released the mouse.
-#   这正是「所见即所得」的全部意义。若预览画直线而提交的边走正交布线，用户一松手管线就会跳位。
+# router 与 painter：
+# This is the whole point of "what you see is what you get". If the preview drew a straight
+# line while the committed edge was routed orthogonally, the pipe would jump the instant the
+# user released the mouse.
+# 这正是「所见即所得」的全部意义。若预览画直线而提交的边走正交布线，用户一松手管线就会跳位。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -78,10 +76,10 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 	var gpCv := gpCtx.gpCv
 	var gpSnap: Dictionary = _gpSnapAt(gpWorld)
 	if not _gpActive:
-		# First press: anchor the start. A pipe may also START dangling (off-sheet continuation),
-		# so a grid snap is accepted here and only checked against the far end at commit time.
-		# 第一次按下：锚定起点。管道也允许「起点悬空」（延续他页），故此处的网格吸附被接受，
-		# 只在提交时才与另一端一起校验。
+ # First press: anchor the start. A pipe may also START dangling (off-sheet continuation),
+ # so a grid snap is accepted here and only checked against the far end at commit time.
+ # 第一次按下：锚定起点。管道也允许「起点悬空」（延续他页），故此处的网格吸附被接受，
+ # 只在提交时才与另一端一起校验。
 		_gpStart = gpSnap
 		_gpActive = true
 		_gpCursor = gpSnap.get("pos", gpWorld)
@@ -100,8 +98,8 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 	var gpId: String = gpCv.gpRequestConnectEdge(_gpRefFrom(_gpStart), _gpRefFrom(gpSnap),
 		_gpKind(), _gpDefaultSignalType(), SnapState.gpOrthoEnabled and not gpShift)
 	if gpId == "":
-		# The command refused (duplicate / self-loop / both ends free).
-		# 命令拒绝（重复边 / 自环 / 两端皆悬空）。
+ # The command refused (duplicate / self-loop / both ends free).
+ # 命令拒绝（重复边 / 自环 / 两端皆悬空）。
 		gpCv.gpReportRefusal(gpCv.gpActions.gpLastRefusal)
 	else:
 		gpRefusal = ""
@@ -205,10 +203,10 @@ func _gpSnapAt(gpWorld: Vector2) -> Dictionary:
 
 
 # Shift means "straight, no orthogonal routing". Sampled live at draw time (not from the press
-# event) because the preview must follow the key while it is held, and gpOnMove carries no
+# event) because the preview must follow the key while it is held, and gpOnMove() carries no
 # modifier flags.
 # Shift 表示「直连、不走正交」。在绘制时实时采样（而非取按下事件），因为预览必须跟随按住状态，
-# 而 gpOnMove 不携带修饰键。
+# 而 gpOnMove() 不携带修饰键。
 func _gpIsStraight() -> bool:
 	return Input.is_key_pressed(KEY_SHIFT)
 

@@ -1,6 +1,6 @@
 extends "res://tests/gp_test.gd"
-# 架构优化 §3 第 3 项：清理 main_window.gd 遗留旧（平铺）工具栏代码后的回归钉。
-# Architecture §3 item 3: regression pin after clearing main_window.gd's legacy flat-toolbar code.
+# 清理 main_window.gd 遗留旧（平铺）工具栏代码后的回归钉。
+# regression pin after clearing main_window.gd's legacy flat-toolbar code.
 #
 # 已删除的死代码：
 #   - 字段 var gpToolBar: HBoxContainer / var gpToolBtns: Dictionary（从未赋值，仅被 Ribbon==null

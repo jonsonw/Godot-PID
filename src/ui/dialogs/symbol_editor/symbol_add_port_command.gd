@@ -1,6 +1,4 @@
 # ============================================================================
-# GPSymbolAddPortCommand — 添加连接端口（M7）
-# Add a connection port to the symbol's working port list (M7).
 #
 # 与 GPAddShapeCommand 同构，但作用于 _gpPorts 数组。保留端口对象，重做重插入同一实例。
 # Same shape as GPAddShapeCommand but operates on the _gpPorts array. The port object is kept so redo

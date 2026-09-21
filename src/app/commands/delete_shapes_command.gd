@@ -1,19 +1,17 @@
 class_name GPDeleteShapesCommand
 extends GPCommand
-# Delete annotation shapes by index (M4).
-# 按下标删除注释图形（M4）。
 #
 # Why indices / 为何用下标:
-#   The selection set of annotation shapes is index-based (gpShapeSel), because shapes have
-#   no id. That makes index the only handle the UI can hand over, so the command snapshots
-#   the real objects at execute time and restores them at their original indices.
-#   注释图形的选择集是基于下标的（gpShapeSel），因为图形没有 id。因此下标是界面唯一能交出
-#   的句柄；命令在执行时快照真实对象，并在撤销时按原下标放回。
+# The selection set of annotation shapes is index-based (gpShapeSel), because shapes have
+# no id. That makes index the only handle the UI can hand over, so the command snapshots
+# the real objects at execute time and restores them at their original indices.
+# 注释图形的选择集是基于下标的（gpShapeSel），因为图形没有 id。因此下标是界面唯一能交出
+# 的句柄；命令在执行时快照真实对象，并在撤销时按原下标放回。
 #
 # Descending removal / 降序删除:
-#   Removing highest-index-first keeps the lower indices valid while the loop runs — the
-#   classic "don't mutate the array you are indexing into" trap.
-#   先删高下标可在循环过程中保持低下标有效 —— 即「不要边遍历边改数组」的经典陷阱。
+# Removing highest-index-first keeps the lower indices valid while the loop runs — the
+# classic "don't mutate the array you are indexing into" trap.
+# 先删高下标可在循环过程中保持低下标有效 —— 即「不要边遍历边改数组」的经典陷阱。
 
 # Indices to delete, as handed over by the selection.
 # 待删除的下标，由选择集交出。

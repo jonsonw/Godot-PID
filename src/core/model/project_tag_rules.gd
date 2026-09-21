@@ -6,19 +6,19 @@ extends RefCounted
 # 工程级位号编号配置：一条默认规则、可选的按类别 / 按图元覆盖，以及各前缀的水位线。
 #
 # Two things live here on purpose / 以下两件事刻意放在此处：
-#   1. The RULES travel with the project file (they are embedded in *.pid.json), because a
-#      project's numbering convention belongs to that project — not to the symbol library and
-#      not to the application. Data sovereignty: reopening the archive years later must
-#      reproduce the same convention.
-#      规则随工程文件走（内嵌进 *.pid.json），因为编号约定属于该工程——不属于图元库，
-#      也不属于应用程序。数据主权：多年后重开存档必须能复现同一套约定。
-#   2. The high-water marks travel with the rules, NOT with gpGraph.gpMeta["tag_seq"].
-#      GPTagGen keeps pipe marks in gpMeta (pre-existing behaviour, must not change); the
-#      equipment counter is new and belongs beside the rules that define it, so a rule edit
-#      and its counter cannot drift apart.
-#      水位线随规则走，而非落在 gpGraph.gpMeta["tag_seq"]。GPTagGen 的管线水位线留在
-#      gpMeta（既有行为，不可改）；设备计数器是新增的，理应紧邻定义它的规则，
-#      使「改规则」与「改计数器」不会脱节。
+# 1. The RULES travel with the project file (they are embedded in *.pid.json), because a
+# project's numbering convention belongs to that project — not to the symbol library and
+# not to the application. Data sovereignty: reopening the archive years later must
+# reproduce the same convention.
+# 规则随工程文件走（内嵌进 *.pid.json），因为编号约定属于该工程——不属于图元库，
+# 也不属于应用程序。数据主权：多年后重开存档必须能复现同一套约定。
+# 2. The high-water marks travel with the rules, NOT with gpGraph.gpMeta["tag_seq"].
+# GPTagGen keeps pipe marks in gpMeta (pre-existing behaviour, must not change); the
+# equipment counter is new and belongs beside the rules that define it, so a rule edit
+# and its counter cannot drift apart.
+# 水位线随规则走，而非落在 gpGraph.gpMeta["tag_seq"]。GPTagGen 的管线水位线留在
+# gpMeta（既有行为，不可改）；设备计数器是新增的，理应紧邻定义它的规则，
+# 使「改规则」与「改计数器」不会脱节。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。

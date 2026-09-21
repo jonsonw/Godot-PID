@@ -104,8 +104,8 @@ func _gpHostWindow() -> Window:
 
 
 # Show the dialog as a movable, resizable window centered over the main window. Callers must use
-# this instead of the bare `popup_centered()`, which ignores `size` and falls back to `min_size`.
-# 以可移动、可缩放的窗口居中显示在主窗口之上。调用方须用本方法而非裸 `popup_centered()`
+# this instead of the bare `popup_centered`, which ignores `size` and falls back to `min_size`.
+# 以可移动、可缩放的窗口居中显示在主窗口之上。调用方须用本方法而非裸 `popup_centered`
 # ——后者会忽略 `size` 并退回 `min_size`。
 func gpPopupOverHost() -> void:
 	GP_WINDOW_FIT.gpPopupFitted(self, _gpHostWindow(), GP_MIN_LOGICAL, GP_MAX_LOGICAL)

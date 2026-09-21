@@ -7,11 +7,11 @@ extends RefCounted
 # 体系，使全部线型共用一套尺度。
 #
 # Why built-in defaults AND a file / 为何内置默认值又提供文件：
-#   The render path (GPEdgeStyle.gpStyleFor) must never fail or block on a file read, so the
-#   SAME patterns live here as constants. assets/linetypes/acad.ltp is the user-editable
-#   mirror — gpLoadFile() overrides the built-ins when present.
-#   渲染路径（GPEdgeStyle.gpStyleFor）绝不能为读文件而失败或阻塞，故同一份图案作为常量内置。
-#   assets/linetypes/acad.ltp 是可编辑镜像——存在时 gpLoadFile() 覆盖内置值。
+# The render path (GPEdgeStyle.gpStyleFor()) must never fail or block on a file read, so the
+# SAME patterns live here as constants. assets/linetypes/acad.ltp is the user-editable
+# mirror — gpLoadFile() overrides the built-ins when present.
+# 渲染路径（GPEdgeStyle.gpStyleFor()）绝不能为读文件而失败或阻塞，故同一份图案作为常量内置。
+# assets/linetypes/acad.ltp 是可编辑镜像——存在时 gpLoadFile() 覆盖内置值。
 # 编码规范：所有变量均显式声明类型。
 
 # Global linetype scale (AutoCAD LTSCALE). Multiplies every dash/space length.
@@ -29,8 +29,8 @@ static var gpBuiltins: Dictionary = {
 	"DOT": PackedFloat32Array([0.0, 4.0]),
 }
 
-# Runtime override table (filled by gpLoadFile). Empty = use built-ins.
-# 运行时覆盖表（由 gpLoadFile 填充）。为空则使用内置值。
+# Runtime override table (filled by gpLoadFile()). Empty = use built-ins.
+# 运行时覆盖表（由 gpLoadFile() 填充）。为空则使用内置值。
 static var gpOverrides: Dictionary = {}
 
 

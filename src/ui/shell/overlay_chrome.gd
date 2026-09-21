@@ -6,16 +6,16 @@ extends Control
 # blocks input so the splitter beneath stays draggable).
 #
 # 在画布/侧栏之上绘制：
-#   1) 随时存在的 1px 发丝接缝线（GP_BORDER，已调低对比度）；
-#   2) 鼠标悬停到某条接缝时，其两侧亮起 2px accent 高亮，明确"此处可拖拽"。
+# 1) 随时存在的 1px 发丝接缝线（GP_BORDER，已调低对比度）；
+# 2) 鼠标悬停到某条接缝时，其两侧亮起 2px accent 高亮，明确"此处可拖拽"。
 # Paints above canvas/docks:
-#   1) an always-on 1px hairline seam (GP_BORDER, low-contrast);
-#   2) when the pointer hovers a seam, a 2px accent highlight flares on both sides —
-#      an explicit "this is draggable" affordance.
+# 1) an always-on 1px hairline seam (GP_BORDER, low-contrast);
+# 2) when the pointer hovers a seam, a 2px accent highlight flares on both sides —
+# an explicit "this is draggable" affordance.
 # 编码规范：所有变量均显式声明类型。
 
-# 三栏分隔条引用（由 _ready 解析）。
-# The three-pane splitter reference (resolved in _ready).
+# 三栏分隔条引用（由 _ready() 解析）。
+# The three-pane splitter reference (resolved in _ready()).
 var gpSplit: HSplitContainer = null
 
 
@@ -45,13 +45,13 @@ func _draw() -> void:
 	for gpI in range(gpSeams.size()):
 		var gpGx: float = gpOrigin + gpSeams[gpI]
 		var gpLx: float = make_canvas_position_local(Vector2(gpGx, 0.0)).x
-		# 细腻 1px 发丝基线。
-		# Delicate 1px hairline baseline.
+ # 细腻 1px 发丝基线。
+ # Delicate 1px hairline baseline.
 		draw_line(Vector2(gpLx + 0.5, gpTop), Vector2(gpLx + 0.5, gpBot),
 			GPChromeStyle.GP_BORDER, 1.0)
 		if gpI == gpHover:
-			# 悬停：两侧 2px accent 高亮（细，不粗）。
-			# Hover: a thin 2px accent highlight on both sides.
+ # 悬停：两侧 2px accent 高亮（细，不粗）。
+ # Hover: a thin 2px accent highlight on both sides.
 			draw_line(Vector2(gpLx - 0.5, gpTop), Vector2(gpLx - 0.5, gpBot),
 				GPChromeStyle.GP_ACCENT, 2.0)
 			draw_line(Vector2(gpLx + 1.5, gpTop), Vector2(gpLx + 1.5, gpBot),

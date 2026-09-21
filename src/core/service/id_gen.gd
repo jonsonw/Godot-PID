@@ -15,8 +15,8 @@ extends RefCounted
 ## W21（多文档）与 W22（跨图纸互引）要求 id 跨文档唯一，故计数器不能停留在某个 Control 的私有字段里。
 ##
 ## Two flavours, deliberately separated / 刻意区分的两种用法：
-##  - static gpSanitize / gpEnsureUnique : pure id hygiene, no state  (stateless / 无状态)
-##  - instance gpNext("n")               : a monotonic counter for runtime instance ids
+## - static gpSanitize() / gpEnsureUnique() : pure id hygiene, no state (stateless / 无状态)
+## - instance gpNext("n") : a monotonic counter for runtime instance ids
 
 # Fallback when the sanitized result is EMPTY (i.e. a blank name). A name that collapses to
 # underscores ("___") is a valid non-empty id and does NOT fall back — matching the historic
@@ -119,10 +119,10 @@ static func gpSanitize(gpName: String) -> String:
 
 
 # Deduplicate gpId against an existing-id predicate: appends "_2", "_3", ... until free.
-# gpIsTaken must be a Callable taking a String and returning a bool, which lets the caller
+# gpIsTaken() must be a Callable taking a String and returning a bool, which lets the caller
 # query a live library without materializing every id up front.
 # 依「已被占用」谓词为 gpId 去重：追加 "_2"、"_3"…… 直到空闲。
-# gpIsTaken 须是「接收 String、返回 bool」的 Callable，使调用方无需预先物化全部 id 即可查询活动库。
+# gpIsTaken() 须是「接收 String、返回 bool」的 Callable，使调用方无需预先物化全部 id 即可查询活动库。
 static func gpEnsureUnique(gpId: String, gpIsTaken: Callable) -> String:
 	var gpCandidate: String = gpId
 	var gpN: int = 2

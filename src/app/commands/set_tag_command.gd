@@ -2,14 +2,13 @@ class_name GPSetTagCommand
 extends GPCommand
 # Copyright © 2026 Jonson Wang
 # Change one instance's 位号 (tag) — M11.
-# 修改某个实例的位号（M11）。
 #
 # Why this is a command and not a direct write / 为何要成为命令而非直接写入：
-#   the tag ends up in the DCS point list and on the physical nameplate. A typo must be
-#   undoable in one step, and a duplicate must be REFUSED rather than silently suffixed —
-#   a silently renamed tag ships a drawing that no longer matches the plant.
-#   位号最终会出现在 DCS 点表与现场标牌上。打错必须一步可撤销，重复必须**拒绝**
-#   而非静默加后缀 —— 静默改名的图纸到了现场就与装置对不上。
+# the tag ends up in the DCS point list and on the physical nameplate. A typo must be
+# undoable in one step, and a duplicate must be REFUSED rather than silently suffixed —
+# a silently renamed tag ships a drawing that no longer matches the plant.
+# 位号最终会出现在 DCS 点表与现场标牌上。打错必须一步可撤销，重复必须**拒绝**
+# 而非静默加后缀 —— 静默改名的图纸到了现场就与装置对不上。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -40,8 +39,8 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		return false
 	if gpCtx.gpTags != null:
 		gpCtx.gpTags.gpGraph = gpCtx.gpGraph
-		# gpRegister releases any previous binding for this id first, so register == rename.
-		# gpRegister 会先注销该 id 的旧绑定，故「登记」即「改名」。
+ # gpRegister() releases any previous binding for this id first, so register == rename.
+ # gpRegister() 会先注销该 id 的旧绑定，故「登记」即「改名」。
 		if not gpCtx.gpTags.gpRegister(_gpId, gpNew).gpIsOk():
 			return false
 	_gpOldTag = gpN.gpTag

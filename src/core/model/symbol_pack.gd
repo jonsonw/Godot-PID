@@ -55,8 +55,8 @@ func gpSizeFor(gpCat: String) -> Vector2:
 	return GPSymbolCategories.gpSizeFor(gpCat, gpCategorySizes)
 
 
-# Serialize pack metadata (symbols are serialized by the caller via GPSymbolDef.gpToDict).
-# 序列化图元包元数据（图元本身由调用方通过 GPSymbolDef.gpToDict 序列化）。
+# Serialize pack metadata (symbols are serialized by the caller via GPSymbolDef.gpToDict()).
+# 序列化图元包元数据（图元本身由调用方通过 GPSymbolDef.gpToDict() 序列化）。
 func gpToDict() -> Dictionary:
 	var gpSizes: Dictionary = {}
 	for gpK in gpCategorySizes.keys():
@@ -76,8 +76,8 @@ func gpToDict() -> Dictionary:
 	}
 
 
-# Rebuild pack metadata and symbols from a dictionary (inverse of gpToDict).
-# 从字典重建图元包元数据与图元（gpToDict 的逆操作）。
+# Rebuild pack metadata and symbols from a dictionary (inverse of gpToDict()).
+# 从字典重建图元包元数据与图元（gpToDict() 的逆操作）。
 func gpFromDict(gpD: Dictionary) -> void:
 	gpPackId = gpD.get("pack_id", "")
 	gpName = gpD.get("name", "")

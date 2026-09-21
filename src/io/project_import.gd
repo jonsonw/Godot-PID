@@ -36,9 +36,7 @@ static func gpReadArchive(gpPath: String) -> GPIOResult:
 	if not gpRead.gpIsOk():
 		return gpRead
 	var gpRaw: Dictionary = gpRead.gpPayload as Dictionary
-	# An empty file is a NEW project, not a corrupt one (E8): the "create" path and the
 	# "open" path then share one code route.
-	# 空文件是**新工程**而非损坏文件（E8）：于是「新建」与「打开」共用一条代码路径。
 	if gpRaw.is_empty():
 		return GPIOResult.gpSuccessWith({}, "io.loaded", gpPath)
 	if not GPSchemaMigrate.gpIsGPidArchive(gpRaw):
@@ -80,15 +78,15 @@ static func gpValidate(gpV3: Dictionary, gpReport: GPImportReport) -> void:
 					gpReport.gpAddWarning("import.tag_duplicate", gpTag)
 				else:
 					gpSeenTags[gpTag] = true
-			# A symbol the current library does not define is kept as-is and drawn as a
-			# placeholder — deleting it would be data loss.
-			# 当前库未定义的图元原样保留并渲染为占位符 —— 删除它就是数据丢失。
+ # A symbol the current library does not define is kept as-is and drawn as a
+ # placeholder — deleting it would be data loss.
+ # 当前库未定义的图元原样保留并渲染为占位符 —— 删除它就是数据丢失。
 			var gpSymbolId: String = str(gpNode.get("symbol_id", ""))
 			if not gpSymbolId.is_empty() and GPSymbolLibrary.gpFindById(gpSymbolId) == null:
 				gpReport.gpAddError("import.symbol_missing", gpSymbolId)
 			gpIndex += 1
-		# Edge ends must resolve; a dangling end is tolerated but reported.
-		# 边端点必须可解析；悬空端被容忍但要报告。
+ # Edge ends must resolve; a dangling end is tolerated but reported.
+ # 边端点必须可解析；悬空端被容忍但要报告。
 		var gpEdges: Array = []
 		if gpSheet.get("edges") is Array:
 			gpEdges = gpSheet.get("edges") as Array
@@ -131,7 +129,7 @@ static func gpRefOf(gpEdge: Dictionary, gpSide: String) -> String:
 # [param gpMode] "merge" (default, non-destructive) or "replace" (clears the target first).
 # [param gpMode] "merge"（默认，非破坏）或 "replace"（先清空目标）。
 # [param gpSheetIndex] which sheet to take; -1 merges EVERY sheet (used by P2).
-# [param gpSheetIndex] 取哪一页图纸；-1 合并**全部**图纸（P2 使用）。
+# [param gpSheetIndex] 取哪一页图纸；-1 合并**全部**图纸。
 static func gpMergeInto(gpTarget: GPPIDGraph, gpV3: Dictionary, gpMode: String = GP_MODE_MERGE,
 		gpSheetIndex: int = 0) -> GPIOResult:
 	var gpReport: GPImportReport = GPImportReport.new()
@@ -179,10 +177,10 @@ static func gpMergeInto(gpTarget: GPPIDGraph, gpV3: Dictionary, gpMode: String =
 				if gpFingerprint(gpExistingDef.gpToDict()) == gpFingerprint(gpDef.gpToDict()):
 					gpReport.gpAddInfo("import.symbol_reused", gpDef.gpId)
 					continue
-				# Same identity, different content: the incoming one is re-identified so
-				# BOTH survive. Overwriting would silently change existing drawings.
-				# 同一标识、不同内容：为导入方重新分配 id，使**两者**都存活。
-				# 覆盖会静默改动既有图纸。
+ # Same identity, different content: the incoming one is re-identified so
+ # BOTH survive. Overwriting would silently change existing drawings.
+ # 同一标识、不同内容：为导入方重新分配 id，使**两者**都存活。
+ # 覆盖会静默改动既有图纸。
 				var gpNewId: String = GPSymbolLibrary.gpAllocateCustomId(gpDef.gpCategory)
 				gpSymbolMap[gpDef.gpId] = gpNewId
 				gpDef.gpId = gpNewId
@@ -221,13 +219,13 @@ static func gpMergeInto(gpTarget: GPPIDGraph, gpV3: Dictionary, gpMode: String =
 			gpUsedUids[gpNewUid] = true
 			gpUidMap[gpOldUid] = gpNewUid
 			gpNd["uid"] = gpNewUid
-			# Symbol remap (only when the id was re-derived above).
-			# 图元重映射（仅当上面重新派生了 id 时）。
+ # Symbol remap (only when the id was re-derived above).
+ # 图元重映射（仅当上面重新派生了 id 时）。
 			var gpSymId: String = str(gpNd.get("symbol_id", ""))
 			if gpSymbolMap.has(gpSymId):
 				gpNd["symbol_id"] = str(gpSymbolMap[gpSymId])
-			# Tag collision: keep the incoming device, rename it, and say so (E27 context).
-			# 位号冲突：保留导入的设备、重命名它并明确告知。
+ # Tag collision: keep the incoming device, rename it, and say so .
+ # 位号冲突：保留导入的设备、重命名它并明确告知。
 			var gpTag: String = str(gpNd.get("tag", ""))
 			if not gpTag.is_empty() and gpUsedTags.has(gpTag):
 				var gpNewTag: String = gpTag + GP_DUP_SUFFIX
@@ -243,8 +241,8 @@ static func gpMergeInto(gpTarget: GPPIDGraph, gpV3: Dictionary, gpMode: String =
 			var gpNode: GPPIDNode = GPPIDNode.new()
 			gpNode.gpFromDict(gpNd)
 			gpTarget.gpAddNode(gpNode)
-		# Edges AFTER nodes, so every uid remap is already known.
-		# 边在节点**之后**处理，使全部 uid 重映射均已就绪。
+ # Edges AFTER nodes, so every uid remap is already known.
+ # 边在节点**之后**处理，使全部 uid 重映射均已就绪。
 		var gpEdges: Array = []
 		if gpSheet.get("edges") is Array:
 			gpEdges = gpSheet.get("edges") as Array

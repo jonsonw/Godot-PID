@@ -5,18 +5,18 @@ extends RefCounted
 # 基于 Hanan 网格的「避障正交布线」（带拐弯惩罚的 A*）。
 #
 # Why a Hanan grid and not a uniform raster / 为何用 Hanan 网格而非均匀栅格：
-#   An optimal orthogonal route only ever turns on a line that touches an obstacle edge. Building
-#   the candidate coordinates from the obstacle envelopes (plus the two endpoints) yields a grid
-#   of a few thousand cells instead of millions, so A* finishes instantly AND the result is still
-#   an optimal orthogonal path in that graph.
-#   最优正交路径只会在「贴着障碍物边」的直线上拐弯。用障碍物包络（加两个端点）构造候选坐标，
-#   网格只有几千格而非几百万，A* 瞬时完成，结果仍是该图上的最优正交路径。
+# An optimal orthogonal route only ever turns on a line that touches an obstacle edge. Building
+# the candidate coordinates from the obstacle envelopes (plus the two endpoints) yields a grid
+# of a few thousand cells instead of millions, so A* finishes instantly AND the result is still
+# an optimal orthogonal path in that graph.
+# 最优正交路径只会在「贴着障碍物边」的直线上拐弯。用障碍物包络（加两个端点）构造候选坐标，
+# 网格只有几千格而非几百万，A* 瞬时完成，结果仍是该图上的最优正交路径。
 #
 # Why A* state carries a direction / 为何 A* 状态要带方向：
-#   Cost depends on whether the move is a TURN, which is a property of the previous move, not of
-#   the cell. Encoding orientation in the state is what makes the turn penalty correct.
-#   代价取决于这一步是否为「拐弯」，而那是「上一步」的属性而非格子的属性。把朝向编进状态，
-#   拐弯惩罚才正确。
+# Cost depends on whether the move is a TURN, which is a property of the previous move, not of
+# the cell. Encoding orientation in the state is what makes the turn penalty correct.
+# 代价取决于这一步是否为「拐弯」，而那是「上一步」的属性而非格子的属性。把朝向编进状态，
+# 拐弯惩罚才正确。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -37,9 +37,9 @@ const GP_OVERLAP_COST: float = 600.0
 
 # Coordinate dedupe / intersection tolerance (world units).
 # 坐标去重 / 相交容差（世界单位）。
-const GP_EPS: float = 0.5
+const GP_EPS: float = GPConstants.GP_EPS
 
-# Safety cap on grid cells; above it the exact search is abandoned for the cheap L/Z/U router.
+# Safety cap on grid cells; above it the exact search() is abandoned for the cheap L/Z/U router.
 # 网格格数上限；超过则放弃精确搜索，改用廉价的 L/Z/U 布线。
 const GP_MAX_CELLS: int = 60000
 
@@ -67,9 +67,9 @@ static func gpObstacles(gpGraph: GPPIDGraph, gpDefLookup: Callable,
 
 # Route one edge orthogonally, avoiding every obstacle and (where possible) every existing line.
 # 正交布一条边，绕开所有障碍物，并尽可能避开所有已有连线。
-# [param gpFrom]  resolved source end {"pos","dir","bound"} / 已解析起点
-# [param gpTo]    resolved target end / 已解析终点
-# [param gpObstacles] raw symbol envelopes to avoid (NOT yet inflated) / 待避开的图元包络（尚未外扩）
+# [param gpFrom()] resolved source end {"pos","dir","bound"} / 已解析起点
+# [param gpTo] resolved target end / 已解析终点
+# [param gpObstacles()] raw symbol envelopes to avoid (NOT yet inflated) / 待避开的图元包络（尚未外扩）
 # [param gpExisting] polylines already on the sheet, penalised when collinear / 图纸上已有的折线，共线时被惩罚
 # [param gpMargin] clearance added around each obstacle / 每个障碍物外扩的间隙
 # [return] the full polyline INCLUDING both endpoints / 含两端的完整折线
@@ -108,7 +108,7 @@ static func gpRouteAuto(gpFrom: Dictionary, gpTo: Dictionary, gpObstacles: Array
 	_gpDedupe(gpYs)
 	var gpNx: int = gpXs.size()
 	var gpNy: int = gpYs.size()
-	# Degenerate or oversized sheet: the exact search is not worth its cost.
+	# Degenerate or oversized sheet: the exact search() is not worth its cost.
 	# 退化或过大的图纸：精确搜索不值当。
 	if gpNx < 2 or gpNy < 2 or gpNx * gpNy > GP_MAX_CELLS:
 		return GPEdgeRoute.gpOrthoPath(gpA, gpDa, gpB, gpDb, gpStubA, gpStubB)
@@ -167,8 +167,8 @@ static func _gpSearch(gpXs: Array[float], gpYs: Array[float], gpBlockers: Array[
 			break
 		var gpDir: int = gpCur % 2
 		var gpG: float = float(gpGScore[gpCur])
-		# Four neighbours: two horizontal (dir 0), two vertical (dir 1).
-		# 四个邻居：两个水平（dir 0）、两个垂直（dir 1）。
+ # Four neighbours: two horizontal (dir 0), two vertical (dir 1).
+ # 四个邻居：两个水平（dir 0）、两个垂直（dir 1）。
 		for gpK in range(4):
 			var gpNewDir: int = 0 if gpK < 2 else 1
 			var gpNx2: int = gpCx + (1 if gpK == 0 else (-1 if gpK == 1 else 0))
@@ -180,12 +180,12 @@ static func _gpSearch(gpXs: Array[float], gpYs: Array[float], gpBlockers: Array[
 			if _gpBlocked(gpP, gpQ, gpBlockers):
 				continue
 			var gpMove: Vector2 = (gpQ - gpP).normalized()
-			# Never fold the first leg back over its own symbol.
-			# 绝不让首段折返、压回自己的图元上。
+ # Never fold the first leg back over its own symbol.
+ # 绝不让首段折返、压回自己的图元上。
 			if gpCx == gpStart.x and gpCy == gpStart.y and gpMove.dot(gpDa) < -0.001:
 				continue
-			# ...and never approach the target from its far side.
-			# ……也绝不从目标的远侧绕进去。
+ # ...and never approach the target from its far side.
+ # ……也绝不从目标的远侧绕进去。
 			if gpNx2 == gpGoal.x and gpNy2 == gpGoal.y and gpMove.dot(gpDb) > 0.001:
 				continue
 			var gpStep: float = gpP.distance_to(gpQ)
@@ -237,8 +237,8 @@ static func _gpBlocked(gpA: Vector2, gpB: Vector2, gpBlockers: Array[Rect2]) -> 
 		var gpRy0: float = gpR.position.y
 		var gpRy1: float = gpR.position.y + gpR.size.y
 		if gpHoriz:
-			# A horizontal run only clashes when it is strictly between the rect's top and bottom.
-			# 水平段只有严格夹在矩形上下边之间时才冲突。
+ # A horizontal run only clashes when it is strictly between the rect's top and bottom.
+ # 水平段只有严格夹在矩形上下边之间时才冲突。
 			if gpA.y <= gpRy0 + GP_EPS or gpA.y >= gpRy1 - GP_EPS:
 				continue
 			if minf(gpHiX, gpRx1) - maxf(gpLoX, gpRx0) > GP_EPS:

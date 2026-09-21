@@ -1,6 +1,4 @@
 # ============================================================================
-# GPSymbolDrawTool — 绘制新图元（直线 / 矩形 / 圆 / 折线）（M7）
-# Draw a new primitive (line / rect / circle / polyline) in the symbol editor (M7).
 #
 # 对应画布 GPDrawShapeTool：两点工具按下锚定、松开提交；折线每次点击追加顶点、Enter / 双击 / 闭合时
 # 结束。瞬态状态（起止点、橡皮筋、折线顶点）与绘制逻辑都在本工具内，提交经编辑器的可撤销命令。
@@ -42,7 +40,7 @@ func gpOnPress(gpLocal: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 			_gpFinishPolyline(gpEd)
 		else:
 			var gpA: Vector2 = gpEd.gpLocalToAuthor(gpLocal)
-			# Close the loop when clicking near the first vertex. / 点回首顶点时闭合。
+ # Close the loop when clicking near the first vertex. / 点回首顶点时闭合。
 			if _gpPolyPts.size() >= 2 and gpEd.gpAuthorToLocal(_gpPolyPts[0]).distance_to(gpLocal) < 8.0:
 				_gpFinishPolyline(gpEd)
 			else:

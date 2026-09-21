@@ -4,20 +4,20 @@ extends RefCounted
 # Ribbon and toolbar construction, styling, mode mapping and tool-selection forwarding
 # Ribbon 与工具栏的构建、样式、模式映射与工具选中转发
 #
-# WHY THIS EXISTS / 为何存在（架构优化建议 §3.2）：
-#   GPMainWindow was carrying many unrelated responsibilities in one file; this coordinator
-#   owns the "Ribbon and toolbar construction, styling, mode mapping and tool-selection forwarding" use case end to end, so the root keeps only assembly and forwarding.
-#   GPMainWindow 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「Ribbon 与工具栏的构建、样式、模式映射与工具选中转发」这一用例，
-#   使根类只保留装配与转发。
+# WHY THIS EXISTS / 为何存在：
+# GPMainWindow was carrying many unrelated responsibilities in one file; this coordinator
+# owns the "Ribbon and toolbar construction, styling, mode mapping and tool-selection forwarding" use case end to end, so the root keeps only assembly and forwarding.
+# GPMainWindow 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「Ribbon 与工具栏的构建、样式、模式映射与工具选中转发」这一用例，
+# 使根类只保留装配与转发。
 #
 # Interaction / 交互方式：
-#   - the root creates this coordinator and injects itself as gpHost (composition root);
-#     根类创建本协调者并把自身注入为 gpHost（组合根装配）；
-#   - the root forwards menu / toolbar actions here, never the other way round — this class
-#     does not reach back into menus or the ribbon;
-#     根类把菜单/工具栏动作转发到此处，绝不反向 —— 本类不回指菜单或 Ribbon；
-#   - UI refresh goes through gpHost._gpSetState / the docks the root owns.
-#     UI 刷新经由 gpHost._gpSetState 及根类持有的停靠栏完成。
+# - the root creates this coordinator and injects itself as gpHost (composition root);
+# 根类创建本协调者并把自身注入为 gpHost（组合根装配）；
+# - the root forwards menu / toolbar actions here, never the other way round — this class
+# does not reach back into menus or the ribbon;
+# 根类把菜单/工具栏动作转发到此处，绝不反向 —— 本类不回指菜单或 Ribbon；
+# - UI refresh goes through gpHost.gpSetState() / the docks the root owns.
+# UI 刷新经由 gpHost.gpSetState() 及根类持有的停靠栏完成。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -26,10 +26,8 @@ var gpHost: GPMainWindow = null
 
 
 
-# ============================ in-place symbol editing ============================
-# ============================ 就地图元编辑 ============================
-# Open the isolation layer for one symbol type directly over the active canvas.
-# 为某个图元类型在活动画布正上方打开隔离层。
+# ============================ symbol editing ============================
+# ============================ 图元编辑 ============================
 # Open the "Make Symbol" dialog pre-loaded with the annotation-shape geometry the user promoted
 # from the main canvas. On confirm it registers / persists a GPSymbolDef (same display-name ->
 # overwrite existing, else new) and refreshes the palette + canvas.
@@ -42,8 +40,8 @@ var gpHost: GPMainWindow = null
 # 高亮与当前画布模式匹配的开关按钮（选择 / 连线 / 绘图工具）。可选 gpMode 参数使其既能作为
 # gpModeChanged 信号的 1 参回调，又能在别处 0 参调用；gpMode < 0 时读取画布实时模式。
 func gpSyncToolBar(gpMode: int = -1) -> void:
-	# The Ribbon owns the mode highlight now; delegate to it (P0 / ADR-UI-01).
-	# 模式高亮现由 Ribbon 负责，委托给它（P0 / ADR-UI-01）。
+	# The Ribbon owns the mode highlight now; delegate to it .
+	# 模式高亮现由 Ribbon 负责，委托给它。
 	if gpHost.gpRibbon != null:
 		var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
 		if gpMode < 0:
@@ -62,51 +60,49 @@ func gpOnToolBarPressed(gpAction: String) -> void:
 		"select":
 			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_SELECT)
 			gpCanvas.gpConnectFrom = ""
-			gpHost._gpSetState("status.mode_select")
+			gpHost.gpSetState("status.mode_select")
 		"connect":
 			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_CONNECT)
-			gpHost._gpSetState("status.mode_connect")
+			gpHost.gpSetState("status.mode_connect")
 		"line":
 			gpCanvas.gpPendingDef = null
 			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_LINE)
-			gpHost._gpSetState("status.mode_line")
+			gpHost.gpSetState("status.mode_line")
 		"circle":
 			gpCanvas.gpPendingDef = null
 			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_CIRCLE)
-			gpHost._gpSetState("status.mode_circle")
+			gpHost.gpSetState("status.mode_circle")
 		"rect":
 			gpCanvas.gpPendingDef = null
 			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_RECT)
-			gpHost._gpSetState("status.mode_rect")
+			gpHost.gpSetState("status.mode_rect")
 		"polyline":
 			gpCanvas.gpPendingDef = null
 			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_POLYLINE)
-			gpHost._gpSetState("status.mode_polyline")
+			gpHost.gpSetState("status.mode_polyline")
 		"pipe":
 			gpCanvas.gpPendingDef = null
 			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_PIPE)
-			gpHost._gpSetState("status.mode_pipe")
+			gpHost.gpSetState("status.mode_pipe")
 		"signal":
 			gpCanvas.gpPendingDef = null
 			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_SIGNAL)
-			gpHost._gpSetState("status.mode_signal")
-		# ---- view / edit commands surfaced on the Ribbon (P0) ----
-		# ---- Ribbon 上暴露的视图/编辑命令（P0） ----
+			gpHost.gpSetState("status.mode_signal")
 		"view_zoom_in":
 			gpCanvas.gpZoomStep(1.0)
 		"view_zoom_out":
 			gpCanvas.gpZoomStep(-1.0)
 		"view_fit":
 			gpCanvas.gpResetView()
-			gpHost._gpSetState("status.view_reset")
+			gpHost.gpSetState("status.view_reset")
 		"edit_undo":
-			gpHost._gpMenuUndo()
+			gpHost.gpMenuUndo()
 		"edit_redo":
-			gpHost._gpMenuRedo()
+			gpHost.gpMenuRedo()
 		"edit_delete":
-			gpHost._gpDeleteSelected()
+			gpHost.gpDeleteSelected()
 		"tool_settings":
-			gpHost._gpOpenSettings()
+			gpHost.gpOpenSettings()
 	gpSyncToolBar()
 
 
@@ -120,24 +116,24 @@ func gpOnToolBarPressed(gpAction: String) -> void:
 # transparent (visuals delegated to GPOverlayChrome).
 func gpStyleChrome() -> void:
 	if gpHost.gpTabs != null:
-		# 右边界接缝由 GPOverlayChrome 统一绘制，这里不再重复画左边框。
+ # 右边界接缝由 GPOverlayChrome 统一绘制，这里不再重复画左边框。
 		gpHost.gpTabs.add_theme_stylebox_override("panel",
 			GPChromeStyle.gpStyleFor(GPChromeStyle.GP_DOCK_BG, 0))
-		# 未选中 / hover 也带 1px 发丝底线，整排 tab 干净统一。
+ # 未选中 / hover 也带 1px 发丝底线，整排 tab 干净统一。
 		var gpTabBg: StyleBoxFlat = GPChromeStyle.gpStyleFor(GPChromeStyle.GP_DOCK_BG, GPChromeStyle.SIDE_BOTTOM)
 		gpHost.gpTabs.add_theme_stylebox_override("tab_unselected", gpTabBg)
 		gpHost.gpTabs.add_theme_stylebox_override("tab_hovered", gpTabBg)
-		# 选中态：1px accent 底线（与未选中同厚，仅颜色不同）+ 略亮背景，细腻区分。
-		# Selected: a 1px accent underline (same thickness as unselected, colour only
-		# differs) plus a slightly lighter fill — delicate distinction, no heavy line.
+ # 选中态：1px accent 底线（与未选中同厚，仅颜色不同）+ 略亮背景，细腻区分。
+ # Selected: a 1px accent underline (same thickness as unselected, colour only
+ # differs) plus a slightly lighter fill — delicate distinction, no heavy line.
 		var gpTabSel: StyleBoxFlat = StyleBoxFlat.new()
 		gpTabSel.bg_color = Color(0.118, 0.131, 0.163)
 		gpTabSel.border_color = GPChromeStyle.GP_ACCENT
 		gpTabSel.border_width_bottom = 1
 		gpHost.gpTabs.add_theme_stylebox_override("tab_selected", gpTabSel)
 	if gpHost.gpBodySplit != null:
-		# 引擎 grabber 透明：拖拽仍可用，但不再画粗亮块；接缝发丝线 + 悬停高亮
-		# 由 GPOverlayChrome（顶层叠加层）绘制，细腻且不双重描边。
+ # 引擎 grabber 透明：拖拽仍可用，但不再画粗亮块；接缝发丝线 + 悬停高亮
+ # 由 GPOverlayChrome（顶层叠加层）绘制，细腻且不双重描边。
 		var gpDrag: StyleBoxFlat = StyleBoxFlat.new()
 		gpDrag.bg_color = Color(0.0, 0.0, 0.0, 0.0)
 		gpHost.gpBodySplit.add_theme_stylebox_override("dragger", gpDrag)
@@ -172,12 +168,12 @@ func gpOnToolSelected(gpType: String) -> void:
 	if gpType == "select":
 		gpHost.gpActiveCanvas().gpSetMode(GPCanvas2D.GPMode.GP_SELECT)
 		gpHost.gpActiveCanvas().gpConnectFrom = ""
-		gpHost._gpSetState("status.mode_select")
+		gpHost.gpSetState("status.mode_select")
 	elif gpType == "connect":
 		gpHost.gpActiveCanvas().gpSetMode(GPCanvas2D.GPMode.GP_CONNECT)
-		gpHost._gpSetState("status.mode_connect")
+		gpHost.gpSetState("status.mode_connect")
 	elif gpType == "custom":
-		gpHost._gpSetState("status.custom_pending")
+		gpHost.gpSetState("status.custom_pending")
 
 
 # A symbol was requested for deletion from the left library. The symbol may be placed on
@@ -191,9 +187,9 @@ func gpOnToolSelected(gpType: String) -> void:
 # A symbol was picked from the left palette: switch to placement mode.
 # 从左侧图元库选中图元：切换到放置模式。
 func gpOnSymbolPicked(gpTypeId: String) -> void:
-	gpHost.gpActiveCanvas().gpPendingDef = gpHost._gpDefFor(gpTypeId)
+	gpHost.gpActiveCanvas().gpPendingDef = gpHost.gpDefFor(gpTypeId)
 	gpHost.gpActiveCanvas().gpSetMode(GPCanvas2D.GPMode.GP_SELECT)
 	gpHost.gpActiveCanvas().gpConnectFrom = ""
-	var gpDef: GPSymbolDef = gpHost._gpDefFor(gpTypeId)
+	var gpDef: GPSymbolDef = gpHost.gpDefFor(gpTypeId)
 	var gpName: String = gpDef.gpDisplayName if gpDef else gpTypeId
-	gpHost._gpSetState("status.symbol_picked", [gpName])
+	gpHost.gpSetState("status.symbol_picked", [gpName])

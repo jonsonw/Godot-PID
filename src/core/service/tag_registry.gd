@@ -1,7 +1,7 @@
 class_name GPTagRegistry
 extends RefCounted
 # Copyright © 2026 Jonson Wang
-# Project-wide tag uniqueness guard (M9 of the property plan).
+# Project-wide tag uniqueness guard .
 # 工程级位号唯一性守卫（属性计划 M9）。
 #
 # A tag (位号) is the human-visible equipment number: "P-1001", "V-203". It is editable, it
@@ -11,20 +11,20 @@ extends RefCounted
 # 绝不可共用。uid 则相反：不可见、不可变，边真正引用的是它。
 #
 # THE INDEX IS A CACHE, THE GRAPH IS THE TRUTH / 索引是缓存，图才是真相:
-#   uid->tag and normalised-tag->uid are rebuilt from the graph by gpRebuild(). They are a
-#   fast path for "who owns this tag?" error messages, never the authority. gpIsTaken()
-#   ALSO scans the attached graph, so a stale index can slow numbering down but can NEVER
-#   hand out a duplicate — the failure mode is a skipped number, not a broken sheet.
-#   uid->tag 与归一化位号->uid 由 gpRebuild() 从图重建。它们是「谁占用了这个位号」错误
-#   提示的快路径，绝非权威。gpIsTaken() 同时扫描所附的图，故索引过期只会让编号跳号，
-#   绝不会发出重复位号——失效模式是跳号，而不是坏图纸。
+# uid->tag and normalised-tag->uid are rebuilt from the graph by gpRebuild(). They are a
+# fast path for "who owns this tag?" error messages, never the authority. gpIsTaken()
+# ALSO scans the attached graph, so a stale index can slow numbering down but can NEVER
+# hand out a duplicate — the failure mode is a skipped number, not a broken sheet.
+# uid->tag 与归一化位号->uid 由 gpRebuild() 从图重建。它们是「谁占用了这个位号」错误
+# 提示的快路径，绝非权威。gpIsTaken() 同时扫描所附的图，故索引过期只会让编号跳号，
+# 绝不会发出重复位号——失效模式是跳号，而不是坏图纸。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
-# The graph this registry guards. Optional, but strongly recommended: without it gpIsTaken
+# The graph this registry guards. Optional, but strongly recommended: without it gpIsTaken()
 # cannot see tags written by code paths that forgot to register.
-# 本注册器所守护的图。可选，但强烈建议提供：没有它，gpIsTaken 便看不见那些「忘记登记」
+# 本注册器所守护的图。可选，但强烈建议提供：没有它，gpIsTaken() 便看不见那些「忘记登记」
 # 的代码路径写入的位号。
 var gpGraph: GPPIDGraph = null
 
@@ -288,10 +288,10 @@ func _gpOwnerOfLocked(gpNorm: String, gpExceptUid: String) -> String:
 # 惰性建立规则，使「两步构造」的注册器永不解引用 null。
 func _gpEnsureRules() -> void:
 	if gpRules == null:
-		# Bind to the GRAPH's rules (never a private copy): the sequence marks must be the
-		# ones the graph serialises, or numbering would restart on every save/load.
-		# 绑定到「图的」规则（绝不用私有副本）：序号水位线必须是图会序列化的那一份，
-		# 否则每次存/读编号都会从头再来。
+ # Bind to the GRAPH's rules (never a private copy): the sequence marks must be the
+ # ones the graph serialises, or numbering would restart on every save/load.
+ # 绑定到「图的」规则（绝不用私有副本）：序号水位线必须是图会序列化的那一份，
+ # 否则每次存/读编号都会从头再来。
 		gpRules = gpGraph.gpTagRulesOrCreate() if gpGraph != null else GPProjectTagRules.gpDefaultRules()
 	elif gpGraph != null and gpGraph.gpTagRules != null and gpRules != gpGraph.gpTagRules:
 		gpRules = gpGraph.gpTagRules

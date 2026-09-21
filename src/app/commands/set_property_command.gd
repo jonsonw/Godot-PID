@@ -1,16 +1,14 @@
 class_name GPSetPropertyCommand
 extends GPCommand
 # Copyright © 2026 Jonson Wang
-# Set ONE property value on ONE instance (M11).
-# 在单个实例上设置**一个**属性值（M11）。
 #
 # The override rule this command enforces / 本命令强制的覆盖规则：
-#   writing a value puts the key into gpProps, which is exactly what GPPropertyResolver reads
-#   as "this instance overrides the library default". Clearing a field therefore means REMOVING
-#   the key (letting the library default win again) — never storing an empty string as a value.
-#   写入一个值即把该键放入 gpProps，而 GPPropertyResolver 正是据此判定
-#   「本实例覆盖了库默认值」。故「清空字段」= **移除**该键（让库默认值重新生效），
-#   绝不是存一个空字符串当值。
+# writing a value puts the key into gpProps, which is exactly what GPPropertyResolver reads
+# as "this instance overrides the library default". Clearing a field therefore means REMOVING
+# the key (letting the library default win again) — never storing an empty string as a value.
+# 写入一个值即把该键放入 gpProps，而 GPPropertyResolver 正是据此判定
+# 「本实例覆盖了库默认值」。故「清空字段」= **移除**该键（让库默认值重新生效），
+# 绝不是存一个空字符串当值。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。

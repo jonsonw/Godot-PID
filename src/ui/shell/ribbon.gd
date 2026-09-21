@@ -1,13 +1,13 @@
 class_name GPPIDRibbon
 extends Panel
 
-# Ribbon-style top command bar (P0, ADR-UI-01). Replaces the old flat text
+# Ribbon-style top command bar . Replaces the old flat text
 # toolbar with an AutoCAD/Office-like TabContainer: each tab groups related
 # commands into icon+text buttons. The Ribbon is a SELF-CONTAINED container —
 # to revert to the previous layout, the host only stops building it and calls
 # the old _gpBuildToolBar instead (see main_window.gd). No other node depends
 # on it, so it is fully reversible.
-# Ribbon 式顶部命令区（P0，ADR-UI-01）。以 AutoCAD/Office 风格的 TabContainer 取代
+# Ribbon 式顶部命令区。以 AutoCAD/Office 风格的 TabContainer 取代
 # 原平铺文字工具栏：每个标签把相关命令按功能分组为「图标+文字」按钮。Ribbon 是
 # 自包含容器——回退旧布局只需宿主停止构建它、改回 _gpBuildToolBar（见 main_window.gd），
 # 无其他节点依赖它，故完全可逆。
@@ -150,8 +150,8 @@ func _gpBuild() -> void:
 		var gpGroups: Array = gpTabDef["groups"]
 		for gpGi in gpGroups.size():
 			gpTab.add_child(_gpBuildGroup(gpGroups[gpGi]))
-			# Thin separator between groups (not after the last one).
-			# 组间细分隔线（最后一组之后不加）。
+ # Thin separator between groups (not after the last one).
+ # 组间细分隔线（最后一组之后不加）。
 			if gpGi < gpGroups.size() - 1:
 				var gpSep: VSeparator = VSeparator.new()
 				gpSep.custom_minimum_size.x = 1

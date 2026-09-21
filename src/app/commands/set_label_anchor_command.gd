@@ -1,8 +1,6 @@
 class_name GPSetLabelAnchorCommand
 extends GPCommand
 # Copyright © 2026 Jonson Wang
-# Set the coarse label anchor of one instance (M11). Fine positioning is M10b's canvas grip.
-# 设置单个实例标签的粗粒度锚点（M11）。精细定位由 M10b 的画布抓取点负责。
 #
 # GPPropertyResolver.GP_ANCHOR_UNSET (-1) means "follow the library default" and is a LEGAL
 # stored value, so "unset" is never confused with "GP_AUTO" (0). That distinction is why the

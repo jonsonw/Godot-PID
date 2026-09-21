@@ -18,19 +18,19 @@ extends RefCounted
 # host's LOGICAL units, i.e. `content_scale_size / content_scale_factor` -- not in the host's
 # pixel size. Measured on this project: host window 3024x1890 px with content_scale_factor 2.0
 # yields a logical viewport of only 800x500. Sizing a dialog against `host.size` therefore
-# overshoots by the whole scale factor, `popup_centered()` then centers a window larger than the
+# overshoots by the whole scale factor, `popup_centered` then centers a window larger than the
 # viewport at a NEGATIVE position, and the user sees the blank middle of a clipped layout.
 # 当 `display/window/subwindows/embed_subwindows = true`（引擎默认）时，子窗口并非操作系统窗口：
 # 它绘制在宿主视口内部，其几何以宿主的「逻辑单位」度量，即 `content_scale_size /
 # content_scale_factor`，而不是宿主的像素尺寸。本项目实测：宿主窗口 3024x1890 像素、
 # content_scale_factor 2.0 时，逻辑视口仅 800x500。因此拿 `host.size` 去算对话框尺寸会整整放大
-# 一个缩放系数，`popup_centered()` 随后把一个大于视口的窗口居中到「负坐标」，用户看到的就是被裁
+# 一个缩放系数，`popup_centered` 随后把一个大于视口的窗口居中到「负坐标」，用户看到的就是被裁
 # 剪布局的中段空白。
 #
 # Hence the single rule below: always measure against the same rect the engine itself uses in
-# `popup_centered_clamped()` -- the embedder's visible rect when embedded, the screen's usable
+# `popup_centered_clamped` -- the embedder's visible rect when embedded, the screen's usable
 # rect otherwise.
-# 因此本文件只遵循一条规则：始终以引擎在 `popup_centered_clamped()` 中所用的同一矩形为基准
+# 因此本文件只遵循一条规则：始终以引擎在 `popup_centered_clamped` 中所用的同一矩形为基准
 # ——嵌入时用宿主视口的可见矩形，否则用屏幕可用矩形。
 #
 # Coding rule: every variable must declare its type explicitly.
@@ -80,10 +80,10 @@ static func gpUsableSize(gpScreen: int) -> Vector2i:
 # 真实操作系统窗口按屏幕空间布局。搞错这一点正是文件顶部记录的那个 bug。
 static func gpParentSize(gpWin: Window, gpHost: Window) -> Vector2i:
 	if gpWin != null and gpWin.is_embedded():
-		# The embedder is the nearest ancestor viewport; the host window is that viewport when
-		# the dialog was parented to a plain Control inside it.
-		# 宿主视口即最近的祖先 Viewport；当对话框被挂在其内部某个普通 Control 下时，宿主窗口
-		# 就是该视口。
+ # The embedder is the nearest ancestor viewport; the host window is that viewport when
+ # the dialog was parented to a plain Control inside it.
+ # 宿主视口即最近的祖先 Viewport；当对话框被挂在其内部某个普通 Control 下时，宿主窗口
+ # 就是该视口。
 		var gpVp: Viewport = gpWin.get_parent() as Viewport
 		if gpVp == null:
 			gpVp = gpHost
@@ -186,9 +186,9 @@ static func gpApply(
 
 
 # Fit the dialog to its parent area and show it centered over the host. The centering is handed
-# to `popup_centered_clamped()` so the engine's own parent-rect logic decides the position --
+# to `popup_centered_clamped` so the engine's own parent-rect logic decides the position --
 # with `size` already clamped to `GP_MAX_FRAC` the result can never be a negative position.
-# 将对话框适配到父区域并居中显示在宿主之上。居中交给 `popup_centered_clamped()`，由引擎自己的
+# 将对话框适配到父区域并居中显示在宿主之上。居中交给 `popup_centered_clamped`，由引擎自己的
 # 父矩形逻辑决定位置——由于 `size` 已被钳制在 `GP_MAX_FRAC` 内，结果绝不可能是负坐标。
 static func gpPopupFitted(
 	gpWin: Window,

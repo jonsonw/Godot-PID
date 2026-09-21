@@ -5,13 +5,11 @@ extends Resource
 # 图元属性 schema 中的单个字段定义 —— 仅属「类型层」元数据。
 #
 # Why this exists / 为何存在：
-#   the old GPSymbolDef.gpAttrsSchema was a bare Dictionary with no type, no unit, no
-#   validation and no multi-language label, so the inspector could only guess a LineEdit from
-#   `.get("type")` and the library defaults never took effect. A typed Resource makes the
-#   schema the single source of truth that every project instance RESOLVES against (M8).
-#   旧的 GPSymbolDef.gpAttrsSchema 是无类型的裸 Dictionary：没有类型、单位、校验与多语言
-#   标签，属性面板只能靠 `.get("type")` 猜一个 LineEdit，库默认值也从未生效。类型化 Resource
-#   让 schema 成为唯一真源，供各项目实例解析（M8）。
+# the old GPSymbolDef.gpAttrsSchema was a bare Dictionary with no type, no unit, no
+# validation and no multi-language label, so the inspector could only guess a LineEdit from
+# `.get("type")` and the library defaults never took effect. A typed Resource makes the
+# 旧的 GPSymbolDef.gpAttrsSchema 是无类型的裸 Dictionary：没有类型、单位、校验与多语言
+# 标签，属性面板只能靠 `.get("type")` 猜一个 LineEdit，库默认值也从未生效。类型化 Resource
 #
 # Invariant / 不变式：instances store VALUES only, never a copy of this definition — that is
 # what makes "edit the library, every project follows" work (see GPPropertyResolver).
@@ -41,8 +39,8 @@ const GP_UNBOUNDED_MAX: float = INF
 # 稳定的技术键，如 "rated_flow"；改名须经 gpRenameFrom 迁移。
 @export var gpKey: String = ""
 
-# I18n key for the display label, resolved by I18n.gpTr at UI time (never at model time).
-# 显示名的 i18n 键，由 UI 层的 I18n.gpTr 解析（模型层绝不解析）。
+# I18n key for the display label, resolved by I18n.gpTr() at UI time (never at model time).
+# 显示名的 i18n 键，由 UI 层的 I18n.gpTr() 解析（模型层绝不解析）。
 @export var gpLabelKey: String = ""
 
 # Fallback display label when gpLabelKey has no translation.
@@ -79,9 +77,9 @@ const GP_UNBOUNDED_MAX: float = INF
 @export var gpOrder: int = 0
 
 # Migration source: when a library rename happens, an instance value stored under this OLD key
-# is moved to gpKey on load (see GPPropertyResolver.gpMigrateProps).
+# is moved to gpKey on load (see GPPropertyResolver.gpMigrateProps()).
 # 迁移来源：库中字段改名时，存于该「旧键」下的实例值会在加载时搬到 gpKey
-# （见 GPPropertyResolver.gpMigrateProps）。
+# （见 GPPropertyResolver.gpMigrateProps()）。
 @export var gpRenameFrom: String = ""
 
 
@@ -101,9 +99,9 @@ static func gpIsEmpty(gpValue: Variant) -> bool:
 
 # Coerce a raw value (from JSON, from a LineEdit, from an import) into this field's kind.
 # 把一个原始值（来自 JSON、输入框或导入）强制转换为本字段的类型。
-# Unparseable input falls back to gpDefault rather than raising — a P&ID sheet must still open
+# Unparseable input falls back to gpDefault() rather than raising — a P&ID sheet must still open
 # when one property was hand-edited in a text editor.
-# 无法解析的输入回落到 gpDefault 而非抛错 —— 某个属性被手工改坏时，图纸仍须能打开。
+# 无法解析的输入回落到 gpDefault() 而非抛错 —— 某个属性被手工改坏时，图纸仍须能打开。
 func gpCoerce(gpValue: Variant) -> Variant:
 	if gpValue == null:
 		return gpDefault
@@ -143,16 +141,16 @@ func gpValidate(gpValue: Variant) -> bool:
 			return false
 	if gpPattern != "" and gpKind != GPKind.GP_BOOL:
 		var gpRe: RegEx = RegEx.new()
-		# A bad pattern must NOT lock the user out of their own sheet — treat it as "no rule".
-		# 坏正则绝不能把用户锁在自己的图纸外 —— 视为「无规则」。
+ # A bad pattern must NOT lock the user out of their own sheet — treat it as "no rule".
+ # 坏正则绝不能把用户锁在自己的图纸外 —— 视为「无规则」。
 		if gpRe.compile(gpPattern) == OK:
 			if gpRe.search(str(gpValue)) == null:
 				return false
 	return true
 
 
-# Serialize to a dictionary (JSON-friendly; gpDefault/gpOptions are assumed JSON scalars).
-# 序列化为字典（JSON 友好；gpDefault / gpOptions 假定为 JSON 标量）。
+# Serialize to a dictionary (JSON-friendly; gpDefault()/gpOptions are assumed JSON scalars).
+# 序列化为字典（JSON 友好；gpDefault() / gpOptions 假定为 JSON 标量）。
 func gpToDict() -> Dictionary:
 	var gpD: Dictionary = {}
 	gpD["key"] = gpKey
@@ -174,9 +172,9 @@ func gpToDict() -> Dictionary:
 	return gpD
 
 
-# Restore in place (inverse of gpToDict). Every key is optional: a hand-written partial schema
+# Restore in place (inverse of gpToDict()). Every key is optional: a hand-written partial schema
 # must still load.
-# 就地还原（gpToDict 的逆操作）。所有键均可选：手写的残缺 schema 也须能载入。
+# 就地还原（gpToDict() 的逆操作）。所有键均可选：手写的残缺 schema 也须能载入。
 func gpFromDict(gpD: Dictionary) -> void:
 	gpKey = gpD.get("key", "")
 	gpLabelKey = gpD.get("label_key", "")

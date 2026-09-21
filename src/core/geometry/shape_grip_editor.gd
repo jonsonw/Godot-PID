@@ -25,11 +25,11 @@ static func gpGrips(gpS: GPShape) -> Array[Dictionary]:
 	var gpOut: Array[Dictionary] = []
 	match gpS.gpKind:
 		GPShape.GPKind.GP_LINE, GPShape.GPKind.GP_POLYLINE:
-			# A 2-pt GP_LINE is treated as an open 2-vertex polyline so it can carry Bézier handles
-			# (double-click to pull them → the straight line bends into a curve). Emit VERTEX grips
-			# (not ENDPOINT) so the canvas/editor vertex-hit & handle editing route it correctly.
-			# 2 点的 GP_LINE 视为开放的双顶点折线，可携带贝塞尔手柄（双击拉出→直线弯成曲线）。发出
-			# VERTEX（而非 ENDPOINT）锚点，使画布/编辑器的顶点命中与手柄编辑正确路由它。
+ # A 2-pt GP_LINE is treated as an open 2-vertex polyline so it can carry Bézier handles
+ # (double-click to pull them → the straight line bends into a curve). Emit VERTEX grips
+ # (not ENDPOINT) so the canvas/editor vertex-hit & handle editing route it correctly.
+ # 2 点的 GP_LINE 视为开放的双顶点折线，可携带贝塞尔手柄（双击拉出→直线弯成曲线）。发出
+ # VERTEX（而非 ENDPOINT）锚点，使画布/编辑器的顶点命中与手柄编辑正确路由它。
 			for gpI in range(gpS.gpPoints.size()):
 				gpOut.append({"pos": gpS.gpPoints[gpI], "role": GP_GRIP_VERTEX, "gi": gpI})
 				if gpI < gpS.gpHandles.size() and gpS.gpHandles[gpI].size() >= 2:
@@ -50,23 +50,23 @@ static func gpGrips(gpS: GPShape) -> Array[Dictionary]:
 				var gpOpp: int = (gpI + 2) % 4
 				gpOut.append({"pos": gpCorners[gpI], "role": GP_GRIP_CORNER, "gi": gpI, "opp": gpCorners[gpOpp]})
 		GPShape.GPKind.GP_ARC:
-			# Center (move) + start / end points on the circle (change radius + sweep).
-			# 圆心（移动）+ 圆上起点 / 终点（改变半径与扫掠）。
+ # Center (move) + start / end points on the circle (change radius + sweep).
+ # 圆心（移动）+ 圆上起点 / 终点（改变半径与扫掠）。
 			gpOut.append({"pos": gpS.gpArcCenter(), "role": GP_GRIP_CENTER, "gi": 0})
 			gpOut.append({"pos": gpS.gpArcStart(), "role": GP_GRIP_VERTEX, "gi": 1})
 			gpOut.append({"pos": gpS.gpArcEnd(), "role": GP_GRIP_VERTEX, "gi": 2})
 	return gpOut
 
 
-# Mutate gpS in place so that gpGrip (from gpGrips) moves to gpPt.
-# 就地改写 gpS，使来自 gpGrips 的 gpGrip 移动到 gpPt。
+# Mutate gpS in place so that gpGrip (from gpGrips()) moves to gpPt.
+# 就地改写 gpS，使来自 gpGrips() 的 gpGrip 移动到 gpPt。
 static func gpApplyGrip(gpS: GPShape, gpGrip: Dictionary, gpPt: Vector2) -> void:
 	var gpRole: int = int(gpGrip["role"])
 	var gpGi: int = int(gpGrip["gi"])
 	match gpRole:
 		GP_GRIP_ENDPOINT, GP_GRIP_VERTEX:
-			# Arc start (gi=1) / end (gi=2): dragging changes the radius (center->point) and sweep.
-			# 弧起点（gi=1）/终点（gi=2）：拖动改变半径（圆心→点）与扫掠角。
+ # Arc start (gi=1) / end (gi=2): dragging changes the radius (center->point) and sweep.
+ # 弧起点（gi=1）/终点（gi=2）：拖动改变半径（圆心→点）与扫掠角。
 			if gpS.gpKind == GPShape.GPKind.GP_ARC and gpS.gpPoints.size() >= 3:
 				var gpC: Vector2 = gpS.gpArcCenter()
 				if gpGi == 1:
@@ -78,8 +78,8 @@ static func gpApplyGrip(gpS: GPShape, gpGrip: Dictionary, gpPt: Vector2) -> void
 			elif gpGi >= 0 and gpGi < gpS.gpPoints.size():
 				gpS.gpPoints[gpGi] = gpPt
 		GP_GRIP_CENTER:
-			# Arc center (gi=0): rigid-translate the whole arc, keeping radius + sweep.
-			# 弧圆心（gi=0）：整体刚性平移，保持半径与扫掠。
+ # Arc center (gi=0): rigid-translate the whole arc, keeping radius + sweep.
+ # 弧圆心（gi=0）：整体刚性平移，保持半径与扫掠。
 			if gpS.gpKind == GPShape.GPKind.GP_ARC and gpGi == 0 and gpS.gpPoints.size() >= 3:
 				var gpDelta: Vector2 = gpPt - gpS.gpArcCenter()
 				gpS.gpPoints = PackedVector2Array([
@@ -93,24 +93,24 @@ static func gpApplyGrip(gpS: GPShape, gpGrip: Dictionary, gpPt: Vector2) -> void
 			if gpS.gpPoints.size() >= 1:
 				gpS.gpRadius = maxf(1.0, gpPt.distance_to(gpS.gpPoints[0]))
 		GP_GRIP_HANDLE_IN:
-			# Pull the in-tangent of vertex gi; stored as a relative offset so it travels with the
-			# vertex. Dragging the in-handle bends the segment arriving at this vertex into a curve.
-			# 拉出入手柄；以相对偏移存储，随顶点移动。拖入手柄使到达该顶点的段变为曲线。
+ # Pull the in-tangent of vertex gi; stored as a relative offset so it travels with the
+ # vertex. Dragging the in-handle bends the segment arriving at this vertex into a curve.
+ # 拉出入手柄；以相对偏移存储，随顶点移动。拖入手柄使到达该顶点的段变为曲线。
 			if gpS.gpKind == GPShape.GPKind.GP_POLYLINE or gpS.gpKind == GPShape.GPKind.GP_LINE:
 				gpS.gpSetHandle(gpGi, 0, gpPt)
 		GP_GRIP_HANDLE_OUT:
-			# Pull the out-tangent of vertex gi; bends the segment leaving this vertex.
-			# 拉出手柄；使离开该顶点的段变为曲线。
+ # Pull the out-tangent of vertex gi; bends the segment leaving this vertex.
+ # 拉出手柄；使离开该顶点的段变为曲线。
 			if gpS.gpKind == GPShape.GPKind.GP_POLYLINE or gpS.gpKind == GPShape.GPKind.GP_LINE:
 				gpS.gpSetHandle(gpGi, 1, gpPt)
 		GP_GRIP_CORNER:
-			# A corner drag keeps the opposite (fixed) corner anchored. Store the rect as a proper
-			# (min, max) pair instead of a raw [opp, pt] so dragging a corner PAST the opposite corner
-			# cannot invert/mirror the rectangle (gpBBox().abs() would otherwise flip it). This makes
-			# every corner behave like the "stable" one the user expects.
-			# 角点拖拽固定对顶角。把矩形存为规范的 (min, max) 对，而非原始 [opp, pt]，从而拖动角点
-			# 越过对顶角时不会把矩形反转/镜像（否则 gpBBox().abs() 会翻转它）。这使每个角点都表现得像
-			# 用户期望的「稳定」角。
+ # A corner drag keeps the opposite (fixed) corner anchored. Store the rect as a proper
+ # (min, max) pair instead of a raw [opp, pt] so dragging a corner PAST the opposite corner
+ # cannot invert/mirror the rectangle (gpBBox().abs would otherwise flip it). This makes
+ # every corner behave like the "stable" one the user expects.
+ # 角点拖拽固定对顶角。把矩形存为规范的 (min, max) 对，而非原始 [opp, pt]，从而拖动角点
+ # 越过对顶角时不会把矩形反转/镜像（否则 gpBBox().abs 会翻转它）。这使每个角点都表现得像
+ # 用户期望的「稳定」角。
 			if gpGrip.has("opp"):
 				var gpOpp: Vector2 = gpGrip["opp"] as Vector2
 				gpS.gpPoints = PackedVector2Array([

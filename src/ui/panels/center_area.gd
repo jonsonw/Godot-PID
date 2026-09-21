@@ -44,8 +44,8 @@ var gpTabs: Array[Dictionary] = []
 # 当前活动图纸在 gpTabs 中的下标（空时为 -1）。
 var gpActive: int = -1
 
-# Symbol definitions shared by every sheet (kept in sync via gpSetDefs).
-# 所有图纸共用的图元定义（经 gpSetDefs 保持同步）。
+# Symbol definitions shared by every sheet (kept in sync via gpSetDefs()).
+# 所有图纸共用的图元定义（经 gpSetDefs() 保持同步）。
 var gpDefs: Array[GPSymbolDef] = []
 
 # Monotonic counter used to number new sheet titles (P&ID 1, P&ID 2, ...).
@@ -237,8 +237,8 @@ func gpSetDefs(gpNewDefs: Array[GPSymbolDef]) -> void:
 # ============================ 内部方法 ============================
 # Create a sheet with the given title and wire it into the tab bar / body.
 # 以给定标题创建图纸并接入标签栏 / 画布体。
-# [param gpId] stable identity; empty is fine for a brand-new tab (gpToSheets derives one).
-# [param gpId] 稳定标识；全新标签页留空亦可（gpToSheets 会推导一个）。
+# [param gpId] stable identity; empty is fine for a brand-new tab (gpToSheets() derives one).
+# [param gpId] 稳定标识；全新标签页留空亦可（gpToSheets() 会推导一个）。
 # [param gpGraphIn] when non-null the tab shows THIS graph instead of a fresh one.
 # [param gpGraphIn] 非 null 时，该标签页显示**这个**图，而非新建一个。
 func _gpAddTabWith(gpTitle: String, gpId: String = "", gpGraphIn: GPPIDGraph = null) -> void:
@@ -325,7 +325,7 @@ func _gpMakeCloseIcon(gpSize: int) -> Texture2D:
 	var gpT: int = 1  # X line thickness in px / X 线宽（像素）
 	for gpX in range(gpSize):
 		for gpY in range(gpSize):
-			# Two diagonals form an X. / 两条对角线构成 X。
+ # Two diagonals form an X. / 两条对角线构成 X。
 			if abs(gpX - gpY) <= gpT or abs(gpX + gpY - (gpSize - 1)) <= gpT:
 				gpImg.set_pixel(gpX, gpY, gpCol)
 	return ImageTexture.create_from_image(gpImg)

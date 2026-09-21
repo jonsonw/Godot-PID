@@ -4,15 +4,15 @@ extends HSplitContainer
 # 三栏分隔条的悬停检测层。
 # Hover-detection layer for the three-pane splitter.
 #
-# 引擎自身的 grabber 已由 _gpStyleChrome 设为透明（视觉交给 GPOverlayChrome），
+# 引擎自身的 grabber 已由 _gpStyleChrome() 设为透明（视觉交给 GPOverlayChrome），
 # 此处只负责"鼠标是否落在某条接缝的抓取带上"，并把悬停态暴露给叠加层绘制高亮。
 # The engine grabber is made transparent by _gpStyleChrome (GPOverlayChrome owns the
 # visuals); this script only detects whether the pointer is over a seam's grab band and
 # exposes the hover state so the overlay can paint the "draggable" highlight.
 #
-# 关键：悬停检测走 gui_input 信号而非覆写 _gui_input 虚方法，否则会遮蔽
+# 关键：悬停检测走 gui_input 信号而非覆写 _gui_input() 虚方法，否则会遮蔽
 # SplitContainer 自带的拖拽处理。
-# Key: hover detection uses the gui_input SIGNAL (not an override of the _gui_input
+# Key: hover detection uses the gui_input SIGNAL (not an override of the _gui_input()
 # virtual), otherwise SplitContainer's own drag handling would be shadowed.
 # 编码规范：所有变量均显式声明类型。
 
@@ -25,8 +25,8 @@ var gpHoverSeam: int = -1
 var gpOverlay: Control = null
 
 
-# 叠加层在 _ready 时回调，建立反向引用。
-# The overlay calls this in _ready to set up the back-reference.
+# 叠加层在 _ready() 时回调，建立反向引用。
+# The overlay calls this in _ready() to set up the back-reference.
 func gpRegisterOverlay(gpO: Control) -> void:
 	gpOverlay = gpO
 

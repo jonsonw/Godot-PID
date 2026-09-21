@@ -24,8 +24,8 @@ extends Window
 # gpMadeSymbol(symbolId)，供调用方放置 / 刷新。
 #
 # 在原本只读预览之上，本对话框现升级为「可交互编辑器」：
-#   - 连接端点（端口）可点击添加、拖拽移动，选中后可改名 / 改朝向 / 删除。
-#   - 简单图元编辑：在预览上绘制直线 / 矩形 / 圆 / 折线，或选中已有图元后移动 / 删除。
+# - 连接端点（端口）可点击添加、拖拽移动，选中后可改名 / 改朝向 / 删除。
+# - 简单图元编辑：在预览上绘制直线 / 矩形 / 圆 / 折线，或选中已有图元后移动 / 删除。
 # 工作模型为两个强类型数组 _gpShapes（Array[GPShape]）与 _gpPorts（Array[GPPort]），
 # 确认时统一重新序列化为保存字典。
 #
@@ -45,9 +45,9 @@ signal gpCancelled
 # 所选注释几何的草稿字典 {paths, circles, rects, ...}。
 var gpDraft: Dictionary = {}
 # Kept for API compatibility (callers pass it), but mode selection is now governed purely
-# by id uniqueness: a taken id forces Overwrite, a free id forces New (see _gpRefreshState).
+# by id uniqueness: a taken id forces Overwrite, a free id forces New (see _gpRefreshState()).
 # 为兼容调用方保留，但模式选择现完全由 id 唯一性治理：id 已被占用强制覆盖、空闲强制
-# 新建（见 _gpRefreshState）。
+# 新建（见 _gpRefreshState()）。
 var gpAllowOverwrite: bool = true
 # Base display-name from the caller (e.g. the id of a symbol being edited) or "".
 # 调用方给定的基础显示名（如正在编辑图元的 id），无则为空串。
@@ -219,9 +219,9 @@ func _gpBuild() -> void:
 	gpModeBox.add_child(gpModeRow)
 	gpBody.add_child(gpModeBox)
 	_gpModeOver = gpModeOverW
-	# Initial mode is NOT hardcoded here: the first _gpRefreshState() (end of _gpBuild)
+	# Initial mode is NOT hardcoded here: the first _gpRefreshState (end of _gpBuild())
 	# derives it from id existence — a taken id forces Overwrite, a free id forces New.
-	# 初始模式不在此硬编码：_gpBuild 末尾的首次 _gpRefreshState() 会按 id 是否已存在
+	# 初始模式不在此硬编码：_gpBuild() 末尾的首次 _gpRefreshState() 会按 id 是否已存在
 	# 推导——已被占用强制覆盖、空闲强制新建。
 	_gpModeNew.pressed.connect(func() -> void: _gpOnModeChanged())
 	gpModeOverW.pressed.connect(func() -> void: _gpOnModeChanged())
@@ -258,10 +258,10 @@ func _gpBuild() -> void:
 	close_requested.connect(_gpOnCancel)
 
 	# Materialize the working model from the incoming draft + ports before first paint. The editor
-	# emits gpChanged during gpInit (and again on gpSetTool), driving both the repaint and the panel
-	# sync through _gpOnEditorChanged — so no manual panel sync is needed here.
-	# 首次绘制前，由传入草稿 + 端口具象化工作模型。编辑器在 gpInit（及 gpSetTool）时发出 gpChanged，
-	# 经 _gpOnEditorChanged 同时驱动重绘与面板同步——此处无需手动同步面板。
+	# emits gpChanged during gpInit (and again on gpSetTool()), driving both the repaint and the panel
+	# sync through _gpOnEditorChanged() — so no manual panel sync is needed here.
+	# 首次绘制前，由传入草稿 + 端口具象化工作模型。编辑器在 gpInit()（及 gpSetTool()）时发出 gpChanged，
+	# 经 _gpOnEditorChanged() 同时驱动重绘与面板同步——此处无需手动同步面板。
 	_gpInitModel()
 	_gpRefreshState()
 	# Focus the name field only when the dialog is already inside the tree (headless runs
@@ -309,9 +309,9 @@ func _gpNewToolRow() -> HBoxContainer:
 		gpB.toggle_mode = true
 		gpB.text = gpLabels[gpI]
 		gpB.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		# Bind the loop index by value so every button keeps its own tool (a captured loop
-		# variable would otherwise collapse all buttons to the last index).
-		# 用 .bind 把循环索引按值固定，使每个按钮保留各自的工具（捕获循环变量会令所有按钮塌缩为末位）。
+ # Bind the loop index by value so every button keeps its own tool (a captured loop
+ # variable would otherwise collapse all buttons to the last index).
+ # 用 .bind 把循环索引按值固定，使每个按钮保留各自的工具（捕获循环变量会令所有按钮塌缩为末位）。
 		gpB.pressed.connect(_gpEditor.gpSetTool.bind(gpI))
 		_gpToolBtns.append(gpB)
 		gpRow.add_child(gpB)
@@ -413,9 +413,9 @@ func _gpNewShapePanel() -> PanelContainer:
 func _gpInitModel() -> void:
 	# Parse the draft into the editor's working geometry, and seed its ports from the caller-supplied
 	# initial ports (or an empty list when creating from scratch). Both are pushed IN PLACE so the
-	# editor's command stack keeps valid references; the history is cleared by gpInit.
+	# editor's command stack keeps valid references; the history is cleared by gpInit().
 	# 把草稿解析进编辑器的工作几何，并用调用方提供的初始端口（或新建时的空列表）播种端口。
-	# 两者均原地推送，使编辑器的命令栈持有有效引用；历史由 gpInit 清空。
+	# 两者均原地推送，使编辑器的命令栈持有有效引用；历史由 gpInit() 清空。
 	var gpS: Array[GPShape] = GPShapeSpec.gpFromSpec(gpDraft)
 	var gpP: Array[GPPort] = GPPortSpec.gpFromDicts(GPPortSpec.gpToDicts(gpInitialPorts))
 	_gpEditor.gpInit(gpS, gpP)
@@ -515,10 +515,10 @@ func _gpCurrentCat() -> String:
 
 
 # Convert the working ports (normalized 0..1) into author-space pixels for the save dict.
-# The inverse of GPSymbolNormalizer.gpNormalizePorts is applied with the SAME bbox + envelope
+# The inverse of GPSymbolNormalizer.gpNormalizePorts() is applied with the SAME bbox + envelope
 # the normalizer will recompute from the saved shapes, so the round-trip is exact.
 # 把工作端口（归一化 0..1）换算为保存字典所需的作者空间像素。这里用与 GPSymbolNormalizer
-# 从已保存图形重算时「同一 bbox + 包络」的 gpNormalizePorts 逆运算，使往返精确无漂移。
+# 从已保存图形重算时「同一 bbox + 包络」的 gpNormalizePorts() 逆运算，使往返精确无漂移。
 func _gpAuthorPorts(gpCat: String = "") -> Array:
 	if _gpEditor == null:
 		return []
@@ -564,10 +564,10 @@ func _gpRefreshState() -> void:
 	var gpBuiltinHit: bool = gpTarget != null and gpTarget.gpBuiltin
 
 	if gpTarget != null and not gpBuiltinHit:
-		# The name is taken by a user symbol: Overwrite is the ONLY available mode and is
-		# forced on, so confirming replaces that symbol (keeping its allocated id).
-		# 该名称已被用户图元占用：覆盖是唯一可用模式并被强制选中，确定即替换该图元
-		#（沿用其已分配的 id）。
+ # The name is taken by a user symbol: Overwrite is the ONLY available mode and is
+ # forced on, so confirming replaces that symbol (keeping its allocated id).
+ # 该名称已被用户图元占用：覆盖是唯一可用模式并被强制选中，确定即替换该图元
+ #（沿用其已分配的 id）。
 		_gpExistingTargetId = gpTarget.gpId
 		_gpModeNew.disabled = true
 		_gpModeOver.disabled = false
@@ -578,17 +578,17 @@ func _gpRefreshState() -> void:
 		_gpHint.text = I18n.gpTr("make_symbol.id_exists") % gpDisp
 		gpHintSet = true
 	elif gpBuiltinHit:
-		# Built-in ids are read-only (decision D3): neither mode is available until the id
-		# is changed to a free one.
-		# 内置 id 只读（决策 D3）：更换为空闲 id 之前两种模式均不可用。
+ # Built-in ids are read-only (decision D3): neither mode is available until the id
+ # is changed to a free one.
+ # 内置 id 只读（决策 D3）：更换为空闲 id 之前两种模式均不可用。
 		_gpModeNew.disabled = true
 		_gpModeOver.disabled = true
 		_gpHint.text = I18n.gpTr("make_symbol.builtin_protected")
 		gpHintSet = true
 	else:
-		# The id is free: New is the ONLY available mode and is forced on; overwrite has no
-		# target and stays disabled.
-		# 该 id 空闲：新建是唯一可用模式并被强制选中；覆盖无目标、保持禁用。
+ # The id is free: New is the ONLY available mode and is forced on; overwrite has no
+ # target and stays disabled.
+ # 该 id 空闲：新建是唯一可用模式并被强制选中；覆盖无目标、保持禁用。
 		_gpModeNew.disabled = false
 		_gpModeOver.disabled = true
 		if gpOverwriteMode:
@@ -611,13 +611,13 @@ func _gpRefreshState() -> void:
 	# —— 缺此守卫时确定会保持可用，以去重 xxx_2 的 id 「新建」出混淆图元）。
 	if gpBuiltinHit or (gpOverwriteMode and _gpExistingTargetId == ""):
 		_gpOk.disabled = true
-		# The hint already explains why (builtin_protected).
-		# 提示行已说明原因（内置保护）。
+ # The hint already explains why (builtin_protected).
+ # 提示行已说明原因（内置保护）。
 	else:
 		_gpOk.disabled = false
-		# Clear stale warnings ONLY when this pass set no hint, so the id-exists
-		# message survives.
-		# 仅当本次未设置提示时才清残留警告，保住「id 已存在」信息。
+ # Clear stale warnings ONLY when this pass set no hint, so the id-exists
+ # message survives.
+ # 仅当本次未设置提示时才清残留警告，保住「id 已存在」信息。
 		if not gpHintSet:
 			_gpHint.text = ""
 
@@ -626,10 +626,10 @@ func _gpRefreshState() -> void:
 # is allocated from the category (C< CATEGORY ><nnn>) and no longer derives from the name,
 # so the name is the only thing that tells "does this symbol already exist?". Built-ins are
 # read-only (decision D3): when the name hits a built-in, it is returned so
-# _gpRefreshState/_gpOnOk can refuse.
+# _gpRefreshState()/_gpOnOk() can refuse.
 # 唯一性以「名称 + 类别」判定，而非 id：自 L/C 命名规则起，id 由类别分配
 # （C<类别码><三位序号>）、不再由名称导出，因此只有名称能回答「该图元是否已存在」。
-# 内置图元只读（决策 D3）：名称命中内置时原样返回，由 _gpRefreshState/_gpOnOk 拒绝。
+# 内置图元只读（决策 D3）：名称命中内置时原样返回，由 _gpRefreshState()/_gpOnOk() 拒绝。
 func _gpFindExisting(gpName: String, gpCategory: String) -> GPSymbolDef:
 	if gpName == "":
 		return null
@@ -678,8 +678,8 @@ func _gpOnOk() -> void:
 	else:
 		gpId = GPSymbolLibrary.gpAllocateCustomId(gpCat)
 	if gpId == "":
-		# The category used up all 999 slots: refuse instead of emitting a malformed id.
-		# 该类别已用满 999 个号位：拒绝，而不是产出一个非法 id。
+ # The category used up all 999 slots: refuse instead of emitting a malformed id.
+ # 该类别已用满 999 个号位：拒绝，而不是产出一个非法 id。
 		_gpHint.text = I18n.gpTr("make_symbol.category_full",
 			"Category %s has no free id left (999 used)") % GPSymbolNaming.gpCategoryCode(gpCat)
 		return
@@ -705,11 +705,11 @@ func _gpOnOk() -> void:
 # Symbol ids are no longer derived from the name: since the L/C naming rule they are
 # allocated by GPSymbolNaming via GPSymbolLibrary.gpAllocateCustomId (C<CATEGORY><nnn>).
 # The name still matters — it is what makes a symbol "already exist" (see
-# _gpFindExisting) — but it no longer turns into an id. GPIdGen.gpSanitize remains the
+# _gpFindExisting()) — but it no longer turns into an id. GPIdGen.gpSanitize() remains the
 # normalizer for the OTHER id spaces (documents, cross-references) that W21/W22 add.
 # 图元 id 不再由名称导出：自 L/C 命名规则起，它们由 GPSymbolNaming 经
-# GPSymbolLibrary.gpAllocateCustomId 分配（C<类别码><三位序号>）。名称仍有作用 —— 它是判定
-# 图元「是否已存在」的依据（见 _gpFindExisting）—— 但不再被转成 id。GPIdGen.gpSanitize
+# GPSymbolLibrary.gpAllocateCustomId() 分配（C<类别码><三位序号>）。名称仍有作用 —— 它是判定
+# 图元「是否已存在」的依据（见 _gpFindExisting()）—— 但不再被转成 id。GPIdGen.gpSanitize()
 # 仍是其他 id 空间（文档、跨图引用）的归一化器，供 W21/W22 使用。
 
 

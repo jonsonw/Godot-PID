@@ -1,11 +1,9 @@
 # ============================================================================
-# GPSymbolMoveShapeCommand — 移动图形（M7）
-# Move a shape by shifting its points (M7).
 #
 # 捕获前后点集与半径，使撤销 / 重做恢复确切几何。执行时若无变化（前后一致）返回 false，栈将丢弃它，
 # 不产生幽灵撤销步（普通单击 / 零位移均如此）。
 # Captures before/after points + radius so undo/redo restore the exact geometry. When nothing
-# changed (before == after) gpExecute returns false so the stack drops it — no phantom undo step
+# changed (before == after) gpExecute() returns false so the stack drops it — no phantom undo step
 # for a plain click or a zero delta.
 # Copyright © 2026 Jonson Wang
 # ============================================================================

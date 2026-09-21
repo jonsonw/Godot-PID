@@ -1,19 +1,19 @@
 class_name GPTagRuleDialog
 extends ConfirmationDialog
 # Copyright © 2026 Jonson Wang
-# "Project > Tag numbering rules" dialog (M9b).
-# 「项目 > 位号编号规则」对话框（M9b）。
+# "Project > Tag numbering rules" dialog .
+# 「项目 > 位号编号规则」对话框。
 #
 # Design notes / 设计说明:
-#   - Every keystroke re-validates and re-renders the preview through GPTagRuleService, so
-#     the user never has to press OK to find out the template is illegal.
-#     每次按键都经 GPTagRuleService 重新校验并重算预览，用户无需按「确定」才发现模板非法。
-#   - The dialog edits a COPY. Nothing touches the document until the user confirms, which
-#     is what makes Cancel a true no-op.
-#     对话框编辑的是副本。用户确认前不触碰文档，这才使「取消」成为真正的空操作。
-#   - Rules are project configuration and travel with the *.pid.json, so this dialog is also
-#     the only place a project can diverge from the factory convention.
-#     规则是工程配置且随 *.pid.json 走，故本对话框也是工程偏离出厂约定的唯一入口。
+# - Every keystroke re-validates and re-renders the preview through GPTagRuleService, so
+# the user never has to press OK to find out the template is illegal.
+# 每次按键都经 GPTagRuleService 重新校验并重算预览，用户无需按「确定」才发现模板非法。
+# - The dialog edits a COPY. Nothing touches the document until the user confirms, which
+# is what makes Cancel a true no-op.
+# 对话框编辑的是副本。用户确认前不触碰文档，这才使「取消」成为真正的空操作。
+# - Rules are project configuration and travel with the *.pid.json, so this dialog is also
+# the only place a project can diverge from the factory convention.
+# 规则是工程配置且随 *.pid.json 走，故本对话框也是工程偏离出厂约定的唯一入口。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。

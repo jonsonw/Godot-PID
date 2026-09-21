@@ -1,6 +1,6 @@
 # ============================================================================
-# GPGripTool — 注释图形锚点 / 整图形拖拽（P2 拆分）
-# Annotation-shape grip / whole-shape drag (P2 split).
+# GPGripTool — 注释图形锚点 / 整图形拖拽
+# Annotation-shape grip / whole-shape drag .
 #
 # 持有「选中注释图形」的锚点拖拽与整图形移动的「执行」部分：移动时实时变更几何（经 GPAnnotationEditor
 # 委托），释放时收尾并广播 gpGraphChanged。发起（命中抓取点 / 整图形命中）仍在 GPSelectTool 的落空
@@ -14,9 +14,9 @@
 class_name GPGripTool
 extends GPCanvasTool
 
-# M3: "is a drag in flight?" is now answered by the drag's owner (GPAnnotationEditor), not by
+# "is a drag in flight?" is now answered by the drag's owner (GPAnnotationEditor), not by
 # peeking at canvas fields.
-# M3：「是否有拖拽在进行」改由拖拽的持有者（GPAnnotationEditor）回答，而非窥探画布字段。
+# 「是否有拖拽在进行」改由拖拽的持有者（GPAnnotationEditor）回答，而非窥探画布字段。
 func gpOnMove(gpWorld: Vector2) -> bool:
 	var gpAnno := gpCtx.gpAnno
 	# Dragging a grip (handle) of the selected annotation shape reshapes / resizes it.
@@ -27,16 +27,16 @@ func gpOnMove(gpWorld: Vector2) -> bool:
 	# 拖动整枚选中的注释图形以移动之。
 	elif gpAnno.gpHasShapeDrag():
 		gpAnno.gpOnShapeMove(gpWorld)
-	# Dragging an edge endpoint / routing vertex (P3-4): re-route or reconnect, previewed live.
-	# 拖动边的端点 / 布线顶点（P3-4）：实时预览改布线或改接。
+	# Dragging an edge endpoint / routing vertex : re-route or reconnect, previewed live.
+	# 拖动边的端点 / 布线顶点：实时预览改布线或改接。
 	elif gpCtx.gpEdgeGrips.gpIsDragging():
 		gpCtx.gpEdgeGrips.gpOnGripMove(gpWorld)
 	# Dragging the body of an edge: translate the whole line rigidly.
 	# 拖动边的线体：整条刚性平移。
 	elif gpCtx.gpEdgeGrips.gpIsMoving():
 		gpCtx.gpEdgeGrips.gpOnEdgeMove(gpWorld)
-	# Dragging a tag (位号) label (M10b): live preview, committed as one undo step on release.
-	# 拖动位号标签（M10b）：实时预览，释放时作为一个撤销步提交。
+	# Dragging a tag (位号) label : live preview, committed as one undo step on release.
+	# 拖动位号标签：实时预览，释放时作为一个撤销步提交。
 	elif gpCtx.gpLabelGrips.gpIsDragging():
 		gpCtx.gpLabelGrips.gpOnGripMove(gpWorld)
 	return true

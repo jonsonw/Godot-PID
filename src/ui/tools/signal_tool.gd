@@ -1,15 +1,13 @@
 class_name GPSignalTool
 extends GPPipeTool
 # Copyright © 2026 Jonson Wang
-# Two-press instrument / electrical signal-line drawing (P3).
-# 两段式仪表 / 电气信号线绘制（P3）。
 #
 # Why inherit instead of copying / 为何继承而非复制：
-#   The interaction is identical — anchor, preview, commit, cancel. Only WHAT is connected
-#   differs. Copying the state machine would mean every future fix (double-click to dangle,
-#   ESC handling, preview fidelity) has to be made twice, and the two copies would drift.
-#   交互完全相同 —— 锚定、预览、提交、取消。不同的只是「连什么」。若复制状态机，将来每个修复
-#   （双击生成悬空端、ESC 处理、预览保真）都得做两遍，且两份副本必然分家。
+# The interaction is identical — anchor, preview, commit, cancel. Only WHAT is connected
+# differs. Copying the state machine would mean every future fix (double-click to dangle,
+# ESC handling, preview fidelity) has to be made twice, and the two copies would drift.
+# 交互完全相同 —— 锚定、预览、提交、取消。不同的只是「连什么」。若复制状态机，将来每个修复
+# （双击生成悬空端、ESC 处理、预览保真）都得做两遍，且两份副本必然分家。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。

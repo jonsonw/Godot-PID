@@ -6,13 +6,13 @@ extends RefCounted
 #
 # Why routing is a PURE function of (end position, end normal, stored waypoints, ortho flag)
 # and not stored geometry / 为何布线是「端点位置 + 端点法线 + 已存折点 + 正交开关」的纯函数而非存储几何：
-#   the two endpoints are ALWAYS recomputed from the port refs every frame (see GPPortResolver),
-#   so routing must be recomputed too — a cached polyline would tear the pipe off its symbol the
-#   first time the symbol moves. Only the MIDDLE waypoints the user dragged are stored, and they
-#   are stored as data (gpRouting), never baked into the render.
-#   两个端点每帧都由端口引用重算（见 GPPortResolver），故布线也必须重算 —— 缓存折线会在图元首次
-#   移动时把管线撕离图元。只有用户拖出来的「中间折点」才存储，且以数据形式存于 gpRouting，
-#   绝不烘进渲染。
+# the two endpoints are ALWAYS recomputed from the port refs every frame (see GPPortResolver),
+# so routing must be recomputed too — a cached polyline would tear the pipe off its symbol the
+# first time the symbol moves. Only the MIDDLE waypoints the user dragged are stored, and they
+# are stored as data (gpRouting), never baked into the render.
+# 两个端点每帧都由端口引用重算（见 GPPortResolver），故布线也必须重算 —— 缓存折线会在图元首次
+# 移动时把管线撕离图元。只有用户拖出来的「中间折点」才存储，且以数据形式存于 gpRouting，
+# 绝不烘进渲染。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -29,27 +29,26 @@ const GP_DETOUR: float = 26.0
 
 # Points closer than this are the same point; legs shorter than this are dropped.
 # 距离小于此值的点视作同一点；短于此值的段被丢弃。
-const GP_EPS: float = 0.5
+const GP_EPS: float = GPConstants.GP_EPS
 
 
 # Build the full polyline for one edge, endpoints INCLUDED.
 # 构造一条边的完整折线，含两个端点。
-# [param gpFrom]   resolved source end   {"pos", "dir", ...} from GPPortResolver.gpResolveEnd
-# [param gpFrom]   已解析的起点端       来自 GPPortResolver.gpResolveEnd 的 {"pos", "dir", ...}
-# [param gpTo]     resolved target end / 已解析的终点端
+# [param gpFrom()] resolved source end {"pos", "dir", ...} from GPPortResolver.gpResolveEnd()
+# [param gpFrom()] 已解析的起点端 来自 GPPortResolver.gpResolveEnd() 的 {"pos", "dir", ...}
+# [param gpTo] resolved target end / 已解析的终点端
 # [param gpRouting] user-dragged MIDDLE waypoints (empty = auto-route) / 用户拖出的中间折点（空 = 自动布线）
-# [param gpOrtho]  false = straight line (Shift-drawn) / false = 直连（按 Shift 画出）
+# [param gpOrtho] false = straight line (Shift-drawn) / false = 直连（按 Shift 画出）
 static func gpRoute(gpFrom: Dictionary, gpTo: Dictionary,
 		gpRouting: Array[Vector2], gpOrtho: bool) -> PackedVector2Array:
 	var gpA: Vector2 = gpFrom.get("pos", Vector2.ZERO)
 	var gpB: Vector2 = gpTo.get("pos", Vector2.ZERO)
 	# 1. The user owns the MIDDLE waypoints — honoured verbatim. But when ortho is on we still grow
-	#    the two port stubs and join every leg with an L-corner, so a dragged bend can NEVER turn
-	#    diagonal. (This is exactly what keeps the line orthogonal while editing — the old code
-	#    concatenated [endA] + routing + [endB] raw, dropping the stubs and leaving the first/last
-	#    legs free to slant.) / 用户拥有「中间」折点——原样采纳。但开启正交时仍长出两端端口引出段、
-	#    并用 L 角点连接每一段，使拖出的鼓包绝不会变斜。这正是编辑时保持正交的关键：旧代码把
-	#    [端A]+routing+[端B] 裸拼、丢掉引出段，首/尾两段因而可能斜出。
+	# the two port stubs and join every leg with an L-corner, so a dragged bend can NEVER turn
+	# diagonal. (This is exactly what keeps the line orthogonal while editing — the old code
+	# concatenated [endA] + routing + [endB] raw, dropping the stubs and leaving the first/last
+	# legs free to slant.) / 用户拥有「中间」折点——原样采纳。但开启正交时仍长出两端端口引出段、
+	# [端A]+routing+[端B] 裸拼、丢掉引出段，首/尾两段因而可能斜出。
 	if not gpRouting.is_empty():
 		if gpOrtho:
 			var gpDa: Vector2 = gpAxisDir(gpFrom.get("dir", Vector2.ZERO), gpB - gpA)
@@ -62,8 +61,8 @@ static func gpRoute(gpFrom: Dictionary, gpTo: Dictionary,
 			gpVerts.append(gpB + gpDb * gpStubB)
 			gpVerts.append(gpB)
 			return gpOrthoThrough(gpVerts)
-		# Straight (Shift) edges keep the raw user path, no stubs, no corners.
-		# 直连（Shift）边保持用户原始路径，无引出段、无角点。
+ # Straight (Shift) edges keep the raw user path, no stubs, no corners.
+ # 直连（Shift）边保持用户原始路径，无引出段、无角点。
 		var gpUser: Array[Vector2] = [gpA]
 		for gpP in gpRouting:
 			gpUser.append(gpP)
@@ -87,10 +86,10 @@ static func gpRoute(gpFrom: Dictionary, gpTo: Dictionary,
 
 # Connect an already-stubbed vertex list orthogonally: between every pair that is NOT axis-aligned
 # insert exactly one Manhattan corner (horizontal leg first). The vertex order is preserved, so a
-# user waypoint sequence stays in the same spatial order. gpClean then drops zero-length / collinear
+# user waypoint sequence stays in the same spatial order. gpClean() then drops zero-length / collinear
 # points, so a stub that happens to be collinear with the next leg simply folds away.
 # 把「已含引出段」的顶点表正交化：每对不轴对齐的顶点之间恰好插入一个曼哈顿角点（先水平）。
-# 顶点顺序保持不变，故用户折点序列仍按同一空间顺序排列。随后 gpClean 去掉零长/共线点，
+# 顶点顺序保持不变，故用户折点序列仍按同一空间顺序排列。随后 gpClean() 去掉零长/共线点，
 # 因此与下一段共线的引出段会被自然并掉。
 static func gpOrthoThrough(gpVerts: Array[Vector2]) -> PackedVector2Array:
 	if gpVerts.size() < 2:
@@ -103,8 +102,8 @@ static func gpOrthoThrough(gpVerts: Array[Vector2]) -> PackedVector2Array:
 		var gpPrev: Vector2 = gpOut[-1]
 		var gpCur: Vector2 = gpVerts[gpI]
 		if absf(gpCur.x - gpPrev.x) > GP_EPS and absf(gpCur.y - gpPrev.y) > GP_EPS:
-			# One corner: go horizontal along the previous leg's row, then vertical.
-			# 一个角点：先沿上一段所在行水平走，再竖直。
+ # One corner: go horizontal along the previous leg's row, then vertical.
+ # 一个角点：先沿上一段所在行水平走，再竖直。
 			gpOut.append(Vector2(gpCur.x, gpPrev.y))
 		gpOut.append(gpCur)
 	return gpClean(gpOut)
@@ -147,12 +146,12 @@ static func gpOrthoPath(gpA: Vector2, gpDirA: Vector2, gpB: Vector2, gpDirB: Vec
 	var gpCHV: Vector2 = Vector2(gpSb.x, gpSa.y)
 	var gpCVH: Vector2 = Vector2(gpSa.x, gpSb.y)
 	if gpAHoriz:
-		# Leaving leg is horizontal: it must agree with the source normal.
-		# 出线段为水平：必须与起点法线同向。
+ # Leaving leg is horizontal: it must agree with the source normal.
+ # 出线段为水平：必须与起点法线同向。
 		if (gpCHV.x - gpSa.x) * gpDa.x > GP_EPS:
 			return gpClean([gpA, gpSa, gpCHV, gpSb, gpB])
-		# Otherwise turn immediately and come in along the target normal.
-		# 否则立刻拐弯，并沿终点法线进入。
+ # Otherwise turn immediately and come in along the target normal.
+ # 否则立刻拐弯，并沿终点法线进入。
 		if (gpSb.x - gpCVH.x) * -gpDb.x > GP_EPS:
 			return gpClean([gpA, gpSa, gpCVH, gpSb, gpB])
 		return gpDetour(gpA, gpSa, gpSb, gpB, true)
@@ -219,8 +218,8 @@ static func gpClean(gpPts: Array[Vector2]) -> PackedVector2Array:
 	while gpI < gpOut.size() - 1:
 		var gpU: Vector2 = (gpOut[gpI] - gpOut[gpI - 1]).normalized()
 		var gpV: Vector2 = (gpOut[gpI + 1] - gpOut[gpI]).normalized()
-		# Same direction (dot > 0) means the middle point adds nothing.
-		# 同向（dot > 0）意味着中间点毫无贡献。
+ # Same direction (dot > 0) means the middle point adds nothing.
+ # 同向（dot > 0）意味着中间点毫无贡献。
 		if absf(gpU.cross(gpV)) < 0.01 and gpU.dot(gpV) > 0.5:
 			gpOut.remove_at(gpI)
 		else:

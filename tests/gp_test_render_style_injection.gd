@@ -1,15 +1,15 @@
 extends "res://tests/gp_test.gd"
-# 架构优化 §4.2：钉住「render 层不读 autoload」这条闭合路径。
-# Architecture §4.2: pin the closed path "the render layer never reads an autoload".
+# 钉住「render 层不读 autoload」这条闭合路径。
+# pin the closed path "the render layer never reads an autoload".
 #
-# 这套测试把 §4.2 的依赖注入机制钉死，专门针对最危险的失败模式——「切换语言 / 字号后，
+# 这套测试把依赖注入机制钉死，专门针对最危险的失败模式——「切换语言 / 字号后，
 # 旧视图的 style 没被更新，于是图上残留旧字号 / 旧文字」。四个断言分别覆盖：
 #   1. GPRenderStyle 值对象正确携带纯数据（不依赖 autoload）；
 #   2. GPGraphBinder.gpApplyStyle 把新快照重注入所有已有视图（钉住「忘记重注入」）；
 #   3. 装配时新建的视图拿到注入的 style（钉住创建路径的注入无遗漏）；
 #   4. 画布在 autoload 缺失（headless）时回落安全默认快照。
 #
-# This suite pins the §4.2 dependency-injection mechanism, aimed squarely at the worst failure
+# This suite pins the dependency-injection mechanism, aimed squarely at the worst failure
 # mode — a locale / font change that forgets to re-push the style into existing views, leaving
 # stale labels on screen. The four asserts cover: (1) the value object carries data, (2) the
 # binder re-injects on gpApplyStyle, (3) newly created views receive the injected style, (4) the
@@ -96,7 +96,7 @@ func gpTestBinderInjectsOnCreate() -> void:
 # (no crash, no global reads).
 func gpTestCanvasBuildsDefaultHeadless() -> void:
 	var gpCv: GPCanvas2D = GPCanvas2D.new()
-	var gpS: GPRenderStyle = gpCv._gpBuildRenderStyle()
+	var gpS: GPRenderStyle = gpCv.gpBuildRenderStyle()
 	gpCheck(gpS != null, "默认快照非空 / default snapshot non-null")
 	gpEq(gpS.gpLocale, "zh_CN", "autoload 缺失时回落 zh_CN / falls back to zh_CN without autoload")
 	gpEq(gpS.gpSymbolFontSize, 16, "autoload 缺失时回落 16 / falls back to 16")

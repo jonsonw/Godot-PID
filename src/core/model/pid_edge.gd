@@ -22,7 +22,7 @@ var gpToRef: Dictionary = {}
 # ---- 连线类型（互斥三分）----
 # PROCESS : 主工艺管线，粗实线 / main process line, thick solid
 # UTILITY : 公用工程管线，细实线（与主管线仅靠线宽区分）/ utility line, thin solid
-# SIGNAL  : 仪表 / 电气控制信号线，线型由 gpSignalType 决定 / signal line, pattern from gpSignalType
+# SIGNAL : 仪表 / 电气控制信号线，线型由 gpSignalType 决定 / signal line, pattern from gpSignalType
 # Why one field and not kind + service: the three states are mutually exclusive, so two fields
 # would admit three illegal combinations and fork the archive schema.
 # 为何只用一个字段而非 kind + service：三种状态互斥，两个字段会放行三种非法组合并使存档 schema 分叉。
@@ -60,11 +60,11 @@ var gpTag: String = ""
 
 # Extra attributes. Well-known keys (documented so the inspector and list export agree):
 # 附加属性。约定键（写在注释里，使属性面板与清单导出一致）：
-#   "dn" 公称直径 / "medium" 介质代号 / "spec" 管道等级 / "insulation" 保温等级（管道）
-#   "tag_manual" 位号被手工改过（全图重编号时跳过）
-#   "show_arrow" 是否画流向箭头（管道默认 true）/ "show_tag" 是否画位号（信号线默认 false）
-#   "tag_offset" 位号手工微调偏移 [dx, dy]
-#   "broken_from" / "broken_to" 由坏边自愈写入，见 gpFromDict
+# "dn" 公称直径 / "medium" 介质代号 / "spec" 管道等级 / "insulation" 保温等级（管道）
+# "tag_manual" 位号被手工改过（全图重编号时跳过）
+# "show_arrow" 是否画流向箭头（管道默认 true）/ "show_tag" 是否画位号（信号线默认 false）
+# "tag_offset" 位号手工微调偏移 [dx, dy]
+# "broken_from" / "broken_to" 由坏边自愈写入，见 gpFromDict()
 var gpAttrs: Dictionary = {}
 
 
@@ -118,19 +118,18 @@ func gpToDict() -> Dictionary:
 	}
 
 
-# Restore this edge from a dictionary (inverse of gpToDict).
-# 从字典还原本边（gpToDict 的逆操作）。
+# Restore this edge from a dictionary (inverse of gpToDict()).
+# 从字典还原本边（gpToDict() 的逆操作）。
 # Tolerant of the old dictionary-graph shape (id/from/to/attrs) so legacy
 # *.pid.json files still load.
-# 兼容旧字典图形状（id/from/to/attrs），使旧版 *.pid.json 仍可载入。
 func gpFromDict(gpD: Dictionary) -> void:
 	gpInstanceId = gpD.get("instance_id", gpD.get("id", ""))
 	# New object-graph shape: port-to-port refs.
 	# 新对象图形状：端口到端口引用。
 	gpFromRef = gpD.get("from_ref", {})
 	if gpFromRef.is_empty():
-		# Old dictionary-graph shape: node-to-node ids.
-		# 旧字典图形状：节点到节点 id。
+ # Old dictionary-graph shape: node-to-node ids.
+ # 旧字典图形状：节点到节点 id。
 		gpFromRef = {"node_id": gpD.get("from", ""), "port_id": ""}
 	gpToRef = gpD.get("to_ref", {})
 	if gpToRef.is_empty():
@@ -151,7 +150,6 @@ func gpFromDict(gpD: Dictionary) -> void:
 	# An end with neither node_id nor point comes from a NEWER file read by an OLDER build, or
 	# from a hand-edited JSON. Keep it loadable as a dangling end at the origin instead of
 	# producing an edge that can never be rendered.
-	# 既无 node_id 又无 point 的端点，来自「新版文件被旧版读过」或手改过的 JSON。
 	# 将其保留为原点处的悬空端，而不是产生一条永远无法渲染的边。
 	if str(gpFromRef.get("node_id", "")) == "" and not gpFromRef.has("point"):
 		gpFromRef["point"] = [0.0, 0.0]

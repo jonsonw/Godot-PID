@@ -5,28 +5,28 @@ extends RefCounted
 # 项目级图元标识 id 命名规则的唯一权威定义。
 #
 # RULE / 规则
-#   <来源码><类别码><三位序号>
-#   source code + CATEGORY CODE (upper) + 3-digit sequence
+# <来源码><类别码><三位序号>
+# source code + CATEGORY CODE (upper) + 3-digit sequence
 #
-#   LVALVE001   L = 内置库图元（Library，随发行版自带、只读）
-#   CVALVE001   C = 自定义图元（Custom，用户自建或由内置图元派生）
+# LVALVE001 L = 内置库图元（Library，随发行版自带、只读）
+# CVALVE001 C = 自定义图元（Custom，用户自建或由内置图元派生）
 #
-#   L 内置库 / library (ships with the release, read-only)
-#   C 自定义 / custom (authored by the user, or derived from a built-in)
+# L 内置库 / library (ships with the release, read-only)
+# C 自定义 / custom (authored by the user, or derived from a built-in)
 #
 # WHY A SEQUENCE AT ALL / 为何要序号：
-#   the sequence lives INSIDE a category, so the id also reads as "which family, and the
-#   Nth member of it". An id built from the English name (BallValve) would make the sequence
-#   permanently 001 and the two halves of the id would carry the same information twice.
-#   序号位于「类别内部」，因此 id 同时表达「属于哪一族」与「族内第几个」。若用英文名
-#   （BallValve）构造 id，序号将永远是 001，且 id 的两半会重复承载同一信息。
+# the sequence lives INSIDE a category, so the id also reads as "which family, and the
+# Nth member of it". An id built from the English name (BallValve) would make the sequence
+# permanently 001 and the two halves of the id would carry the same information twice.
+# 序号位于「类别内部」，因此 id 同时表达「属于哪一族」与「族内第几个」。若用英文名
+# （BallValve）构造 id，序号将永远是 001，且 id 的两半会重复承载同一信息。
 #
 # SEQUENCE IS NEVER RECYCLED / 序号永不复用：
-#   gpAllocate always returns max(existing)+1 and never fills a gap left by a deleted
-#   symbol. Reusing a retired number would make an old *.pid.json silently resolve to a
-#   DIFFERENT symbol that happens to occupy that number now — a data-corruption class bug.
-#   gpAllocate 恒返回 max(已有)+1，绝不填补删除留下的空号。复用已退役编号会让旧存档
-#   静默指向「恰好占用了该号」的另一个图元 —— 属于数据损坏级缺陷。
+# gpAllocate() always returns max(existing)+1 and never fills a gap left by a deleted
+# symbol. Reusing a retired number would make an old *.pid.json silently resolve to a
+# DIFFERENT symbol that happens to occupy that number now — a data-corruption class bug.
+# gpAllocate() 恒返回 max(已有)+1，绝不填补删除留下的空号。复用已退役编号会让旧存档
+# 静默指向「恰好占用了该号」的另一个图元 —— 属于数据损坏级缺陷。
 
 # Source code for built-in (library) symbols.
 # 内置（图元库）图元的来源码。
@@ -50,7 +50,6 @@ const GP_CATEGORY_FALLBACK: String = "GENERAL"
 
 # Legacy id -> current id. Filled in by tools/gen_symbol_packs.py (see legacy_id_map.json).
 # 旧 id → 新 id。由 tools/gen_symbol_packs.py 生成（见 legacy_id_map.json）。
-# The built-in library ids used to be the SVG file stem ("P_CentrifugalPump_001"); every
 # *.pid.json written before the rule change carries those, so they must keep resolving.
 # 内置图元库 id 原先就是 SVG 文件名主干（"P_CentrifugalPump_001"），规则变更前落盘的
 # 每个 *.pid.json 都带这些 id，因此必须能继续解析。

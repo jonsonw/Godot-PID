@@ -1,27 +1,25 @@
 class_name GPReplaceSymbolCommand
 extends GPCommand
 # Copyright © 2026 Jonson Wang
-# Swap one instance onto a different SymbolDef (M10) — "change the symbol, keep the identity".
-# 把某个实例换到另一个 SymbolDef 上（M10）—— 「换图元，不换身份」。
 #
 # What is preserved / 保留什么：
-#   gpUid, gpTag, gpProps and the node's position all survive untouched. That is the whole
-#   point: a pump that becomes a different pump model keeps its tag P-1001, its property
-#   values and — critically — every pipe still lands on it, because edges reference the node
-#   id, never the symbol.
-#   gpUid、gpTag、gpProps 与节点坐标全部原样保留。这正是重点：把一台泵换成另一型号，
-#   它的位号 P-1001、属性值都还在 —— 关键是每根管子都还连着它，因为边引用的是
-#   **节点 id**，从来不是图元。
+# gpUid, gpTag, gpProps and the node's position all survive untouched. That is the whole
+# point: a pump that becomes a different pump model keeps its tag P-1001, its property
+# values and — critically — every pipe still lands on it, because edges reference the node
+# id, never the symbol.
+# gpUid、gpTag、gpProps 与节点坐标全部原样保留。这正是重点：把一台泵换成另一型号，
+# 它的位号 P-1001、属性值都还在 —— 关键是每根管子都还连着它，因为边引用的是
+# **节点 id**，从来不是图元。
 #
-# Port reconciliation / 端口对账（已拍板 2026-09-09：允许降级但警告）：
-#   An edge stores the port NAME as a hint, not as a contract. When the new symbol has no
-#   port of that name, the endpoint DOWNGRADES to the node centre instead of being severed —
-#   the pipe stays connected and merely looks less precise. Blocking the swap would force
-#   the user to delete and redraw; silently re-pointing it would hide the change. So the
-#   downgraded edge ids are recorded in gpDowngraded() and the shell shows a warning.
-#   边把端口**名**存为「提示」而非「契约」。新图元没有同名端口时，端点**降级**到图元中心
-#   而非被切断 —— 管路保持连通，只是外观没那么精确。拦死更换会逼用户删了重画；静默改指
-#   则会掩盖这次变动。故被降级的边 id 记录在 gpDowngraded() 中，由外壳给出警告。
+# Port reconciliation / 端口对账（已拍板：允许降级但警告）：
+# An edge stores the port NAME as a hint, not as a contract. When the new symbol has no
+# port of that name, the endpoint DOWNGRADES to the node centre instead of being severed —
+# the pipe stays connected and merely looks less precise. Blocking the swap would force
+# the user to delete and redraw; silently re-pointing it would hide the change. So the
+# downgraded edge ids are recorded in gpDowngraded() and the shell shows a warning.
+# 边把端口**名**存为「提示」而非「契约」。新图元没有同名端口时，端点**降级**到图元中心
+# 而非被切断 —— 管路保持连通，只是外观没那么精确。拦死更换会逼用户删了重画；静默改指
+# 则会掩盖这次变动。故被降级的边 id 记录在 gpDowngraded() 中，由外壳给出警告。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -53,8 +51,8 @@ func _init(gpInNodeId: String, gpInNewDef: GPSymbolDef) -> void:
 	gpLabel = "更换图元"
 
 
-# Edges downgraded by the last gpExecute / gpRedo. Empty when every port matched.
-# 最近一次 gpExecute / gpRedo 中被降级的边。端口全部匹配时为空。
+# Edges downgraded by the last gpExecute() / gpRedo(). Empty when every port matched.
+# 最近一次 gpExecute() / gpRedo() 中被降级的边。端口全部匹配时为空。
 func gpDowngraded() -> Array[String]:
 	return _gpDowngraded.duplicate()
 

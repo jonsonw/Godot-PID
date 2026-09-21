@@ -1,15 +1,13 @@
 class_name GPAddNodeCommand
 extends GPCommand
-# Place one symbol instance on the sheet (M4).
-# 在图纸上放置一个图元实例（M4）。
 #
 # Redo rule / 重做规则:
-#   The created node object is kept, so redo re-adds the SAME object with the SAME id.
-#   Re-running gpExecute on redo would call gpIds.gpNext() again and hand the node a
-#   brand-new id, silently breaking every edge and every external reference to it.
-#   保留所创建的节点对象，因此重做会用相同 id 重新加入同一对象。
-#   若重做时再次执行 gpExecute，会再调 gpIds.gpNext() 拿到全新 id，
-#   从而静默断开所有关联边与外部引用。
+# The created node object is kept, so redo re-adds the SAME object with the SAME id.
+# Re-running gpExecute() on redo would call gpIds.gpNext() again and hand the node a
+# brand-new id, silently breaking every edge and every external reference to it.
+# 保留所创建的节点对象，因此重做会用相同 id 重新加入同一对象。
+# 若重做时再次执行 gpExecute()，会再调 gpIds.gpNext() 拿到全新 id，
+# 从而静默断开所有关联边与外部引用。
 
 # Symbol definition id to instantiate (e.g. "pump_centrifugal").
 # 要实例化的图元定义 id（如 "pump_centrifugal"）。
@@ -29,8 +27,8 @@ var _gpNode: GPPIDNode = null
 
 
 # Id of the created node, for the caller to select it right after placing. Empty before
-# gpExecute has run.
-# 所创建节点的 id，供调用方在放置后立即选中它。gpExecute 未运行时为空。
+# gpExecute() has run.
+# 所创建节点的 id，供调用方在放置后立即选中它。gpExecute() 未运行时为空。
 var gpCreatedId: String:
 	get: return _gpNode.gpInstanceId if _gpNode != null else ""
 
@@ -51,17 +49,15 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	if gpCtx == null or not gpCtx.gpIsReady():
 		return false
 	if _gpNode == null:
-		# "n" (lower case) is the project-wide node-id prefix: the canvas's own placement path
-		# and every saved file use it. An upper-case "N" here silently forks the id namespace.
-		# "n"（小写）是全项目统一的节点 id 前缀：画布自身的放置路径与所有存档文件都用它。
-		# 此处若用大写 "N" 会静默地分叉 id 命名空间。
+ # "n" (lower case) is the project-wide node-id prefix: the canvas's own placement path
+ # and every saved file use it. An upper-case "N" here silently forks the id namespace.
+ # "n"（小写）是全项目统一的节点 id 前缀：画布自身的放置路径与所有存档文件都用它。
+ # 此处若用大写 "N" 会静默地分叉 id 命名空间。
 		var gpId: String = gpCtx.gpIds.gpNext("n")
-		# Auto-number when the caller supplied no tag (M9): the sheet must show a tag, and a
-		# tag must be unique project-wide. Done HERE rather than in gpRedo so the minted tag
-		# is stored on the kept node object and survives undo/redo unchanged.
-		# 调用方未给位号时自动编号（M9）：图纸上要显示位号，且位号必须工程级唯一。
-		# 在此处而非 gpRedo 中编号，使铸造出的位号存留在被保留的节点对象上，
-		# 撤销/重做后保持不变。
+ # tag must be unique project-wide. Done HERE rather than in gpRedo() so the minted tag
+ # is stored on the kept node object and survives undo/redo unchanged.
+ # 在此处而非 gpRedo() 中编号，使铸造出的位号存留在被保留的节点对象上，
+ # 撤销/重做后保持不变。
 		var gpTagToUse: String = gpTag
 		if gpTagToUse == "" and gpCtx.gpTags != null:
 			gpCtx.gpTags.gpGraph = gpCtx.gpGraph

@@ -93,8 +93,8 @@ func _gpOnMouseExited() -> void:
 func _gui_input(gpEvent: InputEvent) -> void:
 	if gpEvent is InputEventMouseButton:
 		var gpMouseEvent: InputEventMouseButton = gpEvent as InputEventMouseButton
-		# Right-click opens the symbol-library context menu (delete, etc.).
-		# 右键打开图元库上下文菜单（删除等）。
+ # Right-click opens the symbol-library context menu (delete, etc.).
+ # 右键打开图元库上下文菜单（删除等）。
 		if gpMouseEvent.button_index == MOUSE_BUTTON_RIGHT and gpMouseEvent.pressed:
 			accept_event()
 			_gpShowContextMenu()
@@ -133,11 +133,11 @@ func _gpOnContext(gpId: int) -> void:
 	if gpDef == null:
 		return
 	if gpId == GP_CTX_DELETE:
-		# Forward the delete intent to the main window, which owns the graphs and can
-		# cascade-remove any placed instances before dropping the symbol. The menu's
-		# "Delete" item is already disabled for built-in symbols, so gpDef here is user-owned.
-		# 把删除意图转发给主窗口：它持有图，可在移除图元前级联清理画布实例。内置图元的
-		# 「删除」项已被禁用，故此处 gpDef 必为用户自建。
+ # Forward the delete intent to the main window, which owns the graphs and can
+ # cascade-remove any placed instances before dropping the symbol. The menu's
+ # "Delete" item is already disabled for built-in symbols, so gpDef here is user-owned.
+ # 把删除意图转发给主窗口：它持有图，可在移除图元前级联清理画布实例。内置图元的
+ # 「删除」项已被禁用，故此处 gpDef 必为用户自建。
 		gpDeleteRequested.emit(gpDef.gpId)
 
 

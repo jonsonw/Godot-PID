@@ -1,22 +1,22 @@
 class_name GPRenumberTagsCommand
 extends GPCommand
 # Copyright © 2026 Jonson Wang
-# Renumber every piece of equipment on the sheet from the project's numbering rules (M9b).
-# 按工程的编号规则重排图纸上全部设备的位号（M9b）。
+# Renumber every piece of equipment on the sheet from the project's numbering rules .
+# 按工程的编号规则重排图纸上全部设备的位号。
 #
 # WHY THIS IS ONE UNDO STEP / 为何是一个撤销步:
-#   Renumbering touches every instance at once. Twenty separate undo steps would mean the
-#   sheet passes through twenty half-renumbered states, and any of them could be saved by
-#   accident — a half-renumbered P&ID is worse than an un-renumbered one because the damage
-#   is invisible until someone compares it with the DCS point list.
-#   重编号一次性改动所有实例。若拆成二十个撤销步，图纸会经历二十个「半重编号」中间态，
-#   任何一个都可能被误存——半重编号的 P&ID 比未重编号更糟，因为不对照 DCS 点表看不出损坏。
+# Renumbering touches every instance at once. Twenty separate undo steps would mean the
+# sheet passes through twenty half-renumbered states, and any of them could be saved by
+# accident — a half-renumbered P&ID is worse than an un-renumbered one because the damage
+# is invisible until someone compares it with the DCS point list.
+# 重编号一次性改动所有实例。若拆成二十个撤销步，图纸会经历二十个「半重编号」中间态，
+# 任何一个都可能被误存——半重编号的 P&ID 比未重编号更糟，因为不对照 DCS 点表看不出损坏。
 #
 # What it does NOT touch / 它不碰什么:
-#   Edges. Pipe numbers are owned by GPTagGen and get their own command (GPRenumberCommand);
-#   mixing the two namespaces in one step would make the undo label a lie.
-#   连线。管线号归 GPTagGen，有自己的命令（GPRenumberCommand）；把两个命名空间混进
-#   一个撤销步会让撤销标签变成假话。
+# Edges. Pipe numbers are owned by GPTagGen and get their own command (GPRenumberCommand);
+# mixing the two namespaces in one step would make the undo label a lie.
+# 连线。管线号归 GPTagGen，有自己的命令（GPRenumberCommand）；把两个命名空间混进
+# 一个撤销步会让撤销标签变成假话。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -36,8 +36,8 @@ func _init() -> void:
 	gpLabel = "重排位号"
 
 
-# The plan, available after gpExecute so the caller can offer the old->new CSV.
-# gpExecute 之后可用的方案，供调用方提供「旧→新」对照表 CSV。
+# The plan, available after gpExecute() so the caller can offer the old->new CSV.
+# gpExecute() 之后可用的方案，供调用方提供「旧→新」对照表 CSV。
 func gpMapping() -> Array[Dictionary]:
 	return _gpPlan.duplicate()
 
@@ -77,7 +77,7 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 		return
 	GPTagRuleService.gpApplyPlan(gpCtx.gpGraph, _gpPlan)
 	if gpCtx.gpTags != null:
-		# The plan's numbers are already minted; just re-seed the index from the graph.
-		# 方案里的号已经铸造过，只需从图重建索引。
+ # The plan's numbers are already minted; just re-seed the index from the graph.
+ # 方案里的号已经铸造过，只需从图重建索引。
 		gpCtx.gpTags.gpRebuild()
 	gpCtx.gpGraph.gpGraphChanged.emit()

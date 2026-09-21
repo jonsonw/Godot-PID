@@ -1,6 +1,4 @@
 # ============================================================================
-# GPSymbolToolRegistry — 工具种类 -> 工具 注册表（M7）
-# Tool-kind -> tool registry (M7).
 #
 # 对应 GPCanvasToolRegistry：编辑器经它取当前工具，新增一种符号交互只需 gpRegister() 一行，
 # 编辑器主体一行不改。

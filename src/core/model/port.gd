@@ -1,7 +1,5 @@
 class_name GPPort
 extends Resource
-# UNIFIED MODEL (P0): extends Resource so GPSymbolDef can @export Array[GPPort].
-# 统一模型（P0）：继承 Resource，使 GPSymbolDef 能 @export Array[GPPort]。
 
 # Copyright © 2026 Jonson Wang
 # One connection port of a symbol, in the SAME unified model as GPShape.
@@ -17,9 +15,9 @@ extends Resource
 
 # Port purpose (which kind of line may attach to it).
 # 端口用途（决定可接哪类连线）。
-# NOZZLE   : 工艺管口，只接管道 / process nozzle, pipes only
+# NOZZLE : 工艺管口，只接管道 / process nozzle, pipes only
 # ACTUATOR : 阀门执行机构接点，只接信号线 / valve actuator terminal, signal lines only
-# SIGNAL   : 仪表信号端子，只接信号线 / instrument signal terminal, signal lines only
+# SIGNAL : 仪表信号端子，只接信号线 / instrument signal terminal, signal lines only
 # TERMINAL : 通用端点（跨页接续等），两类线都可接 / generic terminal, accepts both
 const GP_NOZZLE: String = "NOZZLE"
 const GP_ACTUATOR: String = "ACTUATOR"
@@ -68,8 +66,8 @@ func gpToDict() -> Dictionary:
 	}
 
 
-# Restore from a dictionary (inverse of gpToDict). Accepts legacy {"name","pos","dir"}.
-# 从字典还原（gpToDict 的逆操作）。接受历史 {"name","pos","dir"} 格式。
+# Restore from a dictionary (inverse of gpToDict()). Accepts legacy {"name","pos","dir"}.
+# 从字典还原（gpToDict() 的逆操作）。接受历史 {"name","pos","dir"} 格式。
 func gpFromDict(gpD: Dictionary) -> void:
 	gpName = str(gpD.get("name", ""))
 	var gpRawPos: Array = gpD.get("pos", [0.5, 0.5])

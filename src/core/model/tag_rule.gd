@@ -5,21 +5,21 @@ extends RefCounted
 # 位号编号规则（如 "P-1001"）的单条定义。
 #
 # A rule answers three questions / 一条规则回答三个问题:
-#   1. Where does the PREFIX come from?  (category table / symbol table / one fixed string)
-#      前缀从哪来？（类别表 / 图元表 / 固定串）
-#   2. How is the number rendered?       (start / step / zero padding / template)
-#      序号如何呈现？（起始 / 步长 / 补零 / 模板）
-#   3. What happens on a collision?      (reject and tell / silently take the next free one)
-#      撞号怎么办？（拒绝并提示 / 自动顺延到下一个空号）
+# 1. Where does the PREFIX come from? (category table / symbol table / one fixed string)
+# 前缀从哪来？（类别表 / 图元表 / 固定串）
+# 2. How is the number rendered? (start / step / zero padding / template)
+# 序号如何呈现？（起始 / 步长 / 补零 / 模板）
+# 3. What happens on a collision? (reject and tell / silently take the next free one)
+# 撞号怎么办？（拒绝并提示 / 自动顺延到下一个空号）
 #
 # WHY THIS IS NOT GPTagGen / 为何不是 GPTagGen:
-#   GPTagGen owns the PIPE numbering ("PL-1001") and deliberately keeps its high-water marks in
-#   gpGraph.gpMeta, because pipe numbers predate this rule system and must keep working byte for
-#   byte. GPTagRule is the EQUIPMENT side and is user-editable per project. They share the
-#   "{prefix}-{seq}" shape on purpose so a user reading the sheet sees one consistent style.
-#   GPTagGen 负责「管线号」（"PL-1001"），其水位线刻意留在 gpGraph.gpMeta——管线号早于本规则
-#   系统且必须逐字节保持原行为。GPTagRule 是「设备位号」侧，按工程可由用户编辑。二者刻意
-#   共用 "{prefix}-{seq}" 形态，使图纸上的编号风格一致。
+# GPTagGen owns the PIPE numbering ("PL-1001") and deliberately keeps its high-water marks in
+# gpGraph.gpMeta, because pipe numbers predate this rule system and must keep working byte for
+# byte. GPTagRule is the EQUIPMENT side and is user-editable per project. They share the
+# "{prefix}-{seq}" shape on purpose so a user reading the sheet sees one consistent style.
+# GPTagGen 负责「管线号」（"PL-1001"），其水位线刻意留在 gpGraph.gpMeta——管线号早于本规则
+# 系统且必须逐字节保持原行为。GPTagRule 是「设备位号」侧，按工程可由用户编辑。二者刻意
+# 共用 "{prefix}-{seq}" 形态，使图纸上的编号风格一致。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -109,13 +109,13 @@ static func gpDefault() -> GPTagRule:
 # 5) GP_FALLBACK_PREFIX.
 #
 # WHY THE TABLE BEATS THE DEFINITION / 为何表优先于定义:
-#   gpCategoryPrefixes is PROJECT configuration the user edits in the numbering dialog;
-#   gpTagPrefix is baked into the library at generation time. When a project says "pumps are
-#   PP here", that is the more specific intent and must win — otherwise editing the table
-#   would appear to do nothing.
-#   gpCategoryPrefixes 是用户在编号对话框里编辑的**工程**配置；gpTagPrefix 是生成时烘进
-#   图元库的默认值。当工程说「本工程泵为 PP」，这是更具体的意图，必须胜出——
-#   否则编辑该表会看起来毫无作用。
+# gpCategoryPrefixes is PROJECT configuration the user edits in the numbering dialog;
+# gpTagPrefix is baked into the library at generation time. When a project says "pumps are
+# PP here", that is the more specific intent and must win — otherwise editing the table
+# would appear to do nothing.
+# gpCategoryPrefixes 是用户在编号对话框里编辑的**工程**配置；gpTagPrefix 是生成时烘进
+# 图元库的默认值。当工程说「本工程泵为 PP」，这是更具体的意图，必须胜出——
+# 否则编辑该表会看起来毫无作用。
 # 图元定义的前缀。解析顺序（由最具体到最宽泛）见上。
 func gpPrefixFor(gpDef: GPSymbolDef) -> String:
 	if gpDef == null:
@@ -137,8 +137,8 @@ func gpPrefixFor(gpDef: GPSymbolDef) -> String:
 
 
 # Resolve the prefix from THIS RULE's configuration only, ignoring gpCategoryPrefixes is NOT
-# what this means — see gpPrefixFor. Kept for callers that already resolved the rule.
-# 仅依本规则的配置解析前缀（含义见 gpPrefixFor）。保留给已自行解析出规则的调用方。
+# what this means — see gpPrefixFor(). Kept for callers that already resolved the rule.
+# 仅依本规则的配置解析前缀（含义见 gpPrefixFor()）。保留给已自行解析出规则的调用方。
 func gpPrefixFromSource(gpDef: GPSymbolDef) -> String:
 	return gpPrefixFor(gpDef)
 

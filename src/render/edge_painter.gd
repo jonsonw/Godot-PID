@@ -90,7 +90,7 @@ static func gpDrawArrow(gpCv: CanvasItem, gpPts: PackedVector2Array, gpColor: Co
 # Draw the line number. Rotates the text on a vertical run when gpRotate is set.
 # 绘制管线编号。gpRotate 为真时在竖管上旋转文字。
 # [return] the text bounding rectangle in world coordinates, so callers can use it for
-#          hit-testing or overlap avoidance.
+# hit-testing or overlap avoidance.
 # [return] 文字包围矩形（世界坐标），供调用方做命中测试或避让。
 static func gpDrawTag(gpCv: CanvasItem, gpPts: PackedVector2Array, gpText: String, gpFont: Font,
 		gpFontSize: int, gpColor: Color, gpRotate: bool = true) -> Rect2:
