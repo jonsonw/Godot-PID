@@ -1,0 +1,98 @@
+{
+  "DVALVE001": {
+    "zh": "角式弹簧安全阀",
+    "en": "Angle Spring-Loaded Safety Valve"
+  },
+  "DGENERAL001": {
+    "zh": "关键介质进口箭头",
+    "en": "Arrow — Inlet of Essential Substances"
+  },
+  "DGENERAL002": {
+    "zh": "关键介质出口箭头",
+    "en": "Arrow — Outlet of Essential Substances"
+  },
+  "DVALVE002": {
+    "zh": "球阀",
+    "en": "Ball Valve"
+  },
+  "DGENERAL003": {
+    "zh": "盲板",
+    "en": "Blind Cover"
+  },
+  "DVALVE003": {
+    "zh": "蝶阀",
+    "en": "Butterfly Valve"
+  },
+  "DPUMP001": {
+    "zh": "离心泵",
+    "en": "Centrifugal Pump"
+  },
+  "DGENERAL004": {
+    "zh": "控制执行机构",
+    "en": "Controlled Actuator"
+  },
+  "DGENERAL005": {
+    "zh": "流向（主管段）",
+    "en": "Direction of Flow (Primary Segment)"
+  },
+  "DGENERAL006": {
+    "zh": "流向（支管段）",
+    "en": "Direction of Flow (Secondary Segment)"
+  },
+  "DHEAT001": {
+    "zh": "浮头式管束换热器",
+    "en": "Floating-Head Tube-Bundle Heat Exchanger"
+  },
+  "DVALVE004": {
+    "zh": "截止阀",
+    "en": "Globe Valve"
+  },
+  "DINSTRUMENT001": {
+    "zh": "仪表气泡（中控室）",
+    "en": "Instrumentation Bubble (Central)"
+  },
+  "DINSTRUMENT002": {
+    "zh": "仪表气泡（现场）",
+    "en": "Instrumentation Bubble (Field)"
+  },
+  "DGENERAL007": {
+    "zh": "人孔",
+    "en": "Manhole"
+  },
+  "DGENERAL008": {
+    "zh": "接管嘴",
+    "en": "Nozzle"
+  },
+  "DGENERAL009": {
+    "zh": "保温管道",
+    "en": "Insulated Piping"
+  },
+  "DHEAT002": {
+    "zh": "板式换热器",
+    "en": "Plate-Type Heat Exchanger"
+  },
+  "DPUMP002": {
+    "zh": "往复泵",
+    "en": "Reciprocating Pump"
+  },
+  "DGENERAL010": {
+    "zh": "异径管",
+    "en": "Reducer (General)"
+  },
+  "DGENERAL011": {
+    "zh": "管道坡度",
+    "en": "Slope"
+  },
+  "DVALVE005": {
+    "zh": "旋启式止回阀",
+    "en": "Swing Check Valve"
+  },
+  "DGENERAL012": {
+    "zh": "T 型三通",
+    "en": "T-Type Connection"
+  },
+  "DTANK001": {
+    "zh": "碟形封头容器",
+    "en": "Vessel with Dished Heads"
+  }
+}

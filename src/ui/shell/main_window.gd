@@ -154,22 +154,39 @@ var gpPrevWidth: int = 0
 # Left dock minimum width in pixels (matches LeftDock.custom_minimum_size.x).
 # 左停靠栏最小宽度（像素，与 LeftDock.custom_minimum_size.x 一致）。
 const GP_LEFT_MIN: float = 160.0
+# Left dock INITIAL width in pixels: wide enough that the symbol palette lays out
+# 3 thumbnails per row on first launch (the grid derives columns from this width).
+# Kept above GP_LEFT_MIN so the startup layout honours the "3 per row" default while
+# the user can still drag the dock narrower (down to GP_LEFT_MIN = 2 per row).
+# 左停靠栏**初始**宽度（像素）：足以让图元库在首次启动时每行排 3 个缩略图（网格据此宽度推导列数）。
+# 刻意高于 GP_LEFT_MIN，使启动布局满足「每行 3 个」默认；用户仍可将停靠栏拖窄（下限 GP_LEFT_MIN = 每行 2 个）。
+const GP_LEFT_DEFAULT: float = 200.0
 # Right dock minimum width in pixels (matches RightDock.custom_minimum_size.x).
 # 右停靠栏最小宽度（像素，与 RightDock.custom_minimum_size.x 一致）。
 const GP_RIGHT_MIN: float = 160.0
+# Right dock INITIAL width in pixels (2026-09-25 request: start at 200).
+# 右停靠栏**初始**宽度（像素）（2026-09-25 需求：初始 200）。
+const GP_RIGHT_DEFAULT: float = 200.0
 
-# Current left-dock width in pixels; seeded from GP_LEFT_MIN and updated by drags.
-# 当前左停靠栏宽度（像素）；以 GP_LEFT_MIN 初始化，拖拽时更新。
-var gpLeftWidthPx: float = GP_LEFT_MIN
-# Current right-dock width in pixels; seeded from GP_RIGHT_MIN and updated by drags.
-# 当前右停靠栏宽度（像素）；以 GP_RIGHT_MIN 初始化，拖拽时更新。
-var gpRightWidthPx: float = GP_RIGHT_MIN
+# Current left-dock width in pixels; seeded from GP_LEFT_DEFAULT (3-per-row layout) and updated by drags.
+# 当前左停靠栏宽度（像素）；以 GP_LEFT_DEFAULT（每行 3 个）初始化，拖拽时更新。
+var gpLeftWidthPx: float = GP_LEFT_DEFAULT
+# Current right-dock width in pixels; seeded from GP_RIGHT_DEFAULT (200) and updated by drags.
+# 当前右停靠栏宽度（像素）；以 GP_RIGHT_DEFAULT（200）初始化，拖拽时更新。
+var gpRightWidthPx: float = GP_RIGHT_DEFAULT
 
 # Ribbon command bar . Replaces the old flat DrawToolBar in the
 # same VBox slot; emits gpActionTriggered, which routes to gpRibbonCoord.gpOnToolBarPressed().
 # Ribbon 命令栏，在原 DrawToolBar 同位置取代它；发射 gpActionTriggered
 # 并路由到 gpRibbonCoord.gpOnToolBarPressed()。
 var gpRibbon: GPPIDRibbon = null
+
+# Standalone top command toolbar row (below the menu bar, horizontally centred).
+# It carries the former left-palette EDIT block plus the quick file/zoom icons;
+# actions reuse menu ids and route through gpMenuCoord.gpOnMenu.
+# 独立的顶部命令工具栏行（菜单栏正下方、水平居中）。承载原左栏「编辑」块与
+# 文件/缩放快捷图标；动作复用菜单 id，经 gpMenuCoord.gpOnMenu 路由。
+var gpQuickBar: GPPIDQuickToolbar = null
 
 
 # Wire the static scene together and set up initial state.
@@ -223,6 +240,9 @@ func _gpAssembleCoordinators() -> void:
 	gpMenuCoord = GPMenuCoordinator.new()
 	gpMenuCoord.gpHost = self
 	get_window().close_requested.connect(gpFileCoord.gpOnCloseRequested)
+	# Autosave: build its timer now; it stays idle until the first manual save arms it (ADR-9).
+	# 自动保存：现在构建其计时器；在首次手动保存启用它之前保持空闲（ADR-9）。
+	gpFileCoord.gpSetupAutoSave()
 
 
 # Reload user-exported symbol packs, then publish the live default defs to gpDefs.
@@ -268,6 +288,15 @@ func _gpFetchStaticNodes() -> void:
 # 因为新建标签会立刻刷新属性面板。
 func _gpAssembleCenter() -> void:
 	gpCenter = $VLayout/Body/Center
+	# The status bar moves INTO the center column: it now spans the drawing area
+	# only, so the LEFT PALETTE extends all the way to the bottom of the window
+	# and the status bar no longer eats into the palette's height.
+	# 状态栏移入中心列：只横跨绘图区，左侧图元库因此直通窗口底部，
+	# 状态栏不再占用图元库的高度。
+	var gpStatus: HBoxContainer = $VLayout/StatusBar
+	$VLayout.remove_child(gpStatus)
+	gpCenter.add_child(gpStatus)
+	gpCenter.add_theme_constant_override("separation", 0)
 	gpCenter.gpSetDefs(gpDefs)
 	gpCenter.gpOnCanvasReady.connect(_gpOnCanvasReady)
 	gpCenter.gpActiveChanged.connect(_gpOnActiveTabChanged)
@@ -283,6 +312,11 @@ func _gpAssemblePalette() -> void:
 	gpLeftDock.gpPopulate(gpDefs)
 	gpLeftDock.gpSymbolPicked.connect(gpRibbonCoord.gpOnSymbolPicked)
 	gpLeftDock.gpToolSelected.connect(gpRibbonCoord.gpOnToolSelected)
+	# Tool-block commands (canvas modes / undo / redo / delete / settings) reuse the
+	# old Ribbon action ids and route through the SAME handler that served the Ribbon.
+	# 工具块命令（画布模式 / 撤销 / 重做 / 删除 / 设置）复用旧 Ribbon 动作 id，
+	# 经当年服务 Ribbon 的同一处理器路由。
+	gpLeftDock.gpActionRequested.connect(gpRibbonCoord.gpOnToolBarPressed)
 	# Symbol deletion is owned here: scan every sheet, cascade-remove canvas instances if
 	# the symbol is in use, then drop it from the live library and re-render the palette.
 	# 图元删除在此负责：扫描所有图纸，若图元在用则级联清理画布实例，再从活动库移除并重渲染。
@@ -318,10 +352,53 @@ func _gpAssembleMenu() -> void:
 	# 菜单展开前向宿主请求刷新启用状态。
 	gpMenuBar.gpMenuOpening.connect(gpMenuCoord.gpOnMenuOpening)
 
-	# ---- Ribbon command bar under the menu bar ----
-	# ---- 菜单栏下方的 Ribbon 命令栏 ----
-	gpRibbonCoord.gpBuildRibbon()
+	# The Ribbon left the top bar (2026-09-25, AutoCAD reference layout): its draw/edit
+	# tools moved INTO the left palette and print/import/export into the menu bar's
+	# quick-access icons. gpStyleChrome stays — it still dresses the right tabs and
+	# the splitter.
+	# Ribbon 已移出顶栏（2026-09-25，参照 AutoCAD 布局）：其绘图/编辑工具移入左侧图元库，
+	# 打印/导入/导出移入菜单栏快捷图标。gpStyleChrome 保留 —— 它仍负责右栏标签与分隔条样式。
 	gpRibbonCoord.gpStyleChrome()
+	_gpAssembleQuickBar()
+
+
+# Build the standalone command toolbar row and insert it DIRECTLY BELOW the menu
+# bar (VLayout index 1), horizontally centred. Actions reuse menu action ids and
+# route through the SAME gpOnMenu dispatcher as the menu popups, so no new routing
+# exists. Also tighten the chrome: VLayout rows touch each other (no 4px default
+# gaps) and the Body splitter gap shrinks to 2px — the reference image shows the
+# docks and canvas butted together with no visible gap strip.
+# 构建独立命令工具栏行并插入菜单栏**正下方**（VLayout 下标 1），水平居中。动作复用
+# 菜单动作 id、经与菜单弹出项**相同**的 gpOnMenu 分发器路由，零新路由。同时收紧
+# chrome：VLayout 各行相互贴合（消除默认 4px 缝），Body 分隔缝收窄到 2px —— 参考图
+# 中侧栏与画布直接相接、无可见缝隙条。
+func _gpAssembleQuickBar() -> void:
+	var gpVLayout: VBoxContainer = $VLayout as VBoxContainer
+	gpQuickBar = GPPIDQuickToolbar.new()
+	gpQuickBar.name = "QuickToolbar"
+	gpQuickBar.gpActionTriggered.connect(gpMenuCoord.gpOnMenu)
+	gpVLayout.add_child(gpQuickBar)
+	gpVLayout.move_child(gpQuickBar, 1)
+	# Flush chrome rows: menu / toolbar / body / status sit back-to-back.
+	# chrome 各行贴合：菜单 / 工具栏 / 主体 / 状态栏背靠背。
+	gpVLayout.add_theme_constant_override("separation", 0)
+	# Minimal but still-draggable splitter gap (dragging needs a non-zero grab band).
+	# 最小但仍可拖拽的分隔缝（拖拽需要非零抓取带）。
+	gpBodySplit.add_theme_constant_override("separation", 2)
+	# The 2px splitter gap shows the root's own background; painting it DOCK-tinted
+	# makes the left seam read as the dock simply extending to the canvas, and the
+	# right seam as a hairline-thin band — matching the reference's butt joint.
+	# 2px 分隔缝露出根节点自身背景；涂成 DOCK 色后，左缝读作「侧栏延伸到画布」，
+	# 右缝读作发丝级窄带 —— 与参考图的直接拼接一致。
+	resized.connect(queue_redraw)
+	queue_redraw()
+
+
+# Paint the root background in the DOCK tint so the splitter gap strips blend into
+# the chrome instead of showing the engine's default clear colour.
+# 根背景涂 DOCK 色，使分隔缝窄带融入 chrome，而非露出引擎默认清屏色。
+func _draw() -> void:
+	GPChromeStyle.gpDraw(self, GPChromeStyle.GP_DOCK_BG, 0)
 
 
 # Create the open / save-as dialog, then bind locale changes to the static-text refresh.
@@ -403,10 +480,19 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 	# 订阅本图纸的应用事件总线而非画布信号。画布仍发射旧信号（公共 API 保持稳定），
 	# 但宿主现在只监听一条显式通道：状态广播走总线，宿主定向请求（打开编辑器 / 提升图形）仍走信号。
 	var gpBus: GPEventBus = gpCanvas.gpEvents
-	gpBus.gpGraphChanged.connect(gpSelCoord.gpOnGraphChanged)
-	gpBus.gpSelectionChanged.connect(gpSelCoord.gpOnSelectionChanged)
-	gpBus.gpStatusUpdated.connect(gpSelCoord.gpOnStatus)
-	gpBus.gpModeChanged.connect(gpRibbonCoord.gpSyncToolBar)
+	# The bus is SHARED across sheets (the document manager's bus), so a second tab
+	# would re-connect the same callables and spam engine "already connected" errors.
+	# Guard every connect with is_connected (idempotent wiring).
+	# 总线是**跨图纸共享**的（文档管理器总线），第二个标签页会重复连接同一可调用对象，
+	# 刷出引擎「already connected」错误。每条连接都加 is_connected 守卫（幂等接线）。
+	if not gpBus.gpGraphChanged.is_connected(gpSelCoord.gpOnGraphChanged):
+		gpBus.gpGraphChanged.connect(gpSelCoord.gpOnGraphChanged)
+	if not gpBus.gpSelectionChanged.is_connected(gpSelCoord.gpOnSelectionChanged):
+		gpBus.gpSelectionChanged.connect(gpSelCoord.gpOnSelectionChanged)
+	if not gpBus.gpStatusUpdated.is_connected(gpSelCoord.gpOnStatus):
+		gpBus.gpStatusUpdated.connect(gpSelCoord.gpOnStatus)
+	if not gpBus.gpModeChanged.is_connected(gpRibbonCoord.gpSyncToolBar):
+		gpBus.gpModeChanged.connect(gpRibbonCoord.gpSyncToolBar)
 	# Announce the document already loaded onto this canvas so bus subscribers (title bar,
 	# project tree) bind to the correct graph in one place, and the dirty flag resets.
 	# 通告本画布已载入的文档，使总线订阅者（标题栏、工程树）在一处绑定到正确的图，并重置脏标记。

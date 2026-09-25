@@ -182,7 +182,7 @@ func gpReconcileLibraryDrift(gpGraph: GPPIDGraph) -> void:
 # 把活动库交给属性面板，使其「更换图元」下拉跟随每次库重载。
 func gpSyncInspectorDefs() -> void:
 	if gpHost.gpInspector != null:
-		gpHost.gpInspector.gpHost.gpDefs = gpHost.gpDefs
+		gpHost.gpInspector.gpDefs = gpHost.gpDefs
 
 # connection survive; only gpSymbolId changes. Missing ports are downgraded to the node
 # centre rather than severed, and the count is surfaced as a warning.

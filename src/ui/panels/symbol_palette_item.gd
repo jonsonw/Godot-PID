@@ -3,8 +3,11 @@ extends Control
 
 # One clickable entry in the left symbol library.
 # 左侧图元库中的一个可点击条目。
-# It shows a small vector thumbnail of the symbol and its localized name below.
-# 显示图元的矢量缩略图，并在下方显示本地化的名称。
+# AutoCAD-style (2026-09-25 reference): the item shows ONLY the vector thumbnail —
+# no text label. The localized name appears on HOVER (tooltip), following the
+# project language. This halves the cell height and lets 4-5 tiles fit per row.
+# AutoCAD 风格（2026-09-25 参照图）：条目只显示矢量缩略图 —— 无文字标签。本地化名称在
+# 悬停时以提示显示，随项目语言。单元格高度因此减半，每行可排 4–5 格。
 
 # Emitted when the user clicks this item.
 # 用户点击本条目时发出。
@@ -13,7 +16,7 @@ signal gpPicked(type_id: String)
 # Emitted when the user requests deletion of this symbol via the context menu. The
 # actual deletion (and any cascade removal of canvas instances) is owned by the main
 # window, which holds the graphs; this item only forwards the user's intent.
-# 用户经右键菜单请求删除本图元时发出。真正的删除（及画布实例的级联清理）由持有图的主窗口
+# 用户经右键菜单请求删除本图元时发出。真正的删除（及画布实例的级联清理）由主窗口
 # 负责，本条目只转发用户意图。
 signal gpDeleteRequested(gpId: String)
 
@@ -25,53 +28,68 @@ const GP_CTX_DELETE: int = 0
 # 本条目所渲染的图元定义。
 var gpDef: GPSymbolDef = null
 
+# Palette cell metrics — defined ONCE here: this item draws with them and GPSymbolGrid derives its
+# row height from them, so the two can never disagree. They used to disagree (the grid sized rows
+# from gpFontSize while the item reserved space from gpSymbolFontSize), and that mismatch is what
+# let one category's thumbnails spill over the next category's header.
+# 图元库单元格度量 —— **只在此处定义一次**：本条目据此绘制，GPSymbolGrid 据此推导行高，故二者
+# 永不会分歧。此前二者确实分歧（网格按 gpFontSize 排行高，条目却按 gpSymbolFontSize 预留空间），
+# 正是这一错位让某个类目的缩略图溢出到下一个类目的标题上。
+# The thumbnail is a fixed pixel size on purpose. It used to be gpSymbolFontSize + 8, but that
+# value is a MILLIMETRE sheet text height since v0.1 (plan Phase 0) — deriving a pixel thumbnail
+# from it produced an 11 px box beside a 24 px label, i.e. the reported "text too large".
+# 缩略图刻意取固定像素尺寸。此前为 gpSymbolFontSize + 8，但该值自 v0.1 起是**毫米**图面字高
+#（计划 Phase 0）—— 用它推导像素缩略图会得到「11px 的框配 24px 的字」，即用户报告的「文字过大」。
+# Since the label was removed the cell height no longer depends on any font size at all:
+# GP_CELL_PAD splits evenly above/below the thumbnail.
+# 自标签移除后，单元格高度不再依赖任何字号：GP_CELL_PAD 均匀分在缩略图上下。
+# 2026-09-25: the thumbnail was shrunk by 1/4 (28 -> 21 px) per user request; tiles stay
+# square so the thumbnail and the draw-block icons share ONE icon size.
+# 2026-09-25：缩略图按需求缩小 1/4（28 -> 21 px）；图块保持正方形，与「绘制」块图标同尺寸。
+const GP_THUMB_PX: float = 21.0
+const GP_CELL_PAD: float = 12.0
+
 # Size of the thumbnail area in screen pixels.
 # 缩略图区域的屏幕像素尺寸。
-var gpThumbnailSize: Vector2 = Vector2(24.0, 24.0)
-
-# Font size used for the localized symbol name below the thumbnail.
-# 缩略图下方本地化符号名的字号。
-var gpLabelFontSize: int = 11
+var gpThumbnailSize: Vector2 = Vector2(GP_THUMB_PX, GP_THUMB_PX)
 
 # Whether the mouse cursor is currently over this item.
 # 鼠标光标是否当前位于本条目上方。
 var _gpHover: bool = false
 
 
+# Height one palette cell needs: thumbnail + vertical padding. The grid's row height MUST come from
+# here so that layout and drawing can never disagree. The UI-font parameter is kept so existing
+# call sites (and the regression tests) stay valid; the height is intentionally font-independent
+# now that the label is gone.
+# 一个图元库单元格所需的高度：缩略图 + 上下边距。网格的行高**必须**取自此函数，
+# 使布局与绘制永不分歧。界面字号参数仅为兼容既有调用点（及回归测试）而保留；
+# 标签移除后高度刻意与字号无关。
+static func gpCellHeight(_gpUIFont: int) -> float:
+	return GP_THUMB_PX + GP_CELL_PAD
+
+
 # Initialize input handling and minimum size.
 # 初始化输入处理与最小尺寸。
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
-	_gpCalcSizes()
-	# Minimum WIDTH is 0: the palette grid stretches each cell to fill the viewport
-	# via fit_child_in_rect, so the grid's combined minimum width stays small and the
-	# left dock can shrink to its floor. The drawn cell width is driven by the grid
-	# layout, not by this minimum. Height keeps a sensible floor for the thumbnail.
-	# 最小宽度为 0：图元网格通过 fit_child_in_rect 把每格拉伸到视口宽，使网格合并最小
-	# 宽保持很小、左停靠栏能收缩到下限。绘制用格宽由网格布局决定，而非此最小值。
-	# 高度保留缩略图所需的合理下限。
-	custom_minimum_size = Vector2(0.0, gpThumbnailSize.y + gpLabelFontSize + 12.0)
+	custom_minimum_size = Vector2(0.0, gpCellHeight(0))
 	mouse_entered.connect(_gpOnMouseEntered)
 	mouse_exited.connect(_gpOnMouseExited)
-	Settings.gpSymbolStyleChanged.connect(_gpOnSymbolStyleChanged)
+	# The hover name follows the project language, so retranslate on locale change.
+	# 悬停名称随项目语言，故语言变化时重翻译。
+	I18n.gpLocaleChanged.connect(_gpOnLocaleChanged)
+	_gpRefreshTooltip()
 
 
-# Recalculate thumbnail and label sizes from the current symbol font size so the
-# toolbar items scale together with the canvas symbol text.
-# 根据当前图元字号重新计算缩略图与标签尺寸，使工具栏条目随画布图元文字一起缩放。
-func _gpCalcSizes() -> void:
-	var gpBase: float = float(Settings.gpSymbolFontSize) + 8.0
-	gpThumbnailSize = Vector2(gpBase, gpBase)
-	gpLabelFontSize = Settings.gpSymbolFontSize
+# Refresh the hover tooltip from the localized display name.
+# 由本地化显示名刷新悬停提示。
+func _gpRefreshTooltip() -> void:
+	tooltip_text = I18n.gpTr(gpDef.gpDisplayName) if gpDef != null else ""
 
 
-# React to symbol font / size changes: update minimum size and redraw.
-# 响应图元字体/字号变化：更新最小尺寸并重绘。
-func _gpOnSymbolStyleChanged() -> void:
-	_gpCalcSizes()
-	custom_minimum_size = Vector2(0.0, gpThumbnailSize.y + gpLabelFontSize + 12.0)
-	update_minimum_size()
-	queue_redraw()
+func _gpOnLocaleChanged(_gpLocale: String) -> void:
+	_gpRefreshTooltip()
 
 
 # Track hover state and redraw when the mouse enters.
@@ -141,21 +159,23 @@ func _gpOnContext(gpId: int) -> void:
 		gpDeleteRequested.emit(gpDef.gpId)
 
 
-# Draw the background, the symbol thumbnail and the label.
-# 绘制背景、图元缩略图和标签。
+# Draw the background and the symbol thumbnail, centered in the cell.
+# 绘制背景与图元缩略图，在单元格内居中。
 func _draw() -> void:
-	# Background color changes on hover to give visual feedback.
-	# 悬停时背景色变化，提供视觉反馈。
-	var gpBg: Color = Color(0.20, 0.23, 0.28) if _gpHover else Color(0.13, 0.15, 0.18)
-	draw_rect(Rect2(Vector2.ZERO, size), gpBg, true)
+	# Default: NO background at all (the dock tint shows through — 2026-09-25 request).
+	# On hover the WHOLE tile area lights up as the visual hint.
+	# 默认：完全无底色（透出停靠栏底色 —— 2026-09-25 需求）。悬停时整块图块区域
+	# 点亮，作为视觉提示。
+	if _gpHover:
+		draw_rect(Rect2(Vector2.ZERO, size), GPChromeStyle.GP_SPLIT_HI, true)
 
 	if gpDef == null:
 		return
 
-	# Thumbnail rectangle, centered horizontally with a small top margin.
-	# 缩略图矩形，水平居中并留顶部边距。
+	# Thumbnail rectangle, centered BOTH axes with the pad split evenly.
+	# 缩略图矩形，两轴居中，边距均分。
 	var gpThumbRect: Rect2 = Rect2(
-		Vector2((size.x - gpThumbnailSize.x) / 2.0, 4.0),
+		Vector2((size.x - gpThumbnailSize.x) / 2.0, (size.y - gpThumbnailSize.y) / 2.0),
 		gpThumbnailSize
 	)
 
@@ -172,18 +192,3 @@ func _draw() -> void:
 		draw_rect(gpThumbRect, gpStroke, false, gpBorder)
 	else:
 		GPSymbolPainter.gpDrawShape(self, gpDef.gpShapeSpec(), gpThumbRect, gpFill, gpStroke, gpBorder)
-
-	# Draw the localized display name directly below the thumbnail, centered across the cell.
-	# 在缩略图正下方、跨整个单元格居中绘制本地化的显示名。
-	var gpFont: Font = Settings.gpSymbolFont if Settings.gpSymbolFont != null else ThemeDB.fallback_font
-	var gpName: String = I18n.gpTr(gpDef.gpDisplayName)
-	var gpTextTop: float = gpThumbRect.position.y + gpThumbRect.size.y + 4.0
-	draw_string(
-		gpFont,
-		Vector2(0.0, gpTextTop),
-		gpName,
-		HORIZONTAL_ALIGNMENT_CENTER,
-		size.x,
-		gpLabelFontSize,
-		Color(0.9, 0.9, 0.9)
-	)

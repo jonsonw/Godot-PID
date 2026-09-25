@@ -28,11 +28,34 @@ const GP_STATE_OK: int = 3        # 拖拽中的合法落点 / legal drop target
 const GP_STATE_BAD: int = 4       # 拖拽中的非法落点 / illegal drop target while dragging
 const GP_STATE_SOURCE: int = 5    # 本次拖拽的起点 / source of the current drag
 
-# Pick box size and dot radius in SCREEN pixels (constant regardless of zoom, so an anchor is
-# always easy to hit).
-# 拾取框尺寸与圆点半径（屏幕像素，与缩放无关，使锚点恒好点中）。
+# Pick box size and dot radius in SCREEN pixels — the CEILING of the drawn handle.
+# WHY A CEILING AND NOT A CONSTANT: a fixed 13 px box next to a 4x2 mm ball valve (4x2 screen
+# points at 100% zoom, see plan Phase 0's mm base) is THREE TIMES the symbol, so the handles
+# buried the very thing they belong to. The drawn handle now follows the symbol's on-screen size
+# (see _gpHandleUnit()) and only falls back to these values for large equipment. Clickability is
+# unaffected because picking uses GPPortAnchor.GP_ANCHOR_PX, which stays constant.
+# 拾取框尺寸与圆点半径（屏幕像素）—— 为「所绘制手柄」的上限。
+# 为何是上限而非定值：固定在 4×2mm 球阀（100% 缩放下即 4×2 屏幕点，见计划 Phase 0 的 mm 基准）
+# 旁边的 13px 方框是图元的**三倍大**，手柄因此埋没了它本该服务的图元本身。现在绘制的手柄随
+# 图元的屏幕尺寸而变（见 _gpHandleUnit()），仅在大型设备上回退到这里的取值。可点性不受影响：
+# 拾取使用恒定的 GPPortAnchor.GP_ANCHOR_PX。
 const GP_BOX: float = 13.0
 const GP_DOT: float = 4.0
+
+# Lower bound of the drawn handle so a very small symbol still shows a visible anchor.
+# 所绘制手柄的下限，使极小图元仍能看见锚点。
+const GP_MIN_HANDLE: float = 3.5
+
+# Share of the symbol's larger on-screen dimension the handle box occupies.
+# 手柄框占图元屏幕较大边长的比例。
+const GP_HANDLE_RATIO: float = 0.30
+
+# The visible dot is a SECOND fraction, applied to the handle UNIT (which already carries
+# GP_HANDLE_RATIO), so the dot always stays inside the box that is drawn around it. Kept as its own
+# named constant because "two ratios multiply" is easy to misread as an accidental double-application.
+# 可见圆点在上海柄单元（其已含 GP_HANDLE_RATIO）之上再乘的**第二层**比例，使圆点始终落在围绕它的
+# 方框之内。单列常量，是因为「两个比例相乘」极易被误读为误加的重复系数。
+const GP_DOT_RATIO: float = 0.30
 
 # Extra size / line weight applied to the emphasised states.
 # 强调状态附加的尺寸与线宽。
@@ -290,10 +313,13 @@ func _gpDrawOne(gpTarget: CanvasItem, gpA: Dictionary, gpDragging: bool) -> void
 			gpCol = GP_COL_IDLE
 	# The dot keeps the port's own purpose colour, so a nozzle still reads as a nozzle.
 	# 圆点保留端口自身的用途色，使管口看起来仍是管口。
+	var gpUnit: float = _gpHandleUnit(str(gpA.get("node_id", "")))
+	var gpDot: float = clampf(gpUnit * GP_DOT_RATIO, GP_MIN_HANDLE * 0.35, GP_DOT)
+	var gpBox: float = gpHandleBoxFor(gpUnit)
 	var gpDotCol: Color = GPEdgeStyle.gpPortColor(str(gpA.get("type", "")))
-	gpTarget.draw_circle(gpP, GP_DOT + gpGrow * 0.5, gpDotCol)
+	gpTarget.draw_circle(gpP, gpDot + gpGrow * 0.5, gpDotCol)
 	# Pick box: the thing the user actually clicks. / 拾取框：用户真正点中的东西。
-	var gpSize: float = GP_BOX + gpGrow
+	var gpSize: float = gpBox + gpGrow
 	var gpRect: Rect2 = Rect2(gpP - Vector2(gpSize, gpSize) * 0.5, Vector2(gpSize, gpSize))
 	gpTarget.draw_rect(gpRect, gpCol, false, gpWidth)
 	# A picked / source anchor gets a second, outer box: unmistakable at a glance.
@@ -333,5 +359,43 @@ func _gpDrawPreview(gpTarget: CanvasItem) -> void:
 	# 吸附提示：在即将被选中的锚点上画一个圆环。
 	if not _gpTarget.is_empty():
 		var gpEp: Vector2 = gpCv.gpScreenFromWorld(_gpTarget.get("pos", Vector2.ZERO) as Vector2)
-		gpTarget.draw_arc(gpEp, GP_BOX, 0.0, TAU, 20,
+		gpTarget.draw_arc(gpEp, clampf(_gpHandleUnit(str(_gpTarget.get("node_id", ""))),
+			GP_MIN_HANDLE, GP_BOX) * 0.75, 0.0, TAU, 20,
 			GP_COL_OK if _gpValid else GP_COL_BAD, 2.0)
+
+
+# Screen size of the handle this anchor's symbol deserves: a fraction of the symbol's larger
+# on-screen dimension, so the handle stays proportional to whatever it annotates — 4 mm valve or
+# 420 mm column. Returns 0 when the node / definition cannot be resolved, which makes the caller
+# fall back to the constant FLOOR (clampf(0, GP_MIN_HANDLE, GP_BOX) == GP_MIN_HANDLE) — i.e. an
+# unresolvable anchor gets the smallest legible handle, never a symbol-sized one.
+# 该锚点所属图元应得的手柄屏幕尺寸：取图元屏幕较大边长的某个比例，使手柄始终与其所标注之物
+# 成比例 —— 无论是 4mm 的阀门还是 420mm 的塔器。节点/定义无法解析时返回 0，调用方据此回退到
+# 常量**下限**（clampf(0, GP_MIN_HANDLE, GP_BOX) == GP_MIN_HANDLE）—— 即无法解析的锚点得到
+# 最小的可读手柄，而绝不会得到「图元大小」的手柄。
+func _gpHandleUnit(gpNodeId: String) -> float:
+	if gpNodeId == "" or gpCv.gpGraph == null:
+		return 0.0
+	var gpNode: GPPIDNode = gpCv.gpGraph.gpGetNode(gpNodeId)
+	if gpNode == null:
+		return 0.0
+	var gpDef: GPSymbolDef = gpCv.gpDefFor(gpNode.gpSymbolId)
+	if gpDef == null:
+		return 0.0
+	return gpHandleUnitFor(maxf(gpDef.gpDefaultSize.x, gpDef.gpDefaultSize.y), gpCv.gpViewZoom)
+
+
+# Handle unit (screen px) for a symbol whose larger authored side is gpSymbolMaxMM, at gpZoom.
+# Pure, so the "handle must scale with its symbol" contract is pinned by a test.
+# 较大作者边长为 gpSymbolMaxMM 的图元在 gpZoom 下的手柄单元（屏幕 px）。纯函数，使
+# 「手柄须随其图元缩放」这一契约由测试钉住。
+static func gpHandleUnitFor(gpSymbolMaxMM: float, gpZoom: float) -> float:
+	if gpSymbolMaxMM <= 0.0 or gpZoom <= 0.0:
+		return 0.0
+	return gpSymbolMaxMM * gpZoom * GP_HANDLE_RATIO
+
+
+# Clamp a handle unit into the legible range. Pure, and the ONLY place the floor/ceiling apply.
+# 把柄单元夹取到可读区间。纯函数，也是下限/上限唯一生效之处。
+static func gpHandleBoxFor(gpUnit: float) -> float:
+	return clampf(gpUnit, GP_MIN_HANDLE, GP_BOX)

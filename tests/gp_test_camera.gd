@@ -44,7 +44,10 @@ func gpTestZoomClamp() -> void:
 	# Repeatedly zoom in far past the clamp.
 	for i in range(60):
 		cam.gpZoomAt(Vector2(800, 450), 1.0)
-	gpCheck(cam.gpZoom <= 4.0 + 1e-6, "zoom clamped at max 4.0")
+	# Max zoom raised to 8.0 for the mm-based world (plan Phase 0): at 1:1 a valve is ~10 mm,
+	# so a higher ceiling lets the user zoom into fine detail.
+	# 最大缩放因 mm 基准（计划 Phase 0）放宽至 8.0：1:1 下阀门约 10mm，更高上限便于放大看细节。
+	gpCheck(cam.gpZoom <= 8.0 + 1e-6, "zoom clamped at max 8.0")
 
 func gpTestPan() -> void:
 	var cam: GPCanvasCamera = GPCanvasCamera.new()

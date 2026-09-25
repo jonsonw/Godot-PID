@@ -67,7 +67,9 @@ func _gpDrawMarquee() -> void:
 # 绘制与世界坐标系对齐的背景网格：细次网格 + 每 5 格一道粗主网格 + 世界原点轴
 #（X 绿 / Y 红）—— AutoCAD 模型空间感（参考 Godot-CAD/Scripts/GridSystem.gd:52-57）。
 func _gpDrawGrid() -> void:
-	var gpStep: float = 50.0 * gpCv.gpViewZoom
+	# Minor grid = GP_GRID_STEP world units (= 10 mm from v0.1; plan Phase 0). Major every 5.
+	# 次网格 = GP_GRID_STEP 世界单位（v0.1 起为 10mm；计划 Phase 0）。主网格每 5 格一道。
+	var gpStep: float = GPConstants.GP_GRID_STEP * gpCv.gpViewZoom
 	if gpStep < 8.0:
 		return
 	var gpStartX: int = int(fmod(gpCv.gpViewOffset.x, gpStep))

@@ -84,7 +84,7 @@ def _shape_with_box(root, size=100):
         if "transform" in el.attrib:
             m = S._mul(m, S._parse_transform(el.attrib["transform"]))
         tag = S._localname(el.tag)
-        if tag in ("path", "rect", "circle", "line", "polygon", "polyline"):
+        if tag in ("path", "rect", "circle", "ellipse", "line", "polygon", "polyline"):
             if tag == "line":
                 x1 = float(el.attrib.get("x1", 0)); y1 = float(el.attrib.get("y1", 0))
                 x2 = float(el.attrib.get("x2", 0)); y2 = float(el.attrib.get("y2", 0))
@@ -98,11 +98,26 @@ def _shape_with_box(root, size=100):
                 cx = float(el.attrib.get("cx", 0)); cy = float(el.attrib.get("cy", 0))
                 r = float(el.attrib.get("r", 0))
                 raw_pts.append(S._apply(m, cx-r, cy-r)); raw_pts.append(S._apply(m, cx+r, cy+r))
+            elif tag == "ellipse":
+                # Without this branch a glyph whose only geometry is an <ellipse> gets NO
+                # raw points at all, so it is silently dropped from the pack — exactly what
+                # happened to the round DEXPI symbols (pumps, valves, bubbles).
+                # 缺这个分支时，仅由 <ellipse> 构成的字形完全没有 raw 点，会被静默丢弃 ——
+                # 圆形 DEXPI 图元（泵、阀、仪表气泡）正是如此。
+                cx = float(el.attrib.get("cx", 0)); cy = float(el.attrib.get("cy", 0))
+                rx = float(el.attrib.get("rx", 0)); ry = float(el.attrib.get("ry", 0))
+                raw_pts.append(S._apply(m, cx-rx, cy-ry)); raw_pts.append(S._apply(m, cx+rx, cy+ry))
             elif tag == "path":
                 d = el.attrib.get("d", "")
                 for poly, _ in S._path_to_polylines(d):
                     for p in poly:
                         raw_pts.append(S._apply(m, p[0], p[1]))
+            elif tag in ("polyline", "polygon"):
+                # Without this branch a glyph whose geometry is ONLY polylines collects no
+                # raw points at all and is silently dropped from the pack.
+                # 缺这个分支时，纯折线字形完全没有 raw 点，会被静默丢弃。
+                for pt in S._pts_from(el.attrib.get("points", ""), m):
+                    raw_pts.append(pt)
         for child in el:
             walk(child, m)
     walk(root, S._ident())
@@ -113,12 +128,30 @@ def _shape_with_box(root, size=100):
     return result["paths"], result["circles"], result["rects"], minx, maxx, miny, maxy
 
 
-def _build_shape(paths, circles, rects, minx, maxx, miny, maxy):
-    # Build gpShape dict with box field (unit-space bbox).
-    # 构建 gpShape 字典，含单位空间包围盒 box。
-    uw = (maxx - minx) or 1.0
-    uh = (maxy - miny) or 1.0
-    box = [round(50.0 - uw * 0.5, 2), round(50.0 - uh * 0.5, 2), round(uw, 2), round(uh, 2)]
+def _build_shape(paths, circles, rects):
+    # Build gpShape dict with box field.
+    # WHY derived from the NORMALIZED primitives, not from the raw input bbox: _collect fits
+    # everything into the 0..SIZE unit box, so mixing "normalized paths" with a "raw-units
+    # bbox" produced a box that did not match the glyph whenever the source SVG was NOT
+    # already drawn in 0..100 coordinates (e.g. the DEXPI pack, whose glyphs are in mm).
+    # The renderer maps box -> the symbol envelope, so a wrong box misplaces every port.
+    # 构建 gpShape 字典，含 box 字段。
+    # 为何由**归一化后的基元**推导而非原始包围盒：_collect 已把几何适配进 0..SIZE 单位框，
+    # 若把「归一化路径」与「原始单位包围盒」混用，则源 SVG 不是 0..100 坐标时（如 DEXPI 包，
+    # 其字形以 mm 计）box 与字形不符。渲染器正是把 box 映射到图元包络，box 错则端口全错。
+    xs = []; ys = []
+    for p in paths:
+        for pt in p["pts"]:
+            xs.append(pt[0]); ys.append(pt[1])
+    for c in circles:
+        cx, cy = c["c"]; r = c["r"]
+        xs.extend([cx - r, cx + r]); ys.extend([cy - r, cy + r])
+    for r in rects:
+        x, y = r["pos"]; w, h = r["size"]
+        xs.extend([x, x + w]); ys.extend([y, y + h])
+    minx, maxx = min(xs), max(xs)
+    miny, maxy = min(ys), max(ys)
+    box = [round(minx, 2), round(miny, 2), round(maxx - minx, 2), round(maxy - miny, 2)]
     return {"paths": paths, "circles": circles, "rects": rects, "box": box}
 
 
@@ -363,6 +396,17 @@ def _process_pack(pack_dir, pack_id, nominal_sizes):
     source = manifest.get("source", "")
     license_str = manifest.get("license", "")
     upstream_author = manifest.get("upstream_author", "")
+    # Source letter for the canonical id. "L" (legacy ISO) unless the manifest declares
+    # otherwise — a pack MUST be able to own its namespace, or two packs would both mint
+    # "VALVE001" and every saved *.pid.json would point at an arbitrary one of them.
+    # 规范 id 的来源码字母。清单未声明时用 "L"（历史 ISO）—— 每个包必须独占自己的
+    # 命名空间，否则两个包都会铸造 "VALVE001"，所有已存盘的 *.pid.json 会指向任意一个。
+    source_code = manifest.get("source_code", "L")
+    # Optional i18n prefix: when set, display names become "<prefix>.<lowercase id>" keys
+    # resolved by I18n, giving the palette a real bilingual pair.
+    # 可选 i18n 前缀：设置后显示名变为 "<前缀>.<小写 id>" 键，经 I18n 解析，
+    # 使图元库获得真正的双语对照。
+    i18n_prefix = manifest.get("i18n_prefix", "")
 
     # ISO 10628 pack: locate mapping.csv for category inference.
     # ISO 10628 包：查找 mapping.csv 用于类别推断。
@@ -410,7 +454,7 @@ def _process_pack(pack_dir, pack_id, nominal_sizes):
                 print("[skip] %s: %s (no drawable primitives)" % (pack_id, fn), file=sys.stderr)
                 continue
             paths, circles, rects, minx, maxx, miny, maxy = result
-            shape = _build_shape(paths, circles, rects, minx, maxx, miny, maxy)
+            shape = _build_shape(paths, circles, rects)
         except Exception as e:
             print("[skip] %s: %s (parse error: %s)" % (pack_id, fn, e), file=sys.stderr)
             continue
@@ -420,35 +464,81 @@ def _process_pack(pack_dir, pack_id, nominal_sizes):
         cat = _infer_category(svg_path, csv_path)
         if icon_entry and icon_entry.get("type"):
             cat = icon_entry["type"]
-        env = nominal_sizes.get(cat, (64.0, 64.0))
+        elif icon_entry and icon_entry.get("category"):
+            cat = icon_entry["category"]
+        # A manifest entry may pin its REAL millimetre size; that overrides the category
+        # nominal. This is the "canvas size follows the standard drawing" hook — without
+        # it every glyph would be flattened to one per-category box and the C01 size
+        # proportions (vessel >> valve) would be lost.
+        # 清单条目可钉住真实毫米尺寸；它优先于类别名义值。这正是「画布尺寸随标准图」的挂点
+        # —— 没有它，每个字形都会被压平到按类别的同一包络，C01 的尺寸比例（容器 >> 阀门）
+        # 便无从谈起。
+        if icon_entry and icon_entry.get("size_mm"):
+            sz = icon_entry["size_mm"]
+            env = (float(sz[0]), float(sz[1]))
+        else:
+            env = nominal_sizes.get(cat, (64.0, 64.0))
 
         raw_entries.append({
             "source_key": base,
             "display_name": display_name,
             "chinese_name": chinese_name,
+            "name_zh": (icon_entry.get("name_zh") if icon_entry else "") or display_name,
+            "name_en": (icon_entry.get("name_en") if icon_entry else "") or display_name,
             "category": cat,
             # Ports are resolved after the canonical ids exist: PORT_OVERRIDES is keyed by
             # canonical id, mirroring GP_PORT_OVERRIDES in symbol_categories.gd.
             # 端口在规范 id 生成后解析：PORT_OVERRIDES 以规范 id 为键，
             # 与 symbol_categories.gd 的 GP_PORT_OVERRIDES 互为镜像。
             "ports": [],
+            # Explicit per-symbol ports from the manifest win over the category table:
+            # DEXPI semantics (a tee has a branch, a vessel has four nozzles) cannot be
+            # inferred from a category name.
+            # 清单里逐符号显式端口优先于类别表：DEXPI 语义（三通带支管、容器四管口）
+            # 无法从类别名推断。
+            "ports_manifest": (icon_entry.get("ports") if icon_entry else None),
             "shape": shape,
             "env": env,
         })
         print("[ok] %-30s -> %-10s env=%dx%d paths=%d" % (
             base, cat, env[0], env[1], len(paths)))
 
-    # Assign the canonical ids (L<CATEGORY><nnn>) and persist the legacy translation.
-    # 分配规范 id（L<类别码><三位序号>）并落盘旧 id 映射。
-    entries = _assign_symbol_ids(raw_entries, "L")
+    # Assign the canonical ids (<source><CATEGORY><nnn>) and persist the legacy translation.
+    # 分配规范 id（<来源码><类别码><三位序号>）并落盘旧 id 映射。
+    entries = _assign_symbol_ids(raw_entries, source_code)
+    # Optional i18n display keys: computed AFTER the ids exist because the key embeds the id.
+    # 可选 i18n 显示键：在 id 生成**之后**计算，因为键本身内嵌 id。
+    if i18n_prefix:
+        for e in entries:
+            e["chinese_name"] = "%s.%s" % (i18n_prefix, e["id"].lower())
+        # Persist id -> bilingual name so the hand-written i18n table can be regenerated
+        # verbatim. WHY A FILE: the key embeds the ALLOCATED id, which only exists after
+        # this point — there is no way for the extractor (which runs first) to know it.
+        # 落盘 id -> 双语名，使手写的 i18n 表可按原文重建。为何要文件：键内嵌的是**分配后**
+        # 的 id，只有到这里才存在 —— 先跑的提取器不可能预知。
+        gp_names = {}
+        for e in entries:
+            gp_names[e["id"]] = {"zh": e.get("name_zh", ""), "en": e.get("name_en", "")}
+        with open(os.path.join(pack_dir, "display_names.json"), "w", encoding="utf-8") as f:
+            json.dump(gp_names, f, ensure_ascii=False, indent=2)
+        print("[i18n] %s: %d display-name entries -> display_names.json"
+              % (pack_id, len(gp_names)))
     # Now that every entry carries its canonical id, resolve ports against PORT_OVERRIDES.
     # 各条目已持有规范 id，此时再按 PORT_OVERRIDES 解析端口。
     for e in entries:
-        e["ports"] = _ports_for(e["id"], e["category"])
+        # A NON-EMPTY manifest list wins; an empty one defers to the category/override
+        # table. WHY: an extractor that simply does not model ports (e.g. a future pack)
+        # writes [] for everything, and treating that as authoritative would silently strip
+        # every connectable symbol of its ports.
+        # 非空的清单列表优先；空列表回落到类别/覆盖表。为何：提取器若未建模端口，
+        # 会给所有图元写 []，若当作权威值就会静默剥掉全部可连接图元的端口。
+        if e.get("ports_manifest"):
+            e["ports"] = [dict(p) for p in e["ports_manifest"]]
+        else:
+            e["ports"] = _ports_for(e["id"], e["category"])
         e["tag_prefix"] = _tag_prefix(e["category"])
     _write_legacy_map(pack_dir, entries)
     for e in entries:
-        e["ports"] = _ports_for(e["id"], e["category"])
         print("[id] %-32s -> %-14s ports=%d" % (e["source_key"], e["id"], len(e["ports"])))
 
     # Emit GDScript file.

@@ -1,0 +1,805 @@
+{
+  "name": "DEXPI Example C01",
+  "source": "DEXPI Example C01 (P&ID reference drawing, SVG export)",
+  "standard_ref": "DEXPI / ISO 10628",
+  "license": "CC BY 4.0 (DEXPI example drawing)",
+  "upstream_author": "DEXPI initiative",
+  "source_code": "D",
+  "i18n_prefix": "dexpi",
+  "icons": [
+    {
+      "id": "angle_safety_valve_spring_loaded",
+      "file": "svg/angle_safety_valve_spring_loaded.svg",
+      "name": "Angle Spring-Loaded Safety Valve",
+      "name_zh": "角式弹簧安全阀",
+      "name_en": "Angle Spring-Loaded Safety Valve",
+      "type": "valve",
+      "size_mm": [
+        3.0,
+        7.0
+      ],
+      "ports": [
+        {
+          "name": "in",
+          "pos": [
+            0.33,
+            1.0
+          ],
+          "dir": [
+            0,
+            1
+          ],
+          "type": "NOZZLE"
+        },
+        {
+          "name": "out",
+          "pos": [
+            1.0,
+            0.14
+          ],
+          "dir": [
+            1,
+            0
+          ],
+          "type": "NOZZLE"
+        }
+      ],
+      "source_shape": "ANGLE_SAFETY_VALVE_SPRING_LOADED_SHAPE",
+      "instance_scale": [
+        0.4,
+        0.4
+      ]
+    },
+    {
+      "id": "arrow_for_inlet_of_essential_substances",
+      "file": "svg/arrow_for_inlet_of_essential_substances.svg",
+      "name": "Arrow — Inlet of Essential Substances",
+      "name_zh": "关键介质进口箭头",
+      "name_en": "Arrow — Inlet of Essential Substances",
+      "type": "general",
+      "size_mm": [
+        7.0,
+        7.0
+      ],
+      "ports": [],
+      "source_shape": "ARROW_FOR_INLET_OF_ESSENTIAL_SUBSTANCES_SHAPE",
+      "instance_scale": [
+        0.7,
+        0.7
+      ]
+    },
+    {
+      "id": "arrow_for_outlet_of_essential_substances",
+      "file": "svg/arrow_for_outlet_of_essential_substances.svg",
+      "name": "Arrow — Outlet of Essential Substances",
+      "name_zh": "关键介质出口箭头",
+      "name_en": "Arrow — Outlet of Essential Substances",
+      "type": "general",
+      "size_mm": [
+        7.0,
+        7.0
+      ],
+      "ports": [],
+      "source_shape": "ARROW_FOR_OUTLET_OF_ESSENTIAL_SUBSTANCES_SHAPE",
+      "instance_scale": [
+        0.7,
+        0.7
+      ]
+    },
+    {
+      "id": "ball_valve",
+      "file": "svg/ball_valve.svg",
+      "name": "Ball Valve",
+      "name_zh": "球阀",
+      "name_en": "Ball Valve",
+      "type": "valve",
+      "size_mm": [
+        4.0,
+        2.0
+      ],
+      "ports": [],
+      "source_shape": "BALL_VALVE_SHAPE",
+      "instance_scale": [
+        0.4,
+        0.4
+      ]
+    },
+    {
+      "id": "blind_cover",
+      "file": "svg/blind_cover.svg",
+      "name": "Blind Cover",
+      "name_zh": "盲板",
+      "name_en": "Blind Cover",
+      "type": "general",
+      "size_mm": [
+        1.0,
+        2.0
+      ],
+      "ports": [
+        {
+          "name": "end",
+          "pos": [
+            0.5,
+            0.0
+          ],
+          "dir": [
+            0,
+            -1
+          ],
+          "type": "TERMINAL"
+        }
+      ],
+      "source_shape": "BLIND_COVER_SHAPE",
+      "instance_scale": [
+        0.4,
+        0.4
+      ]
+    },
+    {
+      "id": "butterfly_valve",
+      "file": "svg/butterfly_valve.svg",
+      "name": "Butterfly Valve",
+      "name_zh": "蝶阀",
+      "name_en": "Butterfly Valve",
+      "type": "valve",
+      "size_mm": [
+        4.0,
+        2.0
+      ],
+      "ports": [],
+      "source_shape": "BUTTERFLY_VALVE_SHAPE",
+      "instance_scale": [
+        0.4,
+        0.4
+      ]
+    },
+    {
+      "id": "centrifugal_pump",
+      "file": "svg/centrifugal_pump.svg",
+      "name": "Centrifugal Pump",
+      "name_zh": "离心泵",
+      "name_en": "Centrifugal Pump",
+      "type": "pump",
+      "size_mm": [
+        10.5,
+        10.5
+      ],
+      "ports": [],
+      "source_shape": "CENTRIFUGAL_PUMP_SHAPE",
+      "instance_scale": [
+        0.7,
+        0.7
+      ]
+    },
+    {
+      "id": "controlled_actuator",
+      "file": "svg/controlled_actuator.svg",
+      "name": "Controlled Actuator",
+      "name_zh": "控制执行机构",
+      "name_en": "Controlled Actuator",
+      "type": "general",
+      "size_mm": [
+        8.1,
+        4.05
+      ],
+      "ports": [
+        {
+          "name": "sig",
+          "pos": [
+            0.0,
+            0.5
+          ],
+          "dir": [
+            -1,
+            0
+          ],
+          "type": "SIGNAL"
+        },
+        {
+          "name": "stem",
+          "pos": [
+            1.0,
+            0.5
+          ],
+          "dir": [
+            1,
+            0
+          ],
+          "type": "ACTUATOR"
+        }
+      ],
+      "source_shape": "CONTROLLED_ACTUATOR_SHAPE",
+      "instance_scale": [
+        0.45,
+        0.45
+      ]
+    },
+    {
+      "id": "direction_of_flow_for_primary_segment",
+      "file": "svg/direction_of_flow_for_primary_segment.svg",
+      "name": "Direction of Flow (Primary Segment)",
+      "name_zh": "流向（主管段）",
+      "name_en": "Direction of Flow (Primary Segment)",
+      "type": "general",
+      "size_mm": [
+        1.75,
+        3.5
+      ],
+      "ports": [],
+      "source_shape": "DIRECTION_OF_FLOW_SHAPE_FOR_PRIMARY_SEGMENT",
+      "instance_scale": [
+        0.7,
+        0.7
+      ]
+    },
+    {
+      "id": "direction_of_flow_for_secondary_segment",
+      "file": "svg/direction_of_flow_for_secondary_segment.svg",
+      "name": "Direction of Flow (Secondary Segment)",
+      "name_zh": "流向（支管段）",
+      "name_en": "Direction of Flow (Secondary Segment)",
+      "type": "general",
+      "size_mm": [
+        1.75,
+        3.5
+      ],
+      "ports": [],
+      "source_shape": "DIRECTION_OF_FLOW_SHAPE_FOR_SECONDARY_SEGMENT",
+      "instance_scale": [
+        0.7,
+        0.7
+      ]
+    },
+    {
+      "id": "floating_head_tube_bundle_heat_exchanger",
+      "file": "svg/floating_head_tube_bundle_heat_exchanger.svg",
+      "name": "Floating-Head Tube-Bundle Heat Exchanger",
+      "name_zh": "浮头式管束换热器",
+      "name_en": "Floating-Head Tube-Bundle Heat Exchanger",
+      "type": "heat",
+      "size_mm": [
+        24.5,
+        7.0
+      ],
+      "ports": [
+        {
+          "name": "shell_in",
+          "pos": [
+            0.0,
+            0.5
+          ],
+          "dir": [
+            -1,
+            0
+          ],
+          "type": "NOZZLE"
+        },
+        {
+          "name": "shell_out",
+          "pos": [
+            1.0,
+            0.5
+          ],
+          "dir": [
+            1,
+            0
+          ],
+          "type": "NOZZLE"
+        }
+      ],
+      "source_shape": "FLOATING_HEAD_TUBE_BUNDLE_HEAT_EXCHANGER_SHAPE",
+      "instance_scale": [
+        0.7,
+        0.7
+      ]
+    },
+    {
+      "id": "globe_valve",
+      "file": "svg/globe_valve.svg",
+      "name": "Globe Valve",
+      "name_zh": "截止阀",
+      "name_en": "Globe Valve",
+      "type": "valve",
+      "size_mm": [
+        4.0,
+        2.0
+      ],
+      "ports": [],
+      "source_shape": "GLOBE_VALVE_SHAPE",
+      "instance_scale": [
+        0.4,
+        0.4
+      ]
+    },
+    {
+      "id": "instrumentation_bubble_central",
+      "file": "svg/instrumentation_bubble_central.svg",
+      "name": "Instrumentation Bubble (Central)",
+      "name_zh": "仪表气泡（中控室）",
+      "name_en": "Instrumentation Bubble (Central)",
+      "type": "instrument",
+      "size_mm": [
+        13.5,
+        7.5
+      ],
+      "ports": [
+        {
+          "name": "proc",
+          "pos": [
+            0.5,
+            1.0
+          ],
+          "dir": [
+            0,
+            1
+          ],
+          "type": "NOZZLE"
+        },
+        {
+          "name": "sig",
+          "pos": [
+            0.5,
+            0.0
+          ],
+          "dir": [
+            0,
+            -1
+          ],
+          "type": "SIGNAL"
+        }
+      ],
+      "source_shape": "INSTRUMENTATION_BUBBLE_SHAPE_CENTRAL",
+      "instance_scale": [
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "instrumentation_bubble_field",
+      "file": "svg/instrumentation_bubble_field.svg",
+      "name": "Instrumentation Bubble (Field)",
+      "name_zh": "仪表气泡（现场）",
+      "name_en": "Instrumentation Bubble (Field)",
+      "type": "instrument",
+      "size_mm": [
+        13.5,
+        7.5
+      ],
+      "ports": [
+        {
+          "name": "proc",
+          "pos": [
+            0.5,
+            1.0
+          ],
+          "dir": [
+            0,
+            1
+          ],
+          "type": "NOZZLE"
+        },
+        {
+          "name": "sig",
+          "pos": [
+            0.5,
+            0.0
+          ],
+          "dir": [
+            0,
+            -1
+          ],
+          "type": "SIGNAL"
+        }
+      ],
+      "source_shape": "INSTRUMENTATION_BUBBLE_SHAPE_FIELD",
+      "instance_scale": [
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "manhole",
+      "file": "svg/manhole.svg",
+      "name": "Manhole",
+      "name_zh": "人孔",
+      "name_en": "Manhole",
+      "type": "general",
+      "size_mm": [
+        4.05,
+        10.5
+      ],
+      "ports": [
+        {
+          "name": "open",
+          "pos": [
+            0.0,
+            0.5
+          ],
+          "dir": [
+            -1,
+            0
+          ],
+          "type": "TERMINAL"
+        }
+      ],
+      "source_shape": "MANHOLE_SHAPE",
+      "instance_scale": [
+        0.3,
+        0.7
+      ]
+    },
+    {
+      "id": "nozzle",
+      "file": "svg/nozzle.svg",
+      "name": "Nozzle",
+      "name_zh": "接管嘴",
+      "name_en": "Nozzle",
+      "type": "general",
+      "size_mm": [
+        4.0,
+        2.0
+      ],
+      "ports": [
+        {
+          "name": "equip",
+          "pos": [
+            0.0,
+            0.5
+          ],
+          "dir": [
+            -1,
+            0
+          ],
+          "type": "NOZZLE"
+        },
+        {
+          "name": "pipe",
+          "pos": [
+            1.0,
+            0.5
+          ],
+          "dir": [
+            1,
+            0
+          ],
+          "type": "NOZZLE"
+        }
+      ],
+      "source_shape": "NOZZLE_SHAPE",
+      "instance_scale": [
+        0.8,
+        0.4
+      ]
+    },
+    {
+      "id": "piping_insulated",
+      "file": "svg/piping_insulated.svg",
+      "name": "Insulated Piping",
+      "name_zh": "保温管道",
+      "name_en": "Insulated Piping",
+      "type": "general",
+      "size_mm": [
+        8.4,
+        1.4
+      ],
+      "ports": [
+        {
+          "name": "in",
+          "pos": [
+            0.0,
+            0.5
+          ],
+          "dir": [
+            -1,
+            0
+          ],
+          "type": "NOZZLE"
+        },
+        {
+          "name": "out",
+          "pos": [
+            1.0,
+            0.5
+          ],
+          "dir": [
+            1,
+            0
+          ],
+          "type": "NOZZLE"
+        }
+      ],
+      "source_shape": "PIPING_INSULATED_SHAPE",
+      "instance_scale": [
+        0.28,
+        0.28
+      ]
+    },
+    {
+      "id": "plate_type_heat_exchanger",
+      "file": "svg/plate_type_heat_exchanger.svg",
+      "name": "Plate-Type Heat Exchanger",
+      "name_zh": "板式换热器",
+      "name_en": "Plate-Type Heat Exchanger",
+      "type": "heat",
+      "size_mm": [
+        25.5,
+        8.0
+      ],
+      "ports": [
+        {
+          "name": "shell_in",
+          "pos": [
+            0.0,
+            0.5
+          ],
+          "dir": [
+            -1,
+            0
+          ],
+          "type": "NOZZLE"
+        },
+        {
+          "name": "shell_out",
+          "pos": [
+            1.0,
+            0.5
+          ],
+          "dir": [
+            1,
+            0
+          ],
+          "type": "NOZZLE"
+        }
+      ],
+      "source_shape": "PLATE_TYPE_HEAT_EXCHANGER_SHAPE",
+      "instance_scale": [
+        0.85,
+        0.8
+      ]
+    },
+    {
+      "id": "reciprocating_pump",
+      "file": "svg/reciprocating_pump.svg",
+      "name": "Reciprocating Pump",
+      "name_zh": "往复泵",
+      "name_en": "Reciprocating Pump",
+      "type": "pump",
+      "size_mm": [
+        10.5,
+        10.5
+      ],
+      "ports": [],
+      "source_shape": "RECIPROCATING_PUMP_SHAPE",
+      "instance_scale": [
+        0.7,
+        0.7
+      ]
+    },
+    {
+      "id": "reducer_general",
+      "file": "svg/reducer_general.svg",
+      "name": "Reducer (General)",
+      "name_zh": "异径管",
+      "name_en": "Reducer (General)",
+      "type": "general",
+      "size_mm": [
+        4.0,
+        2.0
+      ],
+      "ports": [
+        {
+          "name": "in",
+          "pos": [
+            0.0,
+            0.5
+          ],
+          "dir": [
+            -1,
+            0
+          ],
+          "type": "NOZZLE"
+        },
+        {
+          "name": "out",
+          "pos": [
+            1.0,
+            0.5
+          ],
+          "dir": [
+            1,
+            0
+          ],
+          "type": "NOZZLE"
+        }
+      ],
+      "source_shape": "REDUCER_GENERAL_SHAPE",
+      "instance_scale": [
+        0.4,
+        0.4
+      ]
+    },
+    {
+      "id": "slope",
+      "file": "svg/slope.svg",
+      "name": "Slope",
+      "name_zh": "管道坡度",
+      "name_en": "Slope",
+      "type": "general",
+      "size_mm": [
+        3.5,
+        1.0
+      ],
+      "ports": [
+        {
+          "name": "in",
+          "pos": [
+            0.0,
+            0.5
+          ],
+          "dir": [
+            -1,
+            0
+          ],
+          "type": "NOZZLE"
+        },
+        {
+          "name": "out",
+          "pos": [
+            1.0,
+            0.5
+          ],
+          "dir": [
+            1,
+            0
+          ],
+          "type": "NOZZLE"
+        }
+      ],
+      "source_shape": "SLOPE_SHAPE",
+      "instance_scale": [
+        0.35,
+        0.35
+      ]
+    },
+    {
+      "id": "swing_check_valve",
+      "file": "svg/swing_check_valve.svg",
+      "name": "Swing Check Valve",
+      "name_zh": "旋启式止回阀",
+      "name_en": "Swing Check Valve",
+      "type": "valve",
+      "size_mm": [
+        4.5,
+        2.5
+      ],
+      "ports": [],
+      "source_shape": "SWING_CHECK_VALVE_SHAPE",
+      "instance_scale": [
+        0.4,
+        0.4
+      ]
+    },
+    {
+      "id": "t_type_connection",
+      "file": "svg/t_type_connection.svg",
+      "name": "T-Type Connection",
+      "name_zh": "T 型三通",
+      "name_en": "T-Type Connection",
+      "type": "general",
+      "size_mm": [
+        8.0,
+        4.0
+      ],
+      "ports": [
+        {
+          "name": "in",
+          "pos": [
+            0.0,
+            0.0
+          ],
+          "dir": [
+            -1,
+            0
+          ],
+          "type": "NOZZLE"
+        },
+        {
+          "name": "out",
+          "pos": [
+            1.0,
+            0.0
+          ],
+          "dir": [
+            1,
+            0
+          ],
+          "type": "NOZZLE"
+        },
+        {
+          "name": "branch",
+          "pos": [
+            0.5,
+            1.0
+          ],
+          "dir": [
+            0,
+            1
+          ],
+          "type": "NOZZLE"
+        }
+      ],
+      "source_shape": "T_TYPE_CONNECTION_SHAPE",
+      "instance_scale": [
+        0.4,
+        0.4
+      ]
+    },
+    {
+      "id": "vessel_with_dished_heads",
+      "file": "svg/vessel_with_dished_heads.svg",
+      "name": "Vessel with Dished Heads",
+      "name_zh": "碟形封头容器",
+      "name_en": "Vessel with Dished Heads",
+      "type": "tank",
+      "size_mm": [
+        30.0,
+        51.0
+      ],
+      "ports": [
+        {
+          "name": "top",
+          "pos": [
+            0.5,
+            0.0
+          ],
+          "dir": [
+            0,
+            -1
+          ],
+          "type": "NOZZLE"
+        },
+        {
+          "name": "bottom",
+          "pos": [
+            0.5,
+            1.0
+          ],
+          "dir": [
+            0,
+            1
+          ],
+          "type": "NOZZLE"
+        },
+        {
+          "name": "left",
+          "pos": [
+            0.0,
+            0.5
+          ],
+          "dir": [
+            -1,
+            0
+          ],
+          "type": "NOZZLE"
+        },
+        {
+          "name": "right",
+          "pos": [
+            1.0,
+            0.5
+          ],
+          "dir": [
+            1,
+            0
+          ],
+          "type": "NOZZLE"
+        }
+      ],
+      "source_shape": "VESSEL_WITH_DISHED_HEADS_SHAPE",
+      "instance_scale": [
+        1.5,
+        1.7
+      ]
+    }
+  ]
+}

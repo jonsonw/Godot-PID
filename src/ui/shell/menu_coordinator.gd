@@ -37,6 +37,26 @@ func gpDeleteSelected() -> void:
 # Set the status bar text by i18n key and optional format arguments.
 # 通过 i18n 键与可选格式化参数设置状态栏文本。
 
+# Menu 格式 / 图框样式…: open the drawing-frame + title-block editor for the active sheet.
+# 菜单「格式 / 图框样式…」：打开活动图纸的图框 + 标题栏编辑器。
+# The script is loaded lazily (not `preload`, not a typed reference) so the dialog's class
+# never enters the startup dependency graph — the same reason gpOpenSettings() loads its
+# scene dynamically.
+# 脚本延迟加载（不用 preload、不做类型标注），使该对话框的类不进入启动依赖图 ——
+# 与 gpOpenSettings() 动态载入场景同理。
+func gpOpenFrameDialog() -> void:
+	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
+	if gpCanvas == null:
+		return
+	var gpSheet: GPSheet = gpHost.gpCenter.gpActiveSheet()
+	if gpSheet == null:
+		return
+	var gpDlg = (load("res://src/ui/dialogs/title_block_dialog.gd") as GDScript).new()
+	gpHost.add_child(gpDlg)
+	gpDlg.gpConfigure(gpSheet, gpCanvas)
+	gpDlg.gpPopupOverHost()
+
+
 func gpOpenSettings() -> void:
 	# 刻意不写类型标注：一旦标注，编译器会在启动期解析该类并把它拉进启动依赖图，延迟加载便失效。
 	# Deliberately UNTYPED: annotating it would make the compiler resolve the class at startup,
@@ -104,6 +124,13 @@ func gpRefreshEditMenu() -> void:
 	var gpCanRedo: bool = gpCanvas != null and gpCanvas.gpCanRedo()
 	gpHost.gpMenuBar.gpSetActionEnabled("edit_undo", gpCanUndo)
 	gpHost.gpMenuBar.gpSetActionEnabled("edit_redo", gpCanRedo)
+	# The top command toolbar mirrors the same state (its undo/redo came from the
+	# former palette EDIT block and must gray out with an empty stack, too).
+	# 顶部命令工具栏镜像同一状态（其撤销/重做来自原左栏「编辑」块，
+	# 同样须随空栈置灰）。
+	if gpHost.gpQuickBar != null:
+		gpHost.gpQuickBar.gpSetActionEnabled("edit_undo", gpCanUndo)
+		gpHost.gpQuickBar.gpSetActionEnabled("edit_redo", gpCanRedo)
 
 func gpOnMenuOpening(gpTitleKey: String) -> void:
 	if gpTitleKey != "menu.edit":
@@ -158,6 +185,8 @@ func gpOnMenu(gpAction: String) -> void:
 			gpMenuUndo()
 		"edit_redo":
 			gpMenuRedo()
+		"insert_frame_style":
+			gpOpenFrameDialog()
 		"tool_settings":
 			gpOpenSettings()
 		"project_tag_rules":

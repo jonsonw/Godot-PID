@@ -40,10 +40,10 @@ const GP_HOVER_HALO: Color = Color(1.0, 1.0, 1.0, 0.18)
 # Marker for a free (dangling) end. / 悬空端标记色。
 const GP_DANGLING: Color = Color(1.0, 0.604, 0.235)
 
-# Minimum on-screen line width in PIXELS. World-unit widths shrink with zoom; at 25% a 3.0 world
-# unit main line would be 0.75px and read as a hairline identical to a utility line — which is
+# Minimum on-screen line width in PIXELS. World-unit (mm) widths shrink with zoom; at 25% a 0.30 mm
+# main line would be 0.075px and read as a hairline identical to a utility line — which is
 # the one distinction the drafting requirement calls for. This floor protects that distinction.
-# 屏幕最小线宽（像素）。世界单位线宽随缩放变细；25% 缩放时 3.0 世界单位的主管线只有 0.75px，
+# 屏幕最小线宽（像素）。世界单位（mm）线宽随缩放变细；25% 缩放时 0.30 mm 的主管线只有 0.075px，
 # 与公用工程线看起来完全一样 —— 而那正是制图要求要区分的那一项。本下限保护该区分。
 const GP_MIN_PX: float = 1.2
 
@@ -59,12 +59,12 @@ const GP_MIN_DASH_PX: float = 2.0
 # pattern alternates on/off lengths in WORLD units; empty means solid.
 # pattern 以世界单位交替表示「有墨/空白」长度；为空表示实线。
 static func gpStyleFor(gpKind: String, gpSignalType: String, gpZoom: float = 1.0) -> Dictionary:
-	var gpW: float = 1.6
+	var gpW: float = 0.25
 	var gpCol: Color = Color("#9AA6BE")
 	var gpPat: PackedFloat32Array = PackedFloat32Array()
 	match gpKind:
 		GPPIDEdge.GP_PROCESS:
-			gpW = 3.0
+			gpW = 0.30
 			gpCol = Color("#DCE3F0")
  # CONTINUOUS — solid; AutoCAD linetype overlay (ADR-UI-02) keeps the
  # semantic process colour while adopting the standard solid line.
@@ -72,7 +72,7 @@ static func gpStyleFor(gpKind: String, gpSignalType: String, gpZoom: float = 1.0
  # 采用标准实线。
 			gpPat = GPLinetypeManager.gpPatternFor("CONTINUOUS")
 		GPPIDEdge.GP_UTILITY:
-			gpW = 1.6
+			gpW = 0.25
 			gpCol = Color("#9AA6BE")
  # DASHED — AutoCAD utility convention, scaled by the global LTSCALE.
  # DASHED —— AutoCAD 公用工程线惯例，受全局 LTSCALE 缩放。
@@ -80,27 +80,27 @@ static func gpStyleFor(gpKind: String, gpSignalType: String, gpZoom: float = 1.0
 		GPPIDEdge.GP_SIGNAL:
 			match gpSignalType:
 				"ELECTRIC":
-					gpW = 1.4
+					gpW = 0.18
 					gpCol = Color("#F2C14E")
 					gpPat = PackedFloat32Array([10.0, 3.0, 2.0, 3.0])
 				"PNEUMATIC":
-					gpW = 1.4
+					gpW = 0.18
 					gpCol = Color("#7FD1E8")
 					gpPat = PackedFloat32Array([6.0, 4.0])
 				"HYDRAULIC":
-					gpW = 1.4
+					gpW = 0.18
 					gpCol = Color("#B98BE8")
 					gpPat = PackedFloat32Array([10.0, 3.0, 2.0, 3.0, 2.0, 3.0])
 				"DATA":
-					gpW = 1.2
+					gpW = 0.18
 					gpCol = Color("#77C7A8")
 					gpPat = PackedFloat32Array([2.0, 4.0])
 				"CAPILLARY":
-					gpW = 1.4
+					gpW = 0.18
 					gpCol = Color("#E88B8B")
 					gpPat = PackedFloat32Array([12.0, 4.0])
 				_:
-					gpW = 1.4
+					gpW = 0.18
 					gpCol = Color("#F2C14E")
 					gpPat = PackedFloat32Array([10.0, 3.0, 2.0, 3.0])
 	# Screen-space floors, expressed back in world units (the view is scaled by gpZoom).

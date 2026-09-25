@@ -135,6 +135,13 @@ static func gpAlignFor(gpAnchor: int) -> HorizontalAlignment:
 
 # Where the text's top-left corner goes, given the anchor point and the measured text size.
 # 给定锚点与测量出的文字尺寸，文字左上角应放在哪里。
+#
+# NOTE ON THE ALIGNMENT ARGUMENT passed by callers / 关于调用方所传「对齐」参数的说明：
+# Godot IGNORES HorizontalAlignment when the draw width is negative (measured: LEFT/CENTER/RIGHT
+# all start at the same x with width = -1). The position therefore comes ENTIRELY from this
+# function, which is why it returns a top-left corner rather than relying on the engine.
+# Godot 在绘制宽度为负时**忽略**对齐参数（实测：width = -1 时 LEFT/CENTER/RIGHT 三者起点 x 相同）。
+# 故位置**完全**由本函数决定 —— 这正是它返回「左上角」而不依赖引擎的原因。
 static func gpTextOrigin(gpAnchor: int, gpAnchorPos: Vector2, gpTextSize: Vector2) -> Vector2:
 	match gpAnchor:
 		GPLabelAnchor.GPAnchor.GP_LEFT:
@@ -143,6 +150,33 @@ static func gpTextOrigin(gpAnchor: int, gpAnchorPos: Vector2, gpTextSize: Vector
 			return gpAnchorPos - Vector2(0.0, gpTextSize.y * 0.5)
 		_:
 			return gpAnchorPos - Vector2(gpTextSize.x * 0.5, gpTextSize.y * 0.5)
+
+
+# Drawn origin of the label: what to hand draw_string inside the counter-scaled frame.
+# 标签的绘制原点：在反向缩放坐标系内交给 draw_string 的值。
+#
+# TWO UNITS MEET HERE, AND THE WHOLE POINT IS NOT TO MAGNIFY ONE OF THEM TWICE.
+# 此处相遇两种单位，全部要点在于**不可对其中之一重复施加缩放**：
+#   * the anchor offset lives in WORLD units (mm) and MUST be magnified by the canvas scale;
+#   * gpTextOrigin() measures the text, so it already works in the unit the glyph is drawn in
+#     (design pixels) and must NOT be magnified again.
+#   * 锚点偏移是世界单位（mm），**必须**乘以画布缩放；
+#   * gpTextOrigin() 是对文字的测量，其单位已是字形的绘制单位（设计像素），**绝不**可再乘一次。
+# Multiplying the SUM — which is what the draw site used to do — flies the text off at a rate
+# proportional to the zoom, because the text-origin term grew with the zoom while the glyph bitmap
+# did not. That is exactly the reported "the tag wanders off when I zoom, and the grip cannot bring
+# it back": the grip is drawn at the true world offset, so no amount of dragging can make a
+# zoom-scaled ghost line up with it.
+# 对**和式**施乘 —— 绘制点原先正是如此 —— 会使文字以与缩放成正比的速度飞离，因为文字原点项随缩放
+# 增长而字形位图并未随之增长。这正是用户报告的「一缩放位号就跑掉、手柄也调不回来」：手柄画在真实的
+# 世界偏移处，故无论怎么拖，那个被多乘了一次的幽灵都无法与它重合。
+# [param gpOffsetWorld] symbol-local anchor offset, world units (mm) / 图元本地锚点偏移，世界单位（mm）
+# [param gpTextSizePx] measured text size in design pixels / 实测文字尺寸（设计像素）
+# [param gpScale] accumulated canvas scale / 画布累积缩放
+static func gpDrawOrigin(gpAnchor: int, gpOffsetWorld: Vector2, gpTextSizePx: Vector2,
+		gpScale: float) -> Vector2:
+	var gpK: float = maxf(gpScale, 0.0001)
+	return gpOffsetWorld * gpK + gpTextOrigin(gpAnchor, Vector2.ZERO, gpTextSizePx)
 
 
 # Whether a world point is on the grip. / 世界点是否落在抓取点上。

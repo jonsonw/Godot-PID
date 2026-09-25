@@ -73,17 +73,20 @@ static func _gpRebuildCache() -> void:
 # 从 src/core/symbol_packs/ 加载所有图元包。
 static func _gpLoadAllPacks() -> Array[GPSymbolDef]:
 	var gpOut: Array[GPSymbolDef] = []
-	# Load ISO 10628 pack (25 symbols).
-	# 加载 ISO 10628 图元包（25 个图元）。
-	var gpIsoPack: Array[GPSymbolDef] = GPSymbolPackIso_10628.gpDefs()
-	# Decision D3: ISO library symbols are built-in (read-only). The dialog derives a
-	# fresh C-rule copy (C<CATEGORY><nnn>) instead of overwriting them, so flag them
-	# here at load time.
-	# 决策 D3：ISO 库图元为内置（只读）。对话框派生一枚新的 C 规则副本
-	#（C<类别码><三位序号>）而非覆盖原图元，故在加载时标记。
-	for gpD in gpIsoPack:
+	# Load the DEXPI C01 pack (24 symbols) — the v0.1 standard set. The ISO 10628 pack
+	# was REMOVED in the same release (see plan Phase 3): keeping two "standard" sets would
+	# double every valve in the palette and blur which set the editor actually stands behind.
+	# 加载 DEXPI C01 图元包（24 个图元）—— v0.1 标准集。ISO 10628 包在同一次发布中**移除**
+	#（见计划 Phase 3）：同时保留两套「标准」会让调色板里每个阀门出现两次，也模糊了
+	# 编辑器究竟以哪套为准。
+	var gpDexpiPack: Array[GPSymbolDef] = GPSymbolPackDexpi.gpDefs()
+	# Decision D3: built-in library symbols are read-only. The dialog derives a fresh
+	# C-rule copy (C<CATEGORY><nnn>) instead of overwriting them, so flag them at load time.
+	# 决策 D3：内置库图元只读。对话框派生一枚新的 C 规则副本（C<类别码><三位序号>）
+	# 而非覆盖原图元，故在加载时标记。
+	for gpD in gpDexpiPack:
 		gpD.gpBuiltin = true
-	gpOut.append_array(gpIsoPack)
+	gpOut.append_array(gpDexpiPack)
 	return gpOut
 
 

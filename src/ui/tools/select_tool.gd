@@ -267,6 +267,22 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
  # 边选择 / 双击改号 / 抓取点拖拽。
  # Pipes and signal lines are first-class selection targets in SELECT mode, just below
  # nodes. / 管道与信号线是选择模式下的一等选择目标，优先级仅次于节点。
+ # Edge tag grip: the line-number is itself draggable. Tested across ALL edges (not just the
+ # selected one) so a number dragged far off its pipe can still be grabbed to drag it back.
+ # 边管线号抓取点：管线号本身可拖动。跨「所有」边检测（不限于已选中），
+ # 使被拖离管线的编号仍可抓回。
+		var gpTagEid: String = gpCtx.gpEdgeTagGrips.gpHitGripAny(gpWorld)
+		if gpTagEid != "":
+			if gpDouble:
+ # Double-click the number: reset it to the auto (default) placement.
+ # 双击编号：复位到自动（默认）落位。
+				gpCtx.gpEdgeTagGrips.gpReset(gpTagEid)
+			else:
+ # Select the edge, then begin the drag from the press point.
+ # 先选中该边，再从按下点开始拖拽。
+				gpCv.gpSetEdgeSelection([gpTagEid])
+				gpCtx.gpEdgeTagGrips.gpTryStart(gpWorld, gpTagEid)
+			return true
 		var gpEdgeHit: String = gpCv.gpHitEdge(gpWorld)
  # Double-click an edge opens its line-number editor in place. / 双击边就地打开管线号编辑器。
 		if gpDouble and gpEdgeHit != "":

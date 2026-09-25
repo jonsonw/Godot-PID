@@ -1,10 +1,25 @@
 class_name GPPIDToolbar
 extends VBoxContainer
 
-# Left symbol-library dock. The FRAME is built once here (title + search() box +
-# scroll container + tool group); the symbol BUTTONS are injected by code from
-# SymbolLibrary so custom symbol packs drop in without touching the layout.
-# 左侧图元库停靠栏。框架在此一次性搭好（标题 + 搜索框 + 滚动容器 + 工具组）；
+# Left symbol-library dock, AutoCAD-style (2026-09-25 reference layout).
+# 左侧图元库停靠栏，AutoCAD 风格（2026-09-25 参照布局）。
+# Structure / 结构：
+#   [标题 + 搜索框]
+#   [绘制 工具块]  — icon-only buttons for canvas modes (the old Ribbon's draw tools
+#                    moved here after the Ribbon left the top bar)
+#                    画布模式的纯图标按钮（Ribbon 移出顶栏后其绘图工具迁居于此）
+#                    （「编辑」块已按要求整体迁往顶部命令工具栏 quick_toolbar.gd，
+#                      此处不再保留 undo / redo / delete / settings。）
+#                    (the former EDIT block moved wholesale to the top command
+#                     toolbar quick_toolbar.gd — undo / redo / delete / settings
+#                     no longer live here.)
+#   [滚动区]       — one collapsible category block per symbol category; each header
+#                    carries a small GEAR whose popup lets the user tick which symbols
+#                    stay visible in the palette (persisted via Settings).
+#                    每个类目一个可折叠块；标题右侧有小**齿轮**，弹出的复选清单决定
+#                    哪些图元显示在面板中（经 Settings 持久化）。
+# The symbol BUTTONS are injected by code from SymbolLibrary so custom symbol packs
+# drop in without touching the layout.
 # 图元按钮由代码按类目从 SymbolLibrary 注入，自定义图元包无需改布局即可接入。
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -21,6 +36,32 @@ signal gpSymbolDeleteRequested(type: String)
 # A tool was selected: "select" / "connect" / "custom".
 # 选中某工具：select（选择）/ connect（连线）/ custom（自定义图元）。
 signal gpToolSelected(type: String)
+
+# A generic command from the tool blocks (canvas modes, undo/redo/delete/settings).
+# Reuses the Ribbon action ids, so the host routes it through the existing handler.
+# 工具块发出的通用命令（画布模式、撤销/重做/删除/设置）。复用 Ribbon 动作 id，
+# 宿主经既有处理器路由即可。
+signal gpActionRequested(action: String)
+
+# Tool-block definitions: i18n title key + items. "toggle" buttons keep a pressed
+# highlight and are tracked for mode-sync; "mode" is the GPCanvas2D.GPMode they map to.
+# 工具块定义：i18n 标题键 + 条目。"toggle" 按钮保持按下高亮并参与模式同步；
+# "mode" 为该按钮对应的 GPCanvas2D.GPMode。
+const GP_TOOL_BLOCKS: Array = [
+	{
+		"title_key": "ribbon.grp_draw",
+		"items": [
+			{"action": "select",   "key": "symbol_lib.tool_select", "icon": "select",   "toggle": true, "mode": GPCanvas2D.GPMode.GP_SELECT},
+			{"action": "connect",  "key": "symbol_lib.tool_connect", "icon": "connect",  "toggle": true, "mode": GPCanvas2D.GPMode.GP_CONNECT},
+			{"action": "line",     "key": "canvas.tool_line",        "icon": "line",     "toggle": true, "mode": GPCanvas2D.GPMode.GP_DRAW_LINE},
+			{"action": "circle",   "key": "canvas.tool_circle",      "icon": "circle",   "toggle": true, "mode": GPCanvas2D.GPMode.GP_DRAW_CIRCLE},
+			{"action": "rect",     "key": "canvas.tool_rect",        "icon": "rect",     "toggle": true, "mode": GPCanvas2D.GPMode.GP_DRAW_RECT},
+			{"action": "polyline", "key": "canvas.tool_polyline",    "icon": "polyline", "toggle": true, "mode": GPCanvas2D.GPMode.GP_DRAW_POLYLINE},
+			{"action": "pipe",     "key": "symbol_lib.tool_pipe",    "icon": "pipe",     "toggle": true, "mode": GPCanvas2D.GPMode.GP_PIPE},
+			{"action": "signal",   "key": "symbol_lib.tool_signal",  "icon": "signal",   "toggle": true, "mode": GPCanvas2D.GPMode.GP_SIGNAL},
+		]
+	},
+]
 
 # Currently displayed symbol definitions.
 # 当前显示的图元定义。
@@ -52,17 +93,26 @@ var gpSearchBox: LineEdit
 # 承载图元列表的滚动容器。
 var gpListRoot: ScrollContainer
 
-# Select tool button.
-# 选择工具按钮。
-var gpSelBtn: Button
+# Column hosting the static tool blocks (built once, above the scroll area).
+# 承载静态工具块的列（仅构建一次，位于滚动区上方）。
+var gpToolsRoot: VBoxContainer
 
-# Connect tool button.
-# 连线工具按钮。
-var gpConBtn: Button
+# Toggle buttons keyed by action, for mode-sync highlight.
+# 以动作为键的开关按钮，用于模式同步高亮。
+var gpToolBtns: Dictionary = {}
 
-# Custom symbol tool button.
-# 自定义图元工具按钮。
-var gpCustBtn: Button
+# action -> GPCanvas2D.GPMode map, for mode-sync highlight.
+# 动作 → GPCanvas2D.GPMode 映射，用于模式同步高亮。
+var gpActionToMode: Dictionary = {}
+
+# All tool-block buttons, kept for locale / font refresh.
+# 全部工具块按钮，保留以便语言/字号刷新。
+var _gpToolButtons: Array[Button] = []
+
+# Tool-block header buttons, kept for locale / font refresh (arrow re-derived from
+# the collapse state on every re-render).
+# 工具块标题按钮，保留以便语言/字号刷新（箭头每次重渲染时按折叠状态重推）。
+var _gpToolHeaders: Array[Button] = []
 
 
 # Build the static frame of the dock.
@@ -80,6 +130,23 @@ func _ready() -> void:
 	gpSearchBox = LineEdit.new()
 	gpSearchBox.text_changed.connect(_gpOnSearch)
 	add_child(gpSearchBox)
+
+	# ---- frozen frame: tool blocks (the old Ribbon's draw/edit commands) ----
+	# ---- 固化框架：工具块（原 Ribbon 的绘图/编辑命令）----
+	gpToolsRoot = VBoxContainer.new()
+	gpToolsRoot.add_theme_constant_override("separation", 2)
+	add_child(gpToolsRoot)
+	for gpBlock in GP_TOOL_BLOCKS:
+		gpToolsRoot.add_child(_gpBuildToolBlock(gpBlock as Dictionary))
+
+	# 1px hairline separating the DRAW-TILE area from the symbol-category area —
+	# the same separator the categories use between themselves (2026-09-25 request).
+	# 「绘制」图块区与图元类目区之间的 1px 发丝分隔线 —— 与类目之间的分隔线同款
+	#（2026-09-25 需求）。
+	var gpToolSep: ColorRect = ColorRect.new()
+	gpToolSep.color = GPChromeStyle.GP_BORDER
+	gpToolSep.custom_minimum_size = Vector2(0.0, 1.0)
+	add_child(gpToolSep)
 
 	# ---- frozen frame: scroll container (symbols injected here) ----
 	# ---- 固化框架：滚动容器（图元注入于此）----
@@ -99,38 +166,6 @@ func _ready() -> void:
 	gpListRoot.resized.connect(gpReflow)
 	add_child(gpListRoot)
 
-	# ---- frozen frame: tool group ----
-	# ---- 固化框架：工具组 ----
-	var gpTools: HBoxContainer = HBoxContainer.new()
-	# Cap each tool button's minimum width and clip its label when the dock is narrow,
-	# so the three buttons stay below the dock floor (160px). At a wide dock the buttons
-	# expand and show the full label; when shrunk, the label is clipped gracefully
-	# (e.g. "自定义" -> "自定"). This lets the left dock shrink to its declared minimum
-	# instead of being stretched by the button text widths.
-	# 给每个工具按钮设最小宽度上限并在停靠栏变窄时裁剪标签，使三个按钮低于停靠栏
-	# 下限(160px)。停靠栏宽时按钮拉伸显示完整标签；变窄时标签优雅截断（如「自定义」
-	# →「自定」）。从而左停靠栏能收缩到声明的最小宽度，而不被按钮文字宽度撑开。
-	const gpToolMinPx: float = 44.0
-	gpSelBtn = Button.new()
-	gpSelBtn.size_flags_horizontal = SIZE_EXPAND_FILL
-	gpSelBtn.clip_text = true
-	gpSelBtn.custom_minimum_size.x = gpToolMinPx
-	gpConBtn = Button.new()
-	gpConBtn.size_flags_horizontal = SIZE_EXPAND_FILL
-	gpConBtn.clip_text = true
-	gpConBtn.custom_minimum_size.x = gpToolMinPx
-	gpCustBtn = Button.new()
-	gpCustBtn.size_flags_horizontal = SIZE_EXPAND_FILL
-	gpCustBtn.clip_text = true
-	gpCustBtn.custom_minimum_size.x = gpToolMinPx
-	gpSelBtn.pressed.connect(func(): gpToolSelected.emit("select"))
-	gpConBtn.pressed.connect(func(): gpToolSelected.emit("connect"))
-	gpCustBtn.pressed.connect(func(): gpToolSelected.emit("custom"))
-	gpTools.add_child(gpSelBtn)
-	gpTools.add_child(gpConBtn)
-	gpTools.add_child(gpCustBtn)
-	add_child(gpTools)
-
 	# Explicitly match the static frame controls to the current UI font size so they
 	# update reliably when the user changes the font in the settings dialog.
 	# 让静态框架控件显式匹配当前界面字号，确保用户在设置对话框改字号时能可靠更新。
@@ -143,6 +178,135 @@ func _ready() -> void:
 	# 视觉分层：增大垂直留白 + 首帧自绘背景（与画布分隔的右边界）。
 	add_theme_constant_override("separation", 6)
 	queue_redraw()
+
+
+# Build one tool block: a caption header above an auto-flowing tile grid.
+# Each tool is a SQUARE TILE the same size as a palette cell (THUMB+PAD), drawn
+# without any default background; hover/active light the tile up, exactly like the
+# symbol tiles. HFlowContainer re-wraps the tiles to whatever the dock width allows.
+# 构建一个工具块：小标题位于自适应换行的图块网格之下。每个工具是**方形图块**，
+# 与图元单元格同尺寸（THUMB+PAD），默认无底色；悬停/激活点亮图块，与图元图块完全同款。
+# HFlowContainer 依停靠栏宽度自动换行，实现图标自适应布置。
+func _gpBuildToolBlock(gpBlock: Dictionary) -> Control:
+	var gpV: VBoxContainer = VBoxContainer.new()
+	gpV.add_theme_constant_override("separation", 2)
+
+	# Collapsible header, the SAME contract as the symbol-category headers: the
+	# 绘制 block folds exactly like any other category (2026-09-25 request).
+	# 可折叠标题，与图元类目标题**同一契约**：「绘制」块与其他类目一样可折叠。
+	var gpCat: String = str(gpBlock["title_key"])
+	if not gpCollapsed.has(gpCat):
+		gpCollapsed[gpCat] = false
+	var gpFold: bool = gpCollapsed[gpCat]
+
+	var gpHeader: Button = Button.new()
+	gpHeader.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpHeader.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	gpHeader.flat = true
+	gpHeader.clip_text = true
+	gpHeader.add_theme_font_size_override("font_size", maxi(11, Settings.gpEffectiveFontSize() - 2))
+	gpHeader.text = ("▾ " if not gpFold else "▸ ") + I18n.gpTr(gpCat)
+	gpHeader.set_meta("gpKey", gpCat)
+	# Same category-band look: slightly-lighter band + the AutoCAD category feel.
+	# 同类目色带观感：略亮色带 + AutoCAD 类目感。
+	var gpHdrBg: StyleBoxFlat = StyleBoxFlat.new()
+	gpHdrBg.bg_color = Color(0.180, 0.216, 0.267)
+	gpHdrBg.content_margin_left = 6.0
+	gpHdrBg.content_margin_top = 2.0
+	gpHdrBg.content_margin_bottom = 2.0
+	gpHeader.add_theme_stylebox_override("normal", gpHdrBg)
+	gpHeader.add_theme_stylebox_override("hover", gpHdrBg)
+	gpHeader.add_theme_stylebox_override("pressed", gpHdrBg)
+	gpHeader.add_theme_color_override("font_color", Color(0.80, 0.84, 0.90))
+	gpV.add_child(gpHeader)
+	_gpToolHeaders.append(gpHeader)
+
+	# HFlowContainer: fixed-size tiles that WRAP to the dock width — the palette-style
+	# auto-flow. Tiles keep their minimum; the flow derives rows from the real width.
+	# HFlowContainer：固定尺寸图块按停靠栏宽度**自动换行** —— 图元库式自适应流式布局。
+	# 图块保持最小尺寸；流式容器按真实宽度推导行数。
+	var gpGrid: HFlowContainer = HFlowContainer.new()
+	gpGrid.add_theme_constant_override("h_separation", 2)
+	gpGrid.add_theme_constant_override("v_separation", 2)
+	gpGrid.visible = not gpFold
+	for gpItem in gpBlock["items"]:
+		gpGrid.add_child(_gpBuildToolBtn(gpItem as Dictionary))
+	gpV.add_child(gpGrid)
+	gpHeader.pressed.connect(_gpToggleToolBlock.bind(gpCat, gpGrid, gpHeader))
+	return gpV
+
+
+# Toggle the draw tool block's collapsed state and update the header arrow.
+# 切换「绘制」工具块的折叠状态并更新标题箭头。
+func _gpToggleToolBlock(gpCat: String, gpGrid: HFlowContainer, gpHeader: Button) -> void:
+	var gpNow: bool = not gpCollapsed.get(gpCat, false)
+	gpCollapsed[gpCat] = gpNow
+	gpGrid.visible = not gpNow
+	gpHeader.text = ("▾ " if not gpNow else "▸ ") + I18n.gpTr(gpCat)
+
+
+# Build one icon-only tool button (tooltip = localized name, like the AutoCAD tiles).
+# 构建一枚纯图标工具按钮（提示 = 本地化名称，同 AutoCAD 图块）。
+func _gpBuildToolBtn(gpItem: Dictionary) -> Button:
+	var gpBtn: Button = Button.new()
+	gpBtn.focus_mode = Control.FOCUS_NONE
+	gpBtn.tooltip_text = I18n.gpTr(str(gpItem["key"]))
+	gpBtn.set_meta("gpKey", gpItem["key"])
+	# SQUARE TILE, the same footprint as a palette cell (THUMB + PAD = 33 px): the
+	# draw tools read as siblings of the symbol tiles below (2026-09-25 request).
+	# **方形图块**，与图元单元格同尺寸（THUMB + PAD = 33 px）：「绘制」工具与下方
+	# 图元图块视觉同族（2026-09-25 需求）。
+	var gpTile: float = GPSymbolPaletteItem.GP_THUMB_PX + GPSymbolPaletteItem.GP_CELL_PAD
+	gpBtn.custom_minimum_size = Vector2(gpTile, gpTile)
+	# No default background: transparent until hover; hover lights the WHOLE tile
+	# (GP_SPLIT_HI — the exact colour the symbol tiles use); the ACTIVE mode keeps a
+	# dark accent fill + accent underline, mirroring the selected tab look.
+	# 默认无底色：悬停前完全透明；悬停点亮**整块**（GP_SPLIT_HI —— 与图元图块同色）；
+	# 激活模式保持深色 accent 底 + accent 底线，与选中 tab 同款。
+	var gpNone: StyleBoxFlat = StyleBoxFlat.new()
+	gpNone.bg_color = Color(0.0, 0.0, 0.0, 0.0)
+	gpNone.set_content_margin_all(4.0)
+	var gpHover: StyleBoxFlat = gpNone.duplicate() as StyleBoxFlat
+	gpHover.bg_color = GPChromeStyle.GP_SPLIT_HI
+	gpHover.set_corner_radius_all(3)
+	var gpActive: StyleBoxFlat = gpHover.duplicate() as StyleBoxFlat
+	gpActive.bg_color = Color(0.129, 0.165, 0.204)
+	gpActive.border_color = GPChromeStyle.GP_ACCENT
+	gpActive.border_width_bottom = 1
+	gpBtn.add_theme_stylebox_override("normal", gpNone)
+	gpBtn.add_theme_stylebox_override("hover", gpHover)
+	gpBtn.add_theme_stylebox_override("pressed", gpActive)
+	gpBtn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var gpIcon: Texture2D = load("res://assets/icons/%s.svg" % str(gpItem["icon"])) as Texture2D
+	if gpIcon != null:
+		gpBtn.icon = gpIcon
+	# Icon width == the palette thumbnail size (GP_THUMB_PX = 21), so the draw block
+	# and the symbol tiles share ONE icon scale (2026-09-25 request).
+	# 图标宽 = 图元库缩略图尺寸（GP_THUMB_PX = 21），「绘制」块与图元图块共用同一图标尺度。
+	gpBtn.add_theme_constant_override("icon_max_width", int(GPSymbolPaletteItem.GP_THUMB_PX))
+	if bool(gpItem.get("toggle", false)):
+		gpBtn.toggle_mode = true
+		gpToolBtns[str(gpItem["action"])] = gpBtn
+		gpActionToMode[str(gpItem["action"])] = int(gpItem["mode"])
+	gpBtn.pressed.connect(_gpOnToolBtn.bind(str(gpItem["action"])))
+	_gpToolButtons.append(gpBtn)
+	return gpBtn
+
+
+# A tool-block button was pressed: forward the action id through gpActionRequested.
+# 工具块按钮被按下：经 gpActionRequested 转发动作 id。
+func _gpOnToolBtn(gpAction: String) -> void:
+	gpActionRequested.emit(gpAction)
+
+
+# Highlight the toggle button matching the active canvas mode (Ribbon's old contract,
+# now served by the palette blocks).
+# 高亮与当前画布模式匹配的开关按钮（Ribbon 的旧契约，现由图元库工具块履行）。
+func gpSyncMode(gpMode: int) -> void:
+	for gpAct in gpToolBtns.keys():
+		var gpBtn: Button = gpToolBtns[gpAct] as Button
+		var gpM: int = int(gpActionToMode.get(gpAct, -1))
+		gpBtn.button_pressed = (gpM >= 0 and gpMode == gpM)
 
 
 # Inject symbols grouped by category. Call once after assigning the def set.
@@ -182,8 +346,16 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 		gpC.queue_free()
 	gpGrids = []
 
+	# EXPAND (not just FILL) so the ScrollContainer hands this column its whole viewport width.
+	# With FILL alone the column kept its own minimum width, so the grid below laid its cells out
+	# for the wider dock width while its own rect stayed narrow — the cells then overflowed
+	# horizontally instead of merely wrapping. EXPAND makes the column width and the width the grid
+	# lays out for the SAME number, which is what makes the palette predictable.
+	# 用 EXPAND（而非仅 FILL）使 ScrollContainer 把整个视口宽度交给本列。仅 FILL 时本列保持自身
+	# 最小宽，于是下方网格按更宽的停靠栏宽度摆放单元格、自身矩形却仍是窄的 —— 单元格便横向溢出，
+	# 而不是正常换行。EXPAND 让「本列宽度」与「网格据以布局的宽度」成为同一个数，图元库因此可预期。
 	var gpVbox: VBoxContainer = VBoxContainer.new()
-	gpVbox.size_flags_horizontal = SIZE_FILL
+	gpVbox.size_flags_horizontal = SIZE_EXPAND_FILL
 	gpListRoot.add_child(gpVbox)
 
 	# Group symbols by category.
@@ -194,9 +366,28 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 			gpByCat[gpD.gpCategory] = []
 		gpByCat[gpD.gpCategory].append(gpD)
 
-	# One collapsible group per category.
-	# 每个类目一个可折叠分组。
-	for gpCat in gpByCat.keys():
+	# "general"（通用）永远排在所有分类的最下面（2026-09-25 需求）；其余类目保持
+	# 首次出现顺序。比较不区分大小写，兼容旧包里可能的大写变体。
+	# The "general" category always sorts LAST (2026-09-25 request); the other
+	# categories keep first-appearance order. The comparison is case-insensitive to
+	# tolerate capitalised variants in older packs.
+	var gpCatKeys: Array = []
+	for gpK in gpByCat.keys():
+		if str(gpK).to_lower() != "general":
+			gpCatKeys.append(gpK)
+	if gpByCat.has("general"):
+		gpCatKeys.append("general")
+	# One collapsible group per category; a 1px hairline separates every two
+	# neighbouring categories (skip the line before the first one).
+	# 每个类目一个可折叠分组；相邻类目之间以 1px 发丝线分隔（首个类目前不画）。
+	var gpCatIdx: int = 0
+	for gpCat in gpCatKeys:
+		if gpCatIdx > 0:
+			var gpSep: ColorRect = ColorRect.new()
+			gpSep.color = GPChromeStyle.GP_BORDER
+			gpSep.custom_minimum_size = Vector2(0.0, 1.0)
+			gpVbox.add_child(gpSep)
+		gpCatIdx += 1
 		if not gpCollapsed.has(gpCat):
 			gpCollapsed[gpCat] = false
 		var gpCollapsedNow: bool = gpCollapsed[gpCat]
@@ -206,40 +397,60 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 		gpGroup.add_theme_constant_override("separation", 2)
 		gpVbox.add_child(gpGroup)
 
- # Clickable category header: toggles the group when pressed.
- # 可点击的类目标题：点击折叠 / 展开本组。
+		# Header row: [▾ category (expand, click = fold)] [gear (click = visibility menu)].
+		# 标题行：[▾ 类目（伸展，点击折叠）] [齿轮（点击 = 可见性菜单）]。
+		var gpHeadRow: HBoxContainer = HBoxContainer.new()
+		gpHeadRow.add_theme_constant_override("separation", 0)
+		gpGroup.add_child(gpHeadRow)
+
 		var gpHeader: Button = Button.new()
-		gpHeader.size_flags_horizontal = SIZE_FILL
+		gpHeader.size_flags_horizontal = SIZE_EXPAND_FILL
 		gpHeader.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		gpHeader.flat = true
+		gpHeader.clip_text = true
 		gpHeader.add_theme_font_size_override("font_size", Settings.gpEffectiveFontSize())
 		gpHeader.text = ("▾ " if not gpCollapsedNow else "▸ ") + I18n.gpTr(gpCat)
-		gpGroup.add_child(gpHeader)
- # 类目标题：克制的浅背景（仅比 dock 略亮）+ 1px 发丝底线，
- # 取代原先"接近画布亮色的粗填充带"，边界细腻而不抢眼。
+		gpHeadRow.add_child(gpHeader)
+		# 类目标题：克制的浅背景（仅比 dock 略亮）+ 1px 发丝底线。
 		var gpHdrBg: StyleBoxFlat = StyleBoxFlat.new()
-		gpHdrBg.bg_color = Color(0.108, 0.120, 0.150)
+		gpHdrBg.bg_color = Color(0.180, 0.216, 0.267)
 		gpHdrBg.content_margin_left = 6.0
-		gpHdrBg.content_margin_right = 6.0
 		gpHdrBg.content_margin_top = 2.0
 		gpHdrBg.content_margin_bottom = 2.0
-		gpHdrBg.border_color = GPChromeStyle.GP_BORDER
-		gpHdrBg.border_width_bottom = 1
 		gpHeader.add_theme_stylebox_override("normal", gpHdrBg)
 		gpHeader.add_theme_stylebox_override("hover", gpHdrBg)
 		gpHeader.add_theme_stylebox_override("pressed", gpHdrBg)
 		gpHeader.add_theme_color_override("font_color", Color(0.80, 0.84, 0.90))
 
- # Multi-column, width-adaptive thumbnail grid. Its minimum width is forced
- # to the viewport width by _gpReflow so it always fills and re-derives its
- # column count from the real width (see symbol_grid.gd).
- # 多列、随宽度自适应的缩略图网格。其最小宽由 _gpReflow 强制设为视口宽，
- # 从而始终填满并按真实宽度重排列数（见 symbol_grid.gd）。
+		# The category GEAR: opens the per-symbol visibility checklist (AutoCAD panel menu).
+		# 类目**齿轮**：打开逐图元的可见性复选清单（AutoCAD 面板菜单）。
+		var gpGear: Button = Button.new()
+		gpGear.flat = true
+		gpGear.focus_mode = Control.FOCUS_NONE
+		gpGear.tooltip_text = I18n.gpTr("symbol_lib.gear_tip")
+		gpGear.custom_minimum_size = Vector2(22.0, 22.0)
+		var gpGearIcon: Texture2D = load("res://assets/icons/gear.svg") as Texture2D
+		if gpGearIcon != null:
+			gpGear.icon = gpGearIcon
+		gpGear.add_theme_constant_override("icon_max_width", 12)
+		var gpGearBg: StyleBoxFlat = gpHdrBg.duplicate() as StyleBoxFlat
+		gpGearBg.content_margin_left = 2.0
+		gpGearBg.content_margin_right = 4.0
+		gpGear.add_theme_stylebox_override("normal", gpGearBg)
+		gpGear.add_theme_stylebox_override("hover", gpGearBg)
+		gpGear.add_theme_stylebox_override("pressed", gpGearBg)
+		gpHeadRow.add_child(gpGear)
+
+		# Multi-column, width-adaptive thumbnail grid. Its minimum width is forced
+		# to the viewport width by _gpReflow so it always fills and re-derives its
+		# column count from the real width (see symbol_grid.gd).
+		# 多列、随宽度自适应的缩略图网格。其最小宽由 _gpReflow 强制设为视口宽，
+		# 从而始终填满并按真实宽度重排列数（见 symbol_grid.gd）。
 		var gpGrid: GPSymbolGrid = GPSymbolGrid.new()
 		gpGrid.size_flags_horizontal = SIZE_FILL
- # Keep the grid's column-count floor aligned with the left dock minimum so a
- # narrow dock still derives a sensible (>=1) column count from GP_LEFT_MIN.
- # 让网格列数下限与左停靠栏最小宽对齐，窄停靠栏仍按 GP_LEFT_MIN 推导出合理（≥1）列数。
+		# Keep the grid's column-count floor aligned with the left dock minimum so a
+		# narrow dock still derives a sensible (>=1) column count from GP_LEFT_MIN.
+		# 让网格列数下限与左停靠栏最小宽对齐，窄停靠栏仍按 GP_LEFT_MIN 推导出合理（≥1）列数。
 		gpGrid.gpMinWidth = gpMinWidth
 		gpGrid.visible = not gpCollapsedNow
 		gpGroup.add_child(gpGrid)
@@ -251,13 +462,81 @@ func _gpRender(gpList: Array[GPSymbolDef]) -> void:
 			gpItem.size_flags_horizontal = SIZE_EXPAND_FILL
 			gpItem.gpPicked.connect(_gpOnPick)
 			gpItem.gpDeleteRequested.connect(_gpOnDeleteRequested)
+			# Apply the persisted visibility choice: an unticked symbol stays hidden
+			# (the grid lays out visible children only, so no hole is left).
+			# 应用持久化的可见性选择：被取消勾选的图元保持隐藏
+			#（网格只排布可见子项，故不留空洞）。
+			gpItem.visible = not bool(Settings.gpPaletteHidden.get(gpD.gpId, false))
 			gpGrid.add_child(gpItem)
 
 		gpHeader.pressed.connect(_gpToggleCategory.bind(gpCat, gpGrid, gpHeader))
+		gpGear.pressed.connect(_gpShowVisibilityMenu.bind(gpCat, gpByCat[gpCat] as Array, gpGrid))
 
 	# Recompute columns now that grids exist (size may be 0 yet; resize handler refreshes later).
 	# 网格已建好，先按当前视口重排一次（此时尺寸可能仍为 0，缩放处理器之后会再刷新）。
 	gpReflow(-1.0)
+
+
+# Open the per-category visibility checklist: one check item per symbol (localized
+# name), plus "Show All". Toggling flips the palette item's visibility and persists
+# the choice in Settings so it survives restarts.
+# 打开类目的可见性复选清单：每个图元一个复选项（本地化名），外加「全部显示」。
+# 切换即翻转图元条目可见性，并把选择持久化到 Settings，重启后保留。
+func _gpShowVisibilityMenu(gpCat: String, gpDefsIn: Array, gpGrid: GPSymbolGrid) -> void:
+	var gpMenu: PopupMenu = PopupMenu.new()
+	var gpIdx: int = 0
+	for gpD in gpDefsIn:
+		var gpDef: GPSymbolDef = gpD as GPSymbolDef
+		if gpDef == null:
+			continue
+		gpMenu.add_check_item(I18n.gpTr(gpDef.gpDisplayName), gpIdx)
+		gpMenu.set_item_checked(gpIdx, not bool(Settings.gpPaletteHidden.get(gpDef.gpId, false)))
+		gpMenu.set_item_metadata(gpIdx, gpDef.gpId)
+		gpIdx += 1
+	if gpIdx > 0:
+		gpMenu.add_separator()
+	gpMenu.add_item(I18n.gpTr("symbol_lib.show_all"), gpIdx)
+	gpMenu.set_item_metadata(gpIdx, "__show_all__")
+	gpMenu.id_pressed.connect(_gpOnVisibilityToggled.bind(gpMenu, gpGrid))
+	add_child(gpMenu)
+	GPPopupHelper.gpPopupAtMouse(gpMenu, gpGrid)
+	# Free the popup after it closes so this dock can be released later.
+	# 弹层关闭后释放，使停靠栏此后仍可释放。
+	gpMenu.popup_hide.connect(gpMenu.queue_free)
+
+
+# One checklist row was toggled: flip that symbol's palette visibility and persist.
+# 勾选清单的一行被切换：翻转该图元在面板中的可见性并持久化。
+func _gpOnVisibilityToggled(gpId: int, gpMenu: PopupMenu, gpGrid: GPSymbolGrid) -> void:
+	var gpMeta: String = str(gpMenu.get_item_metadata(gpId))
+	if gpMeta == "__show_all__":
+		# Show All: clear every hidden entry of this category's symbols.
+		# 全部显示：清空本类目各图元的隐藏记录。
+		for gpI in range(gpMenu.item_count):
+			var gpMid: String = str(gpMenu.get_item_metadata(gpI))
+			if gpMid != "__show_all__" and gpMid != "":
+				Settings.gpPaletteHidden.erase(gpMid)
+				_gpSetItemVisible(gpGrid, gpMid, true)
+		Settings.gpSave()
+		return
+	var gpHide: bool = not bool(Settings.gpPaletteHidden.get(gpMeta, false))
+	if gpHide:
+		Settings.gpPaletteHidden[gpMeta] = true
+	else:
+		Settings.gpPaletteHidden.erase(gpMeta)
+	Settings.gpSave()
+	_gpSetItemVisible(gpGrid, gpMeta, not gpHide)
+
+
+# Flip the visibility of the palette item whose def carries the given symbol id.
+# 翻转携带指定符号 id 的图元条目可见性。
+func _gpSetItemVisible(gpGrid: GPSymbolGrid, gpSymbolId: String, gpVis: bool) -> void:
+	for gpC in gpGrid.get_children():
+		var gpItem: GPSymbolPaletteItem = gpC as GPSymbolPaletteItem
+		if gpItem != null and gpItem.gpDef != null and gpItem.gpDef.gpId == gpSymbolId:
+			gpItem.visible = gpVis
+	gpGrid.update_minimum_size()
+	gpGrid.queue_sort()
 
 
 # Re-derive each category grid's columns after a width change. The grid fills the
@@ -314,9 +593,11 @@ func _gpToggleCategory(gpCat: String, gpGrid: GPSymbolGrid, gpHeader: Button) ->
 func _gpRefreshLocale(gpLocale: String) -> void:
 	gpTitle.text = I18n.gpTr("symbol_lib.title")
 	gpSearchBox.placeholder_text = I18n.gpTr("symbol_lib.search")
-	gpSelBtn.text = I18n.gpTr("symbol_lib.tool_select")
-	gpConBtn.text = I18n.gpTr("symbol_lib.tool_connect")
-	gpCustBtn.text = I18n.gpTr("symbol_lib.tool_custom")
+	for gpH in _gpToolHeaders:
+		var gpCat: String = str(gpH.get_meta("gpKey"))
+		gpH.text = ("▸ " if bool(gpCollapsed.get(gpCat, false)) else "▾ ") + I18n.gpTr(gpCat)
+	for gpB in _gpToolButtons:
+		gpB.tooltip_text = I18n.gpTr(str(gpB.get_meta("gpKey")))
 	_gpRender(_gpFilter(gpSearchBox.text))
 
 
@@ -327,9 +608,6 @@ func _gpApplyUIFontSize() -> void:
 	var gpSz: int = Settings.gpEffectiveFontSize()
 	gpTitle.add_theme_font_size_override("font_size", gpSz)
 	gpSearchBox.add_theme_font_size_override("font_size", gpSz)
-	gpSelBtn.add_theme_font_size_override("font_size", gpSz)
-	gpConBtn.add_theme_font_size_override("font_size", gpSz)
-	gpCustBtn.add_theme_font_size_override("font_size", gpSz)
 
 
 # React to UI font changes: re-apply font size and re-render the whole list.
@@ -340,8 +618,8 @@ func _gpOnFontChanged() -> void:
 
 
 # React to symbol font / size changes: recreate the palette items so they pick up
-# the new thumbnail and label sizes.
-# 响应图元字体/字号变化：重新创建图元条目以采用新的缩略图和标签尺寸。
+# the new thumbnail size.
+# 响应图元字体/字号变化：重新创建图元条目以采用新的缩略图尺寸。
 func _gpOnSymbolStyleChanged() -> void:
 	_gpRender(_gpFilter(gpSearchBox.text))
 

@@ -141,6 +141,18 @@ func gpSetLabelOffset(gpNodeId: String, gpOffset: Vector2) -> bool:
 	return gpStack.gpDo(gpCmd, gpCtx)
 
 
+# Move one edge's line number off its automatic placement . One undo step per drag.
+# 把一条边的管线号移离其自动落位处。每次拖拽一个撤销步。
+# A zero offset is legal and means "back to the automatic placement" — the command's model
+# accessor erases the stored key, so a reset leaves nothing behind.
+# 零偏移合法，意为「回到自动落位处」—— 命令所用的模型存取器会删除该存储键，故复位不留痕迹。
+func gpSetEdgeTagOffset(gpEdgeId: String, gpOffset: Vector2) -> bool:
+	if gpEdgeId == "":
+		return false
+	var gpCmd: GPSetEdgeTagOffsetCommand = GPSetEdgeTagOffsetCommand.new(gpEdgeId, gpOffset)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
 # connection survive; only gpSymbolId changes. Edge endpoints whose port name the NEW symbol
 # does not declare are downgraded to the node centre and reported in gpLastSwapWarning.
 # 只有 gpSymbolId 变更。新图元未声明其端口名的边端点会降级到图元中心，

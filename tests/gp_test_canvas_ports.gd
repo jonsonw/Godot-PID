@@ -119,7 +119,7 @@ func gpTestPortsWorkOutsideTheTree() -> void:
 	gpEq(gpCv.gpHitTest(Vector2(4.0, 4.0)), "", "空图命中为空 / no hit on an empty graph")
 	gpEq(gpCv.gpHitEdge(Vector2(4.0, 4.0)), "", "空图命中边为空 / no edge hit on an empty graph")
 	gpEq(gpCv.gpHitShape(Vector2(4.0, 4.0)), -1, "空图命中图形为 -1 / no shape hit on an empty graph")
-	gpCheck(gpCv.gpDefFor("LPUMP003") == null, "无 binder 时定义查找返回 null / def lookup is null-safe")
+	gpCheck(gpCv.gpDefFor("DPUMP001") == null, "无 binder 时定义查找返回 null / def lookup is null-safe")
 	gpCheck(gpCv.gpDefLookupCallable().is_valid(), "定义查找 Callable 在树外有效 / def callable valid off-tree")
 	# View controller / 视图控制器：屏幕 <-> 世界换算必须往返一致（默认 100% / 零偏移）。
 	# Screen <-> world must round-trip at the default 100% zoom / zero offset.

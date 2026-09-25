@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10.50 10.50" width="10.50mm" height="10.50mm">
+  <ellipse cx="5.250" cy="5.250" rx="5.250" ry="5.250" fill="none" stroke="#000000" stroke-width="0.3"/>
+  <polyline points="0.000,5.250 10.500,5.250" fill="none" stroke="#000000" stroke-width="0.3"/>
+  <polyline points="5.250,10.500 10.500,5.250 5.250,0.000" fill="none" stroke="#000000" stroke-width="0.3"/>
+</svg>

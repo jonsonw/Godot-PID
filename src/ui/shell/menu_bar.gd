@@ -105,7 +105,6 @@ const GP_SHORTCUTS: Dictionary = {
 	"file_open": [KEY_O, false],
 }
 
-
 # Build the menu bar and connect locale refresh.
 # 构建菜单栏并连接语言刷新。
 func _ready() -> void:
@@ -143,6 +142,28 @@ func _gpRebuild(gpLocale: String = "") -> void:
 func _gpAddMenu(gpTitleKey: String, gpItems: Array) -> void:
 	var gpBtn: MenuButton = MenuButton.new()
 	gpBtn.text = I18n.gpTr(gpTitleKey)
+	# AutoCAD 2026 menu look: flat text buttons on the chrome; a slightly lighter
+	# rounded plate appears on hover; text is light grey (white on hover).
+	# AutoCAD 2026 菜单观感：chrome 上的扁平文字按钮；悬停显出略亮的圆角色板；
+	# 文字浅灰（悬停转白）。
+	gpBtn.flat = true
+	gpBtn.focus_mode = Control.FOCUS_NONE
+	var gpNorm: StyleBoxFlat = StyleBoxFlat.new()
+	gpNorm.bg_color = Color(0.0, 0.0, 0.0, 0.0)
+	gpNorm.content_margin_left = 8.0
+	gpNorm.content_margin_right = 8.0
+	gpNorm.content_margin_top = 3.0
+	gpNorm.content_margin_bottom = 3.0
+	var gpHov: StyleBoxFlat = gpNorm.duplicate() as StyleBoxFlat
+	gpHov.bg_color = GPChromeStyle.GP_SPLIT_HI
+	gpHov.set_corner_radius_all(3)
+	gpBtn.add_theme_stylebox_override("normal", gpNorm)
+	gpBtn.add_theme_stylebox_override("hover", gpHov)
+	gpBtn.add_theme_stylebox_override("pressed", gpHov)
+	gpBtn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	gpBtn.add_theme_color_override("font_color", Color(0.875, 0.894, 0.922))
+	gpBtn.add_theme_color_override("font_hover_color", Color(0.96, 0.97, 0.98))
+	gpBtn.add_theme_color_override("font_pressed_color", Color(0.96, 0.97, 0.98))
 	var gpPopup: PopupMenu = gpBtn.get_popup()
 	_gpFillPopup(gpPopup, gpItems)
 	# Announce the opening so the host can refresh enabled states first.
@@ -265,7 +286,10 @@ static func _gpKeyEvent(gpKeycode: int, gpShift: bool, gpCtrl: bool) -> InputEve
 static func gpShortcutSpecs() -> Dictionary:
 	return GP_SHORTCUTS
 
-# Paint the chrome background + bottom border (separates the menu bar from the Ribbon).
-# 自绘 chrome 背景 + 底部边界线（与下方 Ribbon 分隔）。
+# Paint the chrome background only: the command toolbar row below shares the SAME
+# chrome tone (reference image has no tint step between the menu and toolbar rows),
+# so a border here would draw a line through one continuous surface.
+# 仅画 chrome 背景：下方命令工具栏行与菜单行同色（参考图中两行之间无色差），
+# 在此画边线等于在连续表面上划线。
 func _draw() -> void:
-	GPChromeStyle.gpDraw(self, GPChromeStyle.GP_CHROME_BG, GPChromeStyle.SIDE_BOTTOM)
+	GPChromeStyle.gpDraw(self, GPChromeStyle.GP_CHROME_BG, 0)

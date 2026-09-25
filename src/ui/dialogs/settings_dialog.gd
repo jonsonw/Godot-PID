@@ -153,9 +153,9 @@ func _ready() -> void:
 
 	# Symbol font size spinner.
 	# 图元字号选择器。
-	gpSymSizeSpin.min_value = 8
-	gpSymSizeSpin.max_value = 48
-	gpSymSizeSpin.step = 1
+	gpSymSizeSpin.min_value = 1.0
+	gpSymSizeSpin.max_value = 10.0
+	gpSymSizeSpin.step = 0.1
 	gpSymSizeSpin.value = Settings.gpSymbolFontSize
 	gpSymSizeSpin.value_changed.connect(_gpOnSymSizeChanged)
 
@@ -223,7 +223,7 @@ func _gpOnUIFontSelected(gpIdx: int) -> void:
 # Handle symbol font size changes.
 # 处理图元字号变化。
 func _gpOnSymSizeChanged(gpVal: float) -> void:
-	Settings.gpSymbolFontSize = int(gpVal)
+	Settings.gpSymbolFontSize = gpVal
 	Settings.gpApplySymbolStyle()
 	Settings.gpSave()
 

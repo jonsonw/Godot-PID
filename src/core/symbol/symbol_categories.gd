@@ -12,20 +12,28 @@ extends RefCounted
 # See 符号编辑器设计说明 §5.2 / §6 / §7.
 # 见《符号编辑器设计说明》§5.2 / §6 / §7。
 
-# Category -> nominal envelope size in canvas pixels. Shared by the whole family.
-# 类别 → 标称包络尺寸（画布像素）。同族共享。
+# Category -> nominal envelope size in millimetres (world-unit == 1 mm from v0.1, see plan Phase 0).
+# 类别 → 标称包络尺寸（毫米；从 v0.1 起世界单位 = 1mm，见计划 Phase 0）。
+# This is ONLY a fallback for symbols that carry no explicit size (e.g. user-drawn glyphs or
+# packs that omit size_mm); the built-in DEXPI pack writes each symbol's real C01 mm size
+# per-symbol via the generator (see plan Phase 4), so the per-family equal-size rule yields to
+# the real standard proportions there. The ISO 10628 pack hardcodes its own sizes and is
+# unaffected by this table.
+# 这仅是「无显式尺寸的图元」的兜底（如用户手绘图元或省略 size_mm 的包）；内置 DEXPI 包经生成器
+# 逐符号写入真实 C01 毫米尺寸（见计划 Phase 4），故同族等大规则在那里让位于真实标准比例。
+# ISO 10628 包自行硬编码尺寸，不受本表影响。
 const GP_NOMINAL: Dictionary = {
-	"valve": Vector2(64, 48),
-	"pump": Vector2(80, 56),
-	"tank": Vector2(72, 96),
-	"instrument": Vector2(56, 56),
-	"heat": Vector2(84, 64),
-	"general": Vector2(64, 64),
+	"valve": Vector2(12, 9),
+	"pump": Vector2(15, 11),
+	"tank": Vector2(14, 20),
+	"instrument": Vector2(11, 11),
+	"heat": Vector2(16, 12),
+	"general": Vector2(12, 12),
 }
 
-# Fallback envelope for unknown categories.
-# 未知类别的兜底包络尺寸。
-const GP_FALLBACK_SIZE: Vector2 = Vector2(64, 64)
+# Fallback envelope for unknown categories, in millimetres.
+# 未知类别的兜底包络尺寸（毫米）。
+const GP_FALLBACK_SIZE: Vector2 = Vector2(12, 12)
 
 # Category -> standard port anchors, normalized 0..1 against the nominal envelope.
 # 类别 → 标准端口锚点，相对标称包络归一化到 0..1。
@@ -68,68 +76,82 @@ const GP_STD_PORTS: Dictionary = {
 # 与 tools/gen_symbol_packs.py 的 PORT_OVERRIDES 镜像。gp_test_symbol_pack.gd 断言同类别的
 # 内置图元与用户图元端口一致，因为 GPSymbolNormalizer 对用户自建的无端口图元走本表回退。
 const GP_PORT_OVERRIDES: Dictionary = {
-	# 换热器：壳程两个 + 管程两个 / shell side x2 + tube side x2
-	"LHEAT001": [
+	# ---- DEXPI C01 包（v0.1 标准集）----
+	# 与 assets/symbol_packs/dexpi/manifest.json 的逐符号端口互为镜像：
+	# 包自带端口；本表让「按类别新建的用户图元」与内置图元行为一致，并由
+	# gp_test_symbol_pack.gpTestCategoryTableMatchesGeneratedPack 断言两侧不脱节。
+	# ---- DEXPI C01 pack (v0.1 standard set) ----
+	# Mirrors the per-symbol ports in assets/symbol_packs/dexpi/manifest.json: the pack
+	# carries its own; this table keeps user symbols created from a category behaving like
+	# their built-in twins, and gp_test_symbol_pack pins the two sides together.
+	"DVALVE001": [
+		{"name": "in", "pos": [0.33, 1.0], "dir": [0, 1], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.14], "dir": [1, 0], "type": "NOZZLE"},
+	],
+	# 盲板：单侧法兰端点 / blind cover: a single terminal on the flanged side
+	"DGENERAL003": [
+		{"name": "end", "pos": [0.5, 0.0], "dir": [0, -1], "type": "TERMINAL"},
+	],
+	# 控制执行机构：信号入 + 阀杆出 / actuator: signal in, stem out
+	"DGENERAL004": [
+		{"name": "sig", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "SIGNAL"},
+		{"name": "stem", "pos": [1.0, 0.5], "dir": [1, 0], "type": "ACTUATOR"},
+	],
+	# 换热器：壳程左右两管口 / exchanger: two shell-side nozzles
+	"DHEAT001": [
 		{"name": "shell_in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
 		{"name": "shell_out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
-		{"name": "tube_in", "pos": [0.5, 0.0], "dir": [0, -1], "type": "NOZZLE"},
-		{"name": "tube_out", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
 	],
-	# 储罐：顶 / 底 / 两侧 / tank: top, bottom and two side nozzles
-	"LTANK001": [
+	"DHEAT002": [
+		{"name": "shell_in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "shell_out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+	],
+	# 仪表气泡：下方取自工艺、上方发出信号 / bubble: taps the process below, signals above
+	"DINSTRUMENT001": [
+		{"name": "proc", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
+		{"name": "sig", "pos": [0.5, 0.0], "dir": [0, -1], "type": "SIGNAL"},
+	],
+	"DINSTRUMENT002": [
+		{"name": "proc", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
+		{"name": "sig", "pos": [0.5, 0.0], "dir": [0, -1], "type": "SIGNAL"},
+	],
+	# 人孔：设备壁上的一个接口 / manhole: one opening on the vessel wall
+	"DGENERAL007": [
+		{"name": "open", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "TERMINAL"},
+	],
+	# 接管嘴：设备侧 + 管道侧 / nozzle: equipment side and piping side
+	"DGENERAL008": [
+		{"name": "equip", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "pipe", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+	],
+	# 保温管道：穿过的管段两端 / insulated piping: the run passes straight through
+	"DGENERAL009": [
+		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+	],
+	# 异径管 / reducer
+	"DGENERAL010": [
+		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+	],
+	# 管道坡度 / slope
+	"DGENERAL011": [
+		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+	],
+	# T 型三通：主管左右贯通 + 下方支管 / tee: main run left-right plus a branch downward
+	"DGENERAL012": [
+		{"name": "in", "pos": [0.0, 0.0], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "out", "pos": [1.0, 0.0], "dir": [1, 0], "type": "NOZZLE"},
+		{"name": "branch", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
+	],
+	# 容器：顶 / 底 / 两侧 / vessel: top, bottom and two side nozzles
+	"DTANK001": [
 		{"name": "top", "pos": [0.5, 0.0], "dir": [0, -1], "type": "NOZZLE"},
 		{"name": "bottom", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
-		{"name": "left", "pos": [0.0, 0.25], "dir": [-1, 0], "type": "NOZZLE"},
-		{"name": "right", "pos": [1.0, 0.75], "dir": [1, 0], "type": "NOZZLE"},
+		{"name": "left", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "right", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
 	],
-	# 调节阀 / 执行器 / 定位器：两个管口 + 顶部执行机构接点（接信号线）
-	# control valve / actuator / positioner: two nozzles + a top actuator terminal
-	"LVALVE003": [
-		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
-		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
-		{"name": "act", "pos": [0.5, 0.0], "dir": [0, -1], "type": "ACTUATOR"},
-	],
-	"LVALVE008": [
-		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
-		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
-		{"name": "act", "pos": [0.5, 0.0], "dir": [0, -1], "type": "ACTUATOR"},
-	],
-	"LVALVE007": [
-		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
-		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
-		{"name": "act", "pos": [0.5, 0.0], "dir": [0, -1], "type": "ACTUATOR"},
-	],
-	# 就地指示表（FI/PI/TI/LI）：图形左右被管线贯穿，故是两个管口 + 顶部信号端子
-	# in-line indicators: the glyph is pierced left-to-right by the pipe, plus a signal terminal
-	"LINSTRUMENT002": [
-		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
-		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
-		{"name": "sig", "pos": [0.5, 0.0], "dir": [0, -1], "type": "SIGNAL"},
-	],
-	"LINSTRUMENT006": [
-		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
-		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
-		{"name": "sig", "pos": [0.5, 0.0], "dir": [0, -1], "type": "SIGNAL"},
-	],
-	"LINSTRUMENT008": [
-		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
-		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
-		{"name": "sig", "pos": [0.5, 0.0], "dir": [0, -1], "type": "SIGNAL"},
-	],
-	"LINSTRUMENT004": [
-		{"name": "in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
-		{"name": "out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
-		{"name": "sig", "pos": [0.5, 0.0], "dir": [0, -1], "type": "SIGNAL"},
-	],
-	# 现场接线箱：两个信号端子，无工艺管口 / field enclosure: two signal terminals only
-	"LINSTRUMENT001": [
-		{"name": "sig_in", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "SIGNAL"},
-		{"name": "sig_out", "pos": [1.0, 0.5], "dir": [1, 0], "type": "SIGNAL"},
-	],
-	# 线型图例符号：它们是图例美术，不是可连接图元 / legend glyphs, deliberately not connectable
-	"LGENERAL003": [],
-	"LGENERAL002": [],
-	"LGENERAL001": [],
 }
 
 # Glyph fit margin inside the 100x100 unit box during normalization.

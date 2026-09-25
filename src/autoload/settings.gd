@@ -42,6 +42,8 @@ const GP_FONT_PRESETS: Dictionary = {
 				   "names": ["Arial", "PingFang SC", "Microsoft YaHei"] },
 	"menlo":     { "zh": "Menlo 等宽", "en": "Menlo Mono",
 				   "names": ["Menlo", "PingFang SC", "Microsoft YaHei"] },
+	"calibri":   { "zh": "Calibri / Arial（标准）", "en": "Calibri / Arial (standard)",
+				   "names": ["Calibri", "Arial", "Liberation Sans", "Noto Sans", "PingFang SC", "Microsoft YaHei"] },
 }
 
 # Current UI font size.
@@ -60,11 +62,21 @@ var gpFontKey: String = "system"
 
 # Current symbol font preset key.
 # 当前图元字体预设键。
-var gpSymbolFontKey: String = "system"
+var gpSymbolFontKey: String = "calibri"
 
-# Current symbol font size.
-# 当前图元字号。
-var gpSymbolFontSize: int = 16
+# Current symbol font size, in millimetres (world units). Drives canvas label + tag text height
+# at 1:1; the palette / dock labels use gpFontSize (screen px) instead.
+# 当前图元字号（毫米 / 世界单位）。驱动画布标签与位号文字高度（1:1 比例）；图元库 / 停靠栏
+# 标签改用 gpFontSize（屏幕像素）。
+var gpSymbolFontSize: float = 3.0
+
+# Standard sheet text height (mm) and the threshold above which a stored value can only be a
+# pre-v0.1 SCREEN-pixel size (see the migration in gpLoad()). 3.0 mm matches the DEXPI C01
+# reference sheet; 6.0 mm is above any plausible sheet text height and below the pixel floor (8).
+# 标准图面字高（mm）与「存值只可能是 v0.1 之前的屏幕像素值」的判定阈值（见 gpLoad() 中的迁移）。
+# 3.0mm 对齐 DEXPI C01 参考图；6.0mm 高于任何合理的图面字高，又低于像素时代的下限（8）。
+const GP_SYMBOL_FONT_MM_DEFAULT: float = 3.0
+const GP_SYMBOL_FONT_MM_MIGRATE_ABOVE: float = 6.0
 
 # When true, a line number on a vertical run is rotated -90° so it reads bottom-to-top
 # (the P&ID convention); when false it stays horizontal and right-aligned to the pipe.
@@ -97,6 +109,11 @@ var gpAutoScale: bool = true
 # 屏幕空间下限（GPEdgeStyle.GP_MIN_PX）保护可读性。
 var gpScreenConstantWidth: bool = false
 
+# Palette visibility map: symbol id -> true when the user unticked it from the
+# left palette via a category's gear menu. Persisted so the choice survives restarts.
+# 图元库可见性表：符号 id -> true 表示用户经类目齿轮菜单取消勾选。持久化以在重启后保留。
+var gpPaletteHidden: Dictionary = {}
+
 # Cached symbol font so the canvas can read it cheaply each frame.
 # 缓存的图元字体，供画布逐帧廉价读取。
 var gpSymbolFont: Font = null
@@ -120,6 +137,14 @@ signal gpUIFontChanged
 # 从磁盘加载设置并应用。
 func _ready() -> void:
 	gpLoad()
+	# Persist a one-time config migration immediately, so the corrected value is what the user
+	# sees in the settings dialog and what survives the next launch (see the mm migration note in
+	# gpLoad()). Without this the old pixel-era value would be re-migrated on every start.
+	# 立即持久化一次性配置迁移，使用户在设置对话框看到的就是修正后的值，并在下次启动时保持
+	#（见 gpLoad() 中的 mm 迁移说明）。否则旧像素值会在每次启动时被反复迁移。
+	if has_meta("gpSymbolFontMigrated"):
+		remove_meta("gpSymbolFontMigrated")
+		gpSave()
 	gpApply()
 
 
@@ -176,11 +201,36 @@ func gpLoad() -> void:
 	gpFontSize = gpCfg.get_value("ui", "font_size", 24)
 	gpLocale = gpCfg.get_value("ui", "locale", "zh")
 	gpFontKey = _gpSanitizeFontKey(gpCfg.get_value("ui", "font", "system"))
-	gpSymbolFontSize = gpCfg.get_value("symbol", "font_size", 16)
 	gpSymbolFontKey = _gpSanitizeFontKey(gpCfg.get_value("symbol", "font", "system"))
 	gpAutoScale = gpCfg.get_value("ui", "auto_scale", true)
+	var gpStoredMM: float = float(gpCfg.get_value("symbol", "font_size", GP_SYMBOL_FONT_MM_DEFAULT))
+	gpSymbolFontSize = _gpMigrateSymbolFontMM(gpStoredMM)
+	if gpStoredMM != gpSymbolFontSize:
+		set_meta("gpSymbolFontMigrated", true)
 	gpPipeTagRotate = gpCfg.get_value("pipe", "tag_rotate", true)
 	gpPipeTagFontSize = gpCfg.get_value("pipe", "tag_font_size", 0)
+	gpScreenConstantWidth = gpCfg.get_value("ui", "screen_constant_width", false)
+	gpPaletteHidden = gpCfg.get_value("ui", "palette_hidden", {})
+
+
+# One-time migration to the mm-based drawing text height (v0.1 / plan Phase 0).
+# WHY: the stored value used to be a SCREEN pixel height (8..24). Since the world unit became
+# 1 mm, the same key now means a MILLIMETRE text height ON THE SHEET, where the standard sheet
+# text is 2.5-3.0 mm. A stored value >= 6 can therefore only be the pixel-era one — nobody
+# draws 6 mm text on a 4x2 mm ball valve — so it is snapped to the standard height once.
+# 一次性迁移到「以毫米为基准的图纸字高」（v0.1 / 计划 Phase 0）。原因：该键原为**屏幕像素**
+# 高度（8..24）；世界单位改为 1mm 后，同一键表示**图纸上的毫米字高**，而标准图面字高为
+# 2.5–3.0mm。因此存值 ≥ 6 只可能是像素时代的遗留（没人会在 4×2mm 的球阀上写 6mm 的字），
+# 故一次性归位到标准字高。
+# Kept as a pure function so the decision is testable without writing a config file — its failure
+# mode (a pixel-era 12 surviving as a 12 mm sheet text height) is what made every tag look blurry.
+# 保持为纯函数，使该判定无需写配置文件即可测试 —— 其失效模式（像素时代的 12 以 12mm 图面字高
+# 留存）正是每一个位号都发虚的成因。
+# 存值 → 归位后的图面字高。
+func _gpMigrateSymbolFontMM(gpStoredMM: float) -> float:
+	if gpStoredMM >= GP_SYMBOL_FONT_MM_MIGRATE_ABOVE:
+		return GP_SYMBOL_FONT_MM_DEFAULT
+	return gpStoredMM
 
 
 # Save current settings to disk.
@@ -192,6 +242,7 @@ func gpSave() -> void:
 	gpCfg.set_value("ui", "font", gpFontKey)
 	gpCfg.set_value("ui", "auto_scale", gpAutoScale)
 	gpCfg.set_value("ui", "screen_constant_width", gpScreenConstantWidth)
+	gpCfg.set_value("ui", "palette_hidden", gpPaletteHidden)
 	gpCfg.set_value("symbol", "font_size", gpSymbolFontSize)
 	gpCfg.set_value("symbol", "font", gpSymbolFontKey)
 	gpCfg.set_value("pipe", "tag_rotate", gpPipeTagRotate)

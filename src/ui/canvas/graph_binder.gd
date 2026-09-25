@@ -137,6 +137,12 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
 			var gpDef: GPSymbolDef = gpDefFor(gpN.gpSymbolId)
 			gpV.gpInit(gpN, gpDef)
 			gpV.gpStyle = gpStyle
+			# Tags are text: oversample them for the camera scale so an N mm tag is rasterised at
+			# its on-screen size instead of being magnified from N pixels. The property is an ENUM
+			# (`= true` coerces to 1 = DISABLED), hence the constant.
+			# 位号是文字：按相机缩放过采样，使 N mm 的位号按屏幕实际尺寸光栅化，而非由 N 像素放大。
+			# 该属性是**枚举**（写 `= true` 会被强转为 1 = DISABLED），故用常量。
+			gpV.oversampling_with_scale = CanvasItem.OVERSAMPLING_WITH_SCALE_ENABLED
 			gpWorldRoot.add_child(gpV)
  # Multi-select: every id in the selection set lights up, not just the primary one.
  # 多选：选择集中的每个 id 都会高亮，而不只是主选项。
@@ -176,6 +182,9 @@ func _gpSyncEdgeViews(gpSelection: Array[String], gpEdgeSelection: Array[String]
 			gpV = GPEdgeView.new()
 			gpV.gpInit(gpE, gpGraph, Callable(self, "_gpLookupDef"))
 			gpV.gpStyle = gpStyle
+			# Pipe line numbers are text too — same oversampling reason and enum caveat as above.
+			# 管线位号同样是文字 —— 过采样理由与枚举注意事项同上。
+			gpV.oversampling_with_scale = CanvasItem.OVERSAMPLING_WITH_SCALE_ENABLED
 			gpWorldRoot.add_child(gpV)
  # Edge ids live in their OWN selection array (gpEdgeSel), so selection must be tested against
  # BOTH the node set and the edge set — otherwise an edge's halo never lights up and the user

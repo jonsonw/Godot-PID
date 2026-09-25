@@ -39,6 +39,8 @@ func gpOnMove(gpWorld: Vector2) -> bool:
 	# 拖动位号标签：实时预览，释放时作为一个撤销步提交。
 	elif gpCtx.gpLabelGrips.gpIsDragging():
 		gpCtx.gpLabelGrips.gpOnGripMove(gpWorld)
+	elif gpCtx.gpEdgeTagGrips.gpIsDragging():
+		gpCtx.gpEdgeTagGrips.gpOnGripMove(gpWorld)
 	return true
 
 
@@ -76,6 +78,13 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 	# Finish a tag-label drag — commit one undo step. / 结束位号标签拖拽——提交一个撤销步。
 	if gpCtx.gpLabelGrips.gpIsDragging():
 		gpCtx.gpLabelGrips.gpEndGripDrag()
+		gpCv.gpGraphChanged.emit()
+		gpCv.gpEmitStatus()
+		return true
+	# Finish an edge line-number drag — commit one undo step.
+	# 结束边管线号拖拽——提交一个撤销步。
+	if gpCtx.gpEdgeTagGrips.gpIsDragging():
+		gpCtx.gpEdgeTagGrips.gpEndGripDrag()
 		gpCv.gpGraphChanged.emit()
 		gpCv.gpEmitStatus()
 		return true

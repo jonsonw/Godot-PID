@@ -1,8 +1,8 @@
 class_name GPSymbolNamingTest
 extends GPGTest
 # Copyright © 2026 Jonson Wang
-# Guards the project-wide symbol id rule (L/C + category + 3-digit sequence).
-# 守护项目级图元 id 规则（L/C + 类别 + 三位序号）。
+# Guards the project-wide symbol id rule (L/C/D + category + 3-digit sequence).
+# 守护项目级图元 id 规则（L/C/D + 类别 + 三位序号）。
 #
 # Two things are defended here / 这里守住两件事：
 #   1. the rule itself — parse / validate / allocate behave as documented
@@ -13,7 +13,8 @@ extends GPGTest
 
 
 func gpTestCanonicalIdsValidate() -> void:
-	for gpId in ["LVALVE001", "CPUMP003", "LINSTRUMENT009", "LGENERAL001", "LTANK001"]:
+	for gpId in ["LVALVE001", "CPUMP003", "LINSTRUMENT009", "LGENERAL001",
+			"DVALVE002", "DPUMP001", "DTANK001", "DINSTRUMENT001", "DGENERAL012"]:
 		gpCheck(GPSymbolNaming.gpIsValid(gpId), "canonical id accepted: %s" % gpId)
 
 
@@ -86,10 +87,11 @@ func gpTestMaxSeqIgnoresOtherFamilies() -> void:
 
 
 func gpTestLegacyIdsMigrate() -> void:
-	gpEq(GPSymbolNaming.gpMigrate("P_CentrifugalPump_001"), "LPUMP003",
+	gpEq(GPSymbolNaming.gpMigrate("centrifugal_pump"), "DPUMP001",
 		"the centrifugal pump kept its identity across the rule change")
-	gpEq(GPSymbolNaming.gpMigrate("TK_Tank_001"), "LTANK001", "tank migrated")
-	gpCheck(GPSymbolNaming.gpIsLegacy("GV_GateValve_001"), "known legacy id recognised")
+	gpEq(GPSymbolNaming.gpMigrate("vessel_with_dished_heads"), "DTANK001", "vessel migrated")
+	gpEq(GPSymbolNaming.gpMigrate("ball_valve"), "DVALVE002", "ball valve migrated")
+	gpCheck(GPSymbolNaming.gpIsLegacy("globe_valve"), "known legacy id recognised")
 
 
 func gpTestUnknownIdsPassThroughUnchanged() -> void:
@@ -104,35 +106,35 @@ func gpTestUnknownIdsPassThroughUnchanged() -> void:
 func gpTestLegacyLookupFindsTheRenamedSymbol() -> void:
 	# The whole point of the alias table: an old *.pid.json must still open.
 	# 别名表的全部意义：旧 *.pid.json 必须仍能打开。
-	var gpD: GPSymbolDef = GPSymbolLibrary.gpFindById("P_CentrifugalPump_001")
+	var gpD: GPSymbolDef = GPSymbolLibrary.gpFindById("centrifugal_pump")
 	gpCheck(gpD != null, "a pre-rule id still resolves through the library")
 	if gpD != null:
-		gpEq(gpD.gpId, "LPUMP003", "and resolves to the renamed definition")
+		gpEq(gpD.gpId, "DPUMP001", "and resolves to the renamed definition")
 
 
 func gpTestEveryBuiltinDefFollowsTheRule() -> void:
-	var gpDefs: Array[GPSymbolDef] = GPSymbolPackIso_10628.gpDefs()
-	gpCheck(gpDefs.size() > 0, "the ISO pack is not empty")
+	var gpDefs: Array[GPSymbolDef] = GPSymbolPackDexpi.gpDefs()
+	gpCheck(gpDefs.size() > 0, "the DEXPI C01 pack is not empty")
 	for gpD in gpDefs:
 		gpCheck(GPSymbolNaming.gpIsValid(gpD.gpId), "built-in id follows the rule: %s" % gpD.gpId)
-		gpEq(GPSymbolNaming.gpParse(gpD.gpId).get("source", ""), "L",
-			"library symbols are flagged L: %s" % gpD.gpId)
+		gpEq(GPSymbolNaming.gpParse(gpD.gpId).get("source", ""), "D",
+			"DEXPI symbols are flagged D: %s" % gpD.gpId)
 
 
 func gpTestBuiltinIdsAreUnique() -> void:
 	var gpSeen: Array[String] = []
-	for gpD in GPSymbolPackIso_10628.gpDefs():
+	for gpD in GPSymbolPackDexpi.gpDefs():
 		gpCheck(not gpSeen.has(gpD.gpId), "no duplicate id in the pack: %s" % gpD.gpId)
 		gpSeen.append(gpD.gpId)
 
 
 func gpTestAliasTableMatchesTheGeneratedMap() -> void:
-	# The generator writes assets/symbol_packs/iso_10628/legacy_id_map.json on every run.
+	# The generator writes assets/symbol_packs/dexpi/legacy_id_map.json on every run.
 	# If that map and the compiled-in table drifted, an old file would resolve differently
 	# in a fresh build than in the generator's own output.
-	# 生成器每次运行都会写出 assets/symbol_packs/iso_10628/legacy_id_map.json。
+	# 生成器每次运行都会写出 assets/symbol_packs/dexpi/legacy_id_map.json。
 	# 若该映射与编译进代码的常量表脱节，旧文件在新构建中的解析结果就会与生成器输出不一致。
-	var gpPath: String = "res://assets/symbol_packs/iso_10628/legacy_id_map.json"
+	var gpPath: String = "res://assets/symbol_packs/dexpi/legacy_id_map.json"
 	if not FileAccess.file_exists(gpPath):
 		gpCheck(false, "legacy id map is missing: %s" % gpPath)
 		return
