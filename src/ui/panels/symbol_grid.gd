@@ -35,20 +35,27 @@ var gpAvailWidth: float = 0.0
 # 告诉网格应以哪个宽度进行布局。
 func gpSetAvailWidth(gpW: float) -> void:
 	gpAvailWidth = gpW
+	# CRITICAL: recompute the MINIMUM SIZE as well, not just the layout. The column count derives
+	# from the available width, so a width change changes the row count and therefore the height
+	# the grid must report to its parent VBox. Calling only queue_sort() left the parent with the
+	# height of the OLD column count — the grid then laid its cells out over more rows than the
+	# space it had been given, and every following category's header was drawn on top of the
+	# previous category's last row (the reported "categories overlap" defect).
+	# 关键：不仅要重排，还要重算「最小尺寸」。列数由可用宽度推导，故宽度变化会改变行数，进而改变
+	# 网格必须上报给父 VBox 的高度。此前只调 queue_sort()，父级仍持有**旧列数**对应的高度 —— 网格
+	# 于是按多于所分配空间的行数摆放单元格，后续每个类目的标题都画在了上一个类目最后一行的上面
+	#（即用户报告的「分类重叠」缺陷）。
+	update_minimum_size()
 	queue_sort()
 
 
-# Recompute the cell (roughly square) size from the current symbol font size so the
-# thumbnail + label block scales together with the symbol text drawn on the canvas.
-# 根据当前图元字号重算单元格（近似方形）尺寸，使缩略图 + 文字块与画布上的图元文字同步缩放。
+# Cell height, taken from the SINGLE metric owner (GPSymbolPaletteItem). The grid must never
+# re-derive it: while it derived its own value from gpFontSize and the item reserved space from
+# gpSymbolFontSize, the two disagreed and categories overlapped.
+# 单元格高度取自**唯一的度量拥有者**（GPSymbolPaletteItem）。网格绝不自行推导：此前它按
+# gpFontSize 自行推导、而条目按 gpSymbolFontSize 预留空间，二者不一致，导致类目重叠。
 func _gpCellSize() -> float:
-	# Mirror GPSymbolPaletteItem._gpCalcSizes() / custom_minimum_size.y:
-	# thumbnail side = fontSize + 8, label font size = fontSize, plus 4 top margin +
-	# 4 gap + 4 bottom pad = +12. The cell must be at least this tall to avoid clipping.
-	# 与 GPSymbolPaletteItem._gpCalcSizes() / custom_minimum_size.y 一致：缩略图边长=字号+8，
-	# 标签字号=字号，再加顶距4 + 间距4 + 底距4 = 共+12。单元格至少这么高才不裁切。
-	var gpFontSize: float = float(Settings.gpSymbolFontSize)
-	return (gpFontSize + 8.0) + gpFontSize + 12.0
+	return GPSymbolPaletteItem.gpCellHeight(Settings.gpFontSize)
 
 
 # Re-layout the grid when the symbol font size changes (no need to recreate items).
@@ -84,12 +91,26 @@ func _gpCols() -> int:
 # 最小宽度报 0，使 ScrollContainer 能把网格拉伸到整个视口宽度（自动重排列数）；
 # 高度保留自然值以保留纵向滚动。停靠栏下限由 HSplitContainer 分隔条保证，而非本网格最小宽。
 func _get_minimum_size() -> Vector2:
-	var gpN: int = get_child_count()
-	if gpN == 0:
+	var gpVisible: Array[Control] = _gpVisibleChildren()
+	if gpVisible.is_empty():
 		return Vector2(0.0, 0.0)
-	var gpRows: int = ceili(float(gpN) / float(_gpCols()))
+	var gpRows: int = ceili(float(gpVisible.size()) / float(_gpCols()))
 	var gpH: float = float(gpRows) * _gpCellSize() + GP_V_SEP * float(gpRows - 1)
 	return Vector2(0.0, gpH)
+
+
+# Only VISIBLE children participate in the grid. The palette-visibility gear menu hides
+# individual symbols by toggling child visibility; counting hidden children would leave
+# empty holes and phantom rows.
+# 网格只排布**可见**子项。图元库可见性齿轮菜单通过切换子项可见性来隐藏单个图元；
+# 若把隐藏子项计入，会留下空洞与幻影行。
+func _gpVisibleChildren() -> Array[Control]:
+	var gpOut: Array[Control] = []
+	for gpC in get_children():
+		var gpChild: Control = gpC as Control
+		if gpChild != null and gpChild.visible:
+			gpOut.append(gpChild)
+	return gpOut
 
 
 # Re-layout children whenever the container is sorted by the engine.
@@ -105,7 +126,8 @@ func _notification(gpWhat: int) -> void:
 # 把每个可见子项按列优先网格定位，并把每格均分铺满可用宽度：右侧无空隙、
 # 因「步距 > 格宽」而永不重叠。
 func _gpSort() -> void:
-	var gpN: int = get_child_count()
+	var gpVisible: Array[Control] = _gpVisibleChildren()
+	var gpN: int = gpVisible.size()
 	if gpN == 0:
 		return
 	var gpCols: int = _gpCols()
@@ -119,9 +141,7 @@ func _gpSort() -> void:
 	var gpCw: float = (gpAvail - GP_H_SEP * float(gpCols - 1)) / float(gpCols)
 	gpCw = maxf(gpCw, 1.0)
 	for gpI in range(gpN):
-		var gpChild: Control = get_child(gpI) as Control
-		if gpChild == null or not gpChild.visible:
-			continue
+		var gpChild: Control = gpVisible[gpI]
 		var gpCol: int = gpI % gpCols
 		var gpRow: int = int(gpI / gpCols)
 		var gpX: float = float(gpCol) * (gpCw + GP_H_SEP)

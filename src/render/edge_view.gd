@@ -218,7 +218,14 @@ func _draw() -> void:
 		GPEdgePainter.gpDrawArrow(self, gpPts, gpCol)
 
 	if _gpShouldDrawTag():
-		_gpDrawTag(gpPts, gpCol)
+		var gpGeo: Dictionary = gpTagGeometry()
+		if not gpGeo.is_empty():
+			_gpDrawTag(gpCol, gpGeo)
+			# Selection handle only while the edge is selected/editing, so a dragged-away
+			# number stays discoverable and grabbable. / 仅当选中 / 编辑时画手柄，使被拖离的编号
+			# 仍可被找到、可抓取。
+			if gpSelected or gpEditing:
+				_gpDrawTagGrip(gpGeo)
 
 
 # Paint the pipe BODY into the gpInkLine Line2D child — the single visible geometry for the edge.
@@ -268,30 +275,134 @@ func _gpShouldDrawTag() -> bool:
 	return _gpAttrBool("show_tag", gpDefault)
 
 
-# Paint the line number (or its placeholder) on the longest leg.
-# 把管线编号（或其占位符）绘制到最长段上。
-func _gpDrawTag(gpPts: PackedVector2Array, gpCol: Color) -> void:
+# Where the line number currently sits, in WORLD coordinates — the single source of truth that
+# the painter, the drag grip and the leader ALL read, so the three can never disagree about
+# where the number is.
+# 管线号当前落位（世界坐标）—— 绘制、拖拽手柄与引出线共同读取的唯一真相来源，
+# 故三者对「编号在哪」永不会各执一词。
+# [return] {} when this edge shows no number at all; otherwise a record carrying
+#   "text" / "font" / "fit" / "scale" / "pos" / "rot" / "size" / "box" / "leader" / "anchor" /
+#   "offset" / "placeholder" / "detached" / "flipped".
+# 本边完全不显示编号时返回 {}；否则返回含上述各键的记录。
+# "detached" / "flipped" describe the callout state a dragged-away number is in (flat, with a
+# leader); both come straight from gpPlaceCallout(), the single decision point, so the painter and
+# any future UI reading them can never disagree with the geometry that was actually drawn.
+# "detached" / "flipped" 描述被拖离的编号所处的引出标注状态（横排 + 引出线）；两者直接来自唯一
+# 判定点 gpPlaceCallout()，故绘制方与日后读取它们的界面，都不可能和真正画出的几何不一致。
+func gpTagGeometry() -> Dictionary:
+	if gpEdge == null or not _gpShouldDrawTag():
+		return {}
+	var gpPts: PackedVector2Array = gpPolyline()
+	if gpPts.size() < 2:
+		return {}
 	var gpFont: Font = ThemeDB.fallback_font
 	if gpStyle != null and gpStyle.gpSymbolFont != null:
 		gpFont = gpStyle.gpSymbolFont
-	# Pipe-tag font size overrides the symbol font size when set (>0); otherwise it inherits.
-	# 管线位号字号在设置为正时覆盖图元字号，否则继承。
-	var gpSizeSrc: int = 16
+	# A line number is an in-line annotation, which the reference drawing sets at 3.0 mm — the same
+	# tier as a valve label, not the 4.5 mm of an equipment tag. The project-level override still
+	# wins when set (> 0). See GPTextRole for the measurement.
+	# 管线号属在管标注，参照图取 3.0mm —— 与阀门标注同档，而非设备位号的 4.5mm。项目级覆盖在
+	# 设置为正时仍然优先。实测见 GPTextRole。
+	var gpSizeSrc: float = GPTextRole.GP_INLINE_TAG_MM
 	if gpStyle != null:
-		gpSizeSrc = gpStyle.gpPipeTagFontSize if gpStyle.gpPipeTagFontSize > 0 else gpStyle.gpSymbolFontSize
-	var gpSize: int = maxi(1, gpSizeSrc)
+		gpSizeSrc = GPTextRole.gpPipeTagMM(gpStyle.gpPipeTagFontSize, gpStyle.gpSymbolFontSize)
+	# The tag is drawn in DESIGN PIXELS (see GPCanvasText): a bitmap produced at the sheet height
+	# would be magnified by the canvas scale and read as a grey smudge, whichever family is set.
+	# 位号按**设计像素**绘制（详见 GPCanvasText）：以图面字高生成的字模会被画布缩放放大成一团灰糊，
+	# 与所选字族无关。
+	var gpScale: float = GPCanvasText.gpScaleOf(self)
+	var gpFit: Vector2 = GPCanvasText.gpLabelFontFit(gpSizeSrc, self)
 	var gpText: String = gpEdge.gpTag
-	var gpColor: Color = gpCol
-	if gpText == "":
- # Unnumbered pipe: shout instead of staying silent.
- # 未编号管道：显式提示，而非沉默。
+	var gpPlaceholder: bool = gpText == ""
+	if gpPlaceholder:
+		# Unnumbered pipe: shout instead of staying silent.
+		# 未编号管道：显式提示，而非沉默。
 		gpText = GP_TAG_PLACEHOLDER
-		gpColor = GPEdgeStyle.GP_DANGLING
 	# The per-edge "tag_rotate" attribute overrides the global default when present; otherwise
 	# the global setting decides whether a vertical-run number is rotated.
 	# 当边显式带 "tag_rotate" 属性时该属性优先；否则由全局设置决定竖管位号是否旋转。
-	var gpRotate: bool = _gpAttrBool("tag_rotate", gpStyle.gpPipeTagRotate if gpStyle != null else false)
-	GPEdgePainter.gpDrawTag(self, gpPts, gpText, gpFont, gpSize, gpColor, gpRotate)
+	# The no-snapshot fallback is TRUE, matching both Settings and GPRenderStyle: "a vertical run is
+	# numbered bottom-to-top" is a drafting convention, and a missing snapshot must not silently flip
+	# a convention (the old `false` here meant an un-injected view rendered horizontal numbers).
+	# 无快照时的回落取**真**，与 Settings、GPRenderStyle 三处一致：「竖管自下而上编号」是制图约定，
+	# 而缺失快照不得静默翻转一条约定（此处旧值 `false` 意味着未被注入的视图会渲染水平编号）。
+	var gpRotate: bool = _gpAttrBool("tag_rotate", gpStyle.gpPipeTagRotate if gpStyle != null else true)
+	# Measured in the draw frame's unit (one design pixel), then converted to world units for the
+	# layout module, which reasons in world coordinates — and converted back by the draw transform.
+	# 以绘制坐标系单位（1 设计像素）测量，再换算为世界单位交给以世界坐标推理的布局模块；
+	# 绘制变换会把它换算回来。
+	var gpSzPx: Vector2 = gpFont.get_string_size(gpText, HORIZONTAL_ALIGNMENT_LEFT, -1.0,
+		int(gpFit.x)) * gpFit.y
+	var gpSzWorld: Vector2 = gpSzPx / maxf(gpScale, 0.0001)
+	# The manual drag offset rides in as a WORLD vector, so a dragged number keeps its place on
+	# the sheet across zoom changes exactly like an un-dragged one.
+	# 手工拖拽偏移以**世界**向量传入，故被拖拽过的编号与未被拖拽者一样，在缩放变化间保持其在
+	# 图纸上的位置。
+	# gpPlaceCallout() — NOT gpPlace() — is the entry point: the callout rule (a number pulled clear
+	# of its pipe is laid flat, with its leader) has to be applied where BOTH the placement and the
+	# leader are produced. Calling the two separately is what let a rotated column keep a leader.
+	# 入口是 gpPlaceCallout() 而非 gpPlace()：引出标注规则（被拉离管线的编号一律放平并带引出线）
+	# 必须在「落位与引出线同时产出」的地方施加。分别调用这两者，正是「竖排字列却带着引出线」的由来。
+	var gpOffset: Vector2 = gpEdge.gpTagOffset()
+	var gpCall: Dictionary = GPEdgeTagLayout.gpPlaceCallout(gpPts, gpSzWorld.x, gpSzWorld.y,
+		gpRotate, GPEdgeTagLayout.GP_GAP, gpOffset)
+	return {
+		"text": gpText,
+		"font": gpFont,
+		"fit": gpFit,
+		"scale": gpScale,
+		"pos": gpCall.get("pos", Vector2.ZERO),
+		"rot": float(gpCall.get("rot", 0.0)),
+		"size": gpSzWorld,
+		"box": GPEdgeTagLayout.gpBox(gpCall, gpSzWorld.x, gpSzWorld.y),
+		"leader": gpCall.get("leader", PackedVector2Array()),
+		"anchor": gpCall.get("anchor", Vector2.ZERO),
+		"offset": gpOffset,
+		"placeholder": gpPlaceholder,
+		"detached": bool(gpCall.get("detached", false)),
+		"flipped": bool(gpCall.get("flipped", false)),
+	}
+
+
+# Paint the line number (or its placeholder) where gpTagGeometry() put it — a leader line first
+# when the number has been dragged away from its pipe.
+# 在 gpTagGeometry() 指定的位置绘制管线编号（或其占位符）—— 编号被拖离其管线时先绘制引出线。
+func _gpDrawTag(gpCol: Color, gpGeo: Dictionary) -> void:
+	var gpColor: Color = gpCol
+	if bool(gpGeo.get("placeholder", false)):
+		gpColor = GPEdgeStyle.GP_DANGLING
+	GPEdgePainter.gpDrawLeader(self, gpGeo.get("leader", PackedVector2Array()), gpColor, gpZoom)
+	GPEdgePainter.gpDrawTag(self, gpGeo, gpColor)
+
+
+# Selection handle on the line number, so a dragged-away tag is discoverable and grabbable.
+# 管线号上的选中手柄，使被拖离的编号可被发现、可被抓取。
+# Mirrors the node-label grip: a white square with a blue outline, drawn at the tag box centre in
+# world units (divided by the zoom so it stays a constant ~9 screen pixels, exactly like the
+# node-label handle in symbol_view).
+# 与图元位号手柄同形：白底蓝框方块，画在编号包围盒中心（世界单位下除以缩放以保持约 9 屏幕像素恒定，
+# 与 symbol_view 中的图元位号手柄完全一致）。
+func _gpDrawTagGrip(gpGeo: Dictionary) -> void:
+	var gpBox: Rect2 = gpGeo.get("box", Rect2())
+	if gpBox == Rect2():
+		return
+	var gpGs: float = GPLabelGripOps.GP_GRIP_SIZE / maxf(gpZoom, 0.0001)
+	var gpC: Vector2 = gpBox.get_center()
+	var gpR: float = gpGs * 0.5
+	draw_rect(Rect2(gpC.x - gpR, gpC.y - gpR, gpGs, gpGs), Color(1.0, 1.0, 1.0), true)
+	draw_rect(Rect2(gpC.x - gpR, gpC.y - gpR, gpGs, gpGs), GPLabelGripOps.GP_COL, false, 1.5 / gpZoom)
+
+
+# Live preview while the number is being dragged: write the offset straight onto the edge and
+# repaint. The drag commits on release as ONE undo step, exactly like the node-label drag — the
+# preview is deliberately outside the command stack so a 60 Hz drag does not push 60 undo steps.
+# 拖拽编号时的实时预览：把偏移直接写到边上并重绘。拖拽在释放时作为**一个**撤销步提交，与图元
+# 标签拖拽完全一致 —— 预览有意不经过命令栈，使 60Hz 的拖拽不会压入 60 个撤销步。
+func gpSetTagOffsetPreview(gpOffset: Vector2) -> void:
+	if gpEdge == null:
+		return
+	gpEdge.gpSetTagOffset(gpOffset)
+	queue_redraw()
 
 
 # Read a boolean from gpAttrs with a default. Absent key == default, never an error.

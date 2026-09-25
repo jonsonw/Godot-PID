@@ -103,6 +103,9 @@ func gpCancelActiveTool() -> bool:
 	if gpHost.gpLabelGrips != null and gpHost.gpLabelGrips.gpIsDragging():
 		gpHost.gpLabelGrips.gpCancelDrag()
 		return true
+	if gpHost.gpEdgeTagGrips != null and gpHost.gpEdgeTagGrips.gpIsDragging():
+		gpHost.gpEdgeTagGrips.gpCancelDrag()
+		return true
 	if gpHost.gpPortOps != null and gpHost.gpPortOps.gpIsDragging():
 		gpHost.gpPortOps.gpCancelDrag()
 		return true
@@ -136,6 +139,11 @@ func gpOnLeftUp(gpScreen: Vector2) -> void:
 	# 这次拖拽从未被记录。
 	if gpHost.gpLabelGrips != null and gpHost.gpLabelGrips.gpIsDragging():
 		gpHost.gpLabelGrips.gpEndGripDrag()
+		gpHost.accept_event()
+		return
+	# Edge line-number grip release : commit the drag as ONE undo step. / 边管线号抓取点释放：提交为一个撤销步。
+	if gpHost.gpEdgeTagGrips != null and gpHost.gpEdgeTagGrips.gpIsDragging():
+		gpHost.gpEdgeTagGrips.gpEndGripDrag()
 		gpHost.accept_event()
 		return
 	# Everything else (draw commit / marquee / group drag) is dispatched to the active tool.
@@ -285,6 +293,13 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
 			gpHost.gpLabelGrips.gpOnGripMove(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position))
 			gpHost.accept_event()
 			return
+ # Edge line-number grip drag . Checked right after the node-label grip so the two never
+ # fight over the same motion event. / 边管线号抓取点拖拽。紧跟节点位号抓取点之后检查，
+ # 使两者不争抢同一移动事件。
+		if gpHost.gpEdgeTagGrips != null and gpHost.gpEdgeTagGrips.gpIsDragging():
+			gpHost.gpEdgeTagGrips.gpOnGripMove(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position))
+			gpHost.accept_event()
+			return
  # Endpoint-anchor drag (port-to-port connect). / 端点锚点拖拽（端对端连线）。
 		if gpHost.gpPortOps != null and gpHost.gpPortOps.gpIsDragging():
 			gpHost.gpPortOps.gpUpdateDrag(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position))
@@ -296,6 +311,10 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
  # M10b：抓取点上方显示移动光标。手柄仅 9 px 宽且位于字形**之外**，
  # 没有反馈没人找得到它、更别说拖它。
 		if gpHost.gpLabelGrips != null and gpHost.gpLabelGrips.gpUpdateHoverCursor(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position)):
+			gpHost.accept_event()
+			return
+ # Edge line-number grip hover cursor. / 边管线号抓取点悬停光标。
+		if gpHost.gpEdgeTagGrips != null and gpHost.gpEdgeTagGrips.gpUpdateHoverCursor(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position)):
 			gpHost.accept_event()
 			return
  # Hover highlight for the anchor under the cursor (outside any drag).

@@ -23,9 +23,20 @@ extends Node2D
 # 包络底边到标签基线的垂直距离。
 const GP_LABEL_GAP: float = 7.0
 
-# Port dot radius (world units).
-# 端口圆点半径（世界单位）。
-const GP_PORT_R: float = 4.0
+# Port dot radius: a FRACTION of the symbol's shorter side, clamped, instead of a fixed value.
+# WHY NOT A CONSTANT ANY MORE: the constant was 4.0 and was written in the pixel era — since the
+# world unit became 1 mm (plan Phase 0) it meant a 4 mm radius, i.e. an 8 mm dot on a 4x2 mm ball
+# valve. That is the reported "endpoint size does not match the symbol at all". A ratio with a
+# clamp keeps a nozzle dot readable on a column and proportionate on a valve; a screen-space floor
+# stops it from vanishing when the whole sheet is fitted into the viewport.
+# 端口圆点半径：取图元**较短边**的某个比例并夹取，而不再是一个定值。
+# 为何不再用常量：该常量为 4.0 且写于像素时代 —— 自世界单位改为 1mm（计划 Phase 0）起，它意味着
+# 4mm 半径，即在 4×2mm 的球阀上画一个 8mm 的圆点。这正是用户报告的「端点大小跟图元完全不匹配」。
+# 用「比例 + 夹取」可让管口点在塔器上可读、在阀门上成比例；屏幕空间下限则避免整图适配视口时它
+# 彻底消失。
+const GP_PORT_R_RATIO: float = 0.06
+const GP_PORT_R_MIN: float = 0.4
+const GP_PORT_R_MAX: float = 1.6
 
 # Bound graph node id.
 # 绑定的图节点 id。
@@ -152,23 +163,69 @@ func _draw() -> void:
 	var gpFont: Font = ThemeDB.fallback_font
 	if gpStyle != null and gpStyle.gpSymbolFont != null:
 		gpFont = gpStyle.gpSymbolFont
-	var gpFontSz: int = maxi(1, gpStyle.gpSymbolFontSize if gpStyle != null else 16)
+	# Text is drawn in DESIGN PIXELS, not millimetres: a bitmap produced at the sheet height (3 px
+	# for a 3 mm tag) is magnified by world_root's scale and reads as a grey smudge. See GPCanvasText
+	# for the rationale. The counter-scale makes one draw unit one design pixel, so every coordinate
+	# below is a world coordinate multiplied by the accumulated scale.
+	# 文字按**设计像素**绘制，而非毫米：以图面字高（3mm 位号即 3px）生成的字模会被 world_root 的
+	# 缩放放大成一团灰糊（详见 GPCanvasText）。该反向缩放使 1 绘制单位 == 1 设计像素，故下方每个
+	# 坐标都是「世界坐标 × 累积缩放」。
+	var gpScale: float = GPCanvasText.gpScaleOf(self)
+	# The height depends on WHAT the symbol is, not on a single global number: the reference drawing
+	# annotates equipment at 4.5 mm and everything in-line at 3.0 mm. See GPTextRole for the
+	# measurement. The setting supplies the in-line tier (and the fallback for an unknown category).
+	# 字高取决于**图元是什么**，而非一个全局数字：参照图对设备标注 4.5mm、对在管标注 3.0mm。实测见
+	# GPTextRole。设置项提供在管档（并作为未知类别的兜底）。
+	var gpFontMM: float = GPTextRole.gpTagMM(gpDef.gpCategory if gpDef != null else "",
+		gpStyle.gpSymbolFontSize if gpStyle != null else GPTextRole.GP_INLINE_TAG_MM)
+	var gpFit: Vector2 = GPCanvasText.gpLabelFontFit(gpFontMM, self)
+	var gpFontSz: int = int(gpFit.x)
 	# Measure first, then place the text relative to the anchor per its alignment.
 	# 先测量，再按对齐方式把文字摆到锚点的相应位置。
-	var gpSzText: Vector2 = gpFont.get_string_size(gpLabel, HORIZONTAL_ALIGNMENT_LEFT, -1.0, gpFontSz)
-	var gpOrigin: Vector2 = gpOff + GPLabelGripOps.gpTextOrigin(gpAnchor, Vector2.ZERO, gpSzText)
-	draw_string(gpFont, gpOrigin, gpLabel, GPLabelGripOps.gpAlignFor(gpAnchor),
+	# The offset term is world mm and the measured size is design px — see gpDrawOrigin for why the
+	# two must not be scaled together (that was the reported zoom drift).
+	# 偏移项为世界 mm，实测尺寸为设计像素 —— 二者不可同乘缩放，原因见 gpDrawOrigin
+	#（那正是用户报告的缩放漂移）。
+	# The box is the ROUNDED size times the residual, i.e. the box that will actually be painted — the
+	# placement must be computed from that, not from the un-compensated measurement.
+	# 包围盒取「取整字号 × 残差」，即**真正会被画出来**的那个盒子；定位必须据它计算，而非未补偿的测量值。
+	var gpSzText: Vector2 = gpFont.get_string_size(gpLabel, HORIZONTAL_ALIGNMENT_LEFT, -1.0,
+		gpFontSz) * gpFit.y
+	var gpOrigin: Vector2 = GPLabelGripOps.gpDrawOrigin(gpAnchor, gpOff, gpSzText, gpScale)
+	# The residual rides in the DRAW SCALE, so the anchor must be pre-divided by it: the glyph then
+	# scales ABOUT gpOrigin and lands on exactly the design pixel gpDrawOrigin chose. Putting gpOrigin
+	# in the transform's position instead would multiply it by the parent scale a second time — the
+	# very error gpDrawOrigin exists to prevent (it put every tag ~6 mm off the moment it was tried).
+	# 残差乘在**绘制缩放**上，故锚点须预先除以它：字形因此绕 gpOrigin 缩放，落点仍是 gpDrawOrigin 选定
+	# 的那个设计像素。若把 gpOrigin 放进变换的 position，它会被父级缩放**再乘一次** —— 正是 gpDrawOrigin
+	# 存在的意义所在（试过之后每个位号立刻偏了约 6mm）。
+	draw_set_transform(Vector2.ZERO, 0.0, GPCanvasText.gpTextScale(gpFit, gpScale))
+	# The alignment argument is inert at width = -1 (Godot ignores it; measured), so the position is
+	# fully determined by gpDrawOrigin above. It is passed anyway to state the intent, and it stays
+	# pinned by gp_test_label_anchor.
+	# 宽度为 -1 时对齐参数不起作用（Godot 忽略它，已实测），故位置完全由上面的 gpDrawOrigin 决定。
+	# 仍然传入它只是为了表明意图，并由 gp_test_label_anchor 钉住其取值。
+	draw_string(gpFont, gpOrigin / gpFit.y, gpLabel, GPLabelGripOps.gpAlignFor(gpAnchor),
 		-1.0, gpFontSz, Color(0.9, 0.9, 0.9))
+	# Restore the identity so the grip below (and any later draw on this item) is unaffected.
+	# 复位为单位变换，使下方的抓取点（以及本项之后的任何绘制）不受影响。
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 	# The drag handle, only while selected — same visual language as the edge grips.
 	# 仅在选中时绘制拖拽手柄 —— 与边抓取点同一套视觉语言。
+	# GPLabelGripOps.GP_GRIP_SIZE is a SCREEN-pixel size (the edge grips draw it in screen space),
+	# but this node draws inside the scaled world_root — used raw it became a 9 mm square, i.e. a
+	# handle larger than a ball valve. Dividing by the accumulated scale restores the intended
+	# constant screen size and matches the edge grips exactly.
+	# GPLabelGripOps.GP_GRIP_SIZE 是**屏幕像素**尺寸（边抓取点在屏幕空间绘制它），但本节点在
+	# 被缩放的世界根内绘制 —— 直接使用会变成 9mm 方块，即比球阀还大的手柄。除以累积缩放即可恢复
+	# 既定的屏幕恒定尺寸，并与边抓取点完全一致。
 	if gpSelected:
-		var gpHalf: float = GPLabelGripOps.GP_GRIP_SIZE * 0.5
-		draw_rect(Rect2(gpOff - Vector2(gpHalf, gpHalf),
-			Vector2(GPLabelGripOps.GP_GRIP_SIZE, GPLabelGripOps.GP_GRIP_SIZE)),
+		var gpGs: float = GPLabelGripOps.GP_GRIP_SIZE / gpScale
+		var gpHalf: float = gpGs * 0.5
+		draw_rect(Rect2(gpOff - Vector2(gpHalf, gpHalf), Vector2(gpGs, gpGs)),
 			Color(1.0, 1.0, 1.0), true)
-		draw_rect(Rect2(gpOff - Vector2(gpHalf, gpHalf),
-			Vector2(GPLabelGripOps.GP_GRIP_SIZE, GPLabelGripOps.GP_GRIP_SIZE)),
+		draw_rect(Rect2(gpOff - Vector2(gpHalf, gpHalf), Vector2(gpGs, gpGs)),
 			GPLabelGripOps.GP_COL, false, 1.5)
 
 
@@ -195,9 +252,21 @@ func gpDrawBody(gpCv: CanvasItem) -> void:
 		gpFill = Color(0.3, 1.0, 0.4)
 		gpStroke = Color(1.0, 1.0, 1.0)
 
-	# Border width is kept constant in world units; world_root scale makes it zoom uniformly.
-	# 边框宽度保持世界单位常量；world_root 的缩放使其统一随缩放变化。
-	var gpBorder: float = 2.0
+	# Border width is the equipment-outline weight: 0.35 mm (ISO multi-weight standard). It is a
+	# world-unit (mm) constant, so world_root scale zooms it uniformly. It is floored in SCREEN
+	# space, exactly like the edge layer (GPEdgeStyle.GP_MIN_PX), because at the sheet-fit zoom
+	# (~2x) 0.35 mm is 0.7 screen points and renders as a washed-out hairline. The mm value stays
+	# the authored / exported weight; only the on-screen render gets a floor.
+	# 边框宽度取设备轮廓线宽：0.35 mm（ISO 多级线宽标准）。为世界单位（mm）常量，随 world_root
+	# 缩放统一变化。它在**屏幕**空间设下限，与连线层（GPEdgeStyle.GP_MIN_PX）完全一致 —— 因为在
+	# 整图适配缩放（约 2×）下 0.35mm 仅 0.7 屏幕点，看起来是发虚的细丝。mm 值仍是既定/导出线宽，
+	# 只有屏幕渲染获得下限。
+	# The accumulated scale is read from the transform instead of being plumbed in: this node lives
+	# under a scaled world_root, so its global scale IS the camera zoom (one source, no plumbing).
+	# 累积缩放直接从变换读取而非层层传递：本节点位于被缩放的世界根之下，其全局缩放**就是**相机
+	# 缩放（单一来源，无需布线）。
+	var gpScale: float = maxf(absf(gpCv.get_global_transform().get_scale().x), 0.01)
+	var gpBorder: float = maxf(0.35, GPEdgeStyle.GP_MIN_PX / gpScale)
 
 	# If the definition carries a vector shape spec, render it natively (crisp at any zoom).
 	# 若定义带有矢量形状规格，则原生渲染（任意缩放均清晰）。
@@ -214,6 +283,23 @@ func gpDrawBody(gpCv: CanvasItem) -> void:
 	# 位置取自 GPPortResolver —— 与 GPEdgeView 计算管线端点所用的同一来源，
 	# 故圆点永不会与落在它上面的管线脱开。
 	if gpDef != null:
+		var gpPortR: float = gpPortRadiusFor(gpSz)
+		# Screen-space floor so a fitted whole sheet does not erase the connection marks.
+		# 屏幕空间下限，使「整图适配」时连接标记不会被抹掉。
+		gpPortR = maxf(gpPortR, GPEdgeStyle.GP_MIN_PX * 0.9 / gpScale)
 		for gpP in gpDef.gpPorts:
 			var gpLp: Vector2 = GPPortResolver.gpPortLocalOriented(gpDef, gpNode, gpP)
-			gpCv.draw_circle(gpLp, GP_PORT_R, GPEdgeStyle.gpPortColor(gpP.gpType))
+			gpCv.draw_circle(gpLp, gpPortR, GPEdgeStyle.gpPortColor(gpP.gpType))
+
+
+# Port dot radius (world mm) for a symbol of this size: a fraction of the SHORTER side, clamped.
+# Split out as a pure function so the reported "endpoint size does not match the symbol" defect is
+# pinned by a test instead of only by a screenshot.
+# 给定尺寸图元的端口圆点半径（世界 mm）：取**较短边**的某个比例并夹取。拆为纯函数，使
+# 用户报告的「端点大小与图元不匹配」缺陷由测试钉住，而非仅靠截图。
+# NOTE: this is the authored / exported radius. The renderer additionally applies a SCREEN-space
+# floor (GPEdgeStyle.GP_MIN_PX), which is a display-only concession and deliberately not here.
+# 注意：本值为既定 / 导出半径。渲染时另加**屏幕**空间下限（GPEdgeStyle.GP_MIN_PX），那是
+# 纯显示让步，刻意不放在此处。
+static func gpPortRadiusFor(gpSize: Vector2) -> float:
+	return clampf(minf(gpSize.x, gpSize.y) * GP_PORT_R_RATIO, GP_PORT_R_MIN, GP_PORT_R_MAX)

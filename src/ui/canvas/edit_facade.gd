@@ -146,6 +146,12 @@ func gpRequestConnectEdge(gpFromRef: Dictionary, gpToRef: Dictionary, gpKind: St
 func gpRequestSetLabelOffset(gpNodeId: String, gpOffset: Vector2) -> bool:
 	return gpHost.gpActions.gpSetLabelOffset(gpNodeId, gpOffset)
 
+# Move the line number of one edge . The offset is in WORLD millimetres, added on top of the
+# automatic placement; Vector2.ZERO means "back to the automatic placement".
+# 移动某条边的管线号。偏移为**世界毫米**，叠加在自动落位之上；Vector2.ZERO 意为「回到自动落位」。
+func gpRequestSetEdgeTagOffset(gpEdgeId: String, gpOffset: Vector2) -> bool:
+	return gpHost.gpActions.gpSetEdgeTagOffset(gpEdgeId, gpOffset)
+
 # Record a finished group drag as one undo step. The caller rewinds the nodes to their
 # pre-drag positions first, so the command re-applies the move instead of doubling it.
 # 把一次完成的整组拖拽记录为一个撤销步。调用方先把节点回退到拖拽前位置，

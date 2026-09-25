@@ -40,14 +40,20 @@ var gpHost: GPMainWindow = null
 # 高亮与当前画布模式匹配的开关按钮（选择 / 连线 / 绘图工具）。可选 gpMode 参数使其既能作为
 # gpModeChanged 信号的 1 参回调，又能在别处 0 参调用；gpMode < 0 时读取画布实时模式。
 func gpSyncToolBar(gpMode: int = -1) -> void:
-	# The Ribbon owns the mode highlight now; delegate to it .
-	# 模式高亮现由 Ribbon 负责，委托给它。
+	# The Ribbon built the highlight while it existed; since its removal the LEFT
+	# PALETTE's tool blocks own the mode highlight, so delegate there.
+	# Ribbon 存在时由它承担模式高亮；其移除后改由**左侧图元库**的工具块承担，故委托给它。
 	if gpHost.gpRibbon != null:
+		var gpCanvas0: GPCanvas2D = gpHost.gpActiveCanvas()
+		if gpMode < 0:
+			gpMode = GPCanvas2D.GPMode.GP_SELECT if gpCanvas0 == null else gpCanvas0.gpMode
+		gpHost.gpRibbon.gpSyncMode(gpMode)
+		return
+	if gpHost.gpLeftDock != null and gpHost.gpLeftDock.has_method("gpSyncMode"):
 		var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
 		if gpMode < 0:
 			gpMode = GPCanvas2D.GPMode.GP_SELECT if gpCanvas == null else gpCanvas.gpMode
-		gpHost.gpRibbon.gpSyncMode(gpMode)
-		return
+		gpHost.gpLeftDock.gpSyncMode(gpMode)
 
 # Toolbar button handler: select / connect / drawing tools switch the canvas mode; the
 # "New Symbol…" button opens the isolation editor for advanced symbol authoring.
@@ -119,18 +125,28 @@ func gpStyleChrome() -> void:
  # 右边界接缝由 GPOverlayChrome 统一绘制，这里不再重复画左边框。
 		gpHost.gpTabs.add_theme_stylebox_override("panel",
 			GPChromeStyle.gpStyleFor(GPChromeStyle.GP_DOCK_BG, 0))
- # 未选中 / hover 也带 1px 发丝底线，整排 tab 干净统一。
+ # 未选中 / hover 也带 1px 深色底线，整排 tab 干净统一；内容边距收紧，
+ # 使 tab 选择块小巧（参考图右栏顶部的 tab 尺寸）。
 		var gpTabBg: StyleBoxFlat = GPChromeStyle.gpStyleFor(GPChromeStyle.GP_DOCK_BG, GPChromeStyle.SIDE_BOTTOM)
+		gpTabBg.content_margin_left = 10.0
+		gpTabBg.content_margin_right = 10.0
+		gpTabBg.content_margin_top = 3.0
+		gpTabBg.content_margin_bottom = 3.0
 		gpHost.gpTabs.add_theme_stylebox_override("tab_unselected", gpTabBg)
 		gpHost.gpTabs.add_theme_stylebox_override("tab_hovered", gpTabBg)
- # 选中态：1px accent 底线（与未选中同厚，仅颜色不同）+ 略亮背景，细腻区分。
- # Selected: a 1px accent underline (same thickness as unselected, colour only
- # differs) plus a slightly lighter fill — delicate distinction, no heavy line.
-		var gpTabSel: StyleBoxFlat = StyleBoxFlat.new()
-		gpTabSel.bg_color = Color(0.118, 0.131, 0.163)
+ # 选中态：与参考图菜单「开始」tab 一致的深色底（#212A34，比 chrome 暗）+
+ # 1px accent 底线；尺寸与未选中相同，仅颜色不同。
+ # Selected: the same dark fill as the reference menu's active tab (#212A34,
+ # darker than chrome) plus a 1px accent underline; size identical to unselected,
+ # colour only differs.
+		var gpTabSel: StyleBoxFlat = gpTabBg.duplicate() as StyleBoxFlat
+		gpTabSel.bg_color = Color(0.129, 0.165, 0.204)
 		gpTabSel.border_color = GPChromeStyle.GP_ACCENT
 		gpTabSel.border_width_bottom = 1
 		gpHost.gpTabs.add_theme_stylebox_override("tab_selected", gpTabSel)
+ # Tab 行两端不留边距（参考图中 tab 从面板左缘起排）。
+ # No side margin on the tab row (reference tabs start at the panel's left edge).
+		gpHost.gpTabs.add_theme_constant_override("side_margin", 0)
 	if gpHost.gpBodySplit != null:
  # 引擎 grabber 透明：拖拽仍可用，但不再画粗亮块；接缝发丝线 + 悬停高亮
  # 由 GPOverlayChrome（顶层叠加层）绘制，细腻且不双重描边。

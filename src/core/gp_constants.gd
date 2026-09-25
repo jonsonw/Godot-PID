@@ -14,9 +14,11 @@ extends RefCounted
 # 几何比较容差（退化线段、重合判定）。
 const GP_EPS: float = 0.5
 
-# Fallback grid step in world units, matching the grid the overlay actually draws.
-# 回退网格步长（世界单位），与覆盖层实际画出的网格一致。
-const GP_GRID_STEP: float = 50.0
+# Fallback grid step in world units. From v0.1 the world unit is 1 mm (plan Phase 0), so this
+# is the MINOR grid spacing (10 mm); the overlay draws a coarser MAJOR grid every 5 steps.
+# 回退网格步长（世界单位）。从 v0.1 起世界单位 = 1mm（计划 Phase 0），故此即「次网格」间距
+# （10mm）；覆盖层每 5 格再画一道更粗的「主网格」（50mm）。
+const GP_GRID_STEP: float = 10.0
 
 # Snap radius in SCREEN pixels; divided by zoom so the magnet stays equally forgiving.
 # 吸附半径（屏幕像素）；除以 zoom 使缩小后磁力同样宽容。

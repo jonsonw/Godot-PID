@@ -18,7 +18,7 @@ const GP_SUITE_PREFIX: String = "gp_test_"
 const GP_METHOD_PREFIX: String = "gpTest"
 # Expected suite count; bump when a new gp_test_*.gd is added.
 # 预期套件数量；新增 gp_test_*.gd 时同步 +1。
-const GP_EXPECTED_SUITES: int = 57
+const GP_EXPECTED_SUITES: int = 61
 
 # Engine errors the legacy suites are *expected* to emit. GUT fails any test that leaves an
 # error unhandled, so these are marked handled explicitly (see _gpHandleExpectedErrors).
@@ -27,6 +27,10 @@ const GP_EXPECTED_ERRORS: Array = [
 	# gp_test_project_io.gd 的 malformed JSON 用例：JSON.parse_string 解析失败时引擎会打印该
 	# condition 错误；该用例正要覆盖解析失败路径，属预期噪音而非回归。
 	'Condition "error != Error::OK" is true. Returning: Variant()',
+	# 离树节点手动驱动 _draw()（如 gp_test_edge_follow_drag.gd 直接调用 GPEdgeView._draw()）
+	# 时 Godot 4.7 会打印该 condition。headless 下节点从未真正收到 NOTIFICATION_DRAW，
+	# 这是测试**主动**触发的绘制路径，非产品回归；run_core_tests.gd（权威门禁）零错误。
+	'Condition "!drawing" is true.',
 ]
 
 

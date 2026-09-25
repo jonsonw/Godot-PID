@@ -22,7 +22,7 @@ extends RefCounted
 # 1. a port whose TYPE the tool wants 类型被工具期望的端口
 # 2. any other port 任何其他端口
 # 3. the node centre 节点中心
-# 4. the 50-unit grid 50 单位网格
+# 4. the 10 mm grid 10mm 网格（v0.1 起世界单位 = 1mm，见计划 Phase 0）
 # Step 2 exists so the tool can say "this port is the wrong kind" instead of silently
 # snapping to nothing — a user who clicks an actuator with the pipe tool must be TOLD, not
 # quietly given a dangling end.

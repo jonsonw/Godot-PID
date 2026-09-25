@@ -1,52 +1,64 @@
 class_name GPChromeStyle
 extends RefCounted
 
-# 视觉分层色板（精致深色梯度）。
-# Visual layering palette (refined dark gradient).
+# 视觉分层色板（AutoCAD 2026 参考图实测值，2026-09-25 第二轮取样校准）。
+# Visual layering palette (values sampled from the AutoCAD 2026 reference screenshot,
+# second pass 2026-09-25).
 #
-# 设计原则 / Design intent:
-# - 中心画布最亮（工作区聚焦），向外逐层变暗：画布 > Ribbon > 侧栏 > 菜单/状态栏。
-# The canvas is brightest (working-area focus), darkening outward:
-# canvas > ribbon > dock > menu/status chrome.
-# - 边界线比所有背景亮一档，形成清晰但不刺眼的 1px 分隔，解决五区块"连成一片"。
-# Border lines sit one tier brighter than any background, giving a crisp 1px
-# divider without harshness — fixes the "blocks merge into one" problem.
+# 设计原则 / Design intent（对照参考图取样 / against sampled reference values）:
+# - 整个 chrome（标题/菜单/工具栏/左右侧栏/状态栏）同为 #394454 蓝灰；画布最暗 #212830。
+#   参考图中侧栏与菜单栏**无色差**，只有「画布沉底」这一层明暗对比。
+#   The whole chrome (title/menu/toolbars/docks/status) shares one blue-grey #394454;
+#   the canvas is the darkest surface #212830 — in the reference the docks and the menu
+#   row have NO tint difference, the only contrast is the sunken sheet.
+# - 输入井 #4E5A70 **比面板亮**（AutoCAD 的属性值输入是浅色凹井）。
+#   Input wells #4E5A70 are LIGHTER than the panel (AutoCAD property value wells).
+# - 边界/接缝取更深的 #29323E（参考图中 chrome 与画布之间的深色缝隙），不是亮线。
+#   Seams are a DARKER #29323E (the dark groove between chrome and canvas in the
+#   reference), not a bright hairline.
 # - 颜色均为数据自包含常量，便于统一微调（改这里即改全界面）。
 # Colours are self-contained constants so a single edit restyles the whole UI.
 # 编码规范：所有变量均显式声明类型。
 
-# 菜单栏 / 状态栏（最暗一档 chrome）
-# Menu bar / status bar — darkest chrome tier.
-const GP_CHROME_BG: Color = Color(0.082, 0.090, 0.118)
+# 菜单栏 / 工具栏 / 状态栏（chrome 档，#394454）
+# Menu bar / toolbars / status bar — chrome tier (#394454).
+const GP_CHROME_BG: Color = Color(0.224, 0.267, 0.329)
 
-# Ribbon 命令区（略亮于 chrome，作为命令强调）
-# Ribbon command bar — a touch brighter than chrome to emphasise commands.
-const GP_RIBBON_BG: Color = Color(0.106, 0.118, 0.149)
+# 顶部命令工具栏（与 chrome 同色 —— 参考图中第二行图标区与菜单行无色差）
+# Top command toolbar — same as chrome (the reference's icon row has no tint step
+# against the menu row).
+const GP_RIBBON_BG: Color = Color(0.224, 0.267, 0.329)
 
-# 左右侧栏（图元库 / 属性区，中阶）
-# Left / right docks (symbol library / inspector) — mid tier.
-const GP_DOCK_BG: Color = Color(0.094, 0.106, 0.133)
+# 左右侧栏（图元库 / 属性区；参考图中与 chrome 同为 #394454）
+# Left / right docks (symbol library / inspector); same #394454 as chrome in the
+# reference.
+const GP_DOCK_BG: Color = Color(0.224, 0.267, 0.329)
 
-# 中心画布工作区（最亮，聚焦）
-# Center canvas working area — brightest, focal.
-const GP_CANVAS_BG: Color = Color(0.129, 0.141, 0.180)
+# 中心画布工作区（最暗，模型空间聚焦，#212830）
+# Center canvas working area — darkest, model-space focus (#212830).
+const GP_CANVAS_BG: Color = Color(0.129, 0.157, 0.188)
 
-# 1px 区块边界线（低对比发丝线：介于 dock 与 canvas 之间，清晰但不刺眼）
-# 1px block border — a low-contrast hairline sitting between dock and canvas:
-# crisp yet never harsh, so every divider reads delicate rather than heavy.
-const GP_BORDER: Color = Color(0.150, 0.165, 0.202)
+# 接缝 / 边界线（比两侧都深的 #29323E 凹缝 —— 参考图中 chrome 与画布之间的深色缝）
+# Seam / border — a groove darker than BOTH neighbours (#29323E, the dark gap
+# between chrome and canvas in the reference).
+const GP_BORDER: Color = Color(0.161, 0.196, 0.243)
+
+# 输入井底色（比面板亮的 #4E5A70 —— AutoCAD 属性值输入井；gp_dark.tres 同步使用）
+# Input-well background — LIGHTER than the panel (#4E5A70, AutoCAD property wells);
+# kept in sync with gp_dark.tres.
+const GP_INPUT_BG: Color = Color(0.306, 0.353, 0.439)
 
 # 分隔条底色（三栏 HSplitContainer 的 dragger）
 # Splitter base colour (HSplitContainer dragger between the three panes).
-const GP_SPLIT: Color = Color(0.137, 0.149, 0.184)
+const GP_SPLIT: Color = Color(0.224, 0.267, 0.329)
 
 # 分隔条悬停 / 拖拽手柄（略亮）
 # Splitter hover / grab handle — slightly brighter.
-const GP_SPLIT_HI: Color = Color(0.192, 0.220, 0.271)
+const GP_SPLIT_HI: Color = Color(0.306, 0.353, 0.439)
 
-# 强调色（选中 tab 底边、激活态描边）
-# Accent colour (selected-tab underline, active-state outline).
-const GP_ACCENT: Color = Color(0.290, 0.560, 0.860)
+# 强调色（选中 tab 底边、激活态描边；AutoCAD 蓝）
+# Accent colour (selected-tab underline, active-state outline; AutoCAD blue).
+const GP_ACCENT: Color = Color(0.298, 0.518, 0.769)
 
 
 # 边界位掩码 / Border bit flags.

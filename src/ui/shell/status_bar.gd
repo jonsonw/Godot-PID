@@ -23,7 +23,34 @@ func _ready() -> void:
 	add_child(gpInset)
 	move_child(gpInset, 0)
 	_gpBuildToggles()
+	_gpPinLabelWidths()
 	queue_redraw()
+
+
+# Pin the three live-text labels to fixed widths and make the state label clip its text.
+# Their texts change width while zooming / saving (zoom %, world coords, saved-path
+# messages), and unpinned widths made the bottom row — including the snap/ortho toggle
+# icons — drift horizontally on EVERY change (the reported "icons drift while zooming").
+# Worse: the state label's full-text minimum width inflated the CENTER pane's minimum,
+# which clamped the right splitter after a save printed a long path (part of the
+# reported "can't drag the panels after save/open").
+# 把三个动态文字标签钉到固定宽，并让状态标签裁剪长文本。缩放/保存时这些文字的宽度会变
+#（缩放百分比、世界坐标、保存路径提示），未钉宽时底行 —— 包括捕捉/正交开关图标 —— 每次
+# 都会横移（即用户报告的「缩放时图标轻微漂移」）。更糟的是：状态标签的**全文最小宽**会
+# 撑爆中心列最小宽，保存后打印长路径时把右分隔条钳死（「保存/打开后无法拖动」的一部分）。
+func _gpPinLabelWidths() -> void:
+	var gpPins: Dictionary = {"SelLabel": 180.0, "CoordLabel": 150.0, "ZoomLabel": 96.0}
+	for gpK in gpPins:
+		var gpLbl: Label = get_node_or_null(NodePath(str(gpK))) as Label
+		if gpLbl != null:
+			gpLbl.custom_minimum_size = Vector2(float(gpPins[gpK]), 0.0)
+	var gpState: Label = get_node_or_null(NodePath("StateLabel")) as Label
+	if gpState != null:
+		# clip_text drops the label's text-based minimum width, so a long path can no
+		# longer inflate the layout; ellipsis keeps the truncation readable.
+		# clip_text 使标签不再以全文计算最小宽，长路径无法再撑爆布局；省略号保持可读。
+		gpState.clip_text = true
+		gpState.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 
 
 # Right-aligned CAD toggles: snap / ortho + a snap-type menu. Bound to the SnapState

@@ -125,7 +125,7 @@ func gpTestFactoryLibraryProducesRealFingerprints() -> void:
 	# Previously this suite only exercised synthetic defs, so it stayed green while the real
 	# library had no schema at all. Pin the factory pack instead.
 	# 此前本套件只测合成 def，故真实库没有 schema 时它依然是绿的。改为钉住出厂图元包。
-	var gpDefs: Array[GPSymbolDef] = GPSymbolPackIso_10628.gpDefs()
+	var gpDefs: Array[GPSymbolDef] = GPSymbolPackDexpi.gpDefs()
 	var gpFps: Dictionary = GPPropertyResolver.gpFingerprintsFor(gpDefs)
 	gpCheck(gpFps.size() > 0, "the factory pack yields fingerprints")
 	var gpEmpty: int = 0
@@ -141,7 +141,7 @@ func gpTestPreWiringArchiveIsNotReportedAsDrift() -> void:
 	# would flag EVERY symbol of EVERY such drawing. An empty baseline means "no baseline".
 	# M12 之后、schema 通电之前保存的图纸，所有图元存的都是 ""（当时 gpSchema 恒为 null）。
 	# 现在指纹有了真实值，若直接比对会把此类图纸的**全部**图元判为漂移。空基线即「无基线」。
-	var gpDefs: Array[GPSymbolDef] = GPSymbolPackIso_10628.gpDefs()
+	var gpDefs: Array[GPSymbolDef] = GPSymbolPackDexpi.gpDefs()
 	var gpLive: Dictionary = GPPropertyResolver.gpFingerprintsFor(gpDefs)
 	var gpStored: Dictionary = {}
 	for gpId in gpLive:

@@ -31,28 +31,29 @@ func _draw() -> void:
 	if gpSplit == null or not is_instance_valid(gpSplit):
 		return
 	var gpSplitRect: Rect2 = gpSplit.get_global_rect()
-	# 接缝线只在 Body 纵向范围内绘制（不越界到菜单栏 / 状态栏）。
-	# Seam lines are clipped to the Body's vertical extent (not bleeding into the
-	# menu bar / status bar).
+	# ONE horizontal hairline right BELOW the command toolbar (at the Body's top
+	# edge, drawn inside the toolbar's last pixel row). The docks <-> canvas
+	# vertical hairlines are GONE (reference layout has none); the splitters stay
+	# fully draggable and only reveal a hover highlight as the drag affordance.
+	# 单条水平发丝线画在命令工具栏**正下方**（Body 顶缘、落在工具栏最后一行像素内）。
+	# 侧栏 ↔ 画布之间的常驻竖向发丝线已移除（参考布局无此线）；分隔条仍可自由拖拽，
+	# 仅保留悬停高亮作为「可拖拽」提示。
 	var gpTop: float = make_canvas_position_local(Vector2(0.0, gpSplitRect.position.y)).y
-	var gpBot: float = make_canvas_position_local(Vector2(0.0, gpSplitRect.end.y)).y
-	gpTop = max(gpTop, 0.0)
+	draw_line(Vector2(0.0, gpTop - 0.5), Vector2(size.x, gpTop - 0.5),
+		GPChromeStyle.GP_BORDER, 1.0)
 
+	# Hover-only drag affordance on the two splitter seams.
+	# 两条分隔条接缝仅保留悬停高亮（拖拽可供性）。
 	var gpSeams: PackedFloat32Array = gpSplit.gpSeamXsLocal()
 	var gpOrigin: float = gpSplitRect.position.x
 	var gpHover: int = gpSplit.gpHoverSeam
-
-	for gpI in range(gpSeams.size()):
-		var gpGx: float = gpOrigin + gpSeams[gpI]
-		var gpLx: float = make_canvas_position_local(Vector2(gpGx, 0.0)).x
- # 细腻 1px 发丝基线。
- # Delicate 1px hairline baseline.
-		draw_line(Vector2(gpLx + 0.5, gpTop), Vector2(gpLx + 0.5, gpBot),
-			GPChromeStyle.GP_BORDER, 1.0)
-		if gpI == gpHover:
- # 悬停：两侧 2px accent 高亮（细，不粗）。
- # Hover: a thin 2px accent highlight on both sides.
-			draw_line(Vector2(gpLx - 0.5, gpTop), Vector2(gpLx - 0.5, gpBot),
-				GPChromeStyle.GP_ACCENT, 2.0)
-			draw_line(Vector2(gpLx + 1.5, gpTop), Vector2(gpLx + 1.5, gpBot),
-				GPChromeStyle.GP_ACCENT, 2.0)
+	if gpHover < 0 or gpHover >= gpSeams.size():
+		return
+	var gpGx: float = gpOrigin + gpSeams[gpHover]
+	var gpLx: float = make_canvas_position_local(Vector2(gpGx, 0.0)).x
+	var gpTopY: float = maxf(gpTop, 0.0)
+	var gpBot: float = make_canvas_position_local(Vector2(0.0, gpSplitRect.end.y)).y
+	draw_line(Vector2(gpLx - 0.5, gpTopY), Vector2(gpLx - 0.5, gpBot),
+		GPChromeStyle.GP_ACCENT, 2.0)
+	draw_line(Vector2(gpLx + 1.5, gpTopY), Vector2(gpLx + 1.5, gpBot),
+		GPChromeStyle.GP_ACCENT, 2.0)

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24.50 7.00" width="24.50mm" height="7.00mm">
+  <polyline points="0.000,0.000 24.500,0.000 24.500,7.000 0.000,7.000 0.000,0.000" fill="none" stroke="#000000" stroke-width="0.3"/>
+  <polyline points="3.500,0.000 3.500,7.000" fill="none" stroke="#000000" stroke-width="0.3"/>
+  <polyline points="0.000,3.500 3.500,3.500" fill="none" stroke="#000000" stroke-width="0.3"/>
+  <polyline points="3.500,1.750 19.250,1.750" fill="none" stroke="#000000" stroke-width="0.3"/>
+  <polyline points="3.500,2.917 19.250,2.917" fill="none" stroke="#000000" stroke-width="0.3"/>
+  <polyline points="3.500,4.083 19.250,4.083" fill="none" stroke="#000000" stroke-width="0.3"/>
+  <polyline points="3.500,5.250 19.250,5.250" fill="none" stroke="#000000" stroke-width="0.3"/>
+  <polyline points="19.250,0.875 21.000,0.875 21.000,6.125 19.250,6.125 19.250,0.875" fill="none" stroke="#000000" stroke-width="0.3"/>
+</svg>

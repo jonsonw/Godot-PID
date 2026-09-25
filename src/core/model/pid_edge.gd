@@ -63,9 +63,48 @@ var gpTag: String = ""
 # "dn" 公称直径 / "medium" 介质代号 / "spec" 管道等级 / "insulation" 保温等级（管道）
 # "tag_manual" 位号被手工改过（全图重编号时跳过）
 # "show_arrow" 是否画流向箭头（管道默认 true）/ "show_tag" 是否画位号（信号线默认 false）
-# "tag_offset" 位号手工微调偏移 [dx, dy]
+# "tag_offset" 位号手工拖拽偏移 [dx, dy]（世界单位 mm）；零即删除该键（见 gpSetTagOffset）。
+#             引出线由净距推导（GPEdgeTagLayout.gpLeader），不落盘。
 # "broken_from" / "broken_to" 由坏边自愈写入，见 gpFromDict()
 var gpAttrs: Dictionary = {}
+
+# A manual tag offset below this many millimetres is treated as "no offset" and the key is
+# erased. The drag path writes continuous floats, so "the user dragged it back onto the pipe"
+# arrives as 0.03 rather than an exact zero — without this the file would accumulate a residue
+# entry that means nothing.
+# 小于此毫米数的手工位号偏移视为「无偏移」并删除该键。拖拽路径写入的是连续浮点数，故
+# 「用户把它拖回管线上了」到达时是 0.03 而非精确的零 —— 缺此判断，文件会累积一条毫无意义的残留记录。
+const GP_TAG_OFFSET_EPS: float = 0.05
+
+
+# Manual drag offset of the line number, in world units (mm). Vector2.ZERO means "leave it on
+# the automatic placement", which is also what a number that was never dragged stores.
+# 管线号的手工拖拽偏移，世界单位（mm）。Vector2.ZERO 意为「留在自动落位处」，也是从未被拖动过的
+# 编号所存的值。
+# Tolerant of a hand-edited file: anything that is not a 2-element array is read as "no offset"
+# rather than crashing or producing a half-valid vector.
+# 对手工编辑过的文件容错：任何非「两元素数组」的取值都读作「无偏移」，既不崩溃也不产生半有效向量。
+func gpTagOffset() -> Vector2:
+	if not gpAttrs.has("tag_offset"):
+		return Vector2.ZERO
+	var gpRaw: Variant = gpAttrs["tag_offset"]
+	if gpRaw is Vector2:
+		return gpRaw
+	if gpRaw is Array and (gpRaw as Array).size() >= 2:
+		return Vector2(float(gpRaw[0]), float(gpRaw[1]))
+	return Vector2.ZERO
+
+
+# Set the manual drag offset. A (near) zero offset REMOVES the key instead of storing [0, 0], so
+# a number dragged back onto its pipe leaves no residue and an untouched sheet keeps serialising
+# byte-for-byte as it did before this feature existed.
+# 设置手工拖拽偏移。（近）零偏移**删除**该键而非存 [0, 0]，故被拖回管线上的编号不留残留，
+# 未被动过的图纸也保持与本功能存在之前逐字节相同的序列化结果。
+func gpSetTagOffset(gpOffset: Vector2) -> void:
+	if gpOffset.length() < GP_TAG_OFFSET_EPS:
+		gpAttrs.erase("tag_offset")
+		return
+	gpAttrs["tag_offset"] = [gpOffset.x, gpOffset.y]
 
 
 # Whether the given end is a free-floating point rather than a port bound to a node.

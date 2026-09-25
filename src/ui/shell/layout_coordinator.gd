@@ -25,46 +25,42 @@ extends RefCounted
 var gpHost: GPMainWindow = null
 
 
-# A splitter in the three-pane body was dragged. Godot 4.7's SplitContainer.dragged
-# signal only carries the splitter offset (distance from the body's left edge); it
-# does NOT carry a splitter index even with three children. We therefore decide which
-# splitter moved by comparing the new offset to the stored left/right splitter
-# positions; the closer one wins. This keeps both docks resizable and lets the
-# palette grid reflow as the left dock is widened or narrowed.
-# 三栏主体中某个分隔条被拖动。Godot 4.7 的 SplitContainer.dragged 信号只带分隔条偏移
-#（距主体左缘的距离），即便有三个子节点也**不带索引**。因此通过比较新偏移与当前存
-# 储的左/右分隔条位置来判断拖的是哪条；离谁近就是谁。这样左右两栏都可调，左栏变
-# 宽/窄时图元网格也能随之重排。
-func gpOnBodyDragged(gpOffset: int) -> void:
-	var gpBW: float = gpHost.gpBodySplit.size.x
+# A splitter in the three-pane body was dragged. The engine applies (and clamps) the
+# drag into split_offsets BEFORE emitting, and in this engine build the entries are
+# ABSOLUTE x positions (probe-measured 2026-09-25: writing 400 puts the left divider at
+# x=400, while a visually-clamped pane keeps a raw value that differs from its real
+# position). Therefore offsets[0] IS the left-dock width and offsets[1] IS the
+# left+center span: no index guessing is needed — read BOTH on every event. NEVER write
+# split_offsets back here: a write would fight the engine's in-flight drag and snap the
+# splitter back to the stored width. The previous "diff against our last write" handler
+# failed exactly that way — the engine legitimately rewrites offsets during mouse-press
+# normalisation and min-size clamping, so a stored baseline could never stay in sync.
+# 三栏主体中某个分隔条被拖动。引擎在发信号**之前**已把拖拽结果（含钳制）写入
+# split_offsets，且本引擎构建中条目是**绝对 x 位置**（2026-09-25 探针实测：写 400 左分隔
+# 条即落在 x=400，而被视觉钳制的窗格会保留与真实位置脱节的原始值）。因此 offsets[0] 就是
+# 左栏宽度、offsets[1] 就是左+中跨度：无需猜测索引 —— 每次事件把两条都读出来。**绝不在此
+# 回写** split_offsets：回写会与引擎进行中的拖拽互相打架、把分隔条弹回存储宽度。旧的
+# 「与上次写入做差分」处理器正是这样失效的 —— 引擎会在按下规范化与最小尺寸钳制时合法
+# 改写 offsets，任何存储基线都追不上。
+func gpOnBodyDragged(_gpOffset: int) -> void:
+	var gpSplit: HSplitContainer = gpHost.gpBodySplit
+	var gpBW: float = gpSplit.size.x
 	if gpBW <= 1.0:
 		return
-	var gpOffsetF: float = float(gpOffset)
-	# Determine which splitter is being dragged by proximity to the current positions.
-	# 通过离当前位置的远近判断正在拖哪条分隔条。
-	var gpLeftPos: float = gpHost.gpLeftWidthPx
-	var gpRightPos: float = gpBW - gpHost.gpRightWidthPx
-	var gpLeftDist: float = absf(gpOffsetF - gpLeftPos)
-	var gpRightDist: float = absf(gpOffsetF - gpRightPos)
-	if gpLeftDist < gpRightDist:
- # Left splitter: offset == left-dock width. Feed the new width to the palette
- # grid so it recomputes its column count immediately.
- # 左分隔条：偏移即左栏宽度。把新宽度传给图元网格，使其立即重算列数。
-		gpHost.gpLeftWidthPx = clampf(gpOffsetF, GPMainWindow.GP_LEFT_MIN, gpBW - GPMainWindow.GP_RIGHT_MIN - 80.0)
-		if gpHost.gpLeftDock != null and gpHost.gpLeftDock.has_method("gpReflow"):
-			gpHost.gpLeftDock.gpReflow(gpHost.gpLeftWidthPx)
-	else:
- # Right splitter: offset == left+center span, so right width = body - offset.
- # 右分隔条：偏移即左+中跨度，故右栏宽度 = 主体宽度 - 偏移。
-		var gpRightPx: float = gpBW - gpOffsetF
-		gpHost.gpRightWidthPx = clampf(gpRightPx, GPMainWindow.GP_RIGHT_MIN, gpBW - GPMainWindow.GP_LEFT_MIN - 80.0)
-	# Re-apply the split immediately so the splitter position and the palette reflow
-	# match the dragged width on the spot (and a later resize keeps it, since the
-	# stored pixel widths now reflect the drag). Idempotent: it just writes the same
-	# offsets Godot set during the drag.
-	# 立即重应用分隔，使分隔条位置与图元库重排当场贴合拖出宽度（后续缩放也能保留，
-	# 因为存储像素宽现已反映本次拖拽）。幂等：写入的即 Godot 拖拽时已设的偏移。
-	gpApplySplits()
+	var gpCur: PackedInt32Array = gpSplit.split_offsets
+	if gpCur.size() < 2:
+		return
+	# Left splitter: its offset IS the left-dock width. Feed the new width to the palette
+	# grid so it recomputes its column count immediately.
+	# 左分隔条：偏移即左栏宽度。把新宽度传给图元网格，使其立即重算列数。
+	gpHost.gpLeftWidthPx = clampf(float(gpCur[0]), GPMainWindow.GP_LEFT_MIN,
+		gpBW - GPMainWindow.GP_RIGHT_MIN - 80.0)
+	if gpHost.gpLeftDock != null and gpHost.gpLeftDock.has_method("gpReflow"):
+		gpHost.gpLeftDock.gpReflow(gpHost.gpLeftWidthPx)
+	# Right splitter: its offset is the left+center span, so right width = body - offset.
+	# 右分隔条：偏移即左+中跨度，故右栏宽度 = 主体宽度 - 偏移。
+	gpHost.gpRightWidthPx = clampf(gpBW - float(gpCur[1]), GPMainWindow.GP_RIGHT_MIN,
+		gpBW - GPMainWindow.GP_LEFT_MIN - 80.0)
 
 
 # ============================ lookups ============================
@@ -82,11 +78,14 @@ func gpInitSplits() -> void:
 		await gpHost.get_tree().process_frame
 		if gpHost.gpBodySplit != null and gpHost.gpBodySplit.size.x > 50.0:
 			break
-	# Seed the stored widths from the declared floors so the first apply pins both
-	# docks to their minimum and the canvas gets everything else.
-	# 用声明下限初始化存储宽度，使首次应用把两栏钉到最小、画布取得其余空间。
-	gpHost.gpLeftWidthPx = GPMainWindow.GP_LEFT_MIN
-	gpHost.gpRightWidthPx = GPMainWindow.GP_RIGHT_MIN
+	# Seed the stored widths: left dock starts at its 3-per-row default (so the symbol
+	# palette lays out 3 columns on first launch), right dock at its 200px default
+	# (2026-09-25 request). The canvas gets everything else. Drags overwrite these
+	# until the next restart.
+	# 用声明宽度初始化存储宽度：左栏起始于「每行 3 个」默认（使图元库首次启动即排 3 列），
+	# 右栏起始于 200px 默认（2026-09-25 需求）；画布取得其余空间。拖拽会覆盖，直到下次重启。
+	gpHost.gpLeftWidthPx = GPMainWindow.GP_LEFT_DEFAULT
+	gpHost.gpRightWidthPx = GPMainWindow.GP_RIGHT_DEFAULT
 	gpApplySplits()
 	var gpWin: Window = gpHost.get_window()
 	gpHost.gpPrevWidth = int(gpWin.size.x) if gpWin != null else 0

@@ -13,11 +13,11 @@ extends GPGTest
 # A pump definition, resolved from the real library so the test breaks if the pack changes.
 # 从真实图元库解析出的泵定义，使图元包变化时测试会失败。
 func _gpPumpDef() -> GPSymbolDef:
-	var gpD: GPSymbolDef = GPSymbolLibrary.gpFindById("LPUMP003")
+	var gpD: GPSymbolDef = GPSymbolLibrary.gpFindById("DPUMP001")
 	if gpD != null:
 		return gpD
 	var gpFallback: GPSymbolDef = GPSymbolDef.new()
-	gpFallback.gpId = "LPUMP003"
+	gpFallback.gpId = "DPUMP001"
 	gpFallback.gpCategory = "pump"
 	gpFallback.gpTagPrefix = "P"
 	return gpFallback
@@ -25,7 +25,7 @@ func _gpPumpDef() -> GPSymbolDef:
 
 func _gpValveDef() -> GPSymbolDef:
 	var gpD: GPSymbolDef = GPSymbolDef.new()
-	gpD.gpId = "LVALVE001"
+	gpD.gpId = "DVALVE002"
 	gpD.gpCategory = "valve"
 	gpD.gpTagPrefix = "V"
 	return gpD
@@ -146,7 +146,7 @@ func gpTestSymbolOverrideBeatsCategoryOverride() -> void:
 	var gpSymRule: GPTagRule = GPTagRule.gpDefault()
 	gpSymRule.gpPrefixSource = GPTagRule.GPPrefixSource.GP_FIXED
 	gpSymRule.gpFixedPrefix = "SP"
-	gpP.gpSetOverride(GPProjectTagRules.gpSymbolKey("LPUMP003"), gpSymRule)
+	gpP.gpSetOverride(GPProjectTagRules.gpSymbolKey("DPUMP001"), gpSymRule)
 	gpEq(gpP.gpPrefixFor(_gpPumpDef()), "SP", "the symbol override wins")
 	gpEq(gpP.gpPrefixFor(_gpValveDef()), "V", "other symbols are untouched")
 
@@ -205,7 +205,7 @@ func gpTestStaleIndexCannotProduceADuplicate() -> void:
 	# 索引是缓存，图才是真相。绕过注册器写入的节点仍须被看见，
 	# 故最坏结果只是跳号。
 	var gpG: GPPIDGraph = GPPIDGraph.new()
-	gpG.gpAddNode(gpG.gpNewNode("n9", "LPUMP003", "P-1001"))
+	gpG.gpAddNode(gpG.gpNewNode("n9", "DPUMP001", "P-1001"))
 	var gpR: GPTagRegistry = _gpRegistry(gpG)
 	gpEq(gpR.gpIsTaken("P-1001"), true, "a tag written directly on the graph is seen")
 	gpEq(gpR.gpOwnerOf("P-1001"), "n9", "its owner is found by scanning")
@@ -214,7 +214,7 @@ func gpTestStaleIndexCannotProduceADuplicate() -> void:
 
 func gpTestHandTypedNumbersAreSkipped() -> void:
 	var gpG: GPPIDGraph = GPPIDGraph.new()
-	gpG.gpAddNode(gpG.gpNewNode("n9", "LPUMP003", "P-1001"))
+	gpG.gpAddNode(gpG.gpNewNode("n9", "DPUMP001", "P-1001"))
 	var gpR: GPTagRegistry = _gpRegistry(gpG)
 	gpEq(gpR.gpNextTag(_gpPumpDef()), "P-1002", "the hand-typed 1001 is skipped")
 	gpEq(gpR.gpNextTag(_gpPumpDef()), "P-1003", "numbering continues from there")
@@ -222,8 +222,8 @@ func gpTestHandTypedNumbersAreSkipped() -> void:
 
 func gpTestRebuildDetectsDuplicates() -> void:
 	var gpG: GPPIDGraph = GPPIDGraph.new()
-	gpG.gpAddNode(gpG.gpNewNode("n1", "LPUMP003", "P-1001"))
-	gpG.gpAddNode(gpG.gpNewNode("n2", "LPUMP003", "p 1001"))
+	gpG.gpAddNode(gpG.gpNewNode("n1", "DPUMP001", "P-1001"))
+	gpG.gpAddNode(gpG.gpNewNode("n2", "DPUMP001", "p 1001"))
 	var gpR: GPTagRegistry = _gpRegistry(gpG)
 	gpR.gpRebuild()
 	gpEq(gpR.gpConflicts().size(), 1, "one duplicate is reported")
@@ -243,9 +243,9 @@ func gpTestPreviewDoesNotConsumeNumbers() -> void:
 
 func gpTestRenumberPlanIsDenseAndMapped() -> void:
 	var gpG: GPPIDGraph = GPPIDGraph.new()
-	gpG.gpAddNode(gpG.gpNewNode("n1", "LPUMP003", "P-5000"))
-	gpG.gpAddNode(gpG.gpNewNode("n2", "LVALVE001", "V-9000"))
-	gpG.gpAddNode(gpG.gpNewNode("n3", "LPUMP003", "P-5001"))
+	gpG.gpAddNode(gpG.gpNewNode("n1", "DPUMP001", "P-5000"))
+	gpG.gpAddNode(gpG.gpNewNode("n2", "DVALVE002", "V-9000"))
+	gpG.gpAddNode(gpG.gpNewNode("n3", "DPUMP001", "P-5001"))
 	var gpR: GPTagRegistry = _gpRegistry(gpG)
 	gpR.gpRebuild()
 	var gpItems: Array[Dictionary] = [
@@ -290,8 +290,8 @@ func gpTestPlacementMintsAUniqueTag() -> void:
 	var gpR: GPTagRegistry = _gpRegistry(gpG)
 	var gpSvc: GPEditService = GPEditService.new()
 	gpSvc.gpBindGraph(gpG, GPIdGen.new(), gpR)
-	var gpId1: String = gpSvc.gpPlaceNode("LPUMP003", Vector2.ZERO)
-	var gpId2: String = gpSvc.gpPlaceNode("LPUMP003", Vector2(50, 0))
+	var gpId1: String = gpSvc.gpPlaceNode("DPUMP001", Vector2.ZERO)
+	var gpId2: String = gpSvc.gpPlaceNode("DPUMP001", Vector2(50, 0))
 	gpEq(gpG.gpGetNode(gpId1).gpTag, "P-1001", "the first placement is P-1001")
 	gpEq(gpG.gpGetNode(gpId2).gpTag, "P-1002", "the second placement is P-1002")
 
@@ -300,9 +300,9 @@ func gpTestPlacementWithoutRegistryKeepsOldBehaviour() -> void:
 	var gpG: GPPIDGraph = GPPIDGraph.new()
 	var gpSvc: GPEditService = GPEditService.new()
 	gpSvc.gpBindGraph(gpG, GPIdGen.new())
-	var gpId: String = gpSvc.gpPlaceNode("LPUMP003", Vector2.ZERO, "T-301")
+	var gpId: String = gpSvc.gpPlaceNode("DPUMP001", Vector2.ZERO, "T-301")
 	gpEq(gpG.gpGetNode(gpId).gpTag, "T-301", "an explicit tag is used verbatim")
-	var gpId2: String = gpSvc.gpPlaceNode("LPUMP003", Vector2.ZERO)
+	var gpId2: String = gpSvc.gpPlaceNode("DPUMP001", Vector2.ZERO)
 	gpEq(gpG.gpGetNode(gpId2).gpTag, "", "no registry means no minting (pre-M9 behaviour)")
 
 
@@ -311,7 +311,7 @@ func gpTestDuplicateGetsItsOwnTag() -> void:
 	var gpR: GPTagRegistry = _gpRegistry(gpG)
 	var gpSvc: GPEditService = GPEditService.new()
 	gpSvc.gpBindGraph(gpG, GPIdGen.new(), gpR)
-	var gpSrc: String = gpSvc.gpPlaceNode("LPUMP003", Vector2.ZERO)
+	var gpSrc: String = gpSvc.gpPlaceNode("DPUMP001", Vector2.ZERO)
 	var gpCopies: Array[String] = gpSvc.gpDuplicateSelection([gpSrc])
 	gpEq(gpCopies.size(), 1, "one copy was made")
 	gpEq(gpG.gpGetNode(gpCopies[0]).gpTag, "P-1002", "the copy does not inherit the source tag")
@@ -323,7 +323,7 @@ func gpTestUndoRedoKeepsTheRegistryConsistent() -> void:
 	var gpR: GPTagRegistry = _gpRegistry(gpG)
 	var gpSvc: GPEditService = GPEditService.new()
 	gpSvc.gpBindGraph(gpG, GPIdGen.new(), gpR)
-	var gpId: String = gpSvc.gpPlaceNode("LPUMP003", Vector2.ZERO)
+	var gpId: String = gpSvc.gpPlaceNode("DPUMP001", Vector2.ZERO)
 	gpEq(gpR.gpIsTaken("P-1001"), true, "the placed tag is registered")
 	gpEq(gpSvc.gpUndo(), true, "undo is available")
 	gpEq(gpR.gpIsTaken("P-1001"), false, "undo released the tag again")
@@ -337,7 +337,7 @@ func gpTestDeleteReleasesTheTag() -> void:
 	var gpR: GPTagRegistry = _gpRegistry(gpG)
 	var gpSvc: GPEditService = GPEditService.new()
 	gpSvc.gpBindGraph(gpG, GPIdGen.new(), gpR)
-	var gpId: String = gpSvc.gpPlaceNode("LPUMP003", Vector2.ZERO)
+	var gpId: String = gpSvc.gpPlaceNode("DPUMP001", Vector2.ZERO)
 	gpEq(gpSvc.gpDeleteSelection([gpId], []), true, "the node was deleted")
 	gpEq(gpR.gpIsTaken("P-1001"), false, "deleting released the tag")
 	gpEq(gpSvc.gpUndo(), true, "undo is available")

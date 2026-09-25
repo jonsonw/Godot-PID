@@ -11,10 +11,11 @@ extends RefCounted
 # Coding rule: every variable must declare its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
-# Zoom clamp (world units per screen point inverse). Kept identical to the canvas constants.
-# 缩放夹取范围（与画布原常量保持一致）。
+# Zoom clamp (world units per screen point inverse). Relaxed for the mm-based world (plan Phase 0):
+# at 1:1 a valve is ~10 mm, so a higher ceiling lets the user zoom into fine detail.
+# 缩放夹取范围。针对 mm 基准放宽（计划 Phase 0）：1:1 下阀门约 10mm，更高的上限便于放大看细节。
 const GP_ZOOM_MIN: float = 0.25
-const GP_ZOOM_MAX: float = 4.0
+const GP_ZOOM_MAX: float = 8.0
 
 # Step applied per wheel notch toward zoom-in / zoom-out.
 # 每格滚轮向放大 / 缩小方向施加的步进系数。

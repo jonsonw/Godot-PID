@@ -19,33 +19,36 @@ var gpLocale: String = "zh"
 # Translation table: key -> { "zh": ..., "en": ... }.
 # 翻译表：键 -> { "zh": ..., "en": ... }。
 const GP_STRINGS: Dictionary = {
-	# ---- 图元显示名（pack_iso_10628）----
-	# ---- Symbol display names (pack_iso_10628) ----
-	"iso.lvalve001":        { "zh": "球阀", "en": "Ball Valve" },
-	"iso.lvalve002":        { "zh": "止回阀", "en": "Check Valve" },
-	"iso.lvalve003":        { "zh": "调节阀", "en": "Control Valve" },
-	"iso.lpump001":         { "zh": "压缩机", "en": "Compressor" },
-	"iso.lvalve004":        { "zh": "隔膜阀", "en": "Diaphragm Valve" },
-	"iso.lgeneral001":      { "zh": "电气线（点划线）001", "en": "Electrical Line (Dash-Dot) 001" },
-	"iso.linstrument001":   { "zh": "现场接线箱", "en": "Field Junction Box" },
-	"iso.linstrument002":   { "zh": "流量指示器", "en": "Flow Indicator" },
-	"iso.linstrument003":   { "zh": "流量变送器", "en": "Flow Transmitter" },
-	"iso.lvalve005":        { "zh": "截止阀", "en": "Globe Valve" },
-	"iso.lvalve006":        { "zh": "闸阀", "en": "Gate Valve" },
-	"iso.lheat001":         { "zh": "换热器", "en": "Heat Exchanger" },
-	"iso.lgeneral002":      { "zh": "仪表线（虚线）001", "en": "Instrument Line (Dashed) 001" },
-	"iso.linstrument004":   { "zh": "液位指示器", "en": "Level Indicator" },
-	"iso.linstrument005":   { "zh": "液位变送器", "en": "Level Transmitter" },
-	"iso.lpump002":         { "zh": "容积泵", "en": "Positive Displacement Pump" },
-	"iso.linstrument006":   { "zh": "压力指示器", "en": "Pressure Indicator" },
-	"iso.linstrument007":   { "zh": "压力变送器", "en": "Pressure Transmitter" },
-	"iso.lvalve007":        { "zh": "阀门定位器", "en": "Valve Positioner" },
-	"iso.lpump003":         { "zh": "离心泵", "en": "Centrifugal Pump" },
-	"iso.lgeneral003":      { "zh": "工艺线（实线）001", "en": "Process Line (Solid) 001" },
-	"iso.linstrument008":   { "zh": "温度指示器", "en": "Temperature Indicator" },
-	"iso.ltank001":         { "zh": "储罐", "en": "Storage Tank" },
-	"iso.linstrument009":   { "zh": "温度变送器", "en": "Temperature Transmitter" },
-	"iso.lvalve008":        { "zh": "阀门执行器", "en": "Valve Actuator" },
+	# ---- 图元显示名（pack_dexpi）----
+	# 键内嵌「分配后」的 id，由生成器落盘 assets/symbol_packs/dexpi/display_names.json
+	# 生成；重跑生成器若改变序号分配，须同步重建本块。
+	# ---- Symbol display names (pack_dexpi) ----
+	# Keys embed the ALLOCATED id; regenerate from assets/symbol_packs/dexpi/display_names.json
+	# whenever the generator's numbering changes.
+	"dexpi.dgeneral001":	{ "zh": "关键介质进口箭头", "en": "Arrow — Inlet of Essential Substances" },
+	"dexpi.dgeneral002":	{ "zh": "关键介质出口箭头", "en": "Arrow — Outlet of Essential Substances" },
+	"dexpi.dgeneral003":	{ "zh": "盲板", "en": "Blind Cover" },
+	"dexpi.dgeneral004":	{ "zh": "控制执行机构", "en": "Controlled Actuator" },
+	"dexpi.dgeneral005":	{ "zh": "流向（主管段）", "en": "Direction of Flow (Primary Segment)" },
+	"dexpi.dgeneral006":	{ "zh": "流向（支管段）", "en": "Direction of Flow (Secondary Segment)" },
+	"dexpi.dgeneral007":	{ "zh": "人孔", "en": "Manhole" },
+	"dexpi.dgeneral008":	{ "zh": "接管嘴", "en": "Nozzle" },
+	"dexpi.dgeneral009":	{ "zh": "保温管道", "en": "Insulated Piping" },
+	"dexpi.dgeneral010":	{ "zh": "异径管", "en": "Reducer (General)" },
+	"dexpi.dgeneral011":	{ "zh": "管道坡度", "en": "Slope" },
+	"dexpi.dgeneral012":	{ "zh": "T 型三通", "en": "T-Type Connection" },
+	"dexpi.dheat001":	{ "zh": "浮头式管束换热器", "en": "Floating-Head Tube-Bundle Heat Exchanger" },
+	"dexpi.dheat002":	{ "zh": "板式换热器", "en": "Plate-Type Heat Exchanger" },
+	"dexpi.dinstrument001":	{ "zh": "仪表气泡（中控室）", "en": "Instrumentation Bubble (Central)" },
+	"dexpi.dinstrument002":	{ "zh": "仪表气泡（现场）", "en": "Instrumentation Bubble (Field)" },
+	"dexpi.dpump001":	{ "zh": "离心泵", "en": "Centrifugal Pump" },
+	"dexpi.dpump002":	{ "zh": "往复泵", "en": "Reciprocating Pump" },
+	"dexpi.dtank001":	{ "zh": "碟形封头容器", "en": "Vessel with Dished Heads" },
+	"dexpi.dvalve001":	{ "zh": "角式弹簧安全阀", "en": "Angle Spring-Loaded Safety Valve" },
+	"dexpi.dvalve002":	{ "zh": "球阀", "en": "Ball Valve" },
+	"dexpi.dvalve003":	{ "zh": "蝶阀", "en": "Butterfly Valve" },
+	"dexpi.dvalve004":	{ "zh": "截止阀", "en": "Globe Valve" },
+	"dexpi.dvalve005":	{ "zh": "旋启式止回阀", "en": "Swing Check Valve" },
 	# ---- app chrome ----
 	"symbol_lib.title":        { "zh": "图元库",           "en": "Symbol Library" },
 	"symbol_lib.search":       { "zh": "搜索图元名称 / 类目…", "en": "Search symbols / categories…" },
@@ -62,6 +65,8 @@ const GP_STRINGS: Dictionary = {
 	"ribbon.grp_view":         { "zh": "视图",   "en": "View" },
 	"ribbon.grp_edit":         { "zh": "编辑",   "en": "Edit" },
 	"symbol_lib.tool_custom":  { "zh": "自定义图元",        "en": "Custom Symbol" },
+	"symbol_lib.show_all":     { "zh": "全部显示",         "en": "Show All" },
+	"symbol_lib.gear_tip":     { "zh": "勾选要显示的图元", "en": "Choose visible symbols" },
 	"symbol_lib.ctx_delete":  { "zh": "删除",             "en": "Delete" },
 	"symbol_lib.delete_title": { "zh": "删除图元",       "en": "Delete Symbol" },
 	"symbol_lib.delete_used_confirm": { "zh": "该图元已在画布 %d 处使用，删除将一并移除这些实例及其连线。确认删除？", "en": "This symbol is used in %d place(s) on the canvas. Deleting it will also remove those instances and their connections. Confirm deletion?" },
@@ -150,6 +155,7 @@ const GP_STRINGS: Dictionary = {
 	"status.nothing_to_redo":  { "zh": "没有可重做的操作",  "en": "Nothing to redo" },
 	"status.feature_todo":  { "zh": "功能待接入：%s",    "en": "Feature pending: %s" },
 	"status.saved_with_packs": { "zh": "已保存：%s（含 %d 个用户图元包）", "en": "Saved: %s (%d user packs embedded)" },
+	"status.autosaved":        { "zh": "已自动保存：%s",   "en": "Auto-saved: %s" },
 	"swap.warn_ports":         { "zh": "更换图元：%d 条连线因端口缺失已降级到图元中心（连接未断）",
 								 "en": "Symbol changed: %d connection(s) lost their port and now attach to the symbol centre (still connected)" },
 	"swap.done":               { "zh": "已更换图元：%s（位号与连线保持不变）",
@@ -246,6 +252,7 @@ const GP_STRINGS: Dictionary = {
 	"valve":      { "zh": "阀门",     "en": "Valve" },
 	"instrument": { "zh": "仪表",     "en": "Instrument" },
 	"heat":       { "zh": "换热器",   "en": "Heat Exchanger" },
+	"general":    { "zh": "通用",     "en": "General" },
 
 	# ---- main canvas interaction / 主画布交互 ----
 	"canvas.ctx_edit_symbol":  { "zh": "修改图元…", "en": "Modify Symbol…" },
@@ -407,19 +414,85 @@ const GP_STRINGS: Dictionary = {
 
 	"tag.err_duplicate":      { "zh": "位号已被占用", "en": "Tag already in use" },
 	"tag.err_no_uid":         { "zh": "缺少实例标识", "en": "Missing instance id" },
+
+	# ---- 图框与标题栏（v0.1 Phase 2 / drawing frame & title block）----
+	"menu.frame":             { "zh": "图框与标题栏…", "en": "Drawing Frame & Title Block…" },
+	"frame.title":            { "zh": "图框与标题栏", "en": "Drawing Frame & Title Block" },
+	"frame.show":             { "zh": "显示图框", "en": "Show drawing frame" },
+	"frame.size":             { "zh": "图幅", "en": "Sheet size" },
+	"frame.label_mode":       { "zh": "图纸文字语言", "en": "Drawing text language" },
+	"frame.mode_zh":          { "zh": "中文", "en": "Chinese" },
+	"frame.mode_en":          { "zh": "英文", "en": "English" },
+	"frame.mode_both":        { "zh": "中英对照", "en": "Bilingual" },
+	"frame.col_zh":           { "zh": "中文", "en": "Chinese" },
+	"frame.col_en":           { "zh": "English", "en": "English" },
+	"frame.mode_hint":        { "zh": "仅作用于图纸自带文字；位号/管线号始终单语。",
+							  "en": "Applies to drawing text only; tag numbers stay monolingual." },
+	"frame.applied":          { "zh": "图框已更新", "en": "Drawing frame updated" },
+	# 追踪底图（背景参照层，Phase 5）。
+	# Tracing underlay (background reference layer, Phase 5).
+	"frame.bg.title":         { "zh": "追踪底图", "en": "Tracing Underlay" },
+	"frame.bg.path":          { "zh": "底图路径", "en": "Image path" },
+	"frame.bg.browse":        { "zh": "浏览…", "en": "Browse…" },
+	"frame.bg.clear":         { "zh": "清除底图", "en": "Clear" },
+	"frame.bg.alpha":         { "zh": "底图透明度", "en": "Opacity" },
+	"frame.bg.hint":          { "zh": "放入参考图（PNG/JPG/WEBP）后可在其上 1:1 描摹复刻；仅作参考，不参与导出。",
+							  "en": "Drop a reference image (PNG/JPG/WEBP) to trace over it 1:1; reference only, not exported." },
+	# 标题栏字段双语字段名（固定中英双标，按 GB/T 10609.1 与 ISO 7200）。
+	# Bilingual title-block captions (fixed, per GB/T 10609.1 and ISO 7200).
+	"frame.fld.company":      { "zh": "单位", "en": "COMPANY" },
+	"frame.fld.project":      { "zh": "项目", "en": "PROJECT" },
+	"frame.fld.drawing_no":   { "zh": "图号", "en": "DWG NO." },
+	"frame.fld.drawing_title": { "zh": "图名", "en": "DRAWING TITLE" },
+	"frame.fld.rev":          { "zh": "版次", "en": "REV" },
+	"frame.fld.date":         { "zh": "日期", "en": "DATE" },
+	"frame.fld.designed":     { "zh": "设计", "en": "DESIGNED" },
+	"frame.fld.checked":      { "zh": "校核", "en": "CHECKED" },
+	"frame.fld.approved":     { "zh": "审核", "en": "APPROVED" },
+	"frame.fld.scale":        { "zh": "比例", "en": "SCALE" },
+	"frame.fld.sheet_index":  { "zh": "张次", "en": "SHEET" },
+	"frame.fld.sheet_size":   { "zh": "图幅", "en": "SIZE" },
+	"frame.fld.drawn":        { "zh": "制图", "en": "DRAWN" },
 }
 
 
 # Translate a key into the current locale. Falls back to the key itself.
 # 把键翻译成当前语言。无翻译时回退为键本身。
 func gpTr(gpKey: String, gpFallback: String = "") -> String:
-	var gpMap = GP_STRINGS.get(gpKey)
+	return gpTrIn(gpKey, gpLocale, gpFallback)
+
+
+# Translate a key into an EXPLICIT locale, ignoring gpLocale.
+# WHY: the drawing sheet has its own label mode (中文 / 英文 / 中英对照) that is
+# deliberately DECOUPLED from the UI chrome language gpLocale — a Chinese UI may
+# legitimately carry an all-English drawing. Routing both through gpTr() would
+# couple them, so sheet text asks for the language it wants.
+# 把键翻译成**指定**语言，不受 gpLocale 影响。
+# 原因：图纸有自己的标签模式（中文/英文/中英对照），刻意与界面语言 gpLocale 解耦 ——
+# 中文界面完全可以承载一张纯英文图纸。二者若都走 gpTr() 就会耦合，故图纸文字显式指定语言。
+func gpTrIn(gpKey: String, gpLoc: String, gpFallback: String = "") -> String:
+	var gpMap: Variant = GP_STRINGS.get(gpKey)
 	if gpMap == null:
 		return gpFallback if gpFallback != "" else gpKey
-	var gpVal = gpMap.get(gpLocale)
+	var gpVal: Variant = (gpMap as Dictionary).get(gpLoc)
 	if gpVal == null or gpVal == "":
 		return gpFallback if gpFallback != "" else gpKey
-	return gpVal
+	return str(gpVal)
+
+
+# Both languages of a key joined by " / " (e.g. "项目 / PROJECT"), skipping an empty
+# side so a partially translated key degrades gracefully instead of trailing a slash.
+# 返回一个键的双语串（如"项目 / PROJECT"）；某一侧为空时优雅省略，不留悬空斜杠。
+func gpTrBoth(gpKey: String, gpFallback: String = "") -> String:
+	var gpZh: String = gpTrIn(gpKey, "zh", "")
+	var gpEn: String = gpTrIn(gpKey, "en", "")
+	if gpZh == "" and gpEn == "":
+		return gpFallback if gpFallback != "" else gpKey
+	if gpZh == "":
+		return gpEn
+	if gpEn == "":
+		return gpZh
+	return gpZh + " / " + gpEn
 
 
 # Switch locale and notify listeners.

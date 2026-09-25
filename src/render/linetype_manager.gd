@@ -1,10 +1,10 @@
 class_name GPLinetypeManager
 extends RefCounted
 # Copyright © 2026 Jonson Wang
-# Standard linetype registry (AutoCAD-style). Pattern values are in WORLD units, matching
-# GPEdgeStyle's signal dashes so all line styling shares one unit system.
-# 标准线型登记表（AutoCAD 式）。图案数值以世界单位计，与 GPEdgeStyle 的信号虚线同一单位
-# 体系，使全部线型共用一套尺度。
+# Standard linetype registry (AutoCAD-style). Pattern values are in MILLIMETRES (1 world
+# unit = 1 mm), matching GPEdgeStyle's signal dashes so all line styling shares one unit system.
+# 标准线型登记表（AutoCAD 式）。图案数值以毫米计（1 世界单位 = 1 mm），与 GPEdgeStyle 的信号
+# 虚线同一单位体系，使全部线型共用一套尺度。
 #
 # Why built-in defaults AND a file / 为何内置默认值又提供文件：
 # The render path (GPEdgeStyle.gpStyleFor()) must never fail or block on a file read, so the
@@ -18,15 +18,15 @@ extends RefCounted
 # 全局线型比例（AutoCAD LTSCALE）。乘到每段划长 / 空白长。
 static var gpLinetypeScale: float = 1.0
 
-# Built-in patterns: name -> PackedFloat32Array (on/off lengths in world units).
-# Empty array = solid (CONTINUOUS). 内置图案：名称 -> 划/空长度数组（世界单位）。空数组 = 实线。
+# Built-in patterns: name -> PackedFloat32Array (on/off lengths in millimetres, 1 world unit = 1 mm).
+# Empty array = solid (CONTINUOUS). 内置图案：名称 -> 划/空长度数组（毫米，1 世界单位 = 1 mm）。空数组 = 实线。
 static var gpBuiltins: Dictionary = {
 	"CONTINUOUS": PackedFloat32Array(),
-	"HIDDEN": PackedFloat32Array([12.0, 6.0]),
-	"DASHED": PackedFloat32Array([18.0, 6.0]),
-	"CENTER": PackedFloat32Array([28.0, 6.0, 3.0, 6.0, 3.0, 6.0]),
-	"PHANTOM": PackedFloat32Array([32.0, 6.0, 3.0, 6.0, 3.0, 6.0]),
-	"DOT": PackedFloat32Array([0.0, 4.0]),
+	"HIDDEN": PackedFloat32Array([3.0, 1.5]),
+	"DASHED": PackedFloat32Array([6.0, 2.0]),
+	"CENTER": PackedFloat32Array([20.0, 3.0, 3.0, 3.0]),
+	"PHANTOM": PackedFloat32Array([20.0, 3.0, 3.0, 3.0]),
+	"DOT": PackedFloat32Array([0.0, 1.5]),
 }
 
 # Runtime override table (filled by gpLoadFile()). Empty = use built-ins.
@@ -36,8 +36,8 @@ static var gpOverrides: Dictionary = {}
 
 # Resolve the dash pattern for a linetype name, already scaled by the global LTSCALE.
 # 解析某线型名的虚线图案，已乘全局 LTSCALE。
-# [return] on/off lengths in world units; EMPTY = solid (CONTINUOUS).
-# [return] 世界单位的划/空长度；空 = 实线。
+# [return] on/off lengths in millimetres (1 world unit = 1 mm); EMPTY = solid (CONTINUOUS).
+# [return] 毫米单位的划/空长度（1 世界单位 = 1 mm）；空 = 实线。
 static func gpPatternFor(gpName: String) -> PackedFloat32Array:
 	var gpSrc: Dictionary = gpOverrides if not gpOverrides.is_empty() else gpBuiltins
 	if not gpSrc.has(gpName):

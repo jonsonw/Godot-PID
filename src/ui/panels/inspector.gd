@@ -55,8 +55,10 @@ signal gpCleanOrphansRequested(gpNodeId: String)
 const GP_NAME_PREFIX: String = "name:"
 
 # Minimum width of the property label column (left column of the 2-column inspector).
-# 属性标签列（两列属性面板的左列）最小宽度。
-const GP_LABEL_MIN_W: float = 150.0
+# 2026-09-25: 150 -> 112 (-25%) so the input fields start 25% further LEFT, per request.
+# 属性标签列（两列属性面板的左列）最小宽度。2026-09-25：150 -> 112（-25%），
+# 按需求让输入框整体左移约 25%。
+const GP_LABEL_MIN_W: float = 112.0
 
 # Root container for the form widgets.
 # 表单控件的根容器。
@@ -93,6 +95,13 @@ var _gpBatchIds: Array[String] = []
 # The nodes behind _gpBatchIds, kept so a locale change can rebuild the batch form.
 # _gpBatchIds 对应的节点，使语言切换时能重建批量表单。
 var _gpBatchNodes: Array[GPPIDNode] = []
+
+# How many section headers the current form already has; the FIRST section gets no
+# hairline above it, every later one does (mirrors the left palette's category
+# separators, 2026-09-25 request). Reset on every form rebuild.
+# 当前表单已有多少个小节标题：首节上方不发丝线，其后每节上方各一条
+#（与左栏类目分隔一致，2026-09-25 需求）。每次重建表单时归零。
+var _gpHeadCount: int = 0
 
 
 # Find the form root and show the empty hint.
@@ -241,8 +250,14 @@ func _gpAddSwapRow(gpCurDef: GPSymbolDef) -> void:
 		gpEntry["id"] = gpD.gpId
 		gpRows.append(gpEntry)
 	# Category first, then display name: a 40-entry library must stay scannable.
-	# 先按类目、再按显示名：40 项的库也必须一眼可扫。
+	# "general"（通用）永远排在最后（与左栏图元库一致，2026-09-25 需求）。
+	# Category first, then display name; the "general" category always sorts LAST,
+	# mirroring the left palette (2026-09-25 request).
 	gpRows.sort_custom(func(gpA: Dictionary, gpB: Dictionary) -> bool:
+		var gpAIsG: bool = str(gpA["cat"]).to_lower() == "general"
+		var gpBIsG: bool = str(gpB["cat"]).to_lower() == "general"
+		if gpAIsG != gpBIsG:
+			return gpBIsG
 		if str(gpA["cat"]) != str(gpB["cat"]):
 			return str(gpA["cat"]) < str(gpB["cat"])
 		return str(gpA["name"]) < str(gpB["name"]))
@@ -407,6 +422,15 @@ func _gpAddAnchorRow(gpNode: GPPIDNode) -> void:
 
 
 func _gpAddHead(gpText: String) -> void:
+	# A 1px hairline above every section EXCEPT the first — the same separator the
+	# left symbol library draws between its categories.
+	# 除首节外每个小节上方一条 1px 发丝线 —— 与左栏图元库类目间分隔一致。
+	if _gpHeadCount > 0:
+		var gpSep: ColorRect = ColorRect.new()
+		gpSep.color = GPChromeStyle.GP_BORDER
+		gpSep.custom_minimum_size = Vector2(0.0, 1.0)
+		gpFormRoot.add_child(gpSep)
+	_gpHeadCount += 1
 	var gpLbl: Label = Label.new()
 	gpLbl.text = "▾ %s" % gpText
 	gpFormRoot.add_child(gpLbl)
@@ -425,6 +449,11 @@ func _gpFieldRow(gpLabelText: String) -> HBoxContainer:
 	var gpLbl: Label = Label.new()
 	gpLbl.text = gpLabelText
 	gpLbl.custom_minimum_size = Vector2(GP_LABEL_MIN_W, 0.0)
+	# Left-aligned labels (2026-09-25 request): the whole inspector content now lines
+	# up flush left — heads, notes and field labels share one left edge.
+	# 标签左对齐（2026-09-25 需求）：面板全部内容贴左 —— 小节标题、注释与字段标签
+	# 共用同一条左缘。
+	gpLbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	gpLbl.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	gpLbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	gpRow.add_child(gpLbl)
@@ -530,6 +559,7 @@ func _gpAddNumberField(gpLabel: String, gpInitial: Variant, gpMin: float, gpMax:
 
 # Remove every child of the form root. / 清空表单根的全部子节点。
 func _gpClearForm() -> void:
+	_gpHeadCount = 0
 	for gpC in gpFormRoot.get_children():
 		gpFormRoot.remove_child(gpC)
 		gpC.queue_free()

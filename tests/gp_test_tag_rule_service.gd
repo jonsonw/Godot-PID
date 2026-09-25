@@ -11,19 +11,21 @@ extends GPGTest
 
 
 func _gpPumpDef() -> GPSymbolDef:
-	var gpD: GPSymbolDef = GPSymbolLibrary.gpFindById("LPUMP003")
+	var gpD: GPSymbolDef = GPSymbolLibrary.gpFindById("DPUMP001")
 	if gpD != null:
 		return gpD
 	var gpF: GPSymbolDef = GPSymbolDef.new()
-	gpF.gpId = "LPUMP003"
+	gpF.gpId = "DPUMP001"
 	gpF.gpCategory = "pump"
+	gpF.gpTagPrefix = "P"
 	return gpF
 
 
 func _gpValveDef() -> GPSymbolDef:
 	var gpD: GPSymbolDef = GPSymbolDef.new()
-	gpD.gpId = "LVALVE001"
+	gpD.gpId = "DVALVE002"
 	gpD.gpCategory = "valve"
+	gpD.gpTagPrefix = "V"
 	return gpD
 
 
@@ -33,9 +35,9 @@ func _gpGraphWithThree() -> GPPIDGraph:
 	# in these tests would then collide with a fixture node and gpGetNode would return the
 	# wrong object. / 刻意不用 "a1"/"a2"：GPIdGen 也会发出 "a1"，此后测试里的放置会与夹具
 	# 节点撞号，gpGetNode 就会返回错的对象。
-	gpG.gpAddNode(gpG.gpNewNode("a1", "LPUMP003", "P-5000"))
-	gpG.gpAddNode(gpG.gpNewNode("a2", "LVALVE001", "V-9000"))
-	gpG.gpAddNode(gpG.gpNewNode("a3", "LPUMP003", "P-5001"))
+	gpG.gpAddNode(gpG.gpNewNode("a1", "DPUMP001", "P-5000"))
+	gpG.gpAddNode(gpG.gpNewNode("a2", "DVALVE002", "V-9000"))
+	gpG.gpAddNode(gpG.gpNewNode("a3", "DPUMP001", "P-5001"))
 	return gpG
 
 
@@ -181,7 +183,7 @@ func gpTestSetTagRulesTakesEffectOnNewPlacements() -> void:
 	gpNew.gpDefault.gpStart = 0
 	gpNew.gpDefault.gpCategoryPrefixes = {"pump": "PP"}
 	gpEq(gpSvc.gpSetTagRules(gpNew), true, "the rules were replaced")
-	var gpId: String = gpSvc.gpPlaceNode("LPUMP003", Vector2.ZERO)
+	var gpId: String = gpSvc.gpPlaceNode("DPUMP001", Vector2.ZERO)
 	gpEq(gpG.gpGetNode(gpId).gpTag, "PP0001", "the new rule drives new placements")
 	gpEq(gpG.gpTagRules.gpDefault.gpTemplate, "{prefix}{seq:4}", "the rules live on the graph")
 
@@ -191,5 +193,5 @@ func gpTestRenumberThenPlaceContinuesTheSequence() -> void:
 	var gpR: GPTagRegistry = _gpRegistry(gpG)
 	var gpSvc: GPEditService = _gpSvc(gpG, gpR)
 	gpSvc.gpRenumberTags()
-	var gpId: String = gpSvc.gpPlaceNode("LPUMP003", Vector2.ZERO)
+	var gpId: String = gpSvc.gpPlaceNode("DPUMP001", Vector2.ZERO)
 	gpEq(gpG.gpGetNode(gpId).gpTag, "P-1003", "a new pump continues after the renumbered ones")

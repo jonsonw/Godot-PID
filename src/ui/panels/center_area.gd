@@ -56,9 +56,19 @@ var gpSheetSeq: int = 0
 # 当前是否处于全屏模式。
 var gpFullscreen: bool = false
 
-# Reference to the fullscreen toggle button, so we can relabel it on locale change.
-# 全屏切换按钮的引用，便于在语言变化时重新设置文字。
+# Reference to the fullscreen toggle button, so we can re-tooltip it on locale change.
+# 全屏切换按钮的引用，便于在语言变化时重设提示语。
 var gpFullBtn: Button
+
+# Inline rename editor (double-click a sheet tab). Created once; top-level so it
+# floats over the tab band without participating in the VBox layout.
+# 行内重命名编辑器（双击图纸 tab）。仅创建一次；top-level 使其悬浮于标签带之上、
+# 不参与 VBox 布局。
+var _gpRenameEdit: LineEdit = null
+
+# Index of the sheet being renamed (-1 while idle).
+# 正在重命名的图纸下标（空闲时为 -1）。
+var _gpRenameIdx: int = -1
 
 
 # Build the header (tab bar + add + fullscreen buttons) and the canvas body.
@@ -74,47 +84,117 @@ func _ready() -> void:
 	gpHeader.custom_minimum_size = Vector2(0.0, 28.0)
 	gpHeader.size_flags_horizontal = SIZE_EXPAND_FILL
 	gpHeader.size_flags_vertical = SIZE_SHRINK_BEGIN
-	gpHeader.add_theme_constant_override("separation", 2)
+	# Zero separation: the "+" button must sit FLUSH against the last sheet tab.
+	# 零间距：「+」按钮必须紧贴最后一张图纸的 tab。
+	gpHeader.add_theme_constant_override("separation", 0)
 	# Tab bar grows to fill the header; the two buttons sit on its right.
 	# 标签栏拉伸填满头部；两个按钮置于其右侧。
 	gpTabBar = TabBar.new()
+	# EXPAND_FILL: the tab band now TILES across the whole header width (2026-09-25
+	# request — the previous SHRINK_BEGIN packed everything at the left edge). "+"
+	# then follows the band's right end, i.e. it adapts/moves right automatically.
+	# EXPAND_FILL：tab 色带**平铺**整个头部宽度（2026-09-25 需求 —— 之前的 SHRINK_BEGIN
+	# 把所有元素挤在左缘）。「+」跟随色带右端，即自适应右移。
 	gpTabBar.size_flags_horizontal = SIZE_EXPAND_FILL
 	gpTabBar.size_flags_vertical = SIZE_SHRINK_CENTER
+	gpTabBar.custom_minimum_size = Vector2(0.0, 26.0)
+	# Sheet-tab styling mirrors the RIGHT inspector tabs: same dock-toned band,
+	# same compact geometry, same selected look (dark fill + accent underline).
+	# 图纸 tab 样式与右侧属性面板 tab 同款：同色带、同紧凑尺寸、同选中态（深底 + accent 底线）。
+	var gpTabPanel: StyleBoxFlat = GPChromeStyle.gpStyleFor(GPChromeStyle.GP_DOCK_BG, 0)
+	gpTabBar.add_theme_stylebox_override("panel", gpTabPanel)
+	var gpTabBg: StyleBoxFlat = GPChromeStyle.gpStyleFor(GPChromeStyle.GP_DOCK_BG, GPChromeStyle.SIDE_BOTTOM)
+	gpTabBg.content_margin_left = 10.0
+	gpTabBg.content_margin_right = 10.0
+	gpTabBg.content_margin_top = 3.0
+	gpTabBg.content_margin_bottom = 3.0
+	gpTabBar.add_theme_stylebox_override("tab_unselected", gpTabBg)
+	gpTabBar.add_theme_stylebox_override("tab_hovered", gpTabBg)
+	var gpTabSel: StyleBoxFlat = gpTabBg.duplicate() as StyleBoxFlat
+	gpTabSel.bg_color = Color(0.129, 0.165, 0.204)
+	gpTabSel.border_color = GPChromeStyle.GP_ACCENT
+	gpTabSel.border_width_bottom = 1
+	gpTabBar.add_theme_stylebox_override("tab_selected", gpTabSel)
+	gpTabBar.add_theme_constant_override("side_margin", 0)
 	# Show a close button only on the active tab (TabBar.CLOSE_BUTTON_SHOW_ACTIVE == 1).
 	# 仅在活动标签上显示关闭按钮（TabBar.CLOSE_BUTTON_SHOW_ACTIVE == 1）。
 	gpTabBar.tab_close_display_policy = 1
 	gpTabBar.focus_mode = Control.FOCUS_NONE
 	gpTabBar.tab_changed.connect(_gpOnTabChanged)
 	gpTabBar.tab_close_pressed.connect(_gpOnTabClose)
+	# Double-click on a tab starts the inline rename editor (2026-09-25 request).
+	# 双击标签页启动行内重命名编辑器（2026-09-25 需求）。
+	gpTabBar.gui_input.connect(_gpOnTabBarInput)
 	# Compact close button: small X icon + transparent background (drops the default pill).
-	# 紧凑关闭按钮：小号 X 图标 + 透明背景（去掉默认按钮底）。
-	gpTabBar.add_theme_icon_override("close", _gpMakeCloseIcon(8))
+	# The click TARGET must stay generous: TabBar only emits tab_close_pressed when both
+	# press AND release land inside the close-button rect, so an 8px icon with zero
+	# margins was a near-invisible 8x8 target — a tiny hand tremor between press and
+	# release silently swallowed the click ("the X does nothing"). 10px icon + 4px
+	# horizontal margins give an ~18x16 target while keeping the look compact.
+	# 紧凑关闭按钮：小号 X 图标 + 透明背景（去掉默认按钮底）。但**命中区**必须够大：
+	# TabBar 只有在按下与松开都落在关闭按钮矩形内时才发射 tab_close_pressed —— 8px 图标
+	# 加零边距几乎是隐形的 8×8 目标，按-放之间手一抖点击就被静默吞掉（即「点 X 没反应」）。
+	# 10px 图标 + 4px 水平边距给出约 18×16 的目标，同时保持紧凑观感。
+	gpTabBar.add_theme_icon_override("close", _gpMakeCloseIcon(10))
 	var gpCloseBg: StyleBoxFlat = StyleBoxFlat.new()
-	gpCloseBg.content_margin_left = 0.0
-	gpCloseBg.content_margin_right = 0.0
+	gpCloseBg.content_margin_left = 4.0
+	gpCloseBg.content_margin_right = 4.0
 	gpCloseBg.content_margin_top = 0.0
 	gpCloseBg.content_margin_bottom = 0.0
 	gpCloseBg.bg_color = Color(0.0, 0.0, 0.0, 0.0)
 	gpTabBar.add_theme_stylebox_override("button_pressed", gpCloseBg)
 	gpTabBar.add_theme_stylebox_override("button_highlight", gpCloseBg)
 	gpHeader.add_child(gpTabBar)
-	# "+" button: add a new sheet.
-	# "+" 按钮：新建图纸。
+	# "+" button: add a new sheet. Icon-on-plate look (2026-09-25 request): a visible
+	# rounded block slightly lighter than the dock, hover brightens it — matching the
+	# category-band family. Plate metrics shared with the fullscreen button below.
+	# 「+」按钮：新建图纸。图标 + 色块底观感（2026-09-25 需求）：比 dock 略亮的圆角
+	# 区块，悬停提亮 —— 与类目色带同族。色块度量与下方全屏按钮共用。
+	var gpBtnPlate: StyleBoxFlat = StyleBoxFlat.new()
+	gpBtnPlate.bg_color = Color(0.180, 0.216, 0.267)
+	gpBtnPlate.set_corner_radius_all(3)
+	gpBtnPlate.set_content_margin_all(4.0)
+	var gpBtnHover: StyleBoxFlat = gpBtnPlate.duplicate() as StyleBoxFlat
+	gpBtnHover.bg_color = GPChromeStyle.GP_SPLIT_HI
+	var gpBtnActive: StyleBoxFlat = gpBtnPlate.duplicate() as StyleBoxFlat
+	gpBtnActive.bg_color = Color(0.129, 0.165, 0.204)
+	gpBtnActive.border_color = GPChromeStyle.GP_ACCENT
+	gpBtnActive.border_width_bottom = 1
 	var gpAddBtn: Button = Button.new()
-	gpAddBtn.text = "+"
 	gpAddBtn.tooltip_text = I18n.gpTr("center.add_tab")
-	gpAddBtn.custom_minimum_size = Vector2(26.0, 0.0)
+	var gpAddIcon: Texture2D = load("res://assets/icons/plus.svg") as Texture2D
+	if gpAddIcon != null:
+		gpAddBtn.icon = gpAddIcon
+	gpAddBtn.add_theme_constant_override("icon_max_width", 14)
+	gpAddBtn.custom_minimum_size = Vector2(24.0, 22.0)
 	gpAddBtn.focus_mode = Control.FOCUS_NONE
+	for gpSb in [["normal", gpBtnPlate], ["hover", gpBtnHover], ["pressed", gpBtnActive]]:
+		gpAddBtn.add_theme_stylebox_override(str(gpSb[0]), (gpSb[1] as StyleBoxFlat).duplicate() as StyleBoxFlat)
+	gpAddBtn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	gpAddBtn.pressed.connect(gpAddTab)
 	gpHeader.add_child(gpAddBtn)
+	# (No spacer needed: the tab band itself EXPANDs, so "+" and the fullscreen
+	# button ride at the band's right end — "+" adapts right as tabs are added.)
+	# （无需占位：tab 色带自身 EXPAND，「+」与全屏按钮贴在色带右端 ——
+	# 新增图纸时「+」自适应右移。）
 	# Fullscreen toggle button.
 	# 全屏切换按钮。
 	gpFullBtn = Button.new()
-	gpFullBtn.text = I18n.gpTr("center.fullscreen")
+	# Icon-on-plate toggle, same family as the "+" tile; the active (fullscreen ON)
+	# state keeps the accent-plate so the mode stays visible without text.
+	# 图标 + 色块的开关按钮，与「+」图块同族；激活（全屏开启）时保持 accent 色块，
+	# 无文字也能看清模式状态。
 	gpFullBtn.tooltip_text = I18n.gpTr("center.fullscreen_tip")
+	var gpFullIcon: Texture2D = load("res://assets/icons/fullscreen.svg") as Texture2D
+	if gpFullIcon != null:
+		gpFullBtn.icon = gpFullIcon
+	gpFullBtn.add_theme_constant_override("icon_max_width", 14)
 	gpFullBtn.toggle_mode = true
-	gpFullBtn.custom_minimum_size = Vector2(40.0, 0.0)
+	gpFullBtn.custom_minimum_size = Vector2(24.0, 22.0)
 	gpFullBtn.focus_mode = Control.FOCUS_NONE
+	for gpSb in [["normal", gpBtnPlate], ["hover", gpBtnHover], ["pressed", gpBtnActive]]:
+		gpFullBtn.add_theme_stylebox_override(str(gpSb[0]), (gpSb[1] as StyleBoxFlat).duplicate() as StyleBoxFlat)
+	gpFullBtn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	gpFullBtn.toggled.connect(_gpOnFullscreenToggle)
 	gpHeader.add_child(gpFullBtn)
 	add_child(gpHeader)
@@ -124,6 +204,12 @@ func _ready() -> void:
 	gpBody.size_flags_horizontal = SIZE_EXPAND_FILL
 	gpBody.size_flags_vertical = SIZE_EXPAND_FILL
 	add_child(gpBody)
+	# The canvas working area now paints its OWN canvas tint (the Center container
+	# itself wears the dock tint so the tab row blends with the right dock's band).
+	# 画布工作区自绘画布色（Center 容器自身改为 dock 色，使 tab 行与右栏色带融为一体）。
+	gpBody.draw.connect(_gpDrawBodyBg)
+	gpBody.resized.connect(gpBody.queue_redraw)
+	gpBody.queue_redraw()
 	# Keep the static header labels (button tooltips) in sync with the locale.
 	# 让头部静态文字（按钮提示）随语言同步。
 	I18n.gpLocaleChanged.connect(_gpOnLocale)
@@ -157,6 +243,14 @@ func gpActiveGraph() -> GPPIDGraph:
 	return gpTabs[gpActive]["graph"]
 
 
+# The active sheet's GPSheet (frame size, title block, label mode); null if none.
+# 活动图纸的 GPSheet（图幅、标题栏、语言模式）；无则返回 null。
+func gpActiveSheet() -> GPSheet:
+	if gpActive < 0 or gpActive >= gpTabs.size():
+		return null
+	return gpTabs[gpActive].get("sheet") as GPSheet
+
+
 # Return every sheet's canvas (not just the active one), so an operation can cascade
 # across all open sheets — e.g. removing every placed instance of a deleted symbol.
 # 返回每个图纸的画布（不只活动图纸），使操作能跨所有打开的图纸级联 —— 例如删除图元时
@@ -186,7 +280,13 @@ func gpToSheets() -> Array[GPSheet]:
 	var gpOut: Array[GPSheet] = []
 	var gpI: int = 0
 	for gpTab in gpTabs:
-		var gpSheet: GPSheet = GPSheet.new()
+		# Reuse the tab's own GPSheet when present, so sheet-level data (frame size,
+		# title block, label mode) survives a save instead of falling back to A3 defaults.
+		# 复用标签页自己的 GPSheet（若存在），使图幅/标题栏/语言模式在保存时得以保留，
+		# 而非回落成 A3 默认值。
+		var gpSheet: GPSheet = gpTab.get("sheet") as GPSheet
+		if gpSheet == null:
+			gpSheet = GPSheet.new()
 		gpSheet.gpId = str(gpTab.get("id", "sheet-" + str(gpI + 1)))
 		gpSheet.gpName = str(gpTab.get("title", ""))
 		gpSheet.gpIndex = gpI
@@ -219,7 +319,7 @@ func gpLoadSheets(gpSheets: Array) -> void:
 		if gpSheet == null:
 			continue
 		gpSheetSeq += 1
-		_gpAddTabWith(gpSheet.gpName, gpSheet.gpId, gpSheet.gpGraph)
+		_gpAddTabWith(gpSheet.gpName, gpSheet.gpId, gpSheet.gpGraph, gpSheet)
 		gpI += 1
 
 
@@ -239,19 +339,28 @@ func gpSetDefs(gpNewDefs: Array[GPSymbolDef]) -> void:
 # 以给定标题创建图纸并接入标签栏 / 画布体。
 # [param gpId] stable identity; empty is fine for a brand-new tab (gpToSheets() derives one).
 # [param gpId] 稳定标识；全新标签页留空亦可（gpToSheets() 会推导一个）。
-# [param gpGraphIn] when non-null the tab shows THIS graph instead of a fresh one.
-# [param gpGraphIn] 非 null 时，该标签页显示**这个**图，而非新建一个。
-func _gpAddTabWith(gpTitle: String, gpId: String = "", gpGraphIn: GPPIDGraph = null) -> void:
+# [param gpSheetIn] when non-null the tab adopts THIS sheet's frame/title-block settings.
+# [param gpSheetIn] 非 null 时，该标签页沿用**这张图纸**的图框/标题栏设置。
+func _gpAddTabWith(gpTitle: String, gpId: String = "", gpGraphIn: GPPIDGraph = null,
+		gpSheetIn: GPSheet = null) -> void:
 	var gpGraph: GPPIDGraph = gpGraphIn if gpGraphIn != null else GPPIDGraph.new()
+	var gpSheet: GPSheet = gpSheetIn
+	if gpSheet == null:
+		gpSheet = GPSheet.gpNew(gpId, gpTitle, gpTabs.size())
+	gpSheet.gpGraph = gpGraph
 	var gpCanvas: GPCanvas2D = GPCanvas2D.new()
 	gpCanvas.gpGraph = gpGraph
 	gpCanvas.gpDefs = gpDefs
+	# Hand the sheet to the canvas so its frame renderer knows the size and title block.
+	# 把图纸交给画布，使其图框渲染器知道图幅与标题栏。
+	gpCanvas.gpSetSheet(gpSheet)
 	gpBody.add_child(gpCanvas)
 	# Fill the body: the canvas is a plain Control child, so anchor it to the full rect.
 	# 填满画布体：画布是普通 Control 子节点，故锚定到全矩形。
 	gpCanvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	gpCanvas.visible = false
-	var gpTab: Dictionary = {"id": gpId, "title": gpTitle, "graph": gpGraph, "canvas": gpCanvas}
+	var gpTab: Dictionary = {"id": gpId, "title": gpTitle, "graph": gpGraph, "canvas": gpCanvas,
+		"sheet": gpSheet}
 	gpTabs.append(gpTab)
 	gpTabBar.add_tab(gpTitle)
 	var gpIdx: int = gpTabs.size() - 1
@@ -303,7 +412,9 @@ func _gpOnTabClose(gpIdx: int) -> void:
 func _gpOnFullscreenToggle(gpOn: bool) -> void:
 	gpFullscreen = gpOn
 	if gpFullBtn != null:
-		gpFullBtn.text = I18n.gpTr("center.fullscreen_exit") if gpOn else I18n.gpTr("center.fullscreen")
+		# Icon-only button: state lives in the accent plate; only the tooltip changes.
+		# 纯图标按钮：状态由 accent 色块承载；仅提示语随状态变化。
+		gpFullBtn.tooltip_text = I18n.gpTr("center.fullscreen_exit") if gpOn else I18n.gpTr("center.fullscreen_tip")
 	gpFullscreenToggled.emit(gpOn)
 
 
@@ -313,7 +424,7 @@ func _gpOnLocale(_gpLocale: String) -> void:
 	# Titles are user-facing sheet names; keep them. Only refresh the button labels.
 	# 标题是用户可见的图纸名，保持不变；仅刷新按钮文字。
 	if gpFullBtn != null:
-		gpFullBtn.text = I18n.gpTr("center.fullscreen_exit") if gpFullscreen else I18n.gpTr("center.fullscreen")
+		gpFullBtn.tooltip_text = I18n.gpTr("center.fullscreen_exit") if gpFullscreen else I18n.gpTr("center.fullscreen_tip")
 
 
 # Generate a small, crisp "X" close icon for the tab bar (gpSize px, transparent bg).
@@ -330,8 +441,103 @@ func _gpMakeCloseIcon(gpSize: int) -> Texture2D:
 				gpImg.set_pixel(gpX, gpY, gpCol)
 	return ImageTexture.create_from_image(gpImg)
 
+# ======================= inline tab rename (double-click) =======================
+# ======================= 行内标签重命名（双击）=======================
+# A double click on the tab band starts an inline LineEdit over the clicked tab.
+# Enter commits, Escape or focus loss cancels; the rename updates the tab title,
+# the sheet record AND the GPSheet name so it survives a save/reload.
+# 双击标签带即在对应标签上启动行内 LineEdit。回车提交、Esc 或失焦取消；重命名同时
+# 更新标签标题、图纸记录与 GPSheet 名称，保存/重载后仍保留。
+func _gpOnTabBarInput(gpEvent: InputEvent) -> void:
+	if gpEvent is InputEventMouseButton and gpEvent.pressed and gpEvent.double_click \
+			and int(gpEvent.button_index) == int(MOUSE_BUTTON_LEFT):
+		var gpIdx: int = gpTabBar.get_tab_idx_at_point(gpTabBar.get_local_mouse_position())
+		if gpIdx >= 0:
+			_gpBeginRename(gpIdx)
+
+
+# Show the rename editor over the tab at gpIdx.
+# 在 gpIdx 处的标签上显示重命名编辑器。
+func _gpBeginRename(gpIdx: int) -> void:
+	if gpIdx < 0 or gpIdx >= gpTabs.size():
+		return
+	_gpEndRename(true)
+	_gpRenameIdx = gpIdx
+	if _gpRenameEdit == null:
+		_gpRenameEdit = LineEdit.new()
+		# Top-level: floats over the tab band; containers skip top-level children.
+		# top-level：悬浮于标签带之上；容器会跳过 top-level 子节点。
+		_gpRenameEdit.set_as_top_level(true)
+		_gpRenameEdit.visible = false
+		_gpRenameEdit.text_submitted.connect(_gpOnRenameSubmitted)
+		_gpRenameEdit.gui_input.connect(_gpOnRenameGuiInput)
+		_gpRenameEdit.focus_exited.connect(_gpEndRename.bind(true))
+		add_child(_gpRenameEdit)
+	_gpRenameEdit.text = str(gpTabs[gpIdx]["title"])
+	var gpTabRect: Rect2 = gpTabBar.get_tab_rect(gpIdx)
+	_gpRenameEdit.global_position = gpTabBar.get_global_rect().position + gpTabRect.position + Vector2(0.0, 1.0)
+	# Never narrower than 80px: a freshly created "P&ID 1" tab is tiny but must stay editable.
+	# 不得窄于 80px：新建的「P&ID 1」标签很小，但必须可编辑。
+	_gpRenameEdit.size = Vector2(maxf(gpTabRect.size.x, 80.0), gpTabRect.size.y - 2.0)
+	_gpRenameEdit.visible = true
+	_gpRenameEdit.grab_focus()
+	_gpRenameEdit.select_all()
+
+
+# While the editor is open, Escape cancels the rename (commits nothing).
+# 编辑器打开期间，Esc 取消重命名（不提交）。
+func _gpOnRenameGuiInput(gpEvent: InputEvent) -> void:
+	if gpEvent is InputEventKey and gpEvent.pressed and int(gpEvent.keycode) == int(KEY_ESCAPE):
+		_gpEndRename(false)
+
+
+# Enter was pressed inside the editor: commit and close.
+# 编辑器内按下回车：提交并关闭。
+# ⚠️ MUST pass _gpRenameIdx: the default (-1) makes _gpCommitRename bail out early,
+# so the rename silently did NOTHING (the reported "display name doesn't change").
+# ⚠️ 必须传 _gpRenameIdx：默认值 -1 会让 _gpCommitRename 提前返回，重命名静默失效
+#（即用户报告的「显示名称不改变」）。
+func _gpOnRenameSubmitted(gpText: String) -> void:
+	_gpCommitRename(gpText, _gpRenameIdx)
+	_gpEndRename(false)
+
+
+# Commit (or drop) the pending rename and hide the editor.
+# 提交（或丢弃）未决的重命名并隐藏编辑器。
+func _gpEndRename(gpCommit: bool) -> void:
+	if _gpRenameEdit == null or not _gpRenameEdit.visible:
+		return
+	var gpIdx: int = _gpRenameIdx
+	var gpText: String = _gpRenameEdit.text
+	_gpRenameEdit.visible = false
+	_gpRenameIdx = -1
+	if gpCommit:
+		_gpCommitRename(gpText, gpIdx)
+
+
+# Apply a non-empty, changed title to the tab, the sheet record and the GPSheet.
+# 把非空且变化过的标题应用到标签、图纸记录与 GPSheet。
+func _gpCommitRename(gpText: String, gpIdx: int = -1) -> void:
+	var gpNew: String = gpText.strip_edges()
+	if gpIdx < 0 or gpIdx >= gpTabs.size():
+		return
+	if gpNew == "" or gpNew == str(gpTabs[gpIdx]["title"]):
+		return
+	gpTabs[gpIdx]["title"] = gpNew
+	var gpSheet: GPSheet = gpTabs[gpIdx].get("sheet") as GPSheet
+	if gpSheet != null:
+		gpSheet.gpName = gpNew
+	gpTabBar.set_tab_title(gpIdx, gpNew)
+
+
 # Paint the canvas working-area background (brightest tier) so the sheet stands out
 # from the darker side docks; canvas content draws on top.
 # 自绘画布工作区背景（最亮一档），使图纸从较暗侧栏中凸显；画布内容绘制于其上。
 func _draw() -> void:
-	GPChromeStyle.gpDraw(self, GPChromeStyle.GP_CANVAS_BG, 0)
+	GPChromeStyle.gpDraw(self, GPChromeStyle.GP_DOCK_BG, 0)
+
+
+# Paint the canvas working area (gpBody) in the canvas tint; content draws above.
+# 以画布色绘制绘图工作区（gpBody）；画布内容绘制于其上。
+func _gpDrawBodyBg() -> void:
+	GPChromeStyle.gpDraw(gpBody, GPChromeStyle.GP_CANVAS_BG, 0)

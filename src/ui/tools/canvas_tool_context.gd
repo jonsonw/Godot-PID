@@ -39,6 +39,10 @@ var gpEdgeGrips: GPEdgeGripOps:
 var gpLabelGrips: GPLabelGripOps:
 	get: return gpCv.gpLabelGrips
 
+# Edge line-number grip/drag collaborator . / 边管线号抓取点 / 拖拽协作者。
+var gpEdgeTagGrips: GPEdgeTagGripOps:
+	get: return gpCv.gpEdgeTagGrips
+
 func _init(gpCanvas: GPCanvas2D) -> void:
 	gpCv = gpCanvas
 	gpState = gpCanvas.gpState

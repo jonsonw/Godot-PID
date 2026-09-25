@@ -333,8 +333,8 @@ func gpTestIdGenDocIdAndGlobalUid() -> void:
 
 
 func gpTestFactorySymbolsCarryTypedSchema() -> void:
-	var gpDefs: Array[GPSymbolDef] = GPSymbolPackIso_10628.gpDefs()
-	gpCheck(gpDefs.size() > 0, "the ISO pack produced definitions")
+	var gpDefs: Array[GPSymbolDef] = GPSymbolPackDexpi.gpDefs()
+	gpCheck(gpDefs.size() > 0, "the DEXPI C01 pack produced definitions")
 	var gpNulls: int = 0
 	for gpD in gpDefs:
 		if gpD.gpSchema == null:
@@ -343,12 +343,13 @@ func gpTestFactorySymbolsCarryTypedSchema() -> void:
 
 
 func gpTestEquipmentSchemasHaveEnoughFields() -> void:
-	var gpDefs: Array[GPSymbolDef] = GPSymbolPackIso_10628.gpDefs()
+	var gpDefs: Array[GPSymbolDef] = GPSymbolPackDexpi.gpDefs()
 	var gpThin: int = 0
 	for gpD in gpDefs:
-		# "general" holds line-type symbols (process line, instrument line); one field is
-		# correct for them. Real equipment must offer a usable panel.
-		# general 类别是线型符号（工艺线、仪表线），一个字段即合理；真实设备须给出可用面板。
+		# "general" holds annotation glyphs (arrows, tee, reducer, slope, blind cover) — one
+		# field is correct for them. Real equipment must offer a usable panel.
+		# general 类别是标注类图元（箭头、三通、异径管、坡度、盲板），一个字段即合理；
+		# 真实设备须给出可用面板。
 		if gpD.gpCategory == "general":
 			continue
 		if gpD.gpSchema == null or gpD.gpSchema.gpFields.size() < 3:
@@ -357,7 +358,7 @@ func gpTestEquipmentSchemasHaveEnoughFields() -> void:
 
 
 func _gpFirstOfCategory(gpCat: String) -> GPSymbolDef:
-	for gpD in GPSymbolPackIso_10628.gpDefs():
+	for gpD in GPSymbolPackDexpi.gpDefs():
 		if gpD.gpCategory == gpCat:
 			return gpD
 	return null

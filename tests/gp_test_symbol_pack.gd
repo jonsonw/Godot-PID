@@ -87,24 +87,24 @@ func gpTestNormalizeEmptyGlyph() -> void:
 # 标签去匹配裸标签 SVG）。于是管线只能连到节点中心 ——「把这条管线接到换热器壳程」无法表达。
 # 以下断言就是「端口必须留在包里」的护栏。
 
-# Legend glyphs (the three line-type samples) are artwork, not connectable symbols.
-# 图例符号（三个线型样例）是美术元素，不是可连接图元。
-# The three line-type samples are artwork, not connectable symbols. Ids follow the project
-# rule L/C + category + 3-digit sequence (see GPSymbolNaming).
-# 三个线型样例是美术元素，不是可连接图元。id 遵循项目规则 L/C + 类别 + 三位序号
-#（见 GPSymbolNaming）。
+# Annotation glyphs that sit ON a line (arrows, flow-direction marks) are artwork, not
+# connectable symbols: they are drawn, never wired.
+# 标注类图元（箭头、流向标记）是画在线上的美术元素，不是可连接图元：只绘制，不接线。
+# Ids follow the project rule L/C/D + category + 3-digit sequence (see GPSymbolNaming).
+# id 遵循项目规则 L/C/D + 类别 + 三位序号（见 GPSymbolNaming）。
 const GP_LEGEND_IDS: Array[String] = [
-	"LGENERAL003", "LGENERAL002", "LGENERAL001",  # ProcessLine / InstrumentLine / ElectricalLine
+	"DGENERAL001", "DGENERAL002",  # 关键介质进/出口箭头 / essential-substance inlet/outlet arrows
+	"DGENERAL005", "DGENERAL006",  # 流向（主/支管段）/ direction-of-flow marks
 ]
 
 
 func _gpBuiltinDefs() -> Array[GPSymbolDef]:
-	return GPSymbolPackIso_10628.gpDefs()
+	return GPSymbolPackDexpi.gpDefs()
 
 
 func gpTestEveryBuiltinSymbolHasPorts() -> void:
 	var gpDefs: Array[GPSymbolDef] = _gpBuiltinDefs()
-	gpEq(gpDefs.size(), 25, "the ISO pack still holds 25 symbols")
+	gpEq(gpDefs.size(), 24, "the DEXPI C01 pack holds 24 symbols")
 	for gpD in gpDefs:
 		if GP_LEGEND_IDS.has(gpD.gpId):
 			gpCheck(gpD.gpPorts.is_empty(), "legend glyph carries no ports: %s" % gpD.gpId)
@@ -118,10 +118,31 @@ func gpTestBuiltinPortNamesAreUnique() -> void:
 			% gpD.gpId)
 
 
+# Every built-in display name must be an i18n key that actually resolves in both languages —
+# a raw English string slipped into the pack would show up untranslated in a Chinese drawing.
+# 每个内置显示名都必须是能同时解析出中英两种语言的 i18n 键；若包里混进裸英文串，
+# 中文图纸上就会出现未翻译的图元名。
+func gpTestBuiltinDisplayNamesResolveBilingually() -> void:
+	for gpD in _gpBuiltinDefs():
+		gpCheck(gpD.gpDisplayName.begins_with("dexpi."),
+			"display name is an i18n key: %s" % gpD.gpDisplayName)
+		var gpZh: String = I18n.gpTrIn(gpD.gpDisplayName, "zh", gpD.gpDisplayName)
+		var gpEn: String = I18n.gpTrIn(gpD.gpDisplayName, "en", gpD.gpDisplayName)
+		gpCheck(gpZh != gpD.gpDisplayName, "chinese name resolves: %s" % gpD.gpDisplayName)
+		gpCheck(gpEn != gpD.gpDisplayName, "english name resolves: %s" % gpD.gpDisplayName)
+		var gpById: GPSymbolDef = _gpDefByDisplayName(gpZh)
+		gpCheck(gpById != null and gpById.gpId == gpD.gpId,
+			"lookup by chinese name returns the same symbol: %s" % gpD.gpId)
+
+
+# The vessel is the one multi-nozzle equipment glyph in C01: top, bottom and two side
+# nozzles, all process nozzles — that is what lets you land four different lines on it.
+# 容器是 C01 中唯一的多管口设备图元：顶 / 底 / 两侧共四个管口，全为工艺管口 ——
+# 这正是「在容器上接四条不同管线」得以表达的前提。
 func gpTestMultiNozzleEquipment() -> void:
 	for gpD in _gpBuiltinDefs():
 		match gpD.gpId:
-			"LHEAT001", "LTANK001":  # 换热器 / 储罐
+			"DTANK001":  # 碟形封头容器 / vessel with dished heads
 				gpEq(gpD.gpPorts.size(), 4, "%s exposes four nozzles" % gpD.gpId)
 				gpEq(gpD.gpPortsOfType(GPPort.GP_NOZZLE).size(), 4,
 					"%s nozzles are all process nozzles" % gpD.gpId)
@@ -129,53 +150,93 @@ func gpTestMultiNozzleEquipment() -> void:
 				pass
 
 
-# A control valve, an actuator and a positioner each take a signal line on their actuator
-# terminal — that is what makes "wire the controller to the valve" expressible at all.
-# 调节阀、执行器与定位器各有一个执行机构端子用于接信号线 —— 这正是「把控制器接到阀门上」
-# 得以表达的前提。
+# A controlled actuator takes a signal line on its signal terminal and drives the valve stem
+# through its actuator terminal — that is what makes "wire the controller to the valve"
+# expressible at all. It touches the process itself, so it must NOT expose a nozzle.
+# 控制执行机构在信号端子上接信号线，并通过执行机构端子驱动阀杆 —— 这正是「把控制器接到阀门上」
+# 得以表达的前提。它不直接接触工艺，故不得暴露管口。
 func gpTestValveActuatorTerminals() -> void:
-	for gpName in ["调节阀", "阀门执行器", "阀门定位器"]:
-		var gpD: GPSymbolDef = _gpDefByDisplayName(gpName)
-		gpCheck(gpD != null, "symbol exists: %s" % gpName)
-		if gpD == null:
-			continue
-		gpEq(gpD.gpPortsOfType(GPPort.GP_ACTUATOR).size(), 1,
-			"%s has exactly one actuator terminal" % gpName)
-		gpEq(gpD.gpPortsOfType(GPPort.GP_NOZZLE).size(), 2,
-			"%s keeps its two process nozzles" % gpName)
+	var gpD: GPSymbolDef = _gpDefById("DGENERAL004")
+	gpCheck(gpD != null, "controlled actuator exists")
+	if gpD == null:
+		return
+	gpEq(gpD.gpPortsOfType(GPPort.GP_ACTUATOR).size(), 1,
+		"%s has exactly one actuator terminal" % gpD.gpId)
+	gpEq(gpD.gpPortsOfType(GPPort.GP_SIGNAL).size(), 1,
+		"%s has exactly one signal terminal" % gpD.gpId)
+	gpEq(gpD.gpPortsOfType(GPPort.GP_NOZZLE).size(), 0,
+		"%s is not plumbed into the process" % gpD.gpId)
 
 
-func gpTestTransmittersHaveProcessAndSignalPorts() -> void:
-	for gpName in ["流量变送器", "压力变送器", "液位变送器", "温度变送器"]:
-		var gpD: GPSymbolDef = _gpDefByDisplayName(gpName)
-		gpCheck(gpD != null, "symbol exists: %s" % gpName)
+# An instrumentation bubble taps the process from below (proc) and emits a signal (sig).
+# C01 ships both the central-room and the field variant, and both must behave the same.
+# 仪表气泡从下方取工艺信号（proc）并向外发出信号（sig）。C01 同时提供中控室与现场两种变体，
+# 两者行为必须一致。
+func gpTestInstrumentBubblesHaveProcessAndSignalPorts() -> void:
+	for gpId in ["DINSTRUMENT001", "DINSTRUMENT002"]:
+		var gpD: GPSymbolDef = _gpDefById(gpId)
+		gpCheck(gpD != null, "symbol exists: %s" % gpId)
 		if gpD == null:
 			continue
 		gpEq(gpD.gpPortsOfType(GPPort.GP_NOZZLE).size(), 1,
-			"%s taps the process through one nozzle" % gpName)
+			"%s taps the process through one nozzle" % gpId)
 		gpEq(gpD.gpPortsOfType(GPPort.GP_SIGNAL).size(), 1,
-			"%s emits one signal" % gpName)
+			"%s emits one signal" % gpId)
 
 
-# In-line indicators are pierced by the pipe, so they get two nozzles plus a signal terminal.
-# 就地指示表被管线贯穿，故两个管口 + 一个信号端子。
-func gpTestInLineIndicators() -> void:
-	for gpName in ["流量指示器", "压力指示器", "温度指示器", "液位指示器"]:
-		var gpD: GPSymbolDef = _gpDefByDisplayName(gpName)
-		gpCheck(gpD != null, "symbol exists: %s" % gpName)
-		if gpD == null:
-			continue
-		gpEq(gpD.gpPortsOfType(GPPort.GP_NOZZLE).size(), 2, "%s has two nozzles" % gpName)
-		gpEq(gpD.gpPortsOfType(GPPort.GP_SIGNAL).size(), 1,
-			"%s has one signal terminal" % gpName)
+# A tee is pierced by the main run and branches off it, so it gets three nozzles.
+# 三通被主管贯穿并向分支引出，故为三个管口。
+func gpTestTeeHasThreeNozzles() -> void:
+	var gpD: GPSymbolDef = _gpDefById("DGENERAL012")
+	gpCheck(gpD != null, "t-type connection exists")
+	if gpD == null:
+		return
+	gpEq(gpD.gpPorts.size(), 3, "a tee exposes three nozzles")
+	gpEq(gpD.gpPortsOfType(GPPort.GP_NOZZLE).size(), 3, "all three tee ports are nozzles")
+	gpCheck(gpD.gpPortNamesUnique(), "tee port names are unique so port_id can be a name")
 
 
-func gpTestFieldEnclosureIsSignalOnly() -> void:
-	var gpD: GPSymbolDef = _gpDefByDisplayName("现场接线箱")
-	gpCheck(gpD != null, "field enclosure exists")
-	if gpD != null:
-		gpEq(gpD.gpPortsOfType(GPPort.GP_SIGNAL).size(), 2, "a field enclosure has two terminals")
-		gpEq(gpD.gpPortsOfType(GPPort.GP_NOZZLE).size(), 0, "a field enclosure has no nozzle")
+# A blind cover terminates a flanged branch: it is a TERMINAL, not a nozzle, so no process
+# line can be routed through it by accident.
+# 盲板用于封堵法兰支管：它是 TERMINAL 而非管口，因此不会被误接工艺管线。
+func gpTestBlindCoverIsTerminalOnly() -> void:
+	var gpD: GPSymbolDef = _gpDefById("DGENERAL003")
+	gpCheck(gpD != null, "blind cover exists")
+	if gpD == null:
+		return
+	gpEq(gpD.gpPortsOfType(GPPort.GP_TERMINAL).size(), 1, "a blind cover has one terminal")
+	gpEq(gpD.gpPortsOfType(GPPort.GP_NOZZLE).size(), 0, "a blind cover has no nozzle")
+
+
+# A manhole is an opening on the vessel wall, likewise a terminal rather than a nozzle.
+# 人孔是设备壁上的开孔，同样是端子而非管口。
+func gpTestManholeIsTerminalOnly() -> void:
+	var gpD: GPSymbolDef = _gpDefById("DGENERAL007")
+	gpCheck(gpD != null, "manhole exists")
+	if gpD == null:
+		return
+	gpEq(gpD.gpPortsOfType(GPPort.GP_TERMINAL).size(), 1, "a manhole has one terminal")
+	gpEq(gpD.gpPortsOfType(GPPort.GP_NOZZLE).size(), 0, "a manhole has no nozzle")
+
+
+# Every C01 glyph carries the real millimetre size measured off the reference drawing
+# (1 world unit == 1 mm): a vessel is 30x51 mm while a valve is 4x2 mm. Pinning the extreme
+# pair catches a generator regression that would silently flatten the whole pack to one size.
+# 每个 C01 图元都带有从标准图实测的毫米尺寸（1 世界单位 = 1 mm）：容器 30x51 mm，
+# 而阀门仅 4x2 mm。钉住这一极端组合，可捕获「生成器把整包压成同一尺寸」的回归。
+func gpTestRealMillimetreSizesFromC01() -> void:
+	var gpTank: GPSymbolDef = _gpDefById("DTANK001")
+	var gpValve: GPSymbolDef = _gpDefById("DVALVE002")
+	gpCheck(gpTank != null and gpValve != null, "vessel and ball valve exist")
+	if gpTank != null:
+		gpCheck(absf(gpTank.gpDefaultSize.x - 30.0) < 0.5 and absf(gpTank.gpDefaultSize.y - 51.0) < 0.5,
+			"vessel keeps its real C01 size 30x51 mm, got %s" % gpTank.gpDefaultSize)
+	if gpValve != null:
+		gpCheck(absf(gpValve.gpDefaultSize.x - 4.0) < 0.5 and absf(gpValve.gpDefaultSize.y - 2.0) < 0.5,
+			"ball valve keeps its real C01 size 4x2 mm, got %s" % gpValve.gpDefaultSize)
+	if gpTank != null and gpValve != null:
+		gpCheck(gpTank.gpDefaultSize.y > gpValve.gpDefaultSize.y * 5.0,
+			"canvas proportions follow C01: the vessel dwarfs the valve")
 
 
 # The GDScript table and the generator's Python table must agree: a user symbol created from
@@ -203,20 +264,24 @@ func _gpDefById(gpId: String) -> GPSymbolDef:
 	return null
 
 
-# Look-up by display name. Since the L/C naming rule an id is ALLOCATED from the category,
+# Look-up by display name. Since the L/C/D naming rule an id is ALLOCATED from the category,
 # so the sequence part shifts whenever a symbol is inserted before another one; tests that
 # name ids would break on every such insertion. The display name is the stable handle.
-# A display name may now be an i18n key ("iso.xxx"), so it is compared both raw and
-# translated — that keeps these tests readable in Chinese while the pack stores keys.
-# 按显示名查找。自 L/C 命名规则起，id 由类别「分配」而来，一旦在某个图元之前插入新图元，
+# A display name may now be an i18n key ("dexpi.xxx"), so it is compared against BOTH the
+# Chinese and the English rendering (never merely the current UI locale) — that keeps these
+# tests readable in Chinese while the pack stores keys, and keeps them stable when another
+# suite flips gpLocale.
+# 按显示名查找。自 L/C/D 命名规则起，id 由类别「分配」而来，一旦在某个图元之前插入新图元，
 # 其后的序号就会平移；写死 id 的测试会在每次插入时失效。显示名才是稳定句柄。
-# 显示名如今可能是 i18n 键（"iso.xxx"），故同时按「原值」与「翻译值」比较 ——
-# 这样符号包存键，而测试仍可用中文名书写，保持可读。
+# 显示名如今可能是 i18n 键（"dexpi.xxx"），故同时与「中文」「英文」两种渲染比较
+#（而非仅当前界面语言）—— 这样符号包存键，测试仍可用中文名书写，且在他处切换 gpLocale 时稳定。
 func _gpDefByDisplayName(gpName: String) -> GPSymbolDef:
 	for gpD in _gpBuiltinDefs():
 		if gpD.gpDisplayName == gpName:
 			return gpD
-		if I18n.gpTr(gpD.gpDisplayName, gpD.gpDisplayName) == gpName:
+		var gpZh: String = I18n.gpTrIn(gpD.gpDisplayName, "zh", gpD.gpDisplayName)
+		var gpEn: String = I18n.gpTrIn(gpD.gpDisplayName, "en", gpD.gpDisplayName)
+		if gpZh == gpName or gpEn == gpName:
 			return gpD
 	return null
 

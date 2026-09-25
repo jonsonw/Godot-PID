@@ -10,9 +10,18 @@ extends RefCounted
 #
 # LVALVE001 L = 内置库图元（Library，随发行版自带、只读）
 # CVALVE001 C = 自定义图元（Custom，用户自建或由内置图元派生）
+# DVALVE001 D = DEXPI 标准包图元（DEXPI，独立命名空间）
 #
 # L 内置库 / library (ships with the release, read-only)
 # C 自定义 / custom (authored by the user, or derived from a built-in)
+# D DEXPI 包 / DEXPI pack (the v0.1 standard set from DEXPI Example C01)
+#
+# WHY "D" NEEDS ITS OWN LETTER / 为何 D 要单独一个字母：
+# sharing a namespace with L would mint "VALVE001" twice — once per pack — and every saved
+# *.pid.json would then resolve to whichever pack registered last. A per-source letter makes
+# the id namespace exclusive by construction, not by convention.
+# 若与 L 共用命名空间，"VALVE001" 会被两个包各铸一次，已存盘的 *.pid.json 会解析到
+# 「后注册的那个」。来源码字母使命名空间**按构造**互斥，而非靠约定。
 #
 # WHY A SEQUENCE AT ALL / 为何要序号：
 # the sequence lives INSIDE a category, so the id also reads as "which family, and the
@@ -36,6 +45,12 @@ const GP_SOURCE_LIBRARY: String = "L"
 # 用户自建（自定义）图元的来源码。
 const GP_SOURCE_CUSTOM: String = "C"
 
+# Source code for the DEXPI standard pack (v0.1). A BUILT-IN pack, read-only like L — but
+# with its own namespace so ids never collide with the legacy ISO set.
+# DEXPI 标准包（v0.1）来源码。与 L 同为**内置只读**包，但独占命名空间，id 绝不与
+# 历史 ISO 集冲突。
+const GP_SOURCE_DEXPI: String = "D"
+
 # Width of the sequence field, zero-padded.
 # 序号字段宽度，零填充。
 const GP_SEQ_DIGITS: int = 3
@@ -50,35 +65,37 @@ const GP_CATEGORY_FALLBACK: String = "GENERAL"
 
 # Legacy id -> current id. Filled in by tools/gen_symbol_packs.py (see legacy_id_map.json).
 # 旧 id → 新 id。由 tools/gen_symbol_packs.py 生成（见 legacy_id_map.json）。
-# *.pid.json written before the rule change carries those, so they must keep resolving.
-# 内置图元库 id 原先就是 SVG 文件名主干（"P_CentrifugalPump_001"），规则变更前落盘的
-# 每个 *.pid.json 都带这些 id，因此必须能继续解析。
+# The table mirrors the LIVE pack (dexpi). The ISO 10628 aliases were removed together with
+# that pack in v0.1: an old archive referencing LVALVE001 will report symbol_missing on load
+# (non-destructively, per ADR-6) rather than silently resolving to a different glyph.
+# 本表镜像**当前生效**的包（dexpi）。ISO 10628 的别名随该包在 v0.1 一并移除：引用
+# LVALVE001 的旧档在载入时将报告 symbol_missing（依 ADR-6 非破坏），而不是静默解析到
+# 另一个图元。
 const GP_LEGACY_ALIASES: Dictionary = {
-	"BV_BallValve_001": "LVALVE001",
-	"CHK_CheckValve_001": "LVALVE002",
-	"CV_ControlValve_001": "LVALVE003",
-	"DV_DiaphragmValve_001": "LVALVE004",
-	"GLV_GlobeValve_001": "LVALVE005",
-	"GV_GateValve_001": "LVALVE006",
-	"PV_Positioner_001": "LVALVE007",
-	"VAV_ValveActuator_001": "LVALVE008",
-	"C_Compressor_001": "LPUMP001",
-	"PD_PositiveDisplacementPump_001": "LPUMP002",
-	"P_CentrifugalPump_001": "LPUMP003",
-	"TK_Tank_001": "LTANK001",
-	"HX_HeatExchanger_001": "LHEAT001",
-	"FE_FieldEnclosure_001": "LINSTRUMENT001",
-	"FI_FlowIndicator_001": "LINSTRUMENT002",
-	"FT_FlowTransmitter_001": "LINSTRUMENT003",
-	"LI_LevelIndicator_001": "LINSTRUMENT004",
-	"LT_LevelTransmitter_001": "LINSTRUMENT005",
-	"PI_PressureIndicator_001": "LINSTRUMENT006",
-	"PT_PressureTransmitter_001": "LINSTRUMENT007",
-	"TI_TemperatureIndicator_001": "LINSTRUMENT008",
-	"TT_TemperatureTransmitter_001": "LINSTRUMENT009",
-	"ElectricalLine_DotDash_001": "LGENERAL001",
-	"InstrumentLine_Dashed_001": "LGENERAL002",
-	"ProcessLine_Solid_001": "LGENERAL003",
+	"angle_safety_valve_spring_loaded": "DVALVE001",
+	"arrow_for_inlet_of_essential_substances": "DGENERAL001",
+	"arrow_for_outlet_of_essential_substances": "DGENERAL002",
+	"ball_valve": "DVALVE002",
+	"blind_cover": "DGENERAL003",
+	"butterfly_valve": "DVALVE003",
+	"centrifugal_pump": "DPUMP001",
+	"controlled_actuator": "DGENERAL004",
+	"direction_of_flow_for_primary_segment": "DGENERAL005",
+	"direction_of_flow_for_secondary_segment": "DGENERAL006",
+	"floating_head_tube_bundle_heat_exchanger": "DHEAT001",
+	"globe_valve": "DVALVE004",
+	"instrumentation_bubble_central": "DINSTRUMENT001",
+	"instrumentation_bubble_field": "DINSTRUMENT002",
+	"manhole": "DGENERAL007",
+	"nozzle": "DGENERAL008",
+	"piping_insulated": "DGENERAL009",
+	"plate_type_heat_exchanger": "DHEAT002",
+	"reciprocating_pump": "DPUMP002",
+	"reducer_general": "DGENERAL010",
+	"slope": "DGENERAL011",
+	"swing_check_valve": "DVALVE005",
+	"t_type_connection": "DGENERAL012",
+	"vessel_with_dished_heads": "DTANK001",
 }
 
 # Compiled-once validator for the canonical form.
@@ -156,7 +173,8 @@ static func gpMaxSeq(gpPrefixText: String, gpTaken: Array[String]) -> int:
 # Returns "" when the family is exhausted (999 used) or the source code is unknown.
 # 该族耗尽（已用满 999）或来源码未知时返回 ""。
 static func gpAllocate(gpSource: String, gpCategory: String, gpTaken: Array[String]) -> String:
-	if gpSource != GP_SOURCE_LIBRARY and gpSource != GP_SOURCE_CUSTOM:
+	if gpSource != GP_SOURCE_LIBRARY and gpSource != GP_SOURCE_CUSTOM \
+			and gpSource != GP_SOURCE_DEXPI:
 		return ""
 	var gpNext: int = gpMaxSeq(gpPrefix(gpSource, gpCategory), gpTaken) + 1
 	if gpNext > GP_SEQ_MAX:
@@ -184,7 +202,7 @@ static func gpIsLegacy(gpId: String) -> bool:
 static func _gpRegex() -> RegEx:
 	if _gpRe == null:
 		_gpRe = RegEx.new()
-		var gpErr: Error = _gpRe.compile("^([LC])([A-Z]+)([0-9]{%d})$" % GP_SEQ_DIGITS)
+		var gpErr: Error = _gpRe.compile("^([LCD])([A-Z]+)([0-9]{%d})$" % GP_SEQ_DIGITS)
 		if gpErr != OK:
 			push_error("GPSymbolNaming: regex compile failed (%d)" % gpErr)
 	return _gpRe

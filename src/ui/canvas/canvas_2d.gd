@@ -127,6 +127,13 @@ var gpTags: GPTagRegistry = GPTagRegistry.new()
 # 位号标签抓取点 / 拖拽委托。与 gpEdgeGrips 同形：瞬态拖拽状态存于此，不在画布上。
 var gpLabelGrips: GPLabelGripOps = null
 
+# Edge line-number (管线号) grip / drag delegate . The number on a pipe is itself draggable;
+# this holds the transient drag state (which edge, where it started) off the canvas, exactly like
+# gpLabelGrips does for node tags.
+# 边管线号抓取点 / 拖拽委托。管线上的编号本身可拖动；瞬态拖拽状态（哪条边、从哪开始）
+# 寄于此，与图元位号之于 gpLabelGrips 同形。
+var gpEdgeTagGrips: GPEdgeTagGripOps = null
+
 # Backing field for the gpGraph property. Kept explicit so the setter cannot recurse.
 # gpGraph 属性的后备字段。显式保留以避免 setter 递归。
 var _gpGraphRef: GPPIDGraph
@@ -251,6 +258,29 @@ var gpNextId: int:
 # Node2D that holds all symbol/edge view nodes and carries the camera transform.
 # 承载所有图元/连线视图节点并承载相机变换的 Node2D。
 var gpWorldRoot: Node2D = null
+
+# ---- sheet / drawing frame ----
+# ---- 图纸 / 图框 ----
+# The sheet this canvas is showing: supplies the frame size, title block and the
+# drawing-text language mode (see plan Phase 2). Null until the host assigns one.
+# 本画布正在显示的图纸：提供图幅、标题栏与图纸文字语言模式（见计划 Phase 2）。
+# 宿主赋值前为 null。
+var gpSheet: GPSheet = null
+
+# Frame renderer, a child of world_root placed BEHIND every symbol (z_index -1).
+# 图框渲染器，挂在 world_root 下且位于所有图元**之下**（z_index = -1）。
+var gpFrame: GPFrameView = null
+
+# Tracing underlay (background reference image), created in _ready() (v0.1 Phase 5).
+# 追踪底图（背景参考图），在 _ready() 中创建（v0.1 Phase 5）。
+var gpBackground: GPBackgroundView = null
+
+# True until the sheet has been fitted into the viewport once (see _gpFitIfReady()). Kept as a
+# one-shot so a late-arriving control size still fits the drawing, yet the user's own pan/zoom is
+# never overridden afterwards.
+# 为 true 时表示「尚未把图幅适配进视口一次」（见 _gpFitIfReady()）。以一次性标志实现，使
+# 迟到的控件尺寸仍能触发适配，而此后用户自己的平移/缩放永不被覆盖。
+var _gpNeedFit: bool = true
 
 # ---- camera ----
 # ---- 相机 ----
@@ -406,6 +436,48 @@ func _ready() -> void:
 	gpWorldRoot = Node2D.new()
 	gpWorldRoot.name = "WorldRoot"
 	add_child(gpWorldRoot)
+	# Rasterise text at the SCALE IT IS DRAWN AT. The canvas stretches its content and world_root
+	# scales by the camera zoom, so with the default (PARENT_NODE = off at the root) an N mm glyph is
+	# rasterised at N pixels and then magnified — the blurry "ghosted" tag text. Godot's per-item
+	# oversampling re-rasterises the glyphs for the effective transform, keeping tags crisp at every
+	# zoom. NOTE the property is an ENUM, not a bool: `= true` coerces to value 1, i.e. DISABLED.
+	# 按「实际绘制缩放」光栅化文字。画布会拉伸内容、world_root 又按相机缩放，故在默认值
+	#（PARENT_NODE，根节点处等价于关闭）下，N mm 的字形先以 N 像素光栅化再被放大 —— 正是发虚的
+	# 位号文字。Godot 的逐项过采样会按有效变换重新光栅化字形，使位号在任意缩放下都清晰。
+	# 注意此属性是**枚举**而非布尔：写 `= true` 会被强转为数值 1，即 DISABLED。
+	oversampling_with_scale = CanvasItem.OVERSAMPLING_WITH_SCALE_ENABLED
+	gpWorldRoot.oversampling_with_scale = CanvasItem.OVERSAMPLING_WITH_SCALE_ENABLED
+	# The tracing underlay must sit UNDER the frame and the symbols, but it still has to be ABOVE the
+	# canvas' own background fill. It therefore uses z_index 0 and relies on child ORDER: it is added
+	# first, so it paints first among world_root's children. A NEGATIVE z_index cannot be used here,
+	# because the canvas paints its opaque background + grid from its own canvas item at z_index 0 —
+	# anything below that is drawn beneath an opaque rectangle and is simply invisible (measured:
+	# the frame was bound and positioned correctly yet never showed up until its z_index was raised).
+	# 追踪底图必须位于图框与图元之下，但仍须高于画布自身的底色填充。故它使用 z_index 0 并依赖
+	# **子节点顺序**：它最先加入，因此在 world_root 的子节点中最先绘制。**不可**用负 z_index：
+	# 画布在其自身 canvas item 上以 z_index 0 绘制不透明底色与网格 —— 低于该值的任何内容都画在
+	# 不透明矩形之下、根本不可见（实测：图框已正确绑定与定位，却直到提高 z_index 才显示）。
+	gpBackground = GPBackgroundView.new()
+	gpBackground.name = "BackgroundView"
+	gpBackground.z_index = 0
+	gpWorldRoot.add_child(gpBackground)
+	# The frame also sits below every symbol by ORDER (added before the binder creates any symbol or
+	# edge view), not by a negative z_index — see the note above.
+	# 图框同样以**顺序**（早于绑定器创建任何图元/连线视图）位于所有图元之下，而非负 z_index ——
+	# 见上方说明。
+	gpFrame = GPFrameView.new()
+	gpFrame.name = "FrameView"
+	gpFrame.z_index = 0
+	gpWorldRoot.add_child(gpFrame)
+	# Re-apply the sheet NOW that the frame renderer exists. The host binds the sheet through
+	# gpSetSheet() BEFORE this Control is added to the tree (center_area builds the canvas, binds
+	# the sheet, then adds the canvas), so at that moment gpFrame is still null and the assignment
+	# is swallowed — which is exactly why no frame was ever drawn. Replaying it here is idempotent
+	# and covers every ordering.
+	# 在渲染器存在后立刻重申图纸。宿主经 gpSetSheet() 绑定图纸的时机早于本控件入树
+	#（center_area 先建画布、绑图纸、再把画布入树），当时 gpFrame 仍为 null，赋值被吞 —— 这正是
+	# 图框从未画出的原因。此处重放是幂等的，可覆盖任何装配顺序。
+	gpSetSheet(gpSheet)
 	# Create the graph binder that owns view-sync logic and caches.
 	# 创建持有视图同步逻辑与缓存的图绑定器。
 	gpBinder = GPGraphBinder.new()
@@ -433,6 +505,9 @@ func _ready() -> void:
 	# M10b: the tag label gets the same grip treatment as an edge vertex.
 	# M10b：位号标签获得与边拐点相同的抓取点待遇。
 	gpLabelGrips = GPLabelGripOps.new(self)
+	# Edge line-number grip: the pipe's number is itself draggable, with a leader line drawn
+	# back to the pipe when dragged far enough. / 边管线号抓取点：管线编号可拖动，拖远时画引出线。
+	gpEdgeTagGrips = GPEdgeTagGripOps.new(self)
 	# Endpoint-anchor interaction delegate (highlight / pick / drag-to-connect).
 	# 端点锚点交互委托（高亮 / 拾取 / 拖拽连线）。
 	gpPortOps = GPPortConnectOps.new(self)
@@ -467,7 +542,58 @@ func _ready() -> void:
 	# 重申 core 图绑定（幂等，覆盖在 _ready() 之前就被赋值的图）。
 	if _gpGraphRef != null and not _gpGraphRef.gpGraphChanged.is_connected(_gpOnGraphDataChanged):
 		_gpGraphRef.gpGraphChanged.connect(_gpOnGraphDataChanged)
-	gpViewController.gpResetCamera()
+	# Fit the sheet ONCE, as soon as the control has a real size. _ready() usually runs while the
+	# host is still positioning this Control (size 0), and gpResetCamera() would then place the
+	# world origin at the top-left corner — the drawing would start off half off-screen. The
+	# resized signal covers the case where the size arrives later; the flag makes it a one-shot so
+	# the user's own pan/zoom is never fought afterwards.
+	# 在控件获得真实尺寸后**一次性**适配图幅。_ready() 执行时宿主往往仍在摆放本控件（尺寸为 0），
+	# 此时 gpResetCamera() 会把世界原点放到左上角 —— 图纸一开始就偏出屏外。resized 信号覆盖
+	# 「尺寸稍后才到」的情形；标志位保证只做一次，之后绝不与用户自己的平移/缩放争夺视图。
+	resized.connect(_gpOnCanvasResized)
+	_gpFitIfReady()
+
+
+# Fit the sheet into the viewport once the control has a measurable size (one-shot).
+# 控件尺寸可测后把图幅适配进视口（仅一次）。
+func _gpFitIfReady() -> void:
+	if not _gpNeedFit:
+		return
+	if size.x <= 1.0 or size.y <= 1.0:
+		return
+	if gpSheet != null:
+		gpViewController.gpFitSheet(gpSheet.gpWidthMM, gpSheet.gpHeightMM)
+	else:
+		gpViewController.gpResetCamera()
+	_gpNeedFit = false
+	# The camera moved, so the on-canvas text must be rasterised at the new scale (gpFitSheet /
+	# gpResetCamera already did that) and the status bar must show the resulting zoom.
+	# 相机已移动，故画布文字须按新缩放重新光栅化（gpFitSheet / gpResetCamera 已完成），
+	# 状态栏也须显示新的缩放值。
+	gpEmitStatus()
+
+
+# Re-run the one-shot fit when the size first becomes available.
+# 尺寸首次可用时重跑一次性适配。
+func _gpOnCanvasResized() -> void:
+	_gpFitIfReady()
+
+
+# Bind the sheet this canvas displays and repaint its frame (see plan Phase 2).
+# WHY A SETTER AND NOT A PLAIN ASSIGNMENT: assigning gpSheet alone would leave the frame
+# renderer holding the previous sheet, so the visible frame would silently disagree with
+# the sheet the host thinks is open. The refresh is what keeps them in lockstep.
+# 绑定本画布显示的图纸并重绘图框（见计划 Phase 2）。
+# 为何用方法而非直接赋值：只赋 gpSheet 会让图框渲染器仍持旧图纸，可见图框会与宿主认为
+# 打开的那张图纸静默不一致。重绘正是让二者保持同步的那一步。
+func gpSetSheet(gpValue: GPSheet) -> void:
+	gpSheet = gpValue
+	if gpFrame != null:
+		gpFrame.gpSheet = gpValue
+		gpFrame.gpRefresh()
+	if gpBackground != null:
+		gpBackground.gpSheet = gpValue
+		gpBackground.gpRefresh()
 
 
 # (Re)bind the core graph's change signal. Called from the gpGraph setter.
@@ -553,36 +679,32 @@ func _gpRebuildRenderStyle() -> void:
 # snapshot. The caller owns the autoload dependency; this method only reads. Falls back to safe
 # defaults when the autoloads are absent (headless).
 func gpBuildRenderStyle() -> GPRenderStyle:
-	var gpFont: Font = null
-	var gpFontSize: int = 16
-	var gpLoc: String = "zh_CN"
-	var gpConstWidth: bool = false
-	var gpTagFontSize: int = 0
-	var gpTagRotate: bool = false
-	# Engine.get_singleton is tree-independent (works whether this canvas is in the live
-	# scene tree or exercised headlessly), so the default-fallback path is identical in both.
-	# Engine.get_singleton 与场景树无关（无论画布在活动现场还是被 headless 演练都适用），
-	# 故两条路径的回落逻辑完全一致。
-	var _gpSettings: Object = null
-	if Engine.has_singleton("Settings"):
-		_gpSettings = Engine.get_singleton("Settings")
-	if _gpSettings != null:
-		if _gpSettings.get("gpSymbolFont") != null:
-			gpFont = _gpSettings.gpSymbolFont
-		if _gpSettings.get("gpSymbolFontSize") != null:
-			gpFontSize = _gpSettings.gpSymbolFontSize
-		if _gpSettings.get("gpScreenConstantWidth") != null:
-			gpConstWidth = _gpSettings.gpScreenConstantWidth
-		if _gpSettings.get("gpPipeTagFontSize") != null:
-			gpTagFontSize = _gpSettings.gpPipeTagFontSize
-		if _gpSettings.get("gpPipeTagRotate") != null:
-			gpTagRotate = _gpSettings.gpPipeTagRotate
-	var _gpI18n: Object = null
-	if Engine.has_singleton("I18n"):
-		_gpI18n = Engine.get_singleton("I18n")
-	if _gpI18n != null and _gpI18n.get("gpLocale") != null:
-		gpLoc = _gpI18n.gpLocale
-	return GPRenderStyle.gpFrom(gpFont, gpFontSize, gpLoc, gpConstWidth, gpTagFontSize, gpTagRotate)
+	return GPRenderStyle.gpFromSources(gpResolveAutoload(self, "Settings"), gpResolveAutoload(self, "I18n"))
+
+
+# Resolve an autoload by name through the SCENE TREE, or null when there is none.
+# 经**场景树**按名字解析自动加载单例；不存在时返回 null。
+# ⚠️ This replaced an `Engine.has_singleton` / `Engine.get_singleton` pair that could NEVER
+# succeed: in Godot 4 an autoload is a node under /root, not an Engine singleton. The failed lookup
+# was silent, so inside the running app every setting degraded to its fallback — a vertical pipe
+# number stayed horizontal with tag_rotate=true on disk, and font / font size / locale / tag size /
+# screen-constant width were dead the same way. The signal hookups in _ready() already used this
+# tree form (see the /root/I18n, /root/Settings lookups there); only the snapshot builder did not.
+# ⚠️ 此处替换掉了一对**永远不可能成功**的 `Engine.has_singleton` / `Engine.get_singleton`：
+# Godot 4 中 autoload 是 /root 下的节点，而非 Engine 单例。该查找失败时无声无息，于是应用内每一项设置
+# 都退化为回落值 —— 磁盘上 tag_rotate=true，竖管编号却仍是水平文字；字体 / 字号 / 语言 / 位号字号 /
+# 屏幕恒定线宽同样失效。_ready() 中的信号接线用的本就是这种场景树写法（见那里的 /root/I18n、
+# /root/Settings），唯独构建快照这一处不是。
+# static, so the resolution itself is testable without putting a canvas into a tree.
+# 声明为 static，使该解析本身可在不把画布入树的前提下被测试。
+# The is_inside_tree() guard keeps an out-of-tree caller (a bare `GPCanvas2D.new()` in a headless
+# test) on the safe fallback path instead of tripping an absolute-path lookup with no tree to
+# resolve against. / is_inside_tree() 护栏使树外调用方（headless 测试中裸 new 出的画布）留在安全
+# 回落路径上，而不会在无树可解析时触发一次绝对路径查找。
+static func gpResolveAutoload(gpHost: Node, gpName: String) -> Object:
+	if gpHost == null or not gpHost.is_inside_tree():
+		return null
+	return gpHost.get_node_or_null("/root/" + gpName)
 
 
 # Build and emit a status snapshot for the status bar.
@@ -641,6 +763,31 @@ func _draw() -> void:
 
 func gpRefreshSymbolViews() -> void:
 	gpSymbolLayer.gpRefreshSymbolViews()
+
+
+# Repaint everything whose appearance is baked from the camera scale: the symbol views, the edge
+# views and the sheet frame. Call this from every code path that CHANGES THE ZOOM.
+# 重绘一切「外观由相机缩放烘焙而成」之物：图元视图、连线视图与图幅图框。凡**改变缩放**的代码路径
+# 都必须调用本方法。
+# WHY IT IS NOT PART OF gpApplyCamera() / 为何不并入 gpApplyCamera()：
+# Panning calls gpApplyCamera() on every mouse move and does not change the scale, so folding this in
+# would re-rasterise the whole drawing's text for nothing. Zoom changes are rare and must pay for it.
+# 平移在每次鼠标移动时都会调用 gpApplyCamera()，而它并不改变缩放；若并入其中，就会白白为整幅图
+# 的文字重新光栅化。缩放变化很少，应当由它承担这个代价。
+# WHY A PARENT queue_redraw() IS NOT ENOUGH / 为何父节点的 queue_redraw() 不够：
+# The font size is chosen from the live scale inside each view's _draw(), and a parent's redraw never
+# cascades to child CanvasItems — the same trap already documented on GPCanvasSymbolLayer. Without
+# this call a zoom leaves the glyphs at the previous zoom's raster and magnifies them, which is
+# exactly the blur this sizing scheme exists to remove.
+# 字号由各视图 _draw() 内的实时缩放选定，而父节点的重绘不会级联到子 CanvasItem —— 与
+# GPCanvasSymbolLayer 上已记载的陷阱相同。缺此调用，缩放后字形会停留在上一次缩放的密度上并被放大，
+# 正是本字号方案所要消除的那种发虚。
+func gpOnCameraChanged() -> void:
+	if gpSymbolLayer != null:
+		gpRefreshSymbolViews()
+	if gpFrame != null:
+		gpFrame.gpRefresh()
+	queue_redraw()
 
 
 func gpNodeCenter(gpId: String) -> Vector2:
@@ -759,6 +906,10 @@ func _gpDefLookup(gpSymbolId: String) -> GPSymbolDef:
 
 func gpRequestSetLabelOffset(gpNodeId: String, gpOffset: Vector2) -> bool:
 	return gpEditFacade.gpRequestSetLabelOffset(gpNodeId, gpOffset)
+
+
+func gpRequestSetEdgeTagOffset(gpEdgeId: String, gpOffset: Vector2) -> bool:
+	return gpEditFacade.gpRequestSetEdgeTagOffset(gpEdgeId, gpOffset)
 
 
 func gpDefFor(gpSymbolId: String) -> GPSymbolDef:

@@ -27,6 +27,90 @@ extends RefCounted
 
 var gpHost: GPMainWindow = null
 
+# Autosave POLICY + its timer. gpAutoSave holds the STATE (armed? which cadence); the Timer is
+# the MECHANISM. Armed only after the first successful manual save (ADR-9).
+# 自动保存**策略** + 计时器。gpAutoSave 持有**状态**（是否启用？用哪档节拍）；Timer 是**机制**。
+# 仅在首次手动保存成功后启用（ADR-9）。
+var gpAutoSave: GPAutoSaveService = GPAutoSaveService.new()
+var gpAutoSaveTimer: Timer = null
+
+# True while the exit three-way dialog is open. Autosave is paused then so it cannot overwrite
+# the file behind a "Don't Save" choice — the guard must be able to honour a discard.
+# 退出三选一打开期间为真。此时暂停自动保存，使其不会在用户选「不保存」时从背后改写文件 ——
+# 护栏必须能兑现「丢弃」这一选择。
+var _gpExitPromptOpen: bool = false
+
+
+# ============================ autosave (ADR-9) ============================
+# ============================ 自动保存（ADR-9） ============================
+# Build the autosave Timer and start listening to dirty-flag flips. Called ONCE by the
+# composition root. The timer stays idle until the first manual save arms it.
+# 构建自动保存 Timer 并开始监听脏标记翻转。由组合根调用一次。计时器空闲，直至首次手动保存启用它。
+func gpSetupAutoSave() -> void:
+	gpAutoSaveTimer = Timer.new()
+	gpAutoSaveTimer.one_shot = false
+	gpAutoSaveTimer.wait_time = gpAutoSave.gpActiveInterval()
+	gpAutoSaveTimer.autostart = false
+	gpAutoSaveTimer.timeout.connect(gpOnAutoSaveTick)
+	gpHost.add_child(gpAutoSaveTimer)
+	# Re-time the moment the dirty flag flips, so a fresh edit drops the wait to the 1-minute
+	# cadence instead of sitting out the idle 5-minute one.
+	# 脏标记翻转的瞬间即重新计时，使新改动把等待降到 1 分钟节拍，而不必熬满空闲的 5 分钟。
+	gpHost.gpDocManager.gpBus.gpDirtyChanged.connect(gpOnDirtyChanged)
+
+
+# Arm autosave the first time a manual save succeeds, then start the countdown.
+# 首次手动保存成功时启用自动保存，然后开始计时。
+func gpArmAutoSaveIfNeeded() -> void:
+	if gpAutoSave.gpIsArmed():
+		return
+	gpAutoSave.gpArm()
+	gpRescheduleAutoSave()
+
+
+# (Re)start the timer on the cadence that matches the current dirty state.
+# 依据当前脏状态，用对应的节拍（重新）启动计时器。
+func gpRescheduleAutoSave() -> void:
+	if gpAutoSaveTimer == null:
+		return
+	gpAutoSaveTimer.stop()
+	gpAutoSaveTimer.wait_time = gpAutoSave.gpIntervalFor(gpHost.gpDocManager.gpIsDirty())
+	gpAutoSaveTimer.start()
+
+
+# Pause autosave while the exit prompt is open (see _gpExitPromptOpen).
+# 退出提示打开期间暂停自动保存（见 _gpExitPromptOpen）。
+func gpPauseAutoSaveForExitPrompt() -> void:
+	_gpExitPromptOpen = true
+	if gpAutoSaveTimer != null:
+		gpAutoSaveTimer.stop()
+
+
+# Resume the cadence after the user cancels the exit prompt.
+# 用户在退出提示选「取消」后恢复节拍。
+func gpResumeAutoSaveAfterCancel() -> void:
+	_gpExitPromptOpen = false
+	if gpAutoSave.gpIsArmed():
+		gpRescheduleAutoSave()
+
+
+# Timer fired: persist the active document if autosave is armed and a path exists.
+# 计时器到点：若自动保存已启用且存在路径，落盘当前文档。
+func gpOnAutoSaveTick() -> void:
+	if _gpExitPromptOpen or not gpAutoSave.gpIsArmed():
+		return
+	if gpHost.gpCurrentPath == "":
+		return
+	gpWriteProject(gpHost.gpCurrentPath, true)
+
+
+# Dirty flag flipped: re-time the countdown so the cadence tracks the document state.
+# 脏标记翻转：重新计时，使节拍跟随文档状态。
+func gpOnDirtyChanged(_gpDirty: bool) -> void:
+	if _gpExitPromptOpen or not gpAutoSave.gpIsArmed():
+		return
+	gpRescheduleAutoSave()
+
 
 # ============================ close guard ============================
 # ============================ 关闭拦截 ============================
@@ -63,6 +147,11 @@ func gpOnCloseRequested() -> void:
 # 提供「不保存」是因为用户关闭窗口**恰恰可能**因为这次编辑是个错误 ——
 # 此时强制保存会用坏数据覆盖好文件。
 func gpAskUnsaved() -> void:
+	# Pause autosave while the prompt is open: the user is deciding whether the work is worth
+	# keeping, and a background save would silently overrule a "Don't Save" choice.
+	# 提示期间暂停自动保存：用户正在决定这份工作是否值得保留，
+	# 后台保存会静默否决「不保存」的选择。
+	gpPauseAutoSaveForExitPrompt()
 	var gpDlg: ConfirmationDialog = ConfirmationDialog.new()
 	gpDlg.title = I18n.gpTr("dialog.unsaved_title")
 	gpDlg.dialog_text = I18n.gpTr("dialog.unsaved_text")
@@ -70,10 +159,17 @@ func gpAskUnsaved() -> void:
 	gpDlg.get_cancel_button().text = I18n.gpTr("dialog.cancel")
 	gpDlg.add_button(I18n.gpTr("dialog.unsaved_discard"), true, "discard")
 	gpDlg.confirmed.connect(gpOnUnsavedSave.bind(gpDlg))
-	gpDlg.canceled.connect(gpDlg.queue_free)
+	gpDlg.canceled.connect(gpOnUnsavedCancel.bind(gpDlg))
 	gpDlg.custom_action.connect(gpOnUnsavedDiscard.bind(gpDlg))
 	gpHost.add_child(gpDlg)
 	gpDlg.popup_centered()
+
+
+# "Cancel" chosen: keep the window open and resume the autosave cadence.
+# 选择了「取消」：保持窗口打开并恢复自动保存节拍。
+func gpOnUnsavedCancel(gpDlg: ConfirmationDialog) -> void:
+	gpDlg.queue_free()
+	gpResumeAutoSaveAfterCancel()
 
 
 # "Save" chosen: save (asking for a path first when there is none), then quit.
@@ -163,7 +259,7 @@ func gpOnFileSelected(gpPath: String) -> void:
 # this method only owns UI-side concerns (embedding packs, status, path bookkeeping).
 # 真正的文件机制在 GPProjectIO（*.pid.json 的单一事实来源）；本方法仅负责 UI 关注点
 # （嵌入图元包、状态栏、路径记账）。
-func gpWriteProject(gpPath: String) -> void:
+func gpWriteProject(gpPath: String, gpIsAuto: bool = false) -> void:
 	# Embed custom user packs so the file is self-contained (data sovereignty).
 	# 嵌入用户自定义图元包，使文件自包含（数据主权）。
 	gpHost.gpActiveGraph().gpEmbedUserPacks(GPSymbolLibrary.gpUserPacks())
@@ -189,6 +285,16 @@ func gpWriteProject(gpPath: String) -> void:
 	if gpSheets.size() > 1:
 		gpWriteResult = GPProjectIO.gpWriteSheetsResult(gpSheets, gpFilePath)
 	else:
+		# A single-sheet archive keeps the v2 shape, which has NO sheets[] section — so the
+		# tab title must be stamped into meta["title"], or the migration chain reconstructs
+		# the first sheet's name from an empty/default title and the user's tab rename is
+		# silently lost on reload (showed the default "Sheet 1" again).
+		# 单图纸存档保持 v2 形态，其中**没有** sheets[] 段 —— 故必须把标签标题盖进
+		# meta["title"]，否则迁移链会用空/默认标题重建首张图纸名，用户改过的标签名
+		# 在重载时被静默丢弃（重开后又显示默认的「Sheet 1」）。
+		var gpFirst: GPSheet = gpSheets[0] as GPSheet
+		if gpFirst != null and gpFirst.gpName != "":
+			(gpFirst.gpGraph if gpFirst.gpGraph != null else gpHost.gpActiveGraph()).gpMeta["title"] = gpFirst.gpName
 		gpWriteResult = GPProjectIO.gpWriteProjectResult(gpHost.gpActiveGraph(), gpFilePath)
 	if not gpWriteResult.gpIsOk():
 		gpHost.gpSetState("status.save_fail", [gpFilePath])
@@ -197,11 +303,22 @@ func gpWriteProject(gpPath: String) -> void:
 	# a successful save clears the unsaved-dirty flag so the title bar / project tree update.
 	# 保存成功清除未保存脏标记，使标题栏/工程树同步。
 	gpHost.gpDocManager.gpClearDirty()
+	# The FIRST successful save arms autosave: only now does a real path exist to protect
+	# (ADR-9). Subsequent saves keep it armed; arming is idempotent.
+	# **首次**成功保存启用自动保存：此时才存在值得保护的真实路径（ADR-9）。
+	# 后续保存保持启用；启用是幂等的。
+	gpArmAutoSaveIfNeeded()
 	# Honour a pending quit from the close guard (path-less save-as on exit).
 	# 兑现关闭拦截留下的待退出（退出时无路径的另存为）。
 	if gpHost.gpQuitAfterSave:
 		gpHost.gpQuitAfterSave = false
 		gpHost.get_tree().quit()
+		return
+	if gpIsAuto:
+		# A quieter, distinct line so the user can tell a background checkpoint apart from
+		# their own explicit Ctrl+S.
+		# 更安静且独立的一行，使后台复检与用户自己的 Ctrl+S 可区分。
+		gpHost.gpSetState("status.autosaved", [gpFilePath])
 		return
 	var gpPackCount: int = gpHost.gpActiveGraph().gpUserSymbolPacks.size()
 	gpHost.gpSetState("status.saved_with_packs", [gpFilePath, gpPackCount])
