@@ -26,6 +26,10 @@ This project is in **early development** (app version `0.1.0`, Godot 4.7). The t
 | Multi-sheet tabs | ✅ Working / 可用 |
 | `*.pid.json` read/write + embedded user symbol packs | ✅ Working / 可用 |
 | Chinese / English UI | ✅ Working / 可用 |
+| Edge path editing: drag a segment midpoint or corner, auto re-orthogonalise | ✅ Working / 可用 |
+| Edge tag (line number) drag with leader line | ✅ Working / 可用 |
+| Frame & title block, canvas text roles (single mm↔px source) | ✅ Working / 可用 |
+| Autosave: enabled after the first save (1 min dirty / 5 min clean) | ✅ Working / 可用 |
 | DXF / PDF / basic list export | 🚧 Stubs / 接口已定义，实现为空桩 |
 | 3D linkage rendering | 🚧 Stub / 空桩 |
 | HAZOP knowledge, compliance checks, unit-op generation | 📋 Planned, delivered via `GPIPIDAddon` in Pro / 规划中，由 Pro 版提供 |
@@ -80,14 +84,14 @@ The core code is released under the **MIT License** — free to use, modify, and
 ### Run the tests / 运行测试
 
 ```bash
-# Home-grown GPGTest: 58 suites / 2310 assertions (v0.1 baseline)
+# Home-grown GPGTest: 61 suites / 2,901 assertions (compile-clean, 0 SCRIPT ERROR)
 godot --headless --script res://tests/run_core_tests.gd
 
 # Required after a fresh clone or whenever a class_name is added,
 # otherwise GUT reports "class_names have not been imported"
 godot --headless --import
 
-# GUT 9.6.1 (vendored under addons/gut/)
+# GUT 9.7.1 (vendored under addons/gut/)
 godot --headless --script res://addons/gut/gut_cmdln.gd -gexit
 ```
 
@@ -108,23 +112,23 @@ Godot-PID/                # GitHub repo root (local working folder: Godot-PID-Co
 │   ├── core/              # UI-free kernel, headless-testable
 │   │   ├── model/         # GPPIDGraph / GPPIDNode / GPPIDEdge / GPSymbolDef / GPShape
 │   │   ├── geometry/      # Geometry, grip editing, coordinate transforms
-│   │   ├── symbol/        # Symbol library, DEXPI C01 pack (24 symbols), normalizer
+│   │   ├── symbol/        # Symbol library, DEXPI C01 pack (25 symbols), normalizer
 │   │   ├── view/          # Camera, selection, marquee, hit test, interact state
 │   │   ├── platform/      # DPI window, popup helpers
 │   │   └── service/       # GPIdGen, GPIOResult
 │   ├── app/               # Application services: commands, undo stack, event bus, documents
-│   │   └── commands/      # 8 concrete commands (add/delete/move node, shape, edge)
-│   ├── render/            # GPSymbolView / GPEdgeView / painter
+│   │   └── commands/      # 29 concrete commands (node/shape/edge add-delete-move, path & tag editing, drop restore)
+│   ├── render/            # GPSymbolView / GPEdgeView / frame GPFrameView / backdrop GPBackgroundView / painter
 │   ├── io/                # *.pid.json read/write; DXF / PDF / list export are stubs
 │   ├── ui/
-│   │   ├── shell/         # Main window composition root, menu bar
-│   │   ├── canvas/        # Canvas shell, incremental sync, shortcuts, context menu
+│   │   ├── shell/         # Main window composition root, menu bar, 7 coordinators, quick command bar, autosave
+│   │   ├── canvas/        # Canvas shell + 5 implementation classes, incremental sync, shortcuts, context menu
 │   │   ├── tools/         # Canvas tools: select / place / draw / grip
 │   │   ├── panels/        # Multi-sheet area, palette, inspector, toolbar
-│   │   └── dialogs/       # Settings, new symbol; symbol_editor/ edits geometry
+│   │   └── dialogs/       # Settings, new symbol (incl. port editor panel), title block; symbol_editor/ edits geometry
 │   ├── addons/            # GPIPIDAddon: commercial addon contract
-│   └── autoload/          # Singletons: I18n (i18n), Settings (fonts & config)
-├── addons/gut/            # GUT 9.6.1 test framework (vendored, MIT)
+│   └── autoload/          # 3 singletons: I18n, Settings (fonts & config), SnapState (CAD toggles)
+├── addons/gut/            # GUT 9.7.1 test framework (vendored, MIT)
 ├── assets/                # Symbol SVGs, CJK fonts, theme
 ├── tools/                 # Symbol pack generator (Python)
 ├── tests/                 # GPGTest suites + GUT cases and bridge
@@ -135,15 +139,15 @@ Godot-PID/                # GitHub repo root (local working folder: Godot-PID-Co
 
 ## Core Concepts / 核心概念
 
-- **`GPPIDGraph`** — the node-edge graph core (`RefCounted`). The 2D canvas, view rendering, and persistence all revolve around it; serialization is a hand-written `gpToDict()` emitting five top-level keys: `meta` / `nodes` / `edges` / `shapes` / `user_symbol_packs`.
+- **`GPPIDGraph`** — the node-edge graph core (`RefCounted`). The 2D canvas, view rendering, and persistence all revolve around it; serialization is a hand-written `gpToDict()`. The single-file schema is now **v3**, with top-level keys `meta` / `sheets[]` / `library` / `config` (v1's `nodes` / `edges` / `shapes` / `user_symbol_packs` folded into `sheets[]`).
 - **`GPCommand` + `GPCommandStack`** — every mutation is wrapped in a command and pushed onto a stack, so **editing is undoable by construction** (depth 200). Features that bypass the command layer lose undo support and headless testability.
-- **`GPSymbolDef`** — data-driven symbol definition; avoids a class per symbol. The built-in **DEXPI C01 pack (24 symbols, extracted from the international reference P&ID)** is generated by `tools/gen_symbol_packs.py`; the old ISO 10628 pack has been removed.
+- **`GPSymbolDef`** — data-driven symbol definition; avoids a class per symbol. The built-in **DEXPI C01 pack (25 symbols, extracted from the international reference P&ID)** is generated by `tools/gen_symbol_packs.py`; the old ISO 10628 pack has been removed.
 - **`GPEventBus`** — application-level event bus, one per sheet. Lets `RefCounted` services communicate without a scene tree.
 - **`GPIPIDAddon`** — addon contract. Peripheral and commercial features mount by subclassing it; core code stays untouched.
 
-- **`GPPIDGraph`** — 节点-边图内核（`RefCounted`）。2D 画布、视图渲染、存读都围绕它；序列化走手写的 `gpToDict()`，产出 `meta` / `nodes` / `edges` / `shapes` / `user_symbol_packs` 五个顶层键。
+- **`GPPIDGraph`** — 节点-边图内核（`RefCounted`）。2D 画布、视图渲染、存读都围绕它；序列化走手写的 `gpToDict()`。单档 schema 现为 **v3**，顶层键 `meta` / `sheets[]` / `library` / `config`（v1 的 `nodes` / `edges` / `shapes` / `user_symbol_packs` 已并入 `sheets[]`）。
 - **`GPCommand` + `GPCommandStack`** — 所有修改都包装成命令再入栈，因此**任何编辑天然可撤销**（栈深 200）。新功能若绕过命令层，就拿不到撤销能力，也无法 headless 单测。
-- **`GPSymbolDef`** — 数据驱动图元定义，避免为每个符号建一个类。内置 **DEXPI C01（24 个符号，提取自国际标准示例 P&ID）** 由 `tools/gen_symbol_packs.py` 生成；ISO 10628 包已移除。
+- **`GPSymbolDef`** — 数据驱动图元定义，避免为每个符号建一个类。内置 **DEXPI C01（25 个符号，提取自国际标准示例 P&ID）** 由 `tools/gen_symbol_packs.py` 生成；ISO 10628 包已移除。
 - **`GPEventBus`** — 应用级事件总线，每图纸一条。供服务层那些不进场景树的 `RefCounted` 对象通信。
 - **`GPIPIDAddon`** — 插件契约。外围与商业化功能通过继承此类挂载，核心代码不动。
 
