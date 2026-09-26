@@ -147,16 +147,11 @@ static func _gpFiniteFloat(gpV: float) -> float:
 static func gpMigrate(gpData: Dictionary) -> Dictionary:
 	var gpOut: Dictionary = (gpData as Dictionary).duplicate(true)
 	var gpVersion: int = gpDetectVersion(gpOut)
-	# The document id must exist before uid back-fill, and must be stable across runs so
-	# two migrations of the same file land on the same uid set.
-	# 文档 id 必须在 uid 回填之前存在，且必须跨运行稳定，使同一文件的两次迁移落在一组相同 uid 上。
-	var gpDocId: String = str(gpOut.get("doc_id", ""))
-	if gpDocId.is_empty():
-		gpDocId = str((_gpMetaOf(gpOut)).get("doc_id", ""))
-	if gpDocId.is_empty():
-		gpDocId = GPIdGen.gpNewDocId()
-	gpOut["doc_id"] = gpDocId
-
+	# Each version step is its own function, so a future schema version only ADDS one step and
+	# that step can be tested on its own; gpMigrate() stays a readable assembly list.
+	# 每个版本步都是独立函数，使将来新增 schema 版本只需**加一个步**且该步可单独测试；
+	# gpMigrate() 保持为一份可读的装配清单。
+	var gpDocId: String = _gpStepDocId(gpOut)
 	# Tracks uids ALREADY ASSIGNED during this pass, so back-fill never collides. It must
 	# start EMPTY: pre-seeding it with the archive's own uids makes every pre-existing uid
 	# look like a collision, so all of them get re-assigned — rewriting the user's
@@ -165,9 +160,31 @@ static func gpMigrate(gpData: Dictionary) -> Dictionary:
 	# 若用存档自身的 uid 预填，会让每个既有 uid 都看似冲突而被全部重新分配 ——
 	# 既改写用户标识，又破坏幂等（migrate(migrate(d)) != migrate(d)）。
 	var gpUsedUids: Dictionary = {}
+	var gpSheetsOut: Array = _gpStepV1ToV2(gpOut, gpDocId, gpUsedUids)
+	_gpStepV2ToV3(gpOut, gpSheetsOut)
+	_gpStepV3Header(gpOut, gpSheetsOut)
+	return gpOut
 
-	# --- v1 -> v2: key-name normalisation + uid back-fill -------------------
-	# --- v1 -> v2：键名归一 + uid 回填 --------------------------------------
+
+# Establish a stable document id before uid back-fill, so two migrations of the same file
+# land on the same uid set. Returns the id and writes it back into gpOut.
+# 在 uid 回填之前确定稳定的文档 id，使同一文件的两次迁移落在一组相同 uid 上。
+# 返回该 id 并写回 gpOut。
+static func _gpStepDocId(gpOut: Dictionary) -> String:
+	var gpDocId: String = str(gpOut.get("doc_id", ""))
+	if gpDocId.is_empty():
+		gpDocId = str((_gpMetaOf(gpOut)).get("doc_id", ""))
+	if gpDocId.is_empty():
+		gpDocId = GPIdGen.gpNewDocId()
+	gpOut["doc_id"] = gpDocId
+	return gpDocId
+
+
+# --- v1 -> v2: key-name normalisation + uid back-fill -------------------------
+# --- v1 -> v2：键名归一 + uid 回填 ------------------------------------------
+# Returns the normalised sheets[] array (never empty: a missing sheet gets a default one).
+# 返回归一化后的 sheets[] 数组（永不为空：缺失时补一个默认图纸）。
+static func _gpStepV1ToV2(gpOut: Dictionary, gpDocId: String, gpUsedUids: Dictionary) -> Array:
 	var gpSheets: Array = _gpRawSheetList(gpOut)
 	var gpSheetsOut: Array = []
 	var gpIdx: int = 0
@@ -193,11 +210,17 @@ static func gpMigrate(gpData: Dictionary) -> Dictionary:
 		gpIdx += 1
 	if gpSheetsOut.is_empty():
 		gpSheetsOut.append(_gpEmptySheet(gpOut))
+	return gpSheetsOut
 
-	# --- v2 -> v3: sheets[] + library + config ------------------------------
-	# --- v2 -> v3：sheets[] + library + config ------------------------------
+
+# --- v2 -> v3: sheets[] + library + config ------------------------------------
+# --- v2 -> v3：sheets[] + library + config ------------------------------------
+# Mutates gpOut in place: installs the v3 containers and drops the legacy carry-overs.
+# 就地修改 gpOut：装配 v3 容器并清除历史遗留键。
+static func _gpStepV2ToV3(gpOut: Dictionary, gpSheetsOut: Array) -> void:
 	gpOut["sheets"] = gpSheetsOut
 	# Drop the legacy carry-overs so the v3 container has exactly one place for data.
+	# 清除历史遗留键，使 v3 容器对每类数据只有一处存放。
 	gpOut.erase("nodes")
 	gpOut.erase("edges")
 	gpOut.erase("shapes")
@@ -224,7 +247,11 @@ static func gpMigrate(gpData: Dictionary) -> Dictionary:
 	else:
 		gpOut["config"] = _gpFillConfig((gpOut.get("config") as Dictionary))
 
-	# --- v3 header -----------------------------------------------------------
+
+# --- v3 header ---------------------------------------------------------------
+# Mutates gpOut in place: stamps meta, format, generator and timestamps.
+# 就地修改 gpOut：写入 meta、格式标识、生成器信息与时间戳。
+static func _gpStepV3Header(gpOut: Dictionary, gpSheetsOut: Array) -> void:
 	var gpMeta: Dictionary = _gpMetaOf(gpOut).duplicate(true)
 	gpMeta["version"] = str(gpMeta.get("version", "1.1"))
 	if not gpMeta.has("sheets"):
@@ -239,7 +266,6 @@ static func gpMigrate(gpData: Dictionary) -> Dictionary:
 		gpOut["generator"] = gpGeneratorInfo()
 	if str(gpOut.get("created_at", "")).is_empty():
 		gpOut["created_at"] = gpNowIso()
-	return gpOut
 
 
 # Flatten a v3 container into the shape GPPIDGraph.gpFromDict() understands.
