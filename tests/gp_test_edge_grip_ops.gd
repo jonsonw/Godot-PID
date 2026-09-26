@@ -346,12 +346,12 @@ func gpTestRightClickCreatesBumpAnchor() -> void:
 	var gpClick: Vector2 = Vector2(gpMid.x, gpMid.y + 40.0)  # 40px perpendicular depth / 垂直 40px 深
 	grips.gpStartBump("e1", gpClick)
 	gpEq(e.gpRouting.size(), gpBefore + 1, "right-click inserts ONE corner vertex / 右键插入一个角点顶点")
-	gpCheck(grips._gpBumpAnchors.has("e1"), "an orange corner is recorded / 已记录橙色角点")
-	gpEq(grips._gpBumpAnchors["e1"].size(), 1, "exactly one corner recorded / 恰记录一枚角点")
+	gpCheck(grips.gpAnchors.gpAnchorsFor("e1").size() > 0, "an orange corner is recorded / 已记录橙色角点")
+	gpEq(grips.gpAnchors.gpAnchorsFor("e1").size(), 1, "exactly one corner recorded / 恰记录一枚角点")
 	# The recorded anchor stores the routing-vertex index; the corner IS that vertex, so it sits at a
 	# perpendicular offset (GP_CORNER_OFFSET) below the clicked run. / 记录的锚点存的是 routing 顶点下标；
 	# 角点即该顶点本身，故落在被点线段下方垂直偏移 GP_CORNER_OFFSET 处。
-	var gpRIdx: int = int(grips._gpBumpAnchors["e1"][0])
+	var gpRIdx: int = int(grips.gpAnchors.gpAnchorsFor("e1")[0])
 	gpEq(gpRIdx, 0, "corner recorded at routing index 0 / 角点记于 routing 下标 0")
 	var gpCorner: Vector2 = e.gpRouting[gpRIdx]
 	gpApprox(gpCorner.x, gpClick.x, 1.0, "corner x tracks the click x / 角点 x 跟随点击 x")
@@ -374,13 +374,13 @@ func gpTestBumpAnchorDragReshapes() -> void:
 	gpCheck(not gpG.is_empty(), "found a horizontal run / 找到水平段")
 	grips.gpStartBump("e1", Vector2(gpG["pos"].x, gpG["pos"].y + 40.0))
 	gpEq(e.gpRouting.size(), 1, "one corner = one vertex / 一个角点=一顶点")
-	gpEq(int(grips._gpBumpAnchors["e1"][0]), 0, "corner at routing index 0 / 角点于 routing 下标 0")
+	gpEq(int(grips.gpAnchors.gpAnchorsFor("e1")[0]), 0, "corner at routing index 0 / 角点于 routing 下标 0")
 	# Drag by ARRAY index (the value gpHitBump returns), not by world position.
 	# 按数组下标（gpHitBump 返回的 anchor）拖动，而非世界坐标。
 	grips.gpStartBumpDrag("e1", 0)
 	grips.gpOnGripMove(Vector2(gpG["pos"].x, gpG["pos"].y + 70.0))  # deeper than the +18 at creation
 	gpEq(e.gpRouting.size(), 1, "reshape keeps one vertex / 重塑后仍为一顶点")
-	var gpRIdx: int = int(grips._gpBumpAnchors["e1"][0])
+	var gpRIdx: int = int(grips.gpAnchors.gpAnchorsFor("e1")[0])
 	var gpCorner: Vector2 = e.gpRouting[gpRIdx]
 	gpApprox(gpCorner.x, gpG["pos"].x, 1.0, "corner x tracks drag x / 角点 x 跟随拖动 x")
 	gpApprox(gpCorner.y, gpG["pos"].y + 70.0, 1.0, "corner y tracks drag depth / 角点 y 跟随拖动深度")
@@ -426,12 +426,12 @@ func gpTestBumpAnchorFollowsWholeLineMove() -> void:
 	var gpG: Dictionary = _gpFindRunGrip(pts, true, 80.0)
 	gpCheck(not gpG.is_empty(), "found a horizontal run / 找到水平段")
 	grips.gpStartBump("e1", Vector2(gpG["pos"].x, gpG["pos"].y + 40.0))
-	var gpIdx: int = int(grips._gpBumpAnchors["e1"][0])
+	var gpIdx: int = int(grips.gpAnchors.gpAnchorsFor("e1")[0])
 	var gpCornerBefore: Vector2 = e.gpRouting[gpIdx]
 	# Whole-line move by delta (+50, -25): the corner must ride the line. / 整线平移 delta=(+50,-25)：角点须随线移动。
 	grips.gpStartEdgeMove("e1", Vector2(10, 10))
 	grips.gpOnEdgeMove(Vector2(60, -15))
-	var gpIdx2: int = int(grips._gpBumpAnchors["e1"][0])
+	var gpIdx2: int = int(grips.gpAnchors.gpAnchorsFor("e1")[0])
 	gpEq(gpIdx2, gpIdx, "corner vertex index is stable across a rigid move / 整线平移后角点顶点下标不变")
 	var gpCornerAfter: Vector2 = e.gpRouting[gpIdx2]
 	gpApprox(gpCornerAfter.x, gpCornerBefore.x + 50.0, 0.001, "corner x follows whole-line move / 角点 x 随整线平移")
@@ -452,11 +452,11 @@ func gpTestDeleteBumpAnchor() -> void:
 	var grips: GPEdgeGripOps = GPEdgeGripOps.new(cv)
 	# Pre-seed two orange corners at routing indices 0 and 2 (bypasses geometry for a deterministic check).
 	# 预置两角点于 routing 下标 0 与 2（绕过几何以做确定性检查）。
-	grips._gpBumpAnchors["e1"] = [0, 2]
+	grips.gpAnchors.gpSetAnchors("e1", [0, 2])
 	grips.gpDeleteBump("e1", 0)
 	gpEq(e.gpRouting.size(), 2, "deleting first corner removes ONE vertex (3 -> 2) / 删首角点移除一个顶点")
-	gpEq(grips._gpBumpAnchors["e1"].size(), 1, "one corner remains / 剩一枚角点")
-	gpEq(int(grips._gpBumpAnchors["e1"][0]), 1, "second corner's vertex index shifted down by 1 (2 -> 1) / 第二角点下标回移 1")
+	gpEq(grips.gpAnchors.gpAnchorsFor("e1").size(), 1, "one corner remains / 剩一枚角点")
+	gpEq(int(grips.gpAnchors.gpAnchorsFor("e1")[0]), 1, "second corner's vertex index shifted down by 1 (2 -> 1) / 第二角点下标回移 1")
 	# The surviving routing still holds the two undeleted vertices. / 剩余路由仍含两个未删顶点。
 	gpEq(e.gpRouting[0], Vector2(100, 200), "surviving routing[0] is original vertex 1 / 剩余 routing[0] 为原顶点1")
 	gpEq(e.gpRouting[1], Vector2(300, 200), "surviving routing[1] is original vertex 2 / 剩余 routing[1] 为原顶点2")
@@ -479,7 +479,7 @@ func gpTestDeleteBumpAnchorViaSelection() -> void:
 	gpCheck(not grips.gpSelectedBump().is_empty(), "corner selected / 角点已选中")
 	var gpB: Dictionary = grips.gpSelectedBump()
 	grips.gpDeleteBump(gpB.get("eid", ""), int(gpB.get("ai", -1)))
-	gpEq(grips._gpBumpAnchors["e1"].size(), 0, "anchor gone after delete / 删除后锚点消失")
+	gpEq(grips.gpAnchors.gpAnchorsFor("e1").size(), 0, "anchor gone after delete / 删除后锚点消失")
 	gpCheck(grips.gpSelectedBump().is_empty(), "selection cleared after delete / 删除后选择清空")
 	cv.free()
 
@@ -547,8 +547,8 @@ func gpTestBodyDragCreatesCornerOnStraightEdge() -> void:
 	# 模拟选择工具的线体按下 -> gpStartCornerDrag 插入角点并进入拖拽。
 	grips.gpStartCornerDrag("e1", gpPress)
 	gpEq(e.gpRouting.size(), 1, "body press inserted ONE corner vertex / 线体按下插入一个角点顶点")
-	gpEq(grips._gpBumpAnchors["e1"].size(), 1, "a corner anchor was recorded / 已记录一枚角点")
-	gpEq(int(grips._gpBumpAnchors["e1"][0]), 0, "corner recorded at routing index 0 / 角点记于 routing 下标 0")
+	gpEq(grips.gpAnchors.gpAnchorsFor("e1").size(), 1, "a corner anchor was recorded / 已记录一枚角点")
+	gpEq(int(grips.gpAnchors.gpAnchorsFor("e1")[0]), 0, "corner recorded at routing index 0 / 角点记于 routing 下标 0")
 	# Now drag: the corner follows the cursor. / 拖动：角点跟随光标。
 	grips.gpOnGripMove(Vector2(gpPress.x + 30.0, gpPress.y + 50.0))
 	gpApprox(e.gpRouting[0].x, gpPress.x + 30.0, 1.0, "dragged corner x follows cursor / 拖动角点 x 跟随光标")
@@ -608,7 +608,7 @@ func gpTestCornerDragReleaseClearsDraggingState() -> void:
 	var pts: PackedVector2Array = grips._gpPolyline(e)
 	var gpG: Dictionary = _gpFindRunGrip(pts, true, 80.0)
 	grips.gpStartBump("e1", Vector2(gpG["pos"].x, gpG["pos"].y + 40.0))
-	gpEq(grips._gpBumpAnchors["e1"].size(), 1, "one orange corner recorded / 已记录一枚橙色角点")
+	gpEq(grips.gpAnchors.gpAnchorsFor("e1").size(), 1, "one orange corner recorded / 已记录一枚橙色角点")
 	# Start dragging the orange corner, move it. / 开始拖动橙色角点并移动。
 	grips.gpStartBumpDrag("e1", 0)
 	gpEq(grips.gpIsDragging(), true, "dragging set during corner drag / 角点拖拽中 dragging 为真")

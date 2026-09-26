@@ -21,10 +21,10 @@ extends RefCounted
 # by the Del key. After deletion the section re-orthogonalizes through gpRoute() automatically.
 #
 # 角点索引模型 / Corner index model:
-# _gpBumpAnchors[edgeId] 存的是「该角点所在 routing 顶点的下标」(Array[int])，而非世界坐标，故无论连线
+# GPEdgeBumpAnchors 中每边存的是「该角点所在 routing 顶点的下标」(Array[int])，而非世界坐标，故无论连线
 # 如何平移/整线移动/段平移，角点恒在线上（推导位置 = routing[idx]，绝不孤悬）。删除该顶点即删除角点，
 # 后续角点下标整体 -1；整线/段移动平移 routing 后推导位置自动跟随。
-# _gpBumpAnchors[edgeId] stores the ROUTING-INDEX of the corner's vertex (Array[int]), NOT a world coord,
+# GPEdgeBumpAnchors stores per edge the ROUTING-INDEX of the corner's vertex (Array[int]), NOT a world coord,
 # so the corner ALWAYS rides the line as the edge is moved/translated (its position is derived from
 # routing[idx] and can never float off). Deleting that vertex removes the corner; later indices shift -1.
 #
@@ -96,33 +96,27 @@ var _gpPressWorld: Vector2 = Vector2.ZERO
 # 角点拖动：正被移动的「单个 routing 顶点」的下标（即橙色锚点对应的顶点）。
 var _gpBumpIdx: int = -1
 
-# Persistent orange corner anchors per edge id: Array[int] of ROUTING-VERTEX INDICES. Each int i means
-# the orange square sits ON routing[i]; it IS a real polyline corner (a single vertex), so dragging it
-# moves that corner and gpRoute() re-orthogonalizes the two legs. Storing the index — not a world coord —
-# makes the anchor ALWAYS ride the line: any whole-line / segment / corner move mutates routing, so the
-# corner position follows automatically and can never detach (satisfies "anchors never float off the line").
-# Deleting that vertex removes the corner and later indices shift by -1.
-# 每边的持久橙色角点锚点：ROUTING 顶点下标数组。每个整数 i 表示橙色方块位于 routing[i] 本身；
-# 它「就是」一个真实的折线角点（单个顶点），拖动它即移动该角点、gpRoute() 自动正交化两条腿。
-# 存下标（而非世界坐标）使锚点「永远贴线」——整线/段/角点任一移动都会改写 routing，角点位置自动跟随、
-# 绝不脱离；删除该顶点即删除角点，后续下标整体 -1。
-var _gpBumpAnchors: Dictionary = {}
+# Persistent corner anchors and their selection live in their own coordinator
+# (see edge_bump_anchors.gd). It answers "where are the corners" and "change the corner set";
+# this class keeps only the DRAG state — which corner is in flight right now.
+# 持久角点锚点及其选中由独立协调者持有（见 edge_bump_anchors.gd）。它回答「角点在哪里」
+# 与「增删角点集合」；本类只保留**拖拽状态** —— 当前正在移动哪个角点。
+var gpAnchors: GPEdgeBumpAnchors = null
 
-# Currently-selected corner anchor (for delete via right-click menu / Del key): {"eid": String, "ai": int}.
-# Empty dict = nothing selected. / 当前选中的角点锚点（供右键菜单 / Del 删除）：{eid, ai}；空 = 无。
-var _gpSelBump: Dictionary = {}
-
-# Mark a bump anchor as selected (ai = array index into _gpBumpAnchors[eid]). / 标记某鼓包锚点为选中。
+# Select a corner anchor (ai = array index into gpAnchors.gpAnchorsFor(eid)).
+# 选中某角点锚点（ai = gpAnchors.gpAnchorsFor(eid) 的数组下标）。
 func gpSelectBump(gpEdgeId: String, gpAi: int) -> void:
-	_gpSelBump = {"eid": gpEdgeId, "ai": gpAi}
+	gpAnchors.gpSelectBump(gpEdgeId, gpAi)
 
-# The selected bump anchor, or an empty dict when none. / 当前选中的鼓包锚点；无则返回空字典。
+
+# The selected corner anchor, or an empty dict when none. / 选中的角点锚点；无则返回空字典。
 func gpSelectedBump() -> Dictionary:
-	return _gpSelBump
+	return gpAnchors.gpSelectedBump()
 
-# Drop the bump-anchor selection (called when the user clicks elsewhere). / 清除鼓包锚点选择（点别处时调用）。
+
+# Drop the corner selection (called when the user clicks elsewhere). / 清除角点选择（点别处时调用）。
 func gpClearBumpSelection() -> void:
-	_gpSelBump = {}
+	gpAnchors.gpClearBumpSelection()
 
 # Whole-edge translate drag (body click, NOT a grip). / 整线平移拖拽（线体点击，非抓取点）。
 var _gpMoveEdge: String = ""
@@ -138,6 +132,7 @@ var _gpMoveDangTo: Vector2 = Vector2.INF
 
 func _init(gpCanvas: GPCanvas2D) -> void:
 	gpCv = gpCanvas
+	gpAnchors = GPEdgeBumpAnchors.new(gpCv)
 
 
 # True while a grip drag is in flight. / 抓点拖拽进行中返回真。
@@ -190,40 +185,18 @@ func gpHitGrip(gpWorld: Vector2, gpEdgeId: String) -> Dictionary:
 
 
 # Return the orange corner anchor under the world point for the given edge, or an empty dict.
-# "anchor" is the ARRAY index into _gpBumpAnchors[gpEdgeId] (used for deletion); the position IS the
+# "anchor" is the ARRAY index into gpAnchors.gpAnchorsFor(gpEdgeId) (used for deletion); the position IS the
 # routing vertex at that index, so it is always on the line. / 返回世界点下该边的橙色角点，未命中返回空字典。
-# "anchor" 是 _gpBumpAnchors[gpEdgeId] 的数组下标（供删除用）；位置即该下标处的 routing 顶点，恒在线上。
+# "anchor" 是 gpAnchors.gpAnchorsFor(gpEdgeId) 的数组下标（供删除用）；位置即该下标处 routing 顶点，恒在线上。
 func gpHitBump(gpWorld: Vector2, gpEdgeId: String) -> Dictionary:
-	if not _gpBumpAnchors.has(gpEdgeId):
-		return {}
-	var gpE: GPPIDEdge = gpCv.gpGraph.gpGetEdge(gpEdgeId)
-	if gpE == null:
-		return {}
-	var gpTol: float = 9.0 / gpCv.gpViewZoom
-	var gpList: Array = _gpBumpAnchors[gpEdgeId]
-	for gpAi in range(gpList.size()):
-		var gpRIdx: int = int(gpList[gpAi])
-		if gpRIdx < 0 or gpRIdx >= gpE.gpRouting.size():
-			continue
-		var gpPos: Vector2 = gpE.gpRouting[gpRIdx]
-		if gpWorld.distance_to(gpPos) <= gpTol:
-			return {"kind": GP_KIND_BUMP, "pos": gpPos, "anchor": gpAi}
-	return {}
+	return gpAnchors.gpHitBump(gpWorld, gpEdgeId)
 
 
 # The orange corner anchors of an edge (for drawing). Each is a SINGLE routing vertex, so its position
 # IS that vertex — it always sits on the line (never floats off). / 一条边的橙色角点（绘制用）。每个角点
 # 是「单个 routing 顶点」，故其位置即该顶点本身——恒在线上、绝不脱离。
 func gpBumpGrips(gpEdgeId: String) -> Array[Dictionary]:
-	var gpOut: Array[Dictionary] = []
-	if _gpBumpAnchors.has(gpEdgeId):
-		var gpE: GPPIDEdge = gpCv.gpGraph.gpGetEdge(gpEdgeId)
-		if gpE != null:
-			for gpRIdx in _gpBumpAnchors[gpEdgeId]:
-				var gpI: int = int(gpRIdx)
-				if gpI >= 0 and gpI < gpE.gpRouting.size():
-					gpOut.append({"kind": GP_KIND_BUMP, "pos": gpE.gpRouting[gpI]})
-	return gpOut
+	return gpAnchors.gpBumpGrips(gpEdgeId)
 
 
 # Begin dragging the given BLUE midpoint grip: capture the segment + press point for a rigid translate.
@@ -242,7 +215,7 @@ func gpStartGripDrag(gpEdgeId: String, gpGrip: Dictionary) -> void:
  # routing-vertex index directly — no proximity search() needed.
  # 抓取点字典携带锚点的数组下标（gpHitBump() 返回），故直接定位 routing 顶点下标，无需邻近搜索。
 			var gpAi: int = int(_gpGrip.get("anchor", -1))
-			var gpList: Array = _gpBumpAnchors.get(gpEdgeId, [])
+			var gpList: Array = gpAnchors.gpAnchorsFor(gpEdgeId)
 			if gpAi >= 0 and gpAi < gpList.size():
 				_gpBumpIdx = int(gpList[gpAi])
 				_gpGrip["pos"] = gpE.gpRouting[_gpBumpIdx] if (_gpBumpIdx >= 0 and _gpBumpIdx < gpE.gpRouting.size()) else Vector2.ZERO
@@ -277,66 +250,37 @@ func gpStartGripDrag(gpEdgeId: String, gpGrip: Dictionary) -> void:
 # 该顶点是点击投影到线段上的点、沿垂直方向偏移 GP_CORNER_OFFSET，使其成为「真实」角点（否则 gpRoute()/gpClean()
 # 会把共线点折叠掉）。日后拖动角点即移动该顶点。
 func gpStartBump(gpEdgeId: String, gpWorld: Vector2) -> void:
+	# The corner geometry and the anchor bookkeeping are the anchors coordinator's job; only the
+	# apply + commit belong here. / 角点几何与锚点登记属锚点协调者；此处只负责应用与提交。
+	var gpR: Dictionary = gpAnchors.gpInsertCorner(gpEdgeId, gpWorld)
+	if not bool(gpR.get("ok", false)):
+		return
 	var gpE: GPPIDEdge = gpCv.gpGraph.gpGetEdge(gpEdgeId)
 	if gpE == null:
 		return
-	var gpPts: PackedVector2Array = _gpPolyline(gpE)
-	var gpS: int = GPEdgeGripGeometry.gpFindNearestSegment(gpPts, gpWorld)
-	if gpS < 0:
-		return
-	var gpA: Vector2 = gpPts[gpS]
-	var gpB: Vector2 = gpPts[gpS + 1]
-	var gpSegDir: Vector2 = gpB - gpA
-	if gpSegDir.length_squared() < 1e-6:
-		return
-	# Project the click onto the segment, then offset perpendicular so the new vertex is a real bend.
-	# 把点击投影到线段，再沿垂直方向偏移，使新顶点成为真实拐角。
-	var gpT: float = clampf(((gpWorld - gpA).dot(gpSegDir)) / maxf(gpSegDir.length_squared(), 1e-6), 0.0, 1.0)
-	var gpProj: Vector2 = gpA + gpSegDir * gpT
-	var gpPerp: Vector2 = Vector2(-gpSegDir.y, gpSegDir.x).normalized()
-	var gpSide: float = signf((gpWorld - gpProj).dot(gpPerp))
-	if gpSide == 0.0:
-		gpSide = 1.0
-	var gpCorner: Vector2 = gpProj + gpPerp * GP_CORNER_OFFSET * gpSide
-	var gpInsert: int = GPEdgeGripGeometry.gpRoutingInsertIndex(gpPts, gpE.gpRouting, gpS)
-	var gpNew: Array[Vector2] = gpE.gpRouting.duplicate()
-	gpNew.insert(gpInsert, gpCorner)
-	if not _gpBumpAnchors.has(gpEdgeId):
-		_gpBumpAnchors[gpEdgeId] = []
-	# Store the routing-vertex index of the new corner; shift any EXISTING anchor whose vertex index
-	# is >= gpInsert by +1 (the one inserted vertex pushes later indices up by one).
-	# 记下新角点的 routing 顶点下标；既有锚点的顶点下标 >= gpInsert 者整体 +1（插入一个顶点把后续推后一位）。
-	var gpShifted: Array = []
-	for gpOld in _gpBumpAnchors[gpEdgeId]:
-		var gpV: int = int(gpOld)
-		if gpV >= gpInsert:
-			gpV += 1
-		gpShifted.append(gpV)
-	gpShifted.append(gpInsert)
-	_gpBumpAnchors[gpEdgeId] = gpShifted
 	# Live-apply (so headless tests see it) AND commit through the command layer (so the editor undoes).
 	# 实时应用（使 headless 测试可见）并经命令层提交（使编辑器可撤销）。
+	var gpNew: Array[Vector2] = gpR.get("routing", [])
 	gpE.gpRouting = gpNew
 	gpCv.gpRequestSetEdgeRouting(gpEdgeId, gpNew)
 	gpCv.queue_redraw()
 
 
 # Left-drag an existing orange anchor -> move that corner. gpAnchorIdx is the ARRAY index into
-# _gpBumpAnchors[gpEdgeId] (gpHitBump() returns it), so we resolve the routing-vertex index directly
+# gpAnchors.gpAnchorsFor(gpEdgeId) (gpHitBump() returns it), so we resolve the routing-vertex index directly
 # without a proximity search(). / 左键拖动既有橙色锚点 -> 移动该角点。gpAnchorIdx 为
-# _gpBumpAnchors[gpEdgeId] 的数组下标（gpHitBump() 返回），直接定位 routing 顶点，免去邻近搜索。
+# gpAnchors.gpAnchorsFor(gpEdgeId) 的数组下标（gpHitBump() 返回），直接定位 routing 顶点，免去邻近搜索。
 func gpStartBumpDrag(gpEdgeId: String, gpAnchorIdx: int) -> void:
 	_gpEdgeId = gpEdgeId
 	_gpGrip = {"kind": GP_KIND_BUMP, "anchor": gpAnchorIdx, "pos": Vector2.ZERO}
 	var gpE: GPPIDEdge = gpCv.gpGraph.gpGetEdge(gpEdgeId)
-	if gpE != null and _gpBumpAnchors.has(gpEdgeId):
-		var gpList: Array = _gpBumpAnchors[gpEdgeId]
-		if gpAnchorIdx >= 0 and gpAnchorIdx < gpList.size():
-			var gpRIdx: int = int(gpList[gpAnchorIdx])
-			_gpBumpIdx = gpRIdx
-			_gpOrigRouting = gpE.gpRouting.duplicate()
-			if gpRIdx >= 0 and gpRIdx < gpE.gpRouting.size():
-				_gpGrip["pos"] = gpE.gpRouting[gpRIdx]
+	var gpList: Array = gpAnchors.gpAnchorsFor(gpEdgeId)
+	if gpE != null and gpAnchorIdx >= 0 and gpAnchorIdx < gpList.size():
+		var gpRIdx: int = int(gpList[gpAnchorIdx])
+		_gpBumpIdx = gpRIdx
+		_gpOrigRouting = gpE.gpRouting.duplicate()
+		if gpRIdx >= 0 and gpRIdx < gpE.gpRouting.size():
+			_gpGrip["pos"] = gpE.gpRouting[gpRIdx]
 	gpCv.queue_redraw()
 
 
@@ -350,47 +294,24 @@ func gpStartBumpDrag(gpEdgeId: String, gpAnchorIdx: int) -> void:
 # （真实拐角）后跟随光标。整个「按下-拖拽」只提交一个撤销步：因为 _gpOrigRouting 快照的是插入前的路由，
 # gpEndGripDrag() 重新施加净终值。
 func gpStartCornerDrag(gpEdgeId: String, gpWorld: Vector2) -> void:
+	# Same corner creation as gpStartBump(), but the press immediately enters corner-drag mode.
+	# 与 gpStartBump() 相同的角点创建，但按下后立即进入角点拖拽模式。
+	var gpR: Dictionary = gpAnchors.gpInsertCorner(gpEdgeId, gpWorld)
+	if not bool(gpR.get("ok", false)):
+		return
 	var gpE: GPPIDEdge = gpCv.gpGraph.gpGetEdge(gpEdgeId)
 	if gpE == null:
 		return
-	var gpPts: PackedVector2Array = _gpPolyline(gpE)
-	var gpS: int = GPEdgeGripGeometry.gpFindNearestSegment(gpPts, gpWorld)
-	if gpS < 0:
-		return
-	var gpA: Vector2 = gpPts[gpS]
-	var gpB: Vector2 = gpPts[gpS + 1]
-	var gpSegDir: Vector2 = gpB - gpA
-	if gpSegDir.length_squared() < 1e-6:
-		return
-	var gpT: float = clampf(((gpWorld - gpA).dot(gpSegDir)) / maxf(gpSegDir.length_squared(), 1e-6), 0.0, 1.0)
-	var gpProj: Vector2 = gpA + gpSegDir * gpT
-	var gpPerp: Vector2 = Vector2(-gpSegDir.y, gpSegDir.x).normalized()
-	var gpSide: float = signf((gpWorld - gpProj).dot(gpPerp))
-	if gpSide == 0.0:
-		gpSide = 1.0
-	var gpCorner: Vector2 = gpProj + gpPerp * GP_CORNER_OFFSET * gpSide
-	var gpInsert: int = GPEdgeGripGeometry.gpRoutingInsertIndex(gpPts, gpE.gpRouting, gpS)
-	var gpNew: Array[Vector2] = gpE.gpRouting.duplicate()
-	gpNew.insert(gpInsert, gpCorner)
-	if not _gpBumpAnchors.has(gpEdgeId):
-		_gpBumpAnchors[gpEdgeId] = []
-	var gpShifted: Array = []
-	for gpOld in _gpBumpAnchors[gpEdgeId]:
-		var gpV: int = int(gpOld)
-		if gpV >= gpInsert:
-			gpV += 1
-		gpShifted.append(gpV)
-	gpShifted.append(gpInsert)
-	_gpBumpAnchors[gpEdgeId] = gpShifted
 	# Snapshot the PRE-insert routing so gpEndGripDrag() commits exactly ONE undo step for the whole
 	# press-drag (creation + any move combined). Live-apply only; do NOT commit here.
 	# 快照「插入前」的路由，使 gpEndGripDrag() 为整个按下-拖拽只提交一个撤销步（创建+移动合一）。
 	# 此处仅实时应用，不提交。
 	_gpEdgeId = gpEdgeId
-	_gpBumpIdx = gpInsert
-	_gpGrip = {"kind": GP_KIND_BUMP, "anchor": _gpBumpAnchors[gpEdgeId].size() - 1, "pos": gpCorner}
-	_gpOrigRouting = gpE.gpRouting.duplicate()
-	gpE.gpRouting = gpNew
+	_gpBumpIdx = int(gpR.get("insert", -1))
+	_gpGrip = {"kind": GP_KIND_BUMP, "anchor": int(gpR.get("anchor", -1)),
+		"pos": gpR.get("corner", Vector2.ZERO)}
+	_gpOrigRouting = gpR.get("orig_routing", [])
+	gpE.gpRouting = gpR.get("routing", [])
 	gpCv.queue_redraw()
 
 
@@ -578,38 +499,13 @@ func gpEndEdgeMove() -> void:
 # 按数组下标 ai 删除某边的角点锚点：从 routing 移除单个角点顶点、删去该锚点记录、后续锚点顶点下标 -1；
 # 经命令层提交以便撤销，并清除角点选择。删除后 gpRoute() 自动把该段重新正交化，管线恢复正交连接。
 func gpDeleteBump(gpEdgeId: String, gpAi: int) -> void:
+	# Never mutate the corner set mid-gesture: a drag in flight commits its own routing on release,
+	# and deleting a vertex underneath it would leave that commit pointing at a stale index.
+	# 手势进行中绝不改动角点集合：进行中的拖拽会在释放时提交自己的路由，
+	# 若在它下面删掉顶点，该提交将指向失效下标。
 	if gpIsDragging() or gpIsMoving():
 		return
-	if not _gpBumpAnchors.has(gpEdgeId):
-		return
-	var gpList: Array = _gpBumpAnchors[gpEdgeId]
-	if gpAi < 0 or gpAi >= gpList.size():
-		return
-	var gpE: GPPIDEdge = gpCv.gpGraph.gpGetEdge(gpEdgeId)
-	if gpE == null:
-		return
-	var gpRIdx: int = int(gpList[gpAi])
-	if gpRIdx < 0 or gpRIdx >= gpE.gpRouting.size():
- # Routing lost the vertex (e.g. edge re-routed) — drop the stale anchor entry only.
- # routing 已无该顶点（如边被重布）→ 仅删锚点记录。
-		gpList.remove_at(gpAi)
-		_gpBumpAnchors[gpEdgeId] = gpList
-		gpClearBumpSelection()
-		gpCv.queue_redraw()
-		return
-	# Remove the single corner vertex; later anchor indices shift down by one.
-	# 删除单个角点顶点；后续锚点下标整体 -1。
-	var gpNew: Array[Vector2] = gpE.gpRouting.duplicate()
-	gpNew.remove_at(gpRIdx)
-	gpList.remove_at(gpAi)
-	for gpI in range(gpList.size()):
-		if int(gpList[gpI]) > gpRIdx:
-			gpList[gpI] = int(gpList[gpI]) - 1
-	_gpBumpAnchors[gpEdgeId] = gpList
-	gpE.gpRouting = gpNew
-	gpCv.gpRequestSetEdgeRouting(gpEdgeId, gpNew)
-	gpClearBumpSelection()
-	gpCv.queue_redraw()
+	gpAnchors.gpDeleteBump(gpEdgeId, gpAi)
 
 
 # Element-wise equality of two Vector2 routing arrays. / 两个 Vector2 路由数组逐元素相等。
