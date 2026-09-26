@@ -43,12 +43,6 @@ func gpSyncToolBar(gpMode: int = -1) -> void:
 	# The Ribbon built the highlight while it existed; since its removal the LEFT
 	# PALETTE's tool blocks own the mode highlight, so delegate there.
 	# Ribbon 存在时由它承担模式高亮；其移除后改由**左侧图元库**的工具块承担，故委托给它。
-	if gpHost.gpRibbon != null:
-		var gpCanvas0: GPCanvas2D = gpHost.gpActiveCanvas()
-		if gpMode < 0:
-			gpMode = GPCanvas2D.GPMode.GP_SELECT if gpCanvas0 == null else gpCanvas0.gpMode
-		gpHost.gpRibbon.gpSyncMode(gpMode)
-		return
 	if gpHost.gpLeftDock != null and gpHost.gpLeftDock.has_method("gpSyncMode"):
 		var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
 		if gpMode < 0:
@@ -156,27 +150,6 @@ func gpStyleChrome() -> void:
 		var gpGrab: StyleBoxFlat = StyleBoxFlat.new()
 		gpGrab.bg_color = Color(0.0, 0.0, 0.0, 0.0)
 		gpHost.gpBodySplit.add_theme_stylebox_override("grabber", gpGrab)
-
-# ============================ drawing toolbar ============================
-# ============================ 绘图工具栏 ============================
-# Build the Ribbon command bar and insert it between the menu bar and the body in the
-# root VBox (the same slot the old DrawToolBar occupied). The Ribbon emits
-# gpActionTriggered, which we route to the existing toolbar handler. To REVERT to the
-# previous flat toolbar, rename this back to _gpBuildToolBar and restore that builder.
-# 构建 Ribbon 命令栏并插入根 VBox 的菜单栏与主体之间（即原 DrawToolBar 的位置）。
-# Ribbon 发射 gpActionTriggered，我们将其路由到既有的工具栏处理器。要回退旧平铺工具栏，
-# 把本函数改回 _gpBuildToolBar 并恢复其构建体即可。
-func gpBuildRibbon() -> void:
-	# NOTE: this coordinator is a RefCounted, not a Node — the $-syntax is unavailable here,
-	# so the layout node is resolved through the host.
-	# 注意：本协调者是 RefCounted 而非 Node，此处无法使用 $ 语法，故经宿主解析布局节点。
-	var gpVLayout: VBoxContainer = gpHost.get_node("VLayout") as VBoxContainer
-	gpHost.gpRibbon = GPPIDRibbon.new()
-	gpHost.gpRibbon.name = "Ribbon"
-	gpHost.gpRibbon.gpActionTriggered.connect(gpOnToolBarPressed)
-	gpVLayout.add_child(gpHost.gpRibbon)
-	gpVLayout.move_child(gpHost.gpRibbon, 1)
-	gpSyncToolBar()
 
 # A tool button was pressed: select / connect / custom.
 # 工具按钮被按下：选择 / 连线 / 自定义。
