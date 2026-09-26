@@ -66,8 +66,6 @@ var gpInitialDisplay: String = ""
 # 对话框不再持有工作模型；GPSymbolEditor 持有 _gpShapes / _gpPorts、当前工具与撤销 / 重做历史
 # （GPCommandStack）。对话框仅把 UI 接到编辑器。
 var _gpEditor: GPSymbolEditor = null
-# Outward-normal direction choices for a port (UI dropdown -> Vector2). / 端口可选朝向（UI 下拉 -> 向量）。
-var _gpDirs: Array[Vector2] = [Vector2.ZERO, Vector2(-1.0, 0.0), Vector2(1.0, 0.0), Vector2(0.0, -1.0), Vector2(0.0, 1.0)]
 
 # -- internal widgets / 内部控件 --
 var _gpPreview: Control = null
@@ -82,13 +80,12 @@ var _gpOk: Button = null
 var _gpExistingTargetId: String = ""
 # editor widgets / 编辑器控件
 var _gpToolBtns: Array[Button] = []
-var _gpPortName: LineEdit = null
-var _gpPortDir: OptionButton = null
-var _gpDelPort: Button = null
-var _gpPortHint: Label = null
+# Port editing panel; it owns the name / direction / delete widgets and the direction table.
+# 端点编辑面板；它持有名称 / 朝向 / 删除控件与朝向表。
+var _gpPortPanel: GPPortEditorPanel = null
 var _gpDelShape: Button = null
 var _gpShapeHint: Label = null
-# (PortPanel / ShapePanel containers are returned from their builders and not retained.)
+# (ShapePanel is returned from its builder and not retained.)
 
 const GP_PREVIEW_SIZE: Vector2 = Vector2(260.0, 200.0)
 
@@ -124,18 +121,57 @@ func _gpBuild() -> void:
 	_gpEditor = GPSymbolEditor.new()
 	_gpEditor.gpChanged.connect(_gpOnEditorChanged)
 	_gpEditor.gpToolChanged.connect(_gpOnToolChanged)
+	var gpRoot: VBoxContainer = _gpNewRoot()
+	var gpBody: VBoxContainer = _gpNewScrollBody(gpRoot)
+	# Body content, top to bottom. Each step owns one band of controls so this function reads
+	# as an assembly list instead of a 150-line wall of widget construction.
+	# 主体内容，自顶向下。每一步负责一条控件带，使本函数读作「装配清单」而非
+	# 150 行的控件构建墙。
+	_gpBuildPreview(gpBody)
+	_gpBuildTools(gpBody)
+	_gpBuildIdentity(gpBody)
+	_gpBuildEditors(gpBody)
+	_gpBuildMode(gpBody)
+	_gpBuildHint(gpBody)
+	# The action row sits OUTSIDE the scroll area (see _gpNewScrollBody) so OK/Cancel stay
+	# visible and reachable at every window size.
+	# 操作行位于滚动区之外（见 _gpNewScrollBody），使确定/取消在任何窗口尺寸下都可见可达。
+	_gpBuildActions(gpRoot)
+	_gpWire()
+	# Materialize the working model from the incoming draft + ports before first paint. The editor
+	# emits gpChanged during gpInit (and again on gpSetTool()), driving both the repaint and the panel
+	# sync through _gpOnEditorChanged() — so no manual panel sync is needed here.
+	# 首次绘制前，由传入草稿 + 端口具象化工作模型。编辑器在 gpInit()（及 gpSetTool()）时发出 gpChanged，
+	# 经 _gpOnEditorChanged() 同时驱动重绘与面板同步——此处无需手动同步面板。
+	_gpInitModel()
+	_gpRefreshState()
+	# Focus the name field only when the dialog is already inside the tree (headless runs
+	# and pre-popup builds would otherwise error with "!is_inside_tree").
+	# 仅当对话框已在场景树内才聚焦名称框（headless 运行与弹出前构建否则会报
+	# "!is_inside_tree"）。
+	if _gpNameEdit.is_inside_tree():
+		_gpNameEdit.grab_focus()
+
+
+# Root column of the dialog: everything else hangs off it.
+# 对话框的根列：其余一切挂在它下面。
+func _gpNewRoot() -> VBoxContainer:
 	var gpRoot: VBoxContainer = VBoxContainer.new()
 	gpRoot.name = "Root"
 	gpRoot.add_theme_constant_override("separation", 8)
 	gpRoot.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(gpRoot)
+	return gpRoot
 
-	# Scrollable body: the editor panels (preview + ports + shapes + mode) exceed the
-	# window height, which pushed the action row out of the window — the OK/Cancel
-	# buttons became invisible and unreachable. The body scrolls; the action row below
-	# is OUTSIDE the scroll area and stays visible at every window size.
-	# 可滚动主体：编辑面板（预览 + 端点 + 图元 + 模式）总高超过窗口，把操作行挤出窗口外
-	# —— 确定/取消不可见也不可达。主体滚动；下方的操作行在滚动区之外，任何窗口尺寸下恒可见。
+
+# Scrollable body: the editor panels (preview + ports + shapes + mode) exceed the window height,
+# which pushed the action row out of the window — the OK/Cancel buttons became invisible and
+# unreachable. The body scrolls; the action row is added to the ROOT (outside this scroll area)
+# and stays visible at every window size.
+# 可滚动主体：编辑面板（预览 + 端点 + 图元 + 模式）总高超过窗口，把操作行挤出窗口外
+# —— 确定/取消不可见也不可达。主体滚动；操作行加到**根**（在滚动区之外），
+# 任何窗口尺寸下恒可见。
+func _gpNewScrollBody(gpRoot: VBoxContainer) -> VBoxContainer:
 	var gpScroll: ScrollContainer = ScrollContainer.new()
 	gpScroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	gpScroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -145,20 +181,22 @@ func _gpBuild() -> void:
 	gpBody.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	gpBody.add_theme_constant_override("separation", 8)
 	gpScroll.add_child(gpBody)
+	return gpBody
 
-	# Preview panel / 预览面板
+
+# Preview panel / 预览面板
+func _gpBuildPreview(gpBody: VBoxContainer) -> void:
 	var gpPanel: PanelContainer = PanelContainer.new()
 	gpPanel.custom_minimum_size = GP_PREVIEW_SIZE
 	gpPanel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	gpBody.add_child(gpPanel)
-
 	_gpPreview = _gpNewPreview()
 	gpPanel.add_child(_gpPreview)
 
-	# Editor toolbar / 编辑工具条
-	gpBody.add_child(_gpNewToolRow())
 
-	# Short usage tip / 简短操作提示
+# Editor toolbar + short usage tip / 编辑工具条 + 简短操作提示
+func _gpBuildTools(gpBody: VBoxContainer) -> void:
+	gpBody.add_child(_gpNewToolRow())
 	var gpTip: Label = Label.new()
 	gpTip.text = I18n.gpTr("make_symbol.editor_tip")
 	gpTip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -166,7 +204,10 @@ func _gpBuild() -> void:
 	gpTip.custom_minimum_size = Vector2(0.0, 44.0)
 	gpBody.add_child(gpTip)
 
-	# Category dropdown / 类别下拉
+
+# Category dropdown + internal name (id source) + display name.
+# 类别下拉 + 内部名称（id 来源）+ 显示名
+func _gpBuildIdentity(gpBody: VBoxContainer) -> void:
 	var gpCatRow: HBoxContainer = HBoxContainer.new()
 	gpCatRow.add_theme_constant_override("separation", 6)
 	var gpCatLabel: Label = Label.new()
@@ -181,21 +222,28 @@ func _gpBuild() -> void:
 	_gpCatBtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	gpCatRow.add_child(_gpCatBtn)
 	gpBody.add_child(gpCatRow)
-
-	# Internal name (id source) + display name / 内部名称（id 来源）+ 显示名
 	_gpNameEdit = _gpNewLabeledEdit(gpBody, I18n.gpTr("make_symbol.name"), gpInitialName)
 	_gpDisplayEdit = _gpNewLabeledEdit(gpBody, I18n.gpTr("make_symbol.display_name"), gpInitialDisplay)
 
-	# Port panel / 端点面板
-	gpBody.add_child(_gpNewPortPanel())
-	# Shape panel / 图元几何面板
+
+# Port panel + shape geometry panel / 端点面板 + 图元几何面板
+func _gpBuildEditors(gpBody: VBoxContainer) -> void:
+	# Port editing lives in its own panel class (see port_editor_panel.gd); the dialog only builds
+	# it against the editor and keeps the reference for gpSync().
+	# 端点编辑由独立面板类承载（见 port_editor_panel.gd）；对话框仅针对编辑器构建它并保留引用供 gpSync()。
+	_gpPortPanel = GPPortEditorPanel.new()
+	_gpPortPanel.name = "PortPanel"
+	_gpPortPanel.gpBuild(_gpEditor)
+	gpBody.add_child(_gpPortPanel)
 	gpBody.add_child(_gpNewShapePanel())
 
-	# New vs Overwrite — a radio group: exactly ONE button is pressed at any time. Without
-	# the group, clicking one left the other pressed (both looked active) or unpressed the
-	# clicked one again, so the mode appeared to "do nothing".
-	# 新建 与 覆盖 —— 单选组：任意时刻恰有一个按下。若无此组，点一个另一个仍保持按下
-	# （两个看似同时激活），再点还会把已按下的弹起，模式切换表现为“没反应”。
+
+# New vs Overwrite — a radio group: exactly ONE button is pressed at any time. Without
+# the group, clicking one left the other pressed (both looked active) or unpressed the
+# clicked one again, so the mode appeared to "do nothing".
+# 新建 与 覆盖 —— 单选组：任意时刻恰有一个按下。若无此组，点一个另一个仍保持按下
+# （两个看似同时激活），再点还会把已按下的弹起，模式切换表现为“没反应”。
+func _gpBuildMode(gpBody: VBoxContainer) -> void:
 	var gpModeGroup: ButtonGroup = ButtonGroup.new()
 	gpModeGroup.allow_unpress = false
 	var gpModeBox: VBoxContainer = VBoxContainer.new()
@@ -226,14 +274,19 @@ func _gpBuild() -> void:
 	_gpModeNew.pressed.connect(func() -> void: _gpOnModeChanged())
 	gpModeOverW.pressed.connect(func() -> void: _gpOnModeChanged())
 
-	# Hint line (will-overwrite warning / errors) / 提示行（覆盖警告 / 错误）
+
+# Hint line (will-overwrite warning / errors) / 提示行（覆盖警告 / 错误）
+func _gpBuildHint(gpBody: VBoxContainer) -> void:
 	_gpHint = Label.new()
 	_gpHint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_gpHint.add_theme_color_override("font_color", Color(0.85, 0.45, 0.2))
 	_gpHint.custom_minimum_size = Vector2(0.0, 34.0)
 	gpBody.add_child(_gpHint)
 
-	# Action row / 操作行
+
+# Action row: Cancel + OK. Added to the ROOT so it never scrolls out of reach.
+# 操作行：取消 + 确定。加到**根**上，永不滚出可见区。
+func _gpBuildActions(gpRoot: VBoxContainer) -> void:
 	var gpAct: HBoxContainer = HBoxContainer.new()
 	gpAct.add_theme_constant_override("separation", 8)
 	gpAct.alignment = BoxContainer.ALIGNMENT_END
@@ -246,30 +299,19 @@ func _gpBuild() -> void:
 	gpAct.add_child(gpOk)
 	gpRoot.add_child(gpAct)
 	_gpOk = gpOk
-
-	# Wire / 接线
 	gpCancel.pressed.connect(_gpOnCancel)
 	gpOk.pressed.connect(_gpOnOk)
+
+
+# Signal wiring that is not part of widget construction.
+# 不属于控件构建的信号接线。
+func _gpWire() -> void:
 	_gpNameEdit.text_changed.connect(func(_gpT: String) -> void: _gpRefreshState())
 	_gpDisplayEdit.text_changed.connect(func(_gpT: String) -> void: _gpRefreshState())
 	_gpCatBtn.item_selected.connect(func(_gpI: int) -> void: _gpRefreshState(); _gpEditor.gpSetCategory(_gpCurrentCat()))
 	# Window's own close signal (not a gp-prefixed member): pressing the OS close button cancels.
 	# Window 自带关闭信号（非 gp 前缀成员）：点系统关闭按钮即取消。
 	close_requested.connect(_gpOnCancel)
-
-	# Materialize the working model from the incoming draft + ports before first paint. The editor
-	# emits gpChanged during gpInit (and again on gpSetTool()), driving both the repaint and the panel
-	# sync through _gpOnEditorChanged() — so no manual panel sync is needed here.
-	# 首次绘制前，由传入草稿 + 端口具象化工作模型。编辑器在 gpInit()（及 gpSetTool()）时发出 gpChanged，
-	# 经 _gpOnEditorChanged() 同时驱动重绘与面板同步——此处无需手动同步面板。
-	_gpInitModel()
-	_gpRefreshState()
-	# Focus the name field only when the dialog is already inside the tree (headless runs
-	# and pre-popup builds would otherwise error with "!is_inside_tree").
-	# 仅当对话框已在场景树内才聚焦名称框（headless 运行与弹出前构建否则会报
-	# "!is_inside_tree"）。
-	if _gpNameEdit.is_inside_tree():
-		_gpNameEdit.grab_focus()
 
 
 # Build the read-only-turned-interactive preview Control: a drawing surface that also
@@ -316,68 +358,6 @@ func _gpNewToolRow() -> HBoxContainer:
 		_gpToolBtns.append(gpB)
 		gpRow.add_child(gpB)
 	return gpRow
-
-
-# Build the port (connection point) editing panel.
-# 构建端点（连接点）编辑面板。
-func _gpNewPortPanel() -> PanelContainer:
-	var gpPanel: PanelContainer = PanelContainer.new()
-	gpPanel.name = "PortPanel"
-	var gpBox: VBoxContainer = VBoxContainer.new()
-	gpBox.add_theme_constant_override("separation", 4)
-	var gpTitle: Label = Label.new()
-	gpTitle.text = I18n.gpTr("make_symbol.ports")
-	gpTitle.add_theme_font_size_override("font_size", 14)
-	gpBox.add_child(gpTitle)
-
-	# Name row / 名称行
-	var gpNameRow: HBoxContainer = HBoxContainer.new()
-	gpNameRow.add_theme_constant_override("separation", 6)
-	var gpNameL: Label = Label.new()
-	gpNameL.text = I18n.gpTr("make_symbol.port_name") + ":"
-	gpNameL.custom_minimum_size = Vector2(90.0, 0.0)
-	gpNameRow.add_child(gpNameL)
-	_gpPortName = LineEdit.new()
-	_gpPortName.editable = false
-	_gpPortName.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_gpPortName.text_changed.connect(func(gpT: String) -> void: _gpOnPortName(gpT))
-	gpNameRow.add_child(_gpPortName)
-	gpBox.add_child(gpNameRow)
-
-	# Direction row / 朝向行
-	var gpDirRow: HBoxContainer = HBoxContainer.new()
-	gpDirRow.add_theme_constant_override("separation", 6)
-	var gpDirL: Label = Label.new()
-	gpDirL.text = I18n.gpTr("make_symbol.port_dir") + ":"
-	gpDirL.custom_minimum_size = Vector2(90.0, 0.0)
-	gpDirRow.add_child(gpDirL)
-	_gpPortDir = OptionButton.new()
-	_gpPortDir.add_item(I18n.gpTr("make_symbol.port_dir_none"))
-	_gpPortDir.add_item(I18n.gpTr("make_symbol.port_dir_left"))
-	_gpPortDir.add_item(I18n.gpTr("make_symbol.port_dir_right"))
-	_gpPortDir.add_item(I18n.gpTr("make_symbol.port_dir_up"))
-	_gpPortDir.add_item(I18n.gpTr("make_symbol.port_dir_down"))
-	_gpPortDir.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_gpPortDir.item_selected.connect(func(gpI: int) -> void: _gpOnPortDir(gpI))
-	gpDirRow.add_child(_gpPortDir)
-	gpBox.add_child(gpDirRow)
-
-	# Delete + hint / 删除 + 提示
-	var gpDelRow: HBoxContainer = HBoxContainer.new()
-	gpDelRow.add_theme_constant_override("separation", 6)
-	_gpDelPort = Button.new()
-	_gpDelPort.text = I18n.gpTr("make_symbol.delete_port")
-	_gpDelPort.disabled = true
-	_gpDelPort.pressed.connect(func() -> void: _gpDeletePort())
-	gpDelRow.add_child(_gpDelPort)
-	gpBox.add_child(gpDelRow)
-	_gpPortHint = Label.new()
-	_gpPortHint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_gpPortHint.custom_minimum_size = Vector2(0.0, 28.0)
-	gpBox.add_child(_gpPortHint)
-
-	gpPanel.add_child(gpBox)
-	return gpPanel
 
 
 # Build the glyph-geometry editing panel (delete selected primitive).
@@ -429,7 +409,8 @@ func _gpInitModel() -> void:
 func _gpOnEditorChanged() -> void:
 	if _gpPreview != null:
 		_gpPreview.queue_redraw()
-	_gpSyncPortPanel()
+	if _gpPortPanel != null:
+		_gpPortPanel.gpSync()
 	_gpSyncShapePanel()
 
 
@@ -441,29 +422,6 @@ func _gpOnToolChanged(gpKind: int) -> void:
 
 # ---- port / shape panel sync ----
 # 端点 / 图形面板同步
-func _gpDirIndex(gpDir: Vector2) -> int:
-	for gpI in range(_gpDirs.size()):
-		if _gpDirs[gpI].is_equal_approx(gpDir):
-			return gpI
-	return 0
-
-
-func _gpSyncPortPanel() -> void:
-	if _gpPortName == null or _gpEditor == null:
-		return
-	if _gpEditor.gpSelPort >= 0 and _gpEditor.gpSelPort < _gpEditor.gpPorts.size():
-		var gpP: GPPort = _gpEditor.gpPorts[_gpEditor.gpSelPort]
-		_gpPortName.text = gpP.gpName
-		_gpPortName.editable = true
-		_gpPortDir.selected = _gpDirIndex(gpP.gpDir)
-		_gpDelPort.disabled = false
-		_gpPortHint.text = I18n.gpTr("make_symbol.port_selected")
-	else:
-		_gpPortName.text = ""
-		_gpPortName.editable = false
-		_gpPortDir.selected = 0
-		_gpDelPort.disabled = true
-		_gpPortHint.text = I18n.gpTr("make_symbol.no_port_selected")
 
 
 func _gpSyncShapePanel() -> void:
@@ -475,24 +433,6 @@ func _gpSyncShapePanel() -> void:
 	else:
 		_gpDelShape.disabled = true
 		_gpShapeHint.text = I18n.gpTr("make_symbol.no_shape_selected") % _gpEditor.gpShapes.size()
-
-
-func _gpOnPortName(gpT: String) -> void:
-	if _gpEditor == null:
-		return
-	_gpEditor.gpSetPortName(gpT)
-
-
-func _gpOnPortDir(gpI: int) -> void:
-	if _gpEditor == null:
-		return
-	_gpEditor.gpSetPortDir(_gpDirs[gpI])
-
-
-func _gpDeletePort() -> void:
-	if _gpEditor == null:
-		return
-	_gpEditor.gpDeleteSelectedPort()
 
 
 func _gpDeleteShape() -> void:
