@@ -49,7 +49,7 @@ signal gpActionRequested(action: String)
 # "mode" 为该按钮对应的 GPCanvas2D.GPMode。
 const GP_TOOL_BLOCKS: Array = [
 	{
-		"title_key": "ribbon.grp_draw",
+		"title_key": "symbol_lib.grp_draw",
 		"items": [
 			{"action": "select",   "key": "symbol_lib.tool_select", "icon": "select",   "toggle": true, "mode": GPCanvas2D.GPMode.GP_SELECT},
 			{"action": "connect",  "key": "symbol_lib.tool_connect", "icon": "connect",  "toggle": true, "mode": GPCanvas2D.GPMode.GP_CONNECT},
@@ -339,142 +339,193 @@ func _gpFilter(gpQ: String) -> Array[GPSymbolDef]:
 # Render the injected symbol list, grouped by category with a collapsible header per group.
 # 渲染注入的图元列表，按类目分组，每类目一个可折叠标题；缩略图用 GPSymbolGrid 多列自适应排布。
 func _gpRender(gpList: Array[GPSymbolDef]) -> void:
-	# Clear previous list.
-	# 清空旧列表。
+	# Read as an assembly list: clear -> column -> group -> one group per category -> reflow.
+	# 读作装配清单：清空 -> 建列 -> 分组 -> 每类目一个分组 -> 重排。
+	_gpClearList()
+	var gpVbox: VBoxContainer = _gpNewColumn()
+	var gpByCat: Dictionary = _gpGroupByCategory(gpList)
+	var gpCatKeys: Array = _gpOrderedCategories(gpByCat)
+	var gpCatIdx: int = 0
+	for gpCat in gpCatKeys:
+		# A 1px hairline separates every two neighbouring categories (none before the first).
+		# 相邻类目之间以 1px 发丝线分隔（首个类目前不画）。
+		if gpCatIdx > 0:
+			_gpAddHairline(gpVbox)
+		gpCatIdx += 1
+		gpVbox.add_child(_gpBuildCategoryGroup(str(gpCat), gpByCat[gpCat] as Array))
+	# Recompute columns now that grids exist (size may be 0 yet; resize handler refreshes later).
+	# 网格已建好，先按当前视口重排一次（此时尺寸可能仍为 0，缩放处理器之后会再刷新）。
+	gpReflow(-1.0)
+
+
+# Drop every child of the list and forget the grids built for the previous render.
+# 清空列表的全部子节点，并遗忘上一次渲染建立的网格。
+func _gpClearList() -> void:
 	for gpC in gpListRoot.get_children():
 		gpListRoot.remove_child(gpC)
 		gpC.queue_free()
 	gpGrids = []
 
-	# EXPAND (not just FILL) so the ScrollContainer hands this column its whole viewport width.
-	# With FILL alone the column kept its own minimum width, so the grid below laid its cells out
-	# for the wider dock width while its own rect stayed narrow — the cells then overflowed
-	# horizontally instead of merely wrapping. EXPAND makes the column width and the width the grid
-	# lays out for the SAME number, which is what makes the palette predictable.
-	# 用 EXPAND（而非仅 FILL）使 ScrollContainer 把整个视口宽度交给本列。仅 FILL 时本列保持自身
-	# 最小宽，于是下方网格按更宽的停靠栏宽度摆放单元格、自身矩形却仍是窄的 —— 单元格便横向溢出，
-	# 而不是正常换行。EXPAND 让「本列宽度」与「网格据以布局的宽度」成为同一个数，图元库因此可预期。
+
+# The single column that holds every category group. EXPAND (not just FILL) so the
+# ScrollContainer hands this column its whole viewport width. With FILL alone the column kept its
+# own minimum width, so the grid below laid its cells out for the wider dock width while its own
+# rect stayed narrow — the cells then overflowed horizontally instead of merely wrapping. EXPAND
+# makes the column width and the width the grid lays out for the SAME number.
+# 持有全部类目分组的单列。用 EXPAND（而非仅 FILL）使 ScrollContainer 把整个视口宽度交给本列。
+# 仅 FILL 时本列保持自身最小宽，于是下方网格按更宽的停靠栏宽度摆放单元格、自身矩形却仍是窄的
+# —— 单元格便横向溢出，而不是正常换行。EXPAND 让「本列宽度」与「网格据以布局的宽度」成为同一个数。
+func _gpNewColumn() -> VBoxContainer:
 	var gpVbox: VBoxContainer = VBoxContainer.new()
 	gpVbox.size_flags_horizontal = SIZE_EXPAND_FILL
 	gpListRoot.add_child(gpVbox)
+	return gpVbox
 
-	# Group symbols by category.
-	# 按类目对图元分组。
+
+# Bucket the symbols by category, preserving first-appearance order within each bucket.
+# 按类目把图元分桶，桶内保持首次出现顺序。
+func _gpGroupByCategory(gpList: Array[GPSymbolDef]) -> Dictionary:
 	var gpByCat: Dictionary = {}
 	for gpD in gpList:
 		if not gpByCat.has(gpD.gpCategory):
 			gpByCat[gpD.gpCategory] = []
 		gpByCat[gpD.gpCategory].append(gpD)
+	return gpByCat
 
-	# "general"（通用）永远排在所有分类的最下面（2026-09-25 需求）；其余类目保持
-	# 首次出现顺序。比较不区分大小写，兼容旧包里可能的大写变体。
-	# The "general" category always sorts LAST (2026-09-25 request); the other
-	# categories keep first-appearance order. The comparison is case-insensitive to
-	# tolerate capitalised variants in older packs.
+
+# Category order for display: "general"（通用）always sorts LAST; the rest keep first-appearance
+# order. The comparison is case-insensitive to tolerate capitalised variants in older packs.
+# 类目的显示顺序：「通用」永远排在最后；其余保持首次出现顺序。
+# 比较不区分大小写，兼容旧包里可能的大写变体。
+func _gpOrderedCategories(gpByCat: Dictionary) -> Array:
 	var gpCatKeys: Array = []
 	for gpK in gpByCat.keys():
 		if str(gpK).to_lower() != "general":
 			gpCatKeys.append(gpK)
 	if gpByCat.has("general"):
 		gpCatKeys.append("general")
-	# One collapsible group per category; a 1px hairline separates every two
-	# neighbouring categories (skip the line before the first one).
-	# 每个类目一个可折叠分组；相邻类目之间以 1px 发丝线分隔（首个类目前不画）。
-	var gpCatIdx: int = 0
-	for gpCat in gpCatKeys:
-		if gpCatIdx > 0:
-			var gpSep: ColorRect = ColorRect.new()
-			gpSep.color = GPChromeStyle.GP_BORDER
-			gpSep.custom_minimum_size = Vector2(0.0, 1.0)
-			gpVbox.add_child(gpSep)
-		gpCatIdx += 1
-		if not gpCollapsed.has(gpCat):
-			gpCollapsed[gpCat] = false
-		var gpCollapsedNow: bool = gpCollapsed[gpCat]
+	return gpCatKeys
 
-		var gpGroup: VBoxContainer = VBoxContainer.new()
-		gpGroup.size_flags_horizontal = SIZE_FILL
-		gpGroup.add_theme_constant_override("separation", 2)
-		gpVbox.add_child(gpGroup)
 
-		# Header row: [▾ category (expand, click = fold)] [gear (click = visibility menu)].
-		# 标题行：[▾ 类目（伸展，点击折叠）] [齿轮（点击 = 可见性菜单）]。
-		var gpHeadRow: HBoxContainer = HBoxContainer.new()
-		gpHeadRow.add_theme_constant_override("separation", 0)
-		gpGroup.add_child(gpHeadRow)
+# A 1px separator line matching the one GPChromeStyle uses between chrome bands.
+# 一条 1px 分隔线，与 GPChromeStyle 在各 chrome 带之间所用的一致。
+func _gpAddHairline(gpParent: Control) -> void:
+	var gpSep: ColorRect = ColorRect.new()
+	gpSep.color = GPChromeStyle.GP_BORDER
+	gpSep.custom_minimum_size = Vector2(0.0, 1.0)
+	gpParent.add_child(gpSep)
 
-		var gpHeader: Button = Button.new()
-		gpHeader.size_flags_horizontal = SIZE_EXPAND_FILL
-		gpHeader.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		gpHeader.flat = true
-		gpHeader.clip_text = true
-		gpHeader.add_theme_font_size_override("font_size", Settings.gpEffectiveFontSize())
-		gpHeader.text = ("▾ " if not gpCollapsedNow else "▸ ") + I18n.gpTr(gpCat)
-		gpHeadRow.add_child(gpHeader)
-		# 类目标题：克制的浅背景（仅比 dock 略亮）+ 1px 发丝底线。
-		var gpHdrBg: StyleBoxFlat = StyleBoxFlat.new()
-		gpHdrBg.bg_color = Color(0.180, 0.216, 0.267)
-		gpHdrBg.content_margin_left = 6.0
-		gpHdrBg.content_margin_top = 2.0
-		gpHdrBg.content_margin_bottom = 2.0
-		gpHeader.add_theme_stylebox_override("normal", gpHdrBg)
-		gpHeader.add_theme_stylebox_override("hover", gpHdrBg)
-		gpHeader.add_theme_stylebox_override("pressed", gpHdrBg)
-		gpHeader.add_theme_color_override("font_color", Color(0.80, 0.84, 0.90))
 
-		# The category GEAR: opens the per-symbol visibility checklist (AutoCAD panel menu).
-		# 类目**齿轮**：打开逐图元的可见性复选清单（AutoCAD 面板菜单）。
-		var gpGear: Button = Button.new()
-		gpGear.flat = true
-		gpGear.focus_mode = Control.FOCUS_NONE
-		gpGear.tooltip_text = I18n.gpTr("symbol_lib.gear_tip")
-		gpGear.custom_minimum_size = Vector2(22.0, 22.0)
-		var gpGearIcon: Texture2D = load("res://assets/icons/gear.svg") as Texture2D
-		if gpGearIcon != null:
-			gpGear.icon = gpGearIcon
-		gpGear.add_theme_constant_override("icon_max_width", 12)
-		var gpGearBg: StyleBoxFlat = gpHdrBg.duplicate() as StyleBoxFlat
-		gpGearBg.content_margin_left = 2.0
-		gpGearBg.content_margin_right = 4.0
-		gpGear.add_theme_stylebox_override("normal", gpGearBg)
-		gpGear.add_theme_stylebox_override("hover", gpGearBg)
-		gpGear.add_theme_stylebox_override("pressed", gpGearBg)
-		gpHeadRow.add_child(gpGear)
+# One collapsible category group: header row (fold button + gear) above the thumbnail grid.
+# 一个可折叠的类目分组：标题行（折叠按钮 + 齿轮）位于缩略图网格之上。
+func _gpBuildCategoryGroup(gpCat: String, gpItems: Array) -> Control:
+	if not gpCollapsed.has(gpCat):
+		gpCollapsed[gpCat] = false
+	var gpCollapsedNow: bool = gpCollapsed[gpCat]
 
-		# Multi-column, width-adaptive thumbnail grid. Its minimum width is forced
-		# to the viewport width by _gpReflow so it always fills and re-derives its
-		# column count from the real width (see symbol_grid.gd).
-		# 多列、随宽度自适应的缩略图网格。其最小宽由 _gpReflow 强制设为视口宽，
-		# 从而始终填满并按真实宽度重排列数（见 symbol_grid.gd）。
-		var gpGrid: GPSymbolGrid = GPSymbolGrid.new()
-		gpGrid.size_flags_horizontal = SIZE_FILL
-		# Keep the grid's column-count floor aligned with the left dock minimum so a
-		# narrow dock still derives a sensible (>=1) column count from GP_LEFT_MIN.
-		# 让网格列数下限与左停靠栏最小宽对齐，窄停靠栏仍按 GP_LEFT_MIN 推导出合理（≥1）列数。
-		gpGrid.gpMinWidth = gpMinWidth
-		gpGrid.visible = not gpCollapsedNow
-		gpGroup.add_child(gpGrid)
-		gpGrids.append(gpGrid)
+	var gpGroup: VBoxContainer = VBoxContainer.new()
+	gpGroup.size_flags_horizontal = SIZE_FILL
+	gpGroup.add_theme_constant_override("separation", 2)
 
-		for gpD in gpByCat[gpCat]:
-			var gpItem: GPSymbolPaletteItem = GPSymbolPaletteItem.new()
-			gpItem.gpDef = gpD
-			gpItem.size_flags_horizontal = SIZE_EXPAND_FILL
-			gpItem.gpPicked.connect(_gpOnPick)
-			gpItem.gpDeleteRequested.connect(_gpOnDeleteRequested)
-			# Apply the persisted visibility choice: an unticked symbol stays hidden
-			# (the grid lays out visible children only, so no hole is left).
-			# 应用持久化的可见性选择：被取消勾选的图元保持隐藏
-			#（网格只排布可见子项，故不留空洞）。
-			gpItem.visible = not bool(Settings.gpPaletteHidden.get(gpD.gpId, false))
-			gpGrid.add_child(gpItem)
+	var gpHead: Dictionary = _gpBuildCategoryHeader(gpCat, gpCollapsedNow)
+	gpGroup.add_child(gpHead["row"] as HBoxContainer)
 
-		gpHeader.pressed.connect(_gpToggleCategory.bind(gpCat, gpGrid, gpHeader))
-		gpGear.pressed.connect(_gpShowVisibilityMenu.bind(gpCat, gpByCat[gpCat] as Array, gpGrid))
+	var gpGrid: GPSymbolGrid = _gpBuildCategoryGrid(gpCollapsedNow)
+	gpGroup.add_child(gpGrid)
+	gpGrids.append(gpGrid)
+	_gpFillCategoryGrid(gpGrid, gpItems)
 
-	# Recompute columns now that grids exist (size may be 0 yet; resize handler refreshes later).
-	# 网格已建好，先按当前视口重排一次（此时尺寸可能仍为 0，缩放处理器之后会再刷新）。
-	gpReflow(-1.0)
+	# Bind the two header buttons now that both the grid and the item list exist.
+	# 两个标题按钮在此接线 —— 此时网格与条目表都已就绪。
+	var gpHeader: Button = gpHead["header"]
+	var gpGear: Button = gpHead["gear"]
+	gpHeader.pressed.connect(_gpToggleCategory.bind(gpCat, gpGrid, gpHeader))
+	gpGear.pressed.connect(_gpShowVisibilityMenu.bind(gpCat, gpItems, gpGrid))
+	return gpGroup
+
+
+# Header row of a category group: [▾ category (expand, click = fold)] [gear (visibility menu)].
+# Returns {"row": HBoxContainer, "header": Button, "gear": Button} — the callers bind to the
+# named handles rather than to child indices, so adding a widget to this row cannot silently
+# rewire the buttons.
+# 类目分组的标题行：[▾ 类目（伸展，点击折叠）] [齿轮（可见性菜单）]。
+# 返回 {"row": HBoxContainer, "header": Button, "gear": Button} —— 调用方按**具名句柄**接线，
+# 而非子节点下标；故将来在本行增删控件都不会静默把按钮接错。
+func _gpBuildCategoryHeader(gpCat: String, gpCollapsedNow: bool) -> Dictionary:
+	var gpHeadRow: HBoxContainer = HBoxContainer.new()
+	gpHeadRow.add_theme_constant_override("separation", 0)
+
+	var gpHeader: Button = Button.new()
+	gpHeader.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpHeader.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	gpHeader.flat = true
+	gpHeader.clip_text = true
+	gpHeader.add_theme_font_size_override("font_size", Settings.gpEffectiveFontSize())
+	gpHeader.text = ("▾ " if not gpCollapsedNow else "▸ ") + I18n.gpTr(gpCat)
+	gpHeadRow.add_child(gpHeader)
+	# 类目标题：克制的浅背景（仅比 dock 略亮）+ 1px 发丝底线。
+	var gpHdrBg: StyleBoxFlat = StyleBoxFlat.new()
+	gpHdrBg.bg_color = Color(0.180, 0.216, 0.267)
+	gpHdrBg.content_margin_left = 6.0
+	gpHdrBg.content_margin_top = 2.0
+	gpHdrBg.content_margin_bottom = 2.0
+	gpHeader.add_theme_stylebox_override("normal", gpHdrBg)
+	gpHeader.add_theme_stylebox_override("hover", gpHdrBg)
+	gpHeader.add_theme_stylebox_override("pressed", gpHdrBg)
+	gpHeader.add_theme_color_override("font_color", Color(0.80, 0.84, 0.90))
+
+	# The category GEAR: opens the per-symbol visibility checklist (AutoCAD panel menu).
+	# 类目**齿轮**：打开逐图元的可见性复选清单（AutoCAD 面板菜单）。
+	var gpGear: Button = Button.new()
+	gpGear.flat = true
+	gpGear.focus_mode = Control.FOCUS_NONE
+	gpGear.tooltip_text = I18n.gpTr("symbol_lib.gear_tip")
+	gpGear.custom_minimum_size = Vector2(22.0, 22.0)
+	var gpGearIcon: Texture2D = load("res://assets/icons/gear.svg") as Texture2D
+	if gpGearIcon != null:
+		gpGear.icon = gpGearIcon
+	gpGear.add_theme_constant_override("icon_max_width", 12)
+	var gpGearBg: StyleBoxFlat = gpHdrBg.duplicate() as StyleBoxFlat
+	gpGearBg.content_margin_left = 2.0
+	gpGearBg.content_margin_right = 4.0
+	gpGear.add_theme_stylebox_override("normal", gpGearBg)
+	gpGear.add_theme_stylebox_override("hover", gpGearBg)
+	gpGear.add_theme_stylebox_override("pressed", gpGearBg)
+	gpHeadRow.add_child(gpGear)
+	return {"row": gpHeadRow, "header": gpHeader, "gear": gpGear}
+
+
+# Multi-column, width-adaptive thumbnail grid. Its minimum width is forced to the viewport width
+# by _gpReflow so it always fills and re-derives its column count from the real width
+# (see symbol_grid.gd).
+# 多列、随宽度自适应的缩略图网格。其最小宽由 _gpReflow 强制设为视口宽，
+# 从而始终填满并按真实宽度重排列数（见 symbol_grid.gd）。
+func _gpBuildCategoryGrid(gpCollapsedNow: bool) -> GPSymbolGrid:
+	var gpGrid: GPSymbolGrid = GPSymbolGrid.new()
+	gpGrid.size_flags_horizontal = SIZE_FILL
+	# Keep the grid's column-count floor aligned with the left dock minimum so a narrow dock
+	# still derives a sensible (>=1) column count from GP_LEFT_MIN.
+	# 让网格列数下限与左停靠栏最小宽对齐，窄停靠栏仍按 GP_LEFT_MIN 推导出合理（≥1）列数。
+	gpGrid.gpMinWidth = gpMinWidth
+	gpGrid.visible = not gpCollapsedNow
+	return gpGrid
+
+
+# Populate a category grid with one palette tile per symbol, honouring persisted visibility.
+# 用每个图元一个图块填充类目网格，并遵循持久化的可见性选择。
+func _gpFillCategoryGrid(gpGrid: GPSymbolGrid, gpItems: Array) -> void:
+	for gpD in gpItems:
+		var gpItem: GPSymbolPaletteItem = GPSymbolPaletteItem.new()
+		gpItem.gpDef = gpD
+		gpItem.size_flags_horizontal = SIZE_EXPAND_FILL
+		gpItem.gpPicked.connect(_gpOnPick)
+		gpItem.gpDeleteRequested.connect(_gpOnDeleteRequested)
+		# Apply the persisted visibility choice: an unticked symbol stays hidden
+		# (the grid lays out visible children only, so no hole is left).
+		# 应用持久化的可见性选择：被取消勾选的图元保持隐藏
+		#（网格只排布可见子项，故不留空洞）。
+		gpItem.visible = not bool(Settings.gpPaletteHidden.get(gpD.gpId, false))
+		gpGrid.add_child(gpItem)
 
 
 # Open the per-category visibility checklist: one check item per symbol (localized

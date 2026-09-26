@@ -77,9 +77,21 @@ var _gpRenameIdx: int = -1
 # 构建头部（标签栏 + 新建 + 全屏按钮）与画布体。此处不创建首张图纸：宿主先连接
 # gpOnCanvasReady，再调用 gpAddTab()，使首张画布按正确顺序完成配置。
 func _ready() -> void:
+	# Assembly list: header (tab bar + the two icon buttons) -> canvas body -> locale hook.
+	# 装配清单：头部（标签栏 + 两个图标按钮）→ 画布体 → 语言订阅。
 	mouse_filter = MOUSE_FILTER_STOP
-	# ---- header ----
-	# ---- 头部 ----
+	add_child(_gpBuildHeader())
+	gpBody = _gpBuildBody()
+	# Keep the static header tooltips in sync with the locale.
+	# 让头部静态文字（按钮提示）随语言同步。
+	I18n.gpLocaleChanged.connect(_gpOnLocale)
+	# 视觉分层：首帧自绘画布工作区背景（最亮一档，聚焦）。
+	queue_redraw()
+
+
+# Header row: the tab band, then "+" and the fullscreen toggle at its right end.
+# 头部行：标签色带，其后是「+」与全屏切换按钮（贴在色带右端）。
+func _gpBuildHeader() -> HBoxContainer:
 	var gpHeader: HBoxContainer = HBoxContainer.new()
 	gpHeader.custom_minimum_size = Vector2(0.0, 28.0)
 	gpHeader.size_flags_horizontal = SIZE_EXPAND_FILL
@@ -87,14 +99,23 @@ func _ready() -> void:
 	# Zero separation: the "+" button must sit FLUSH against the last sheet tab.
 	# 零间距：「+」按钮必须紧贴最后一张图纸的 tab。
 	gpHeader.add_theme_constant_override("separation", 0)
-	# Tab bar grows to fill the header; the two buttons sit on its right.
-	# 标签栏拉伸填满头部；两个按钮置于其右侧。
+	gpHeader.add_child(_gpBuildTabBar())
+	gpHeader.add_child(_gpBuildAddButton())
+	gpHeader.add_child(_gpBuildFullscreenButton())
+	# (No spacer needed: the tab band itself EXPANDs, so "+" and the fullscreen
+	# button ride at the band's right end — "+" adapts right as tabs are added.)
+	# （无需占位：tab 色带自身 EXPAND，「+」与全屏按钮贴在色带右端 ——
+	# 新增图纸时「+」自适应右移。）
+	return gpHeader
+
+
+# The sheet tab band, styled to mirror the right inspector's tabs.
+# 图纸标签色带，样式镜像右侧属性面板的标签。
+func _gpBuildTabBar() -> TabBar:
 	gpTabBar = TabBar.new()
-	# EXPAND_FILL: the tab band now TILES across the whole header width (2026-09-25
-	# request — the previous SHRINK_BEGIN packed everything at the left edge). "+"
-	# then follows the band's right end, i.e. it adapts/moves right automatically.
-	# EXPAND_FILL：tab 色带**平铺**整个头部宽度（2026-09-25 需求 —— 之前的 SHRINK_BEGIN
-	# 把所有元素挤在左缘）。「+」跟随色带右端，即自适应右移。
+	# EXPAND_FILL: the tab band TILES across the whole header width, so "+" follows the band's
+	# right end and moves right automatically as tabs are added.
+	# EXPAND_FILL：tab 色带**平铺**整个头部宽度，「+」跟随色带右端、随新增标签自适应右移。
 	gpTabBar.size_flags_horizontal = SIZE_EXPAND_FILL
 	gpTabBar.size_flags_vertical = SIZE_SHRINK_CENTER
 	gpTabBar.custom_minimum_size = Vector2(0.0, 26.0)
@@ -144,77 +165,75 @@ func _ready() -> void:
 	gpCloseBg.bg_color = Color(0.0, 0.0, 0.0, 0.0)
 	gpTabBar.add_theme_stylebox_override("button_pressed", gpCloseBg)
 	gpTabBar.add_theme_stylebox_override("button_highlight", gpCloseBg)
-	gpHeader.add_child(gpTabBar)
-	# "+" button: add a new sheet. Icon-on-plate look (2026-09-25 request): a visible
-	# rounded block slightly lighter than the dock, hover brightens it — matching the
-	# category-band family. Plate metrics shared with the fullscreen button below.
-	# 「+」按钮：新建图纸。图标 + 色块底观感（2026-09-25 需求）：比 dock 略亮的圆角
-	# 区块，悬停提亮 —— 与类目色带同族。色块度量与下方全屏按钮共用。
-	var gpBtnPlate: StyleBoxFlat = StyleBoxFlat.new()
-	gpBtnPlate.bg_color = Color(0.180, 0.216, 0.267)
-	gpBtnPlate.set_corner_radius_all(3)
-	gpBtnPlate.set_content_margin_all(4.0)
-	var gpBtnHover: StyleBoxFlat = gpBtnPlate.duplicate() as StyleBoxFlat
-	gpBtnHover.bg_color = GPChromeStyle.GP_SPLIT_HI
-	var gpBtnActive: StyleBoxFlat = gpBtnPlate.duplicate() as StyleBoxFlat
-	gpBtnActive.bg_color = Color(0.129, 0.165, 0.204)
-	gpBtnActive.border_color = GPChromeStyle.GP_ACCENT
-	gpBtnActive.border_width_bottom = 1
-	var gpAddBtn: Button = Button.new()
-	gpAddBtn.tooltip_text = I18n.gpTr("center.add_tab")
-	var gpAddIcon: Texture2D = load("res://assets/icons/plus.svg") as Texture2D
-	if gpAddIcon != null:
-		gpAddBtn.icon = gpAddIcon
-	gpAddBtn.add_theme_constant_override("icon_max_width", 14)
-	gpAddBtn.custom_minimum_size = Vector2(24.0, 22.0)
-	gpAddBtn.focus_mode = Control.FOCUS_NONE
-	for gpSb in [["normal", gpBtnPlate], ["hover", gpBtnHover], ["pressed", gpBtnActive]]:
-		gpAddBtn.add_theme_stylebox_override(str(gpSb[0]), (gpSb[1] as StyleBoxFlat).duplicate() as StyleBoxFlat)
-	gpAddBtn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	return gpTabBar
+
+
+# The three plate styles every header icon button shares (normal / hover / active).
+# Both buttons get their OWN duplicates, so tweaking one cannot affect the other.
+# 所有头部图标按钮共用的三种色块样式（常态 / 悬停 / 激活）。
+# 两个按钮各取自己的副本，故调整其一不会影响另一个。
+func _gpPlateStyles() -> Array:
+	var gpPlate: StyleBoxFlat = StyleBoxFlat.new()
+	gpPlate.bg_color = Color(0.180, 0.216, 0.267)
+	gpPlate.set_corner_radius_all(3)
+	gpPlate.set_content_margin_all(4.0)
+	var gpHover: StyleBoxFlat = gpPlate.duplicate() as StyleBoxFlat
+	gpHover.bg_color = GPChromeStyle.GP_SPLIT_HI
+	var gpActive: StyleBoxFlat = gpPlate.duplicate() as StyleBoxFlat
+	gpActive.bg_color = Color(0.129, 0.165, 0.204)
+	gpActive.border_color = GPChromeStyle.GP_ACCENT
+	gpActive.border_width_bottom = 1
+	return [[ "normal", gpPlate ], [ "hover", gpHover ], [ "pressed", gpActive ]]
+
+
+# A header icon button on a rounded plate, slightly lighter than the dock; hover brightens it —
+# matching the category-band family. Plate metrics are shared with the fullscreen button.
+# 头部图标按钮：比 dock 略亮的圆角色块，悬停提亮 —— 与类目色带同族。
+# 色块度量与全屏按钮共用。
+func _gpMakeIconButton(gpTipKey: String, gpIconPath: String) -> Button:
+	var gpBtn: Button = Button.new()
+	gpBtn.tooltip_text = I18n.gpTr(gpTipKey)
+	var gpIcon: Texture2D = load(gpIconPath) as Texture2D
+	if gpIcon != null:
+		gpBtn.icon = gpIcon
+	gpBtn.add_theme_constant_override("icon_max_width", 14)
+	gpBtn.custom_minimum_size = Vector2(24.0, 22.0)
+	gpBtn.focus_mode = Control.FOCUS_NONE
+	for gpSb in _gpPlateStyles():
+		gpBtn.add_theme_stylebox_override(str(gpSb[0]), (gpSb[1] as StyleBoxFlat).duplicate() as StyleBoxFlat)
+	gpBtn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	return gpBtn
+
+
+# "+" — adds a new sheet. / 「+」—— 新建图纸。
+func _gpBuildAddButton() -> Button:
+	var gpAddBtn: Button = _gpMakeIconButton("center.add_tab", "res://assets/icons/plus.svg")
 	gpAddBtn.pressed.connect(gpAddTab)
-	gpHeader.add_child(gpAddBtn)
-	# (No spacer needed: the tab band itself EXPANDs, so "+" and the fullscreen
-	# button ride at the band's right end — "+" adapts right as tabs are added.)
-	# （无需占位：tab 色带自身 EXPAND，「+」与全屏按钮贴在色带右端 ——
-	# 新增图纸时「+」自适应右移。）
-	# Fullscreen toggle button.
-	# 全屏切换按钮。
-	gpFullBtn = Button.new()
-	# Icon-on-plate toggle, same family as the "+" tile; the active (fullscreen ON)
-	# state keeps the accent-plate so the mode stays visible without text.
-	# 图标 + 色块的开关按钮，与「+」图块同族；激活（全屏开启）时保持 accent 色块，
-	# 无文字也能看清模式状态。
-	gpFullBtn.tooltip_text = I18n.gpTr("center.fullscreen_tip")
-	var gpFullIcon: Texture2D = load("res://assets/icons/fullscreen.svg") as Texture2D
-	if gpFullIcon != null:
-		gpFullBtn.icon = gpFullIcon
-	gpFullBtn.add_theme_constant_override("icon_max_width", 14)
+	return gpAddBtn
+
+
+# Fullscreen toggle. The active (fullscreen ON) state keeps the accent plate so the mode stays
+# visible without any text.
+# 全屏切换按钮。激活（全屏开启）时保持 accent 色块，无文字也能看清模式状态。
+func _gpBuildFullscreenButton() -> Button:
+	gpFullBtn = _gpMakeIconButton("center.fullscreen_tip", "res://assets/icons/fullscreen.svg")
 	gpFullBtn.toggle_mode = true
-	gpFullBtn.custom_minimum_size = Vector2(24.0, 22.0)
-	gpFullBtn.focus_mode = Control.FOCUS_NONE
-	for gpSb in [["normal", gpBtnPlate], ["hover", gpBtnHover], ["pressed", gpBtnActive]]:
-		gpFullBtn.add_theme_stylebox_override(str(gpSb[0]), (gpSb[1] as StyleBoxFlat).duplicate() as StyleBoxFlat)
-	gpFullBtn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	gpFullBtn.toggled.connect(_gpOnFullscreenToggle)
-	gpHeader.add_child(gpFullBtn)
-	add_child(gpHeader)
-	# ---- body ----
-	# ---- 画布体 ----
-	gpBody = Control.new()
-	gpBody.size_flags_horizontal = SIZE_EXPAND_FILL
-	gpBody.size_flags_vertical = SIZE_EXPAND_FILL
-	add_child(gpBody)
-	# The canvas working area now paints its OWN canvas tint (the Center container
-	# itself wears the dock tint so the tab row blends with the right dock's band).
-	# 画布工作区自绘画布色（Center 容器自身改为 dock 色，使 tab 行与右栏色带融为一体）。
-	gpBody.draw.connect(_gpDrawBodyBg)
-	gpBody.resized.connect(gpBody.queue_redraw)
-	gpBody.queue_redraw()
-	# Keep the static header labels (button tooltips) in sync with the locale.
-	# 让头部静态文字（按钮提示）随语言同步。
-	I18n.gpLocaleChanged.connect(_gpOnLocale)
-	# 视觉分层：首帧自绘画布工作区背景（最亮一档，聚焦）。
-	queue_redraw()
+	return gpFullBtn
+
+
+# The canvas working area. It paints its OWN canvas tint — the Center container itself wears the
+# dock tint so the tab row blends with the right dock's band.
+# 画布工作区。它自绘画布色 —— Center 容器自身为 dock 色，使 tab 行与右栏色带融为一体。
+func _gpBuildBody() -> Control:
+	var gpBodyOut: Control = Control.new()
+	gpBodyOut.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpBodyOut.size_flags_vertical = SIZE_EXPAND_FILL
+	add_child(gpBodyOut)
+	gpBodyOut.draw.connect(_gpDrawBodyBg)
+	gpBodyOut.resized.connect(gpBodyOut.queue_redraw)
+	gpBodyOut.queue_redraw()
+	return gpBodyOut
 
 
 # ============================ public API ============================

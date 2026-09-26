@@ -175,12 +175,6 @@ var gpLeftWidthPx: float = GP_LEFT_DEFAULT
 # 当前右停靠栏宽度（像素）；以 GP_RIGHT_DEFAULT（200）初始化，拖拽时更新。
 var gpRightWidthPx: float = GP_RIGHT_DEFAULT
 
-# Ribbon command bar . Replaces the old flat DrawToolBar in the
-# same VBox slot; emits gpActionTriggered, which routes to gpRibbonCoord.gpOnToolBarPressed().
-# Ribbon 命令栏，在原 DrawToolBar 同位置取代它；发射 gpActionTriggered
-# 并路由到 gpRibbonCoord.gpOnToolBarPressed()。
-var gpRibbon: GPPIDRibbon = null
-
 # Standalone top command toolbar row (below the menu bar, horizontally centred).
 # It carries the former left-palette EDIT block plus the quick file/zoom icons;
 # actions reuse menu ids and route through gpMenuCoord.gpOnMenu.
@@ -584,22 +578,6 @@ func gpMenuRedo() -> void:
 
 func gpOpenSettings() -> void:
 	gpMenuCoord.gpOpenSettings()
-
-
-func _gpBuildRibbon() -> void:
-	gpRibbonCoord.gpBuildRibbon()
-
-
-func _gpStyleChrome() -> void:
-	gpRibbonCoord.gpStyleChrome()
-
-
-func _gpOnToolBarPressed(gpAction: String) -> void:
-	gpRibbonCoord.gpOnToolBarPressed(gpAction)
-
-
-func _gpSyncToolBar(gpMode: int = -1) -> void:
-	gpRibbonCoord.gpSyncToolBar(gpMode)
 
 
 func gpDeleteSelected() -> void:

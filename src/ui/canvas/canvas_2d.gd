@@ -261,26 +261,21 @@ var gpWorldRoot: Node2D = null
 
 # ---- sheet / drawing frame ----
 # ---- 图纸 / 图框 ----
-# The sheet this canvas is showing: supplies the frame size, title block and the
-# drawing-text language mode (see plan Phase 2). Null until the host assigns one.
-# 本画布正在显示的图纸：提供图幅、标题栏与图纸文字语言模式（见计划 Phase 2）。
-# 宿主赋值前为 null。
-var gpSheet: GPSheet = null
+# Sheet rendering coordinator: owns the sheet itself plus its frame and background renderers.
+# See sheet_layer.gd — the root keeps only assembly and forwarding for this use case.
+# 图纸渲染协调者：持有图纸本体及其图框、背景渲染器。见 sheet_layer.gd ——
+# 根类对本用例只保留装配与转发。
+var gpSheetLayer: GPCanvasSheetLayer = null
 
-# Frame renderer, a child of world_root placed BEHIND every symbol (z_index -1).
-# 图框渲染器，挂在 world_root 下且位于所有图元**之下**（z_index = -1）。
-var gpFrame: GPFrameView = null
-
-# Tracing underlay (background reference image), created in _ready() (v0.1 Phase 5).
-# 追踪底图（背景参考图），在 _ready() 中创建（v0.1 Phase 5）。
-var gpBackground: GPBackgroundView = null
-
-# True until the sheet has been fitted into the viewport once (see _gpFitIfReady()). Kept as a
-# one-shot so a late-arriving control size still fits the drawing, yet the user's own pan/zoom is
-# never overridden afterwards.
-# 为 true 时表示「尚未把图幅适配进视口一次」（见 _gpFitIfReady()）。以一次性标志实现，使
-# 迟到的控件尺寸仍能触发适配，而此后用户自己的平移/缩放永不被覆盖。
-var _gpNeedFit: bool = true
+# Forwarding property for the sheet. The sheet lives on the sheet layer, but outside callers
+# (e.g. GPCanvasViewController) read gpHost.gpSheet, so the root must keep this port.
+# 图纸的转发属性。图纸实体存放在图纸层，但外部调用方（如 GPCanvasViewController）会读
+# gpHost.gpSheet，故根类必须保留此端口。
+var gpSheet: GPSheet:
+	get:
+		return gpSheetLayer.gpSheet if gpSheetLayer != null else null
+	set(gpValue):
+		gpSetSheet(gpValue)
 
 # ---- camera ----
 # ---- 相机 ----
@@ -412,11 +407,32 @@ func _init() -> void:
 	gpEditFacade.gpHost = self
 	gpSymbolLayer = GPCanvasSymbolLayer.new()
 	gpSymbolLayer.gpHost = self
+	gpSheetLayer = GPCanvasSheetLayer.new()
+	gpSheetLayer.gpHost = self
 
 
 # Initialize the canvas: create world root and connect global signals.
 # 初始化画布：创建世界根节点并连接全局信号。
 func _ready() -> void:
+	# Assembly order is load-bearing: configure the Control first, then the world root every child
+	# hangs from, then the layers and delegates that draw into it, and the graph / autoload wiring
+	# LAST because those callbacks can fire the moment they are connected.
+	# 装配顺序是有意义的：先配置控件自身，再建所有子节点的挂点 world_root，
+	# 然后是绘制到它上面的各层与委托；图 / 自动加载的接线放最后 —— 因为那些回调一连接就可能触发。
+	_gpSetupControl()
+	_gpBuildWorldRoot()
+	_gpBuildSheetLayer()
+	_gpBuildBinder()
+	_gpBuildDelegates()
+	_gpBuildInputTools()
+	_gpSubscribeAutoloads()
+	_gpWireGraphSignals()
+	_gpArmFit()
+
+
+# Own Control settings: input, clipping, focus and text rasterisation.
+# 本控件的自身设置：输入、裁剪、焦点与文字光栅化。
+func _gpSetupControl() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
 	# Confine all drawing (background grid, annotation shapes, world_root symbols and
 	# grips) to this control's rect. Otherwise a panned/zoomed WorldRoot paints outside
@@ -431,11 +447,6 @@ func _ready() -> void:
 	# Keyboard shortcuts (Delete / Ctrl+A / ESC) arrive through gpInputRouter.gpOnGuiInput(), which requires focus.
 	# 键盘快捷键（Delete / Ctrl+A / ESC）经 gpInputRouter.gpOnGuiInput() 送达，而这需要焦点。
 	focus_mode = Control.FOCUS_CLICK
-	# Create the world root. All symbol/edge views live here so they share one transform.
-	# 创建世界根节点。所有图元/连线视图都挂在此处，共享同一变换。
-	gpWorldRoot = Node2D.new()
-	gpWorldRoot.name = "WorldRoot"
-	add_child(gpWorldRoot)
 	# Rasterise text at the SCALE IT IS DRAWN AT. The canvas stretches its content and world_root
 	# scales by the camera zoom, so with the default (PARENT_NODE = off at the root) an N mm glyph is
 	# rasterised at N pixels and then magnified — the blurry "ghosted" tag text. Godot's per-item
@@ -446,7 +457,20 @@ func _ready() -> void:
 	# 位号文字。Godot 的逐项过采样会按有效变换重新光栅化字形，使位号在任意缩放下都清晰。
 	# 注意此属性是**枚举**而非布尔：写 `= true` 会被强转为数值 1，即 DISABLED。
 	oversampling_with_scale = CanvasItem.OVERSAMPLING_WITH_SCALE_ENABLED
+
+
+# The world root: every symbol / edge view hangs here so they share one transform.
+# 世界根节点：所有图元 / 连线视图都挂在此处，共享同一变换。
+func _gpBuildWorldRoot() -> void:
+	gpWorldRoot = Node2D.new()
+	gpWorldRoot.name = "WorldRoot"
+	add_child(gpWorldRoot)
 	gpWorldRoot.oversampling_with_scale = CanvasItem.OVERSAMPLING_WITH_SCALE_ENABLED
+
+
+# Build the frame + background through the sheet layer, then replay the sheet binding.
+# 经图纸层构建图框与背景，再重放图纸绑定。
+func _gpBuildSheetLayer() -> void:
 	# The tracing underlay must sit UNDER the frame and the symbols, but it still has to be ABOVE the
 	# canvas' own background fill. It therefore uses z_index 0 and relies on child ORDER: it is added
 	# first, so it paints first among world_root's children. A NEGATIVE z_index cannot be used here,
@@ -457,53 +481,56 @@ func _ready() -> void:
 	# **子节点顺序**：它最先加入，因此在 world_root 的子节点中最先绘制。**不可**用负 z_index：
 	# 画布在其自身 canvas item 上以 z_index 0 绘制不透明底色与网格 —— 低于该值的任何内容都画在
 	# 不透明矩形之下、根本不可见（实测：图框已正确绑定与定位，却直到提高 z_index 才显示）。
-	gpBackground = GPBackgroundView.new()
-	gpBackground.name = "BackgroundView"
-	gpBackground.z_index = 0
-	gpWorldRoot.add_child(gpBackground)
-	# The frame also sits below every symbol by ORDER (added before the binder creates any symbol or
-	# edge view), not by a negative z_index — see the note above.
-	# 图框同样以**顺序**（早于绑定器创建任何图元/连线视图）位于所有图元之下，而非负 z_index ——
-	# 见上方说明。
-	gpFrame = GPFrameView.new()
-	gpFrame.name = "FrameView"
-	gpFrame.z_index = 0
-	gpWorldRoot.add_child(gpFrame)
+	# Frame and background are built by the sheet layer, background FIRST — both use z_index 0,
+	# so stacking depends entirely on child order (see sheet_layer.gd header).
+	# 图框与背景由图纸层构建，**背景在前** —— 二者均用 z_index 0，
+	# 层叠完全依赖子节点顺序（见 sheet_layer.gd 文件头）。
+	gpSheetLayer.gpBuild(gpWorldRoot)
 	# Re-apply the sheet NOW that the frame renderer exists. The host binds the sheet through
 	# gpSetSheet() BEFORE this Control is added to the tree (center_area builds the canvas, binds
-	# the sheet, then adds the canvas), so at that moment gpFrame is still null and the assignment
+	# the sheet, then adds the canvas), so at that moment the frame is still null and the assignment
 	# is swallowed — which is exactly why no frame was ever drawn. Replaying it here is idempotent
 	# and covers every ordering.
 	# 在渲染器存在后立刻重申图纸。宿主经 gpSetSheet() 绑定图纸的时机早于本控件入树
-	#（center_area 先建画布、绑图纸、再把画布入树），当时 gpFrame 仍为 null，赋值被吞 —— 这正是
+	#（center_area 先建画布、绑图纸、再把画布入树），当时图框仍为 null，赋值被吞 —— 这正是
 	# 图框从未画出的原因。此处重放是幂等的，可覆盖任何装配顺序。
 	gpSetSheet(gpSheet)
+
+
+# The graph binder plus the render-style snapshot it consumes.
+# 图绑定器，以及它消费的渲染样式快照。
+func _gpBuildBinder() -> void:
 	# Create the graph binder that owns view-sync logic and caches.
 	# 创建持有视图同步逻辑与缓存的图绑定器。
 	gpBinder = GPGraphBinder.new()
 	gpBinder.name = "GraphBinder"
 	add_child(gpBinder)
 	gpBinder.gpWorldRoot = gpWorldRoot
-	# 构造渲染样式快照并注入绑定器，使 render 层不读 autoload。
-	# 订阅语言 / 字号 / 位号样式变化，变化时重建快照并显式重推（见下方三个回调）。
-	# : build the render-style snapshot and inject it so the render layer
-	# stays autoload-free; locale / font / pipe-tag changes rebuild + re-push it (see callbacks).
+	# Build the render-style snapshot and inject it so the render layer stays autoload-free;
+	# locale / font / pipe-tag changes rebuild + re-push it (see _gpSubscribeAutoloads()).
+	# 构造渲染样式快照并注入绑定器，使 render 层不读 autoload；
+	# 语言 / 字号 / 位号样式变化会重建并显式重推（见 _gpSubscribeAutoloads()）。
 	gpRenderStyle = gpBuildRenderStyle()
 	gpBinder.gpStyle = gpRenderStyle
-	# Create the drawing delegate . It borrows this Control as its CanvasItem.
+
+
+# Editing delegates. They own their own transient state, which is why the canvas stays thin.
+# 各编辑委托。它们各自持有自己的瞬态状态，这正是画布能保持轻薄的原因。
+func _gpBuildDelegates() -> void:
+	# Create the drawing delegate. It borrows this Control as its CanvasItem.
 	# 创建绘制委托。它以本 Control 作为绘制目标 CanvasItem。
 	_gpOverlay = GPCanvasOverlay.new(self)
-	# Create the annotation-shape editing delegate , owner = this canvas.
+	# Create the annotation-shape editing delegate, owner = this canvas.
 	# 创建注释图形编辑委托，状态持有者为本画布。
 	gpAnno = GPAnnotationEditor.new(self)
-	# Create the edge editing delegates , owner = this canvas. They are reached by the
+	# Create the edge editing delegates, owner = this canvas. They are reached by the
 	# select tool through gpCtx (mirroring gpAnno), so transient edge-edit state never lives here.
 	# 创建边编辑委托，状态持有者为本画布。选择工具经 gpCtx 访问它们（与 gpAnno 同形），
 	# 故边的瞬态编辑状态不落在本画布上。
 	gpEdgeEditor = GPEdgeTagEditor.new(self)
 	gpEdgeGrips = GPEdgeGripOps.new(self)
-	# M10b: the tag label gets the same grip treatment as an edge vertex.
-	# M10b：位号标签获得与边拐点相同的抓取点待遇。
+	# The tag label gets the same grip treatment as an edge vertex.
+	# 位号标签获得与边拐点相同的抓取点待遇。
 	gpLabelGrips = GPLabelGripOps.new(self)
 	# Edge line-number grip: the pipe's number is itself draggable, with a leader line drawn
 	# back to the pipe when dragged far enough. / 边管线号抓取点：管线编号可拖动，拖远时画引出线。
@@ -511,18 +538,25 @@ func _ready() -> void:
 	# Endpoint-anchor interaction delegate (highlight / pick / drag-to-connect).
 	# 端点锚点交互委托（高亮 / 拾取 / 拖拽连线）。
 	gpPortOps = GPPortConnectOps.new(self)
-	# 右键菜单委托、快捷键委托、工具注册表与六个模式工具由输入路由自建。
-	# : the input router builds its context-menu delegate, shortcut delegate,
-	# tool registry and the six mode tools — they are input-dispatch implementation details.
+
+
+# The input router builds its context-menu delegate, shortcut delegate, tool registry and the
+# mode tools — they are input-dispatch implementation details and stay out of the canvas.
+# 输入路由自建右键菜单委托、快捷键委托、工具注册表与模式工具 ——
+# 它们属于输入派发的实现细节，不落在画布上。
+func _gpBuildInputTools() -> void:
 	gpInputRouter.gpBuildTools()
-	# Subscribe to language and font changes so symbol labels stay in sync.
-	# 订阅语言与字体变化，保持图元文字同步。
+
+
+# Subscribe to locale / font / pipe-tag changes so symbol labels stay in sync.
+# 订阅语言、字体与位号样式变化，保持图元文字同步。
+func _gpSubscribeAutoloads() -> void:
 	# Headless-resilient guard: `I18n` / `Settings` are autoloads and are NOT present when the
 	# canvas is exercised outside the live app (e.g. `--script` regression checkers). Skip the
 	# connection when the singleton is absent — the real app always has them, so behavior is
-	# identical there. This is what lets the P2 tool layer be validated headlessly without a GUI.
+	# identical there. This is what lets the tool layer be validated headlessly without a GUI.
 	# 无界面容错护栏：I18n / Settings 是自动加载单例，在画布脱离活动现场运行（如 `--script` 回归检查
-	# 器）时并不存在。单例缺失时跳过连接——真实应用永远具备它们，故行为零变更。正是这一步让 P2 工具
+	# 器）时并不存在。单例缺失时跳过连接——真实应用永远具备它们，故行为零变更。正是这一步让工具
 	# 层可在无 GUI 环境下 headless 校验。
 	var _gpI18n: Object = get_node_or_null("/root/I18n")
 	if _gpI18n != null and _gpI18n.has_signal("gpLocaleChanged"):
@@ -532,22 +566,30 @@ func _ready() -> void:
 		_gpSettings.gpSymbolStyleChanged.connect(_gpOnSymbolStyleChanged)
 	if _gpSettings != null and _gpSettings.has_signal("gpPipeTagStyleChanged"):
 		_gpSettings.gpPipeTagStyleChanged.connect(_gpOnTagStyleChanged)
-	# the tool layer keeps emitting unchanged while new subscribers listen on the bus. The core
-	# GPPIDGraph emits a raw signal; the canvas is the single place that maps it onto the bus
-	# (now owned by the document manager, M6). The funnel stays — the graph does not emit the bus.
-	# 新订阅者监听总线。core 的 GPPIDGraph 发射的是原始信号；画布是把它映射到总线的唯一位置
-	# （总线现由文档管理器持有，M6）。漏斗保留——图本身不发射总线。
+
+
+# Funnel the core graph's raw signal onto the document bus; the graph itself does not emit it.
+# 把 core 图的原始信号引入文档总线；图自身并不发射该总线信号。
+func _gpWireGraphSignals() -> void:
+	# The core GPPIDGraph emits a raw signal; the canvas is the single place that maps it onto the
+	# bus. The funnel stays here — the graph does not emit the bus itself.
+	# core 的 GPPIDGraph 发射的是原始信号；画布是把它映射到总线的唯一位置。
+	# 漏斗保留在此 —— 图本身不发射总线。
 	gpGraphChanged.connect(_gpForwardGraphChanged)
 	# Re-assert the core-graph binding (idempotent; covers a graph assigned before _ready()).
 	# 重申 core 图绑定（幂等，覆盖在 _ready() 之前就被赋值的图）。
 	if _gpGraphRef != null and not _gpGraphRef.gpGraphChanged.is_connected(_gpOnGraphDataChanged):
 		_gpGraphRef.gpGraphChanged.connect(_gpOnGraphDataChanged)
-	# Fit the sheet ONCE, as soon as the control has a real size. _ready() usually runs while the
-	# host is still positioning this Control (size 0), and gpResetCamera() would then place the
-	# world origin at the top-left corner — the drawing would start off half off-screen. The
-	# resized signal covers the case where the size arrives later; the flag makes it a one-shot so
-	# the user's own pan/zoom is never fought afterwards.
-	# 在控件获得真实尺寸后**一次性**适配图幅。_ready() 执行时宿主往往仍在摆放本控件（尺寸为 0），
+
+
+# Fit the sheet ONCE, as soon as the control has a real size.
+# 在控件获得真实尺寸后**一次性**适配图幅。
+func _gpArmFit() -> void:
+	# _ready() usually runs while the host is still positioning this Control (size 0), and
+	# gpResetCamera() would then place the world origin at the top-left corner — the drawing would
+	# start off half off-screen. The resized signal covers the case where the size arrives later;
+	# the flag makes it a one-shot so the user's own pan/zoom is never fought afterwards.
+	# _ready() 执行时宿主往往仍在摆放本控件（尺寸为 0），
 	# 此时 gpResetCamera() 会把世界原点放到左上角 —— 图纸一开始就偏出屏外。resized 信号覆盖
 	# 「尺寸稍后才到」的情形；标志位保证只做一次，之后绝不与用户自己的平移/缩放争夺视图。
 	resized.connect(_gpOnCanvasResized)
@@ -557,20 +599,10 @@ func _ready() -> void:
 # Fit the sheet into the viewport once the control has a measurable size (one-shot).
 # 控件尺寸可测后把图幅适配进视口（仅一次）。
 func _gpFitIfReady() -> void:
-	if not _gpNeedFit:
-		return
-	if size.x <= 1.0 or size.y <= 1.0:
-		return
-	if gpSheet != null:
-		gpViewController.gpFitSheet(gpSheet.gpWidthMM, gpSheet.gpHeightMM)
-	else:
-		gpViewController.gpResetCamera()
-	_gpNeedFit = false
-	# The camera moved, so the on-canvas text must be rasterised at the new scale (gpFitSheet /
-	# gpResetCamera already did that) and the status bar must show the resulting zoom.
-	# 相机已移动，故画布文字须按新缩放重新光栅化（gpFitSheet / gpResetCamera 已完成），
-	# 状态栏也须显示新的缩放值。
-	gpEmitStatus()
+	# Delegated to the sheet layer; the size is passed in because that coordinator is a
+	# RefCounted and cannot read Control.size itself.
+	# 委托图纸层执行；尺寸由参数传入，因该协调者是 RefCounted，无法自行读取 Control.size。
+	gpSheetLayer.gpFitIfReady(size)
 
 
 # Re-run the one-shot fit when the size first becomes available.
@@ -587,13 +619,7 @@ func _gpOnCanvasResized() -> void:
 # 为何用方法而非直接赋值：只赋 gpSheet 会让图框渲染器仍持旧图纸，可见图框会与宿主认为
 # 打开的那张图纸静默不一致。重绘正是让二者保持同步的那一步。
 func gpSetSheet(gpValue: GPSheet) -> void:
-	gpSheet = gpValue
-	if gpFrame != null:
-		gpFrame.gpSheet = gpValue
-		gpFrame.gpRefresh()
-	if gpBackground != null:
-		gpBackground.gpSheet = gpValue
-		gpBackground.gpRefresh()
+	gpSheetLayer.gpSetSheet(gpValue)
 
 
 # (Re)bind the core graph's change signal. Called from the gpGraph setter.
@@ -785,8 +811,7 @@ func gpRefreshSymbolViews() -> void:
 func gpOnCameraChanged() -> void:
 	if gpSymbolLayer != null:
 		gpRefreshSymbolViews()
-	if gpFrame != null:
-		gpFrame.gpRefresh()
+	gpSheetLayer.gpRefreshFrame()
 	queue_redraw()
 
 
