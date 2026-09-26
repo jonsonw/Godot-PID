@@ -37,8 +37,12 @@ func gpTestLegacyToolbarWrappersRemoved() -> void:
 	gpCheck(!("_gpAddToolBtn(" in gpSrc), "遗留 _gpAddToolBtn 必须已清理 / _gpAddToolBtn definition must be gone")
 	gpCheck(!("_gpAddSep(" in gpSrc), "遗留 _gpAddSep 必须已清理 / _gpAddSep definition must be gone")
 	gpCheck(!("_gpModeForAction(" in gpSrc), "遗留 _gpModeForAction 必须已清理 / _gpModeForAction definition must be gone")
-	# 正向钉：活的 Ribbon 转发方法必须仍在，证明未误删活动代码。
-	# Positive pin: the live Ribbon-forwarding methods must remain.
-	gpCheck(("_gpOnToolBarPressed(" in gpSrc), "_gpOnToolBarPressed 仍在 / still present")
-	gpCheck(("_gpSyncToolBar(" in gpSrc), "_gpSyncToolBar 仍在 / still present")
-	gpCheck(("_gpBuildRibbon(" in gpSrc), "_gpBuildRibbon 仍在 / still present")
+	# 防回退：Ribbon 命令栏移除后，它那四个转发壳的「定义」必须保持已删除。
+	# （Ribbon 的动作集已由「左侧图元库 + 顶部 QuickToolbar」完全覆盖，故其代码不再需要。）
+	# Regression guard: after the Ribbon command bar's removal, its four forwarding shells must
+	# stay removed. (The Ribbon's action set is fully covered by the left palette plus the top
+	# QuickToolbar, so its code is no longer needed.)
+	gpCheck(!("_gpBuildRibbon(" in gpSrc), "遗留 _gpBuildRibbon 必须已清理 / _gpBuildRibbon must be gone")
+	gpCheck(!("_gpSyncToolBar(" in gpSrc), "遗留 _gpSyncToolBar 必须已清理 / _gpSyncToolBar must be gone")
+	gpCheck(!("_gpOnToolBarPressed(" in gpSrc), "遗留 _gpOnToolBarPressed 必须已清理 / _gpOnToolBarPressed must be gone")
+	gpCheck(!("_gpStyleChrome(" in gpSrc), "遗留 _gpStyleChrome 必须已清理 / _gpStyleChrome must be gone")

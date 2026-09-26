@@ -512,9 +512,24 @@ func gpTestEveryZoomChangeRerasterisesText() -> void:
 	var gpRefreshBody: String = gpCanvasSrc.substr(gpRefreshAt,
 		(gpRefreshEnd - gpRefreshAt) if gpRefreshEnd > 0 else 100
 	)
-	for gpCall in ["gpRefreshSymbolViews()", "gpFrame.gpRefresh()"]:
+	for gpCall in ["gpRefreshSymbolViews()", "gpSheetLayer.gpRefreshFrame()"]:
 		gpCheck(gpRefreshBody.find(gpCall) >= 0,
 			"gpOnCameraChanged() 必须刷新 %s，否则该图层保留旧字模" % [gpCall])
+	# The frame refresh now lives on the sheet layer (GPCanvasSheetLayer), so pin the SECOND half
+	# of the chain: the layer must still actually reach the frame view. Pinning only the root would
+	# let someone delete the inner call and silently reintroduce the stale-glyph defect.
+	# 图框刷新已下沉到图纸层（GPCanvasSheetLayer），故须钉住链条的**后半段**：该层仍必须真正
+	# 调用到图框视图。只钉根类会让"删掉内层调用"悄悄复活旧字模缺陷。
+	var gpLayerSrc: String = FileAccess.get_file_as_string("res://src/ui/canvas/sheet_layer.gd")
+	gpCheck(gpLayerSrc.length() > 0, "应能读到 sheet_layer.gd 源码 / sheet_layer.gd reads")
+	var gpLayerAt: int = gpLayerSrc.find("func gpRefreshFrame")
+	gpCheck(gpLayerAt >= 0, "GPCanvasSheetLayer 应提供 gpRefreshFrame()")
+	var gpLayerEnd: int = gpLayerSrc.find("\nfunc ", gpLayerAt + 1)
+	var gpLayerBody: String = gpLayerSrc.substr(gpLayerAt,
+		(gpLayerEnd - gpLayerAt) if gpLayerEnd > 0 else 100
+	)
+	gpCheck(gpLayerBody.find("gpFrame.gpRefresh()") >= 0,
+		"gpRefreshFrame() 必须真正调用 gpFrame.gpRefresh()，否则图框保留旧字模")
 
 
 # THE ZOOM-DRIFT DEFECT — the label's anchor edge must sit on the anchor point at EVERY zoom.

@@ -52,18 +52,18 @@ const GP_STRINGS: Dictionary = {
 	# ---- app chrome ----
 	"symbol_lib.title":        { "zh": "图元库",           "en": "Symbol Library" },
 	"symbol_lib.search":       { "zh": "搜索图元名称 / 类目…", "en": "Search symbols / categories…" },
+	# Header of the tool block that holds the drawing tools. It used to live under the
+	# removed Ribbon ("ribbon.grp_draw"); the id now follows the symbol_lib.* domain it
+	# actually belongs to — gpTr() falls back to RAW KEY TEXT when a key is missing, so a
+	# stale id silently shows "ribbon.grp_draw" on screen instead of failing.
+	# 承载绘图工具的「绘制」工具块标题。它原先挂在已移除的 Ribbon 下（"ribbon.grp_draw"）；
+	# 现改回其真正所属的 symbol_lib.* 命名域 —— 因为 gpTr() 在键缺失时会**回退为裸键名**，
+	# 一个过时的 id 不会报错，只会把 "ribbon.grp_draw" 直接显示到界面上。
+	"symbol_lib.grp_draw":    { "zh": "绘制",             "en": "Draw" },
 	"symbol_lib.tool_select":  { "zh": "选择",             "en": "Select" },
 	"symbol_lib.tool_connect": { "zh": "连线",             "en": "Connect" },
 	"symbol_lib.tool_pipe":    { "zh": "管道",             "en": "Pipe" },
 	"symbol_lib.tool_signal":  { "zh": "信号线",           "en": "Signal" },
-	"ribbon.tab_home":         { "zh": "常用",   "en": "Home" },
-	"ribbon.tab_view":         { "zh": "视图",   "en": "View" },
-	"ribbon.tab_edit":         { "zh": "编辑",   "en": "Edit" },
-	"ribbon.grp_pointer":      { "zh": "指针",   "en": "Pointer" },
-	"ribbon.grp_draw":         { "zh": "绘制",   "en": "Draw" },
-	"ribbon.grp_line":         { "zh": "管线",   "en": "Piping" },
-	"ribbon.grp_view":         { "zh": "视图",   "en": "View" },
-	"ribbon.grp_edit":         { "zh": "编辑",   "en": "Edit" },
 	"symbol_lib.tool_custom":  { "zh": "自定义图元",        "en": "Custom Symbol" },
 	"symbol_lib.show_all":     { "zh": "全部显示",         "en": "Show All" },
 	"symbol_lib.gear_tip":     { "zh": "勾选要显示的图元", "en": "Choose visible symbols" },
