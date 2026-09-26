@@ -178,6 +178,29 @@ func gpOnRightDown(gpScreen: Vector2) -> void:
 func gpShowContextMenu(gpNodeHit: String) -> void:
 	_gpCtxHit = gpNodeHit
 	var gpMenu: PopupMenu = PopupMenu.new()
+	_gpBuildMenuItems(gpMenu, gpNodeHit)
+	_gpApplyMenuStates(gpMenu, gpNodeHit)
+	gpMenu.id_pressed.connect(gpOnContext)
+	gpCv.add_child(gpMenu)
+	# Godot 4's PopupMenu/Popup exposes NO popup_at_cursor; the only positioning entry is popup, and
+	# when popups are NOT embedded (embed_subwindows=false, the default) its .position is interpreted in
+	# GLOBAL SCREEN coordinates. Positioning is centralized in GPPopupHelper.gpPopupAtMouse (single source
+	# sites). Menu top-left anchors at the pointer and opens down-right (the convention). (2,2) nudges
+	# the cursor off.
+	# Godot 4 的 PopupMenu/Popup 没有 popup_at_cursor，仅 popup 可定位；「非嵌入」（默认值）时其
+	# .position 取「全局屏幕」坐标。菜单定位统一交由 GPPopupHelper.gpPopupAtMouse()（窗口屏幕坐标公式的
+	# 单一事实来源）。菜单左上角锚定在指针、向右下展开（符合惯例）。(2,2) 微调让光标落在菜单角外侧。
+	GPPopupHelper.gpPopupAtMouse(gpMenu, gpCv)
+	# Free the menu after it closes; a leaked PopupMenu keeps its parent alive.
+	# 关闭后释放菜单；泄漏的 PopupMenu 会让其父节点无法释放。
+	gpMenu.popup_hide.connect(gpMenu.queue_free)
+
+
+# Append every applicable item, in a FIXED order: target-specific items first, then the
+# sheet-wide tail. Which of them end up DISABLED is decided afterwards by _gpApplyMenuStates().
+# 按**固定顺序**追加所有适用条目：先目标专属项，再全图纸尾部项。
+# 其中哪些最终被**禁用**，由随后的 _gpApplyMenuStates() 决定。
+func _gpBuildMenuItems(gpMenu: PopupMenu, gpNodeHit: String) -> void:
 	# Promote selected annotation shapes into a real symbol (only meaningful when shapes are picked).
 	# 把选中的注释图形提升为真正图元（仅当选中图形时才有意义）。
 	if not gpCv.gpShapeSel.is_empty():
@@ -229,18 +252,6 @@ func gpShowContextMenu(gpNodeHit: String) -> void:
 	gpMenu.add_item(I18n.gpTr("canvas.ctx_deselect"), GP_CTX_DESELECT)
 	gpMenu.add_separator()
 	gpMenu.add_check_item(I18n.gpTr("canvas.ctx_connect_mode"), GP_CTX_CONNECT)
-	# Disable by id, looked up through get_item_index: positional disabling breaks as soon as a
-	# conditional item is inserted above. Items that were not added are skipped (index -1).
-	# 按 id 禁用，并用 get_item_index 反查位置：一旦上方插入了条件项，按位置禁用就会错位。
-	# 未添加的条目（下标 -1）直接跳过。
-	if gpMenu.get_item_index(GP_CTX_EDIT) >= 0:
-		gpMenu.set_item_disabled(gpMenu.get_item_index(GP_CTX_EDIT), gpNodeHit == "")
-	if gpMenu.get_item_index(GP_CTX_DUPLICATE) >= 0:
-		gpMenu.set_item_disabled(gpMenu.get_item_index(GP_CTX_DUPLICATE), gpCv.gpSelection.is_empty())
-	if gpMenu.get_item_index(GP_CTX_DELETE) >= 0:
-		gpMenu.set_item_disabled(gpMenu.get_item_index(GP_CTX_DELETE), gpCv.gpSelection.is_empty() and gpCv.gpShapeSel.is_empty())
-	gpMenu.set_item_disabled(gpMenu.get_item_index(GP_CTX_DESELECT), gpCv.gpSelection.is_empty() and gpCv.gpShapeSel.is_empty())
-	gpMenu.set_item_checked(gpMenu.get_item_index(GP_CTX_CONNECT), gpCv.gpMode == GPMode.GP_CONNECT)
 	# Sheet-wide renumber (useful from anywhere there are edges).
 	# 全图纸重新编号（只要有边即可，随处可用）。
 	if gpCv.gpGraph != null and not gpCv.gpGraph.gpEdges.is_empty():
@@ -249,20 +260,22 @@ func gpShowContextMenu(gpNodeHit: String) -> void:
 	# 用绕开障碍的正交路径，自动连接「两个已拾取的端点」。
 	if gpCv.gpPortPick.size() >= 2:
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_auto_connect"), GP_CTX_AUTO_CONNECT)
-	gpMenu.id_pressed.connect(gpOnContext)
-	gpCv.add_child(gpMenu)
-	# Godot 4's PopupMenu/Popup exposes NO popup_at_cursor; the only positioning entry is popup, and
-	# when popups are NOT embedded (embed_subwindows=false, the default) its .position is interpreted in
-	# GLOBAL SCREEN coordinates. Positioning is centralized in GPPopupHelper.gpPopupAtMouse (single source
-	# sites). Menu top-left anchors at the pointer and opens down-right (the convention). (2,2) nudges
-	# the cursor off.
-	# Godot 4 的 PopupMenu/Popup 没有 popup_at_cursor，仅 popup 可定位；「非嵌入」（默认值）时其
-	# .position 取「全局屏幕」坐标。菜单定位统一交由 GPPopupHelper.gpPopupAtMouse()（窗口屏幕坐标公式的
-	# 单一事实来源）。菜单左上角锚定在指针、向右下展开（符合惯例）。(2,2) 微调让光标落在菜单角外侧。
-	GPPopupHelper.gpPopupAtMouse(gpMenu, gpCv)
-	# Free the menu after it closes; a leaked PopupMenu keeps its parent alive.
-	# 关闭后释放菜单；泄漏的 PopupMenu 会让其父节点无法释放。
-	gpMenu.popup_hide.connect(gpMenu.queue_free)
+
+
+# Disable / check the stateful items. Disabling goes through get_item_index (by ID), because
+# positional disabling breaks as soon as a conditional item is inserted above; items that were
+# not added report index -1 and are skipped.
+# 设置有状态条目的禁用 / 勾选。禁用一律**按 id** 经 get_item_index 反查位置 —— 一旦上方插入了
+# 条件项，按位置禁用就会错位；未添加的条目返回下标 -1，直接跳过。
+func _gpApplyMenuStates(gpMenu: PopupMenu, gpNodeHit: String) -> void:
+	if gpMenu.get_item_index(GP_CTX_EDIT) >= 0:
+		gpMenu.set_item_disabled(gpMenu.get_item_index(GP_CTX_EDIT), gpNodeHit == "")
+	if gpMenu.get_item_index(GP_CTX_DUPLICATE) >= 0:
+		gpMenu.set_item_disabled(gpMenu.get_item_index(GP_CTX_DUPLICATE), gpCv.gpSelection.is_empty())
+	if gpMenu.get_item_index(GP_CTX_DELETE) >= 0:
+		gpMenu.set_item_disabled(gpMenu.get_item_index(GP_CTX_DELETE), gpCv.gpSelection.is_empty() and gpCv.gpShapeSel.is_empty())
+	gpMenu.set_item_disabled(gpMenu.get_item_index(GP_CTX_DESELECT), gpCv.gpSelection.is_empty() and gpCv.gpShapeSel.is_empty())
+	gpMenu.set_item_checked(gpMenu.get_item_index(GP_CTX_CONNECT), gpCv.gpMode == GPMode.GP_CONNECT)
 
 
 # Dispatch a context-menu action.
