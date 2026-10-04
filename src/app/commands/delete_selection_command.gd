@@ -38,8 +38,13 @@ var _gpRestore: GPRestoreDroppedEdgesCommand = null
 
 # Build the command from the current selection: node ids, shape indices and edge ids.
 # 由当前选择集构造命令：节点 id、图形下标与边 id。
-func _init(gpInNodeIds: Array[String], gpInShapeIdxs: Array[int], gpInEdgeIds: Array[String] = []) -> void:
-	_gpNodes = GPDeleteNodesCommand.new(gpInNodeIds)
+# gpInLookup resolves symbol definitions; the node half needs it to recognise a REQUIRED part (an
+# A-class built-in nozzle) and refuse to delete it. An invalid lookup just disables that guard.
+# gpInLookup 解析图元定义；节点部分需要它来识别**必需**部件（A 类自带管口）并拒绝对其删除。
+# 无效查找器只是关闭该护栏。
+func _init(gpInNodeIds: Array[String], gpInShapeIdxs: Array[int], gpInEdgeIds: Array[String] = [],
+		gpInLookup: Callable = Callable()) -> void:
+	_gpNodes = GPDeleteNodesCommand.new(gpInNodeIds, gpInLookup)
 	_gpShapes = GPDeleteShapesCommand.new(gpInShapeIdxs)
 	# Only build the edge half when there is something to delete, so an edge-less selection stays
 	# a pure node/shape composite (no empty no-op half).

@@ -118,22 +118,28 @@ static func gpPolylineHitsRect(gpPts: PackedVector2Array, gpRect: Rect2) -> bool
 # never drift from what the user sees. / 从 gpNode 下方穿过的第一条边的 id，无则 ""。以「实际绘制的
 # 已布线折线」对「命中测试所用的同一节点矩形助手」度量，故检测永不会与用户所见失步。
 
-static func gpPickSplitPorts(gpSym: GPPIDNode, gpDef: GPSymbolDef, gpA: Vector2, gpB: Vector2) -> Dictionary:
+static func gpPickSplitPorts(gpSym: GPPIDNode, gpDef: GPSymbolDef, gpA: Vector2, gpB: Vector2,
+		gpGraph: GPPIDGraph = null, gpDefLookup: Callable = Callable()) -> Dictionary:
 	var gpBestIn: String = ""
 	var gpBestOut: String = ""
 	var gpBestScore: float = INF
 	for gpI in range(gpDef.gpPorts.size()):
 		var gpPI: GPPort = gpDef.gpPorts[gpI]
- # Reuse the renderer's own transform order (mirror first, then rotate) — never re-derive it,
- # or a flipped-and-rotated symbol's ports would land on the wrong side.
- # 复用渲染器自身的变换顺序（先镜像、再旋转）——绝不另行推导，否则「翻转+旋转」图元的端口会跑错侧。
-		var gpWA: Vector2 = gpSym.gpPosition + GPPortResolver.gpPortLocalOriented(gpDef, gpSym, gpPI)
+ # Reuse the resolver's own transform (mirror first, then rotate, mount chain folded in) —
+ # never re-derive it, or a flipped / rotated / MOUNTED symbol's ports would land on the wrong side.
+ # 复用解析器自身的变换（先镜像、再旋转，并计入挂载父链）——绝不另行推导，
+ # 否则「翻转 / 旋转 / 已挂载」图元的端口会跑错侧。
+ # gpGraph / gpDefLookup are optional so existing callers keep working; without them a mounted
+ # child falls back to its own frame (the pre-mount behaviour).
+ # gpGraph / gpDefLookup 为可选，使既有调用方继续可用；不传时挂载子件回落为自身坐标系
+ # （即挂载功能之前的行为）。
+		var gpWA: Vector2 = GPPortResolver.gpPortWorld(gpGraph, gpDefLookup, gpDef, gpSym, gpPI)
 		var gpDi: float = gpWA.distance_to(gpA)
 		for gpJ in range(gpDef.gpPorts.size()):
 			if gpJ == gpI:
 				continue
 			var gpPJ: GPPort = gpDef.gpPorts[gpJ]
-			var gpWB: Vector2 = gpSym.gpPosition + GPPortResolver.gpPortLocalOriented(gpDef, gpSym, gpPJ)
+			var gpWB: Vector2 = GPPortResolver.gpPortWorld(gpGraph, gpDefLookup, gpDef, gpSym, gpPJ)
 			var gpScore: float = gpDi + gpWB.distance_to(gpB)
 			if gpScore < gpBestScore:
 				gpBestScore = gpScore
@@ -261,7 +267,8 @@ static func gpSplitThroughSymbol(gpCv: GPCanvas2D,gpEdgeId: String, gpSymNid: St
 	var gpWant: String = GPPortResolver.gpWantTypeFor(gpE)
 	var gpA: Vector2 = GPPortResolver.gpResolveEnd(gpCv.gpGraph, gpLookup, gpE, true, gpWant).get("pos", gpSym.gpPosition)
 	var gpB: Vector2 = GPPortResolver.gpResolveEnd(gpCv.gpGraph, gpLookup, gpE, false, gpWant).get("pos", gpSym.gpPosition)
-	var gpPick: Dictionary = GPEdgeGripGeometry.gpPickSplitPorts(gpSym, gpDef, gpA, gpB)
+	var gpPick: Dictionary = GPEdgeGripGeometry.gpPickSplitPorts(gpSym, gpDef, gpA, gpB,
+		gpCv.gpGraph, gpLookup)
 	var gpIn: String = str(gpPick.get("in", ""))
 	var gpOut: String = str(gpPick.get("out", ""))
 	if gpIn == "" or gpOut == "":

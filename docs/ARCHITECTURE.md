@@ -13,7 +13,15 @@
 | UI | `src/ui` | shell（组合根 `GPMainWindow` + 7 协调者）、canvas（`GPCanvas2D` + **5 实现类**）、tools、panels、dialogs（含 `symbol_editor/`） | 唯一依赖 Godot 控件与 autoload 的层 |
 | App | `src/app` | 用例编排：命令栈 + **29 条命令** + `GPEditService` + `GPAppDocumentManager` + `GPEventBus` + 自动保存服务 | 纯 `RefCounted`，无 UI 引用 |
 | Core | `src/core` | model（`GPPIDGraph` 聚合根）、geometry、symbol、view（画布纯状态 + 画布文字档位）、platform、service、`gp_constants` | **49 个类无一个是 `Node`** → 可 headless 测试 |
-| IO | `src/io` | `*.pid.json` 读写（`GPProjectIO`）+ 原子写 + schema 迁移 + 导入导出 | 唯一允许碰 `FileAccess` 的层；DXF / PDF 导出目前为**空桩** |
+| IO | `src/io` | `*.pid.json` 读写（`GPProjectIO`）+ 原子写 + schema 迁移 + 导入导出 + **DEXPI（Proteus XML）导入导出** | 唯一允许碰 `FileAccess` 的层；DXF / PDF 导出目前为**空桩** |
+
+**DEXPI 子模块（第二个外部方言适配器，与 `*.pid.json` 平级）**：`GPDexpiSchema`（常量/版本能力表）、
+`GPXmlText`（转义单点）、`GPDexpiMapping`（映射表 + `gpFlipY`/`gpNormRgb` 单点）、
+`GPDexpiExporter`、`GPDexpiReader`、`GPDexpiValidator`、`GPDexpiImporter`、
+`GPExporterRegistry`（新增格式不再改 UI 分发）。
+三条硬不变量：① 所有世界坐标必须落在 Diagram Extent 之内（Extent 随几何一起翻转）；
+② null 一律**省略** `Value` 属性，绝不写 `Value=""`；③ RDL URI 绝不臆造 ——
+只有规范已核实的才写，其余留空并进报告。
 | Render | `src/render` | `GPSymbolView` / `GPEdgeView` 视图节点与绘制器、`GPFrameView`（图框）/ `GPBackgroundView`（底图） | 只读模型；3D 构建为空桩 |
 | Autoload | `src/autoload` | `I18n`（zh/en）、`Settings`（`user://settings.cfg`）、`SnapState`（CAD 开关） | 3 个全局单例，**仅 ui 可依赖** |
 | Addons | `src/addons` | `GPIPIDAddon` 商业化插件契约（8 个钩子） | **仅契约，无加载器** |

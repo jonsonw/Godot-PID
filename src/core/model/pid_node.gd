@@ -70,6 +70,47 @@ var gpLabelAnchor: int = GPPropertyResolver.GP_ANCHOR_UNSET
 # GP_OFFSET_UNSET 表示「跟随库默认」。
 var gpLabelOffset: Vector2 = GPLabelAnchor.GP_OFFSET_UNSET
 
+# ---- mounting: this node is fitted ONTO another node (see 图元层级架构规划) ----
+# ---- 挂载：本节点**装**在另一个节点上（见《图元层级架构规划》） ----
+# "" = a top-level node. Otherwise the HOST'S gpInstanceId — the live-graph handle, exactly as
+# edges address nodes (gpFromRef.node_id). See gpIsMounted().
+# ★ NOT gpUid: the instance id is the in-memory address, and the native *.pid.json uses it
+# throughout (edges included), which is what keeps one addressing scheme per file. Any format
+# whose object IDs are STABLE must translate it — see GPDexpiExporter, which maps it to gpUid
+# because §7.4 forbids exporting an instance id as a DEXPI object ID.
+# "" = 顶层节点。否则为**宿主的 gpInstanceId** —— 活图中的句柄，与边寻址节点的方式一致
+#（gpFromRef.node_id）。见 gpIsMounted()。
+# ★ **不是** gpUid：instance id 是内存地址，原生 *.pid.json 全程使用它（含边），
+# 这正是「一种文件只用一种寻址方式」的保证。任何以**稳定 ID** 标识对象的格式都必须翻译它 ——
+# 见 GPDexpiExporter：因 §7.4 禁止把 instance id 当 DEXPI 对象 ID 导出，故它映射为 gpUid。
+var gpParentUid: String = ""
+
+# The anchor name on the HOST definition (GPAttachPoint.gpName) this node is mounted into.
+# 本节点装入的**宿主**定义上的锚点名（GPAttachPoint.gpName）。
+var gpMountAnchor: String = ""
+
+# Per-instance nudge from the anchor, in the host's LOCAL millimetres. Vector2.ZERO = exactly on
+# the anchor (a legitimate value, so it doubles as "unset" only because mounting implies an anchor).
+# 相对锚点的单实例微调，以**宿主本地毫米**计。Vector2.ZERO = 正好落在锚点上
+# （这是合法取值，故它就是「未设置」——因为挂载本身就意味着存在锚点）。
+var gpMountOffset: Vector2 = Vector2.ZERO
+
+# Extra rotation relative to the anchor-derived orientation, in degrees (normally 0).
+# 相对「由锚点推导出的朝向」的附加旋转，度（通常为 0）。
+var gpMountAngleDeg: float = 0.0
+
+# Per-node overrides of the definition's label slots: slot key -> {anchor, offset}. Written only
+# when non-empty, so an unmounted node's archive stays byte-identical.
+# 对定义侧文本槽的**单实例**覆盖：槽名 -> {anchor, offset}。仅在非空时写出，
+# 故未挂载节点的存档逐字节不变。
+var gpLabelSlotOverrides: Dictionary = {}
+
+
+# Whether this node is mounted onto a host (its world transform is then DERIVED, never stored).
+# 本节点是否被挂载到宿主上（此时其世界变换为**推导**而来，永不存储）。
+func gpIsMounted() -> bool:
+	return gpParentUid != ""
+
 
 # Serialize this node to a plain dictionary (object graph -> dict graph).
 # 将本节点序列化为普通字典（对象图 → 字典图）。
@@ -92,6 +133,20 @@ func gpToDict() -> Dictionary:
 	# 仅在偏移确实设置时输出：未设置的哨兵是 ±INF，它无法用 JSON 表示，会损坏存档。
 	if gpLabelOffset != GPLabelAnchor.GP_OFFSET_UNSET:
 		gpD["label_offset"] = [gpLabelOffset.x, gpLabelOffset.y]
+	# Mounting keys are written ONLY when actually mounted / overridden, so a plain node's
+	# archive keeps its exact previous byte shape. mount_anchor alone (no parent) is meaningless
+	# and therefore never emitted.
+	# 挂载键**仅在确实挂载 / 有覆盖时**写出，故普通节点的存档保持原有逐字节形态。
+	# 单独出现 mount_anchor（无父件）是无意义的，因此绝不写出。
+	if gpParentUid != "":
+		gpD["parent_uid"] = gpParentUid
+		gpD["mount_anchor"] = gpMountAnchor
+		if gpMountOffset != Vector2.ZERO:
+			gpD["mount_offset"] = [gpMountOffset.x, gpMountOffset.y]
+		if not is_zero_approx(gpMountAngleDeg):
+			gpD["mount_angle_deg"] = gpMountAngleDeg
+	if not gpLabelSlotOverrides.is_empty():
+		gpD["label_slots"] = gpLabelSlotOverrides.duplicate(true)
 	return gpD
 
 
@@ -132,6 +187,21 @@ func gpFromDict(gpD: Dictionary) -> void:
 		gpLabelOffset = Vector2(float(gpOff[0]), float(gpOff[1]))
 	else:
 		gpLabelOffset = GPLabelAnchor.GP_OFFSET_UNSET
+
+	# Mounting: absent in every archive written before this feature, so each read falls back to
+	# "top-level node, no slot overrides" and the node loads exactly as before.
+	# 挂载：本功能之前写出的存档均无这些键，故每次读取都回落到「顶层节点、无槽覆盖」，
+	# 节点载入行为与之前完全一致。
+	gpParentUid = str(gpD.get("parent_uid", ""))
+	gpMountAnchor = str(gpD.get("mount_anchor", ""))
+	var gpMO: Array = gpD.get("mount_offset", [])
+	if gpMO.size() >= 2:
+		gpMountOffset = Vector2(float(gpMO[0]), float(gpMO[1]))
+	else:
+		gpMountOffset = Vector2.ZERO
+	gpMountAngleDeg = float(gpD.get("mount_angle_deg", 0.0))
+	var gpLSO: Variant = gpD.get("label_slots", {})
+	gpLabelSlotOverrides = (gpLSO as Dictionary).duplicate(true) if gpLSO is Dictionary else {}
 
 
 # Effective uid: an archive written before M8 has none, so the per-drawing id doubles as the

@@ -67,6 +67,13 @@ const GP_STRINGS: Dictionary = {
 	"symbol_lib.tool_custom":  { "zh": "自定义图元",        "en": "Custom Symbol" },
 	"symbol_lib.show_all":     { "zh": "全部显示",         "en": "Show All" },
 	"symbol_lib.gear_tip":     { "zh": "勾选要显示的图元", "en": "Choose visible symbols" },
+	# 左栏的两个顶层分组（P3）。它们按「与别的图元的关系」划分，而非按类目：阀门与管口同属
+	# 「通用」类目，但一个是宿主、另一个是部件。键同时充当折叠状态的键（与「绘制」块同一约定）。
+	# The left dock's two TOP-LEVEL groups (P3). They split by RELATION to another symbol, not by
+	# category: a valve and a nozzle both live in "general", yet one hosts and the other is hosted.
+	# The key doubles as the collapse-state key, exactly like the Draw block above.
+	"symbol_lib.grp_primary":  { "zh": "主图元",           "en": "Primary Symbols" },
+	"symbol_lib.grp_attach":   { "zh": "次级图元",         "en": "Attachments" },
 	"symbol_lib.ctx_delete":  { "zh": "删除",             "en": "Delete" },
 	"symbol_lib.delete_title": { "zh": "删除图元",       "en": "Delete Symbol" },
 	"symbol_lib.delete_used_confirm": { "zh": "该图元已在画布 %d 处使用，删除将一并移除这些实例及其连线。确认删除？", "en": "This symbol is used in %d place(s) on the canvas. Deleting it will also remove those instances and their connections. Confirm deletion?" },
@@ -167,6 +174,7 @@ const GP_STRINGS: Dictionary = {
 	"status.save_fail":        { "zh": "保存失败：%s",    "en": "Save failed: %s" },
 	"status.loaded_with_packs":{ "zh": "已打开：%s（含 %d 个用户图元包）", "en": "Opened: %s (%d user packs embedded)" },
 	"status.load_fail":        { "zh": "打开失败：%s",    "en": "Open failed: %s" },
+	"status.parse_fail":       { "zh": "解析失败：%s",    "en": "Parse failed: %s" },
 	"status.exported":         { "zh": "已导出：%s（节点 %d / 连线 %d）",
 								 "en": "Exported: %s (%d nodes / %d edges)" },
 	"status.export_fail":      { "zh": "导出失败：%s",    "en": "Export failed: %s" },
@@ -180,6 +188,7 @@ const GP_STRINGS: Dictionary = {
 	"doc.info": { "zh": "G-PID 工程\n文档元信息（标题 / 图号 / 版本）待接入。",
 				  "en": "G-PID Project\nDocument metadata (title / drawing no. / revision) pending." },
 	"doc.pid_filter": { "zh": "G-PID 工程 (*.pid.json)", "en": "G-PID Project (*.pid.json)" },
+	"doc.dexpi_filter": { "zh": "DEXPI XML (*.pid.xml)", "en": "DEXPI XML (*.pid.xml)" },
 
 	"settings.title":      { "zh": "设置",          "en": "Settings" },
 	"settings.font_size":  { "zh": "界面字体大小",   "en": "UI Font Size" },
@@ -208,11 +217,13 @@ const GP_STRINGS: Dictionary = {
 	"menu.file_save_as":       { "zh": "另存为…",      "en": "Save As…" },
 	"menu.file_print":         { "zh": "打印…",        "en": "Print…" },
 	"menu.file_import":        { "zh": "导入…",        "en": "Import…" },
+	"menu.import_dexpi":       { "zh": "导入 DEXPI XML…", "en": "Import DEXPI XML…" },
 	"menu.file_quit":          { "zh": "退出",         "en": "Quit" },
 	"menu.export":             { "zh": "导出",         "en": "Export" },
 	"menu.export_project":     { "zh": "工程…",        "en": "Project…" },
 	"menu.export_library":     { "zh": "图元库…",      "en": "Symbol Library…" },
 	"menu.export_config":      { "zh": "项目配置…",    "en": "Project Config…" },
+	"menu.export_dexpi":       { "zh": "导出 DEXPI XML…", "en": "Export DEXPI XML…" },
 	"menu.export_pdf":         { "zh": "导出 PDF…",    "en": "Export PDF…" },
 	"menu.export_dxf":         { "zh": "导出 DXF…",    "en": "Export DXF…" },
 	"menu.edit_undo":          { "zh": "撤销",         "en": "Undo" },
@@ -275,6 +286,26 @@ const GP_STRINGS: Dictionary = {
 	"canvas.ctx_drop_split":        { "zh": "把连线拆成两根接入图元", "en": "Split line through the symbol" },
 	"canvas.ctx_drop_title":        { "zh": "无法拆分连线", "en": "Cannot split line" },
 	"canvas.ctx_drop_needs_ports":  { "zh": "该图元的端点少于两个，无法拆分连线；请修改图元并增加至少两个端点。", "en": "This symbol has fewer than two ports; cannot split the line. Edit the symbol and add at least two ports." },
+
+	# ---- P2 主图元 / 次级图元（挂载） / primary & secondary symbols (mounting) ----
+	# 右键「添加附件 ▶」子菜单的标题与置灰原因。
+	# The "Add Attachment" submenu title and the reason a type is greyed out.
+	"canvas.ctx_attach":            { "zh": "添加附件", "en": "Add Attachment" },
+	"canvas.ctx_attach_no_room":    { "zh": "该宿主上没有空闲的兼容锚点", "en": "No free compatible anchor on this host" },
+	"canvas.ctx_detach":            { "zh": "卸载附件", "en": "Detach Attachment" },
+	# 附件拒绝原因（GPEditService.gpLastRefusal → 状态栏）。机器可读键不带前缀，前缀 "attach." 由
+	# GPCanvasEditFacade.gpReportRefusal() 加上，与既有的 "edge." 命名空间并列。
+	# Attach refusal reasons (gpLastRefusal -> status bar). The machine-readable key carries no
+	# prefix; "attach." is added by the facade, mirroring the existing "edge." namespace.
+	"attach.no_host":               { "zh": "宿主已不存在，无法挂载附件。", "en": "The host no longer exists; cannot attach." },
+	"attach.no_anchor":             { "zh": "此处没有可挂载的兼容锚点，未放置。", "en": "No free compatible anchor here; nothing was placed." },
+	# 从库中拖动次级图元（模式一）时的状态栏提示。主图元没有挂载类型，因而**不可能**找到锚点，
+	# 故在拖动的起点就拒绝，而不是让用户拖到一半才失败。
+	# Status-bar text for dragging an attachment out of the library (mode 1). A primary symbol has
+	# no mount kind, so it could NEVER find an anchor — the gesture is refused at its source rather
+	# than being allowed to fail halfway.
+	"status.attach_armed":          { "zh": "拖到宿主图元上放置「%s」。Esc 取消。", "en": "Drop onto a host to place \u201c%s\u201d. Esc to cancel." },
+	"status.attach_not_mountable":  { "zh": "「%s」是主图元，不能挂到别的图元上。", "en": "\u201c%s\u201d is a primary symbol \u2014 it cannot be mounted onto another." },
 
 	# ---- Main-canvas annotation draw tools / 主画布注释绘图工具 ----
 	"canvas.tool_polyline":   { "zh": "折线", "en": "Polyline" },

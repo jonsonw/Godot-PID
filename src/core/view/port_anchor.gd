@@ -63,7 +63,10 @@ static func gpPortWorldPos(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpNodeId:
 	var gpPort: GPPort = gpDef.gpPortByName(gpPortId) if gpPortId != "" else null
 	if gpPort == null:
 		return Vector2.INF
-	return gpNode.gpPosition + GPPortResolver.gpPortLocalOriented(gpDef, gpNode, gpPort)
+	# Going through GPPortResolver.gpPortWorld() (instead of adding the node position here) is
+	# what folds a MOUNTED child's host chain into the port position.
+	# 经由 GPPortResolver.gpPortWorld()（而非在此处加节点坐标）才能把挂载子件的宿主父链折进端口位置。
+	return GPPortResolver.gpPortWorld(gpGraph, gpDefLookup, gpDef, gpNode, gpPort)
 
 
 # The anchor record for one (node, port), or an EMPTY dictionary when it cannot be resolved.
@@ -82,8 +85,8 @@ static func gpAnchorOf(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpNodeId: Str
 	if gpPort == null:
 		return {}
 	return gpMakeAnchor(gpNodeId, gpPortId,
-		gpNode.gpPosition + GPPortResolver.gpPortLocalOriented(gpDef, gpNode, gpPort),
-		GPPortResolver.gpPortDirOriented(gpNode, gpPort), gpPort.gpType)
+		GPPortResolver.gpPortWorld(gpGraph, gpDefLookup, gpDef, gpNode, gpPort),
+		GPPortResolver.gpPortWorldDir(gpGraph, gpDefLookup, gpNode, gpPort), gpPort.gpType)
 
 
 # Every anchor exposed by the given nodes. An EMPTY gpNodeIds means "every node on the sheet",
@@ -96,18 +99,30 @@ static func gpAnchors(gpGraph: GPPIDGraph, gpDefLookup: Callable,
 	if gpGraph == null:
 		return gpOut
 	var gpWanted: Array[String] = gpNodeIds
+	# Dedupe by (node, port): a host that has yielded to its nozzles contributes THEIR ports, and
+	# those same ports are contributed again by the nozzle nodes themselves when the caller asks for
+	# every node — without this the sheet would show two overlapping anchors at each nozzle tip.
+	# 按 (节点, 端口) 去重：已让位于管嘴的宿主贡献的是**管嘴的**端口，而调用方索取「每个节点」时
+	# 管嘴节点自身又会贡献同一批端口 —— 少了这一步，图纸上每个管嘴端会出现两个重叠锚点。
+	var gpSeen: Dictionary = {}
 	for gpN in gpGraph.gpNodes:
 		if not gpWanted.is_empty() and not gpWanted.has(gpN.gpInstanceId):
 			continue
-		var gpDef: GPSymbolDef = null
-		if gpDefLookup.is_valid():
-			gpDef = gpDefLookup.call(gpN.gpSymbolId) as GPSymbolDef
-		if gpDef == null:
-			continue
-		for gpP in gpDef.gpPorts:
-			gpOut.append(gpMakeAnchor(gpN.gpInstanceId, gpP.gpName,
-				gpN.gpPosition + GPPortResolver.gpPortLocalOriented(gpDef, gpN, gpP),
-				GPPortResolver.gpPortDirOriented(gpN, gpP), gpP.gpType))
+		# gpServingPorts() answers with the ports that ACTUALLY carry this node's connections:
+		# its own, or its mounted nozzles' when those have taken over (see GPMountResolver).
+		# gpServingPorts() 返回**真正**承载该节点连接关系的端口：自身端口，或接管之后的管嘴端口
+		#（见 GPMountResolver）。
+		for gpS in GPMountResolver.gpServingPorts(gpGraph, gpDefLookup, gpN):
+			var gpSN: GPPIDNode = gpS["node"]
+			var gpSP: GPPort = gpS["port"]
+			var gpSDef: GPSymbolDef = gpS["def"]
+			var gpKey: String = gpSN.gpInstanceId + "|" + gpSP.gpName
+			if gpSeen.has(gpKey):
+				continue
+			gpSeen[gpKey] = true
+			gpOut.append(gpMakeAnchor(gpSN.gpInstanceId, gpSP.gpName,
+				GPPortResolver.gpPortWorld(gpGraph, gpDefLookup, gpSDef, gpSN, gpSP),
+				GPPortResolver.gpPortWorldDir(gpGraph, gpDefLookup, gpSN, gpSP), gpSP.gpType))
 	return gpOut
 
 
@@ -115,17 +130,51 @@ static func gpAnchors(gpGraph: GPPIDGraph, gpDefLookup: Callable,
 # 距世界点最近的锚点；拾取半径内没有时返回空字典。
 # [param gpNodeIds] restrict the search() to these nodes; EMPTY = every node.
 # [param gpNodeIds] 限定在这些节点内搜索；为空 = 每个节点。
+#
+# BODY WINS WHEN THE ANCHORS BELONG TO THE SELECTION / 锚点属于选择集时**本体取胜**：
+# Restricting the search to the selected symbols means the user was aiming at one of them, and may
+# equally have meant the symbol itself. A nozzle is 4 mm long with a port at EACH tip, so the 10 px
+# pick radius covers its entire body and the part could never be grabbed — the reported "the
+# built-in parts cannot be dragged". The anchor therefore only wins when the press is CLOSER TO THE
+# ANCHOR than to the centre of the node that owns it: pressing a tip snaps the tip, pressing the
+# body grabs the part. The rule is scale-free, so a 10 mm valve keeps behaving exactly as before.
+# When gpNodeIds is EMPTY the search serves a wire looking for a landing point on ANY symbol, and
+# there the nearest port is simply the answer — no body-wins test applies.
+# 把搜索限定在选中图元上，意味着用户瞄的就是其中之一，也可能瞄的是图元本身。管嘴长 4mm、**两端**
+# 各有一个端口，故 10px 拾取半径盖住它整个身子，部件便永远抓不住 —— 即用户报告的「自带部件拖不动」。
+# 因此锚点仅在「按下点离锚点比离其所属节点中心更近」时才取胜：按端头就是按端头，按身子就是抓部件。
+# 该规则与尺寸无关，故 10mm 的阀门行为与之前**完全**一致。当 gpNodeIds 为空时，搜索是在为一条
+# 连线寻找落点，最近的端口就是答案，不适用「本体取胜」。
 static func gpHitPort(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpWorld: Vector2,
 		gpZoom: float, gpNodeIds: Array[String] = []) -> Dictionary:
 	var gpR: float = GP_ANCHOR_PX / maxf(gpZoom, 0.01)
 	var gpBest: Dictionary = {}
 	var gpBestD: float = gpR
+	var gpSelOnly: bool = not gpNodeIds.is_empty()
 	for gpA in gpAnchors(gpGraph, gpDefLookup, gpNodeIds):
 		var gpD: float = (gpA["pos"] as Vector2).distance_to(gpWorld)
-		if gpD <= gpBestD:
-			gpBestD = gpD
-			gpBest = gpA
+		if gpD > gpBestD:
+			continue
+		if gpSelOnly and gpD >= _gpCentreDistance(gpGraph, gpDefLookup, gpA, gpWorld):
+			continue
+		gpBestD = gpD
+		gpBest = gpA
 	return gpBest
+
+
+# Distance from a world point to the derived centre of the node an anchor belongs to. INF when the
+# node cannot be resolved, so the body-wins test above never rejects on a missing node (INF compares
+# as "far", leaving the anchor in charge).
+# 世界点到锚点所属节点**推导**中心的距离。节点无法解析时为 INF，使上方的「本体取胜」判定绝不会因
+# 节点缺失而拒绝（INF 视为「远」，仍由锚点取胜）。
+static func _gpCentreDistance(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpAnchor: Dictionary,
+		gpWorld: Vector2) -> float:
+	if gpGraph == null:
+		return INF
+	var gpNode: GPPIDNode = gpGraph.gpGetNode(str(gpAnchor.get("node_id", "")))
+	if gpNode == null:
+		return INF
+	return GPPortResolver.gpNodeWorldOrigin(gpGraph, gpDefLookup, gpNode).distance_to(gpWorld)
 
 
 # Do two anchor records name the very same endpoint?

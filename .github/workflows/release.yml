@@ -1,0 +1,139 @@
+# G-PID v0.1 发布工作流 / Release workflow for G-PID
+#
+# 触发：push 一个 v* 标签（如 v0.1.0）或手动 workflow_dispatch。
+#   1. windows job — ubuntu-latest 上导出 Windows Desktop 预设（二进制内嵌 pck，单 exe）
+#   2. macos  job  — macos-latest 上导出 macOS 预设（.app，未签名/未公证）
+#
+# 说明：
+#   · headless 导出不会自动下载模板，必须先把官方模板预置到 user:// 的 templates/ 下。
+#   · macOS 包若要做 Developer ID 签名 + 公证，需 Apple 账号并在 preset 里配置
+#     codesign/notarization；本工作流产出的是未签名包，用户首次运行需右键打开或
+#     `xattr -cr Godot-PID.app` 绕过 Gatekeeper。
+#   · 二进制一律作为 Release 附件上传，绝不提交进仓库（见 .gitignore 的 /build/）。
+#
+# Godot 版本与本地/CI 测试保持一致（4.7）；升级只需改 GODOT_TAG。
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GODOT_TAG: "4.7-stable"
+  TPZ_URL: "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz"
+
+jobs:
+  windows:
+    name: Windows build (windows-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Godot (headless, linux x86_64)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/godot.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_TAG}/Godot_v${GODOT_TAG}_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d /tmp/godot-bin
+          GODOT_BIN="$(find /tmp/godot-bin -maxdepth 1 -type f -name 'Godot*' | head -n 1)"
+          chmod +x "$GODOT_BIN"
+          sudo mv "$GODOT_BIN" /usr/local/bin/godot
+          godot --version
+
+      - name: Install export templates (4.7.stable)
+        run: |
+          set -euo pipefail
+          TEMPLATE_DIR="$HOME/.local/share/godot/templates/4.7.stable"
+          rm -rf "$TEMPLATE_DIR"
+          mkdir -p "$TEMPLATE_DIR"
+          curl -fsSL -o /tmp/templates.tpz "$TPZ_URL"
+          # ⚠️ .tpz 是 zip 不是 tar；且 4.7 的包内多套一层 templates/，必须上提，
+          # 否则 Godot 在 export_templates/<ver>/ 下找不到 windows_release_*.exe。
+          unzip -q -o /tmp/templates.tpz -d "$TEMPLATE_DIR"
+          mv "$TEMPLATE_DIR/templates"/* "$TEMPLATE_DIR/"
+          rmdir "$TEMPLATE_DIR/templates"
+          ls "$TEMPLATE_DIR" | grep -Ei "windows_release" || { echo "windows template missing"; exit 1; }
+
+      - name: Export Windows release (embedded pck → single exe)
+        run: |
+          set -euo pipefail
+          mkdir -p build/win
+          godot --headless --path . --export-release "Windows Desktop" build/win/Godot-PID.exe
+
+      - name: Package zip
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          cp build/win/Godot-PID.exe "Godot-PID-windows-${TAG}.exe"
+          zip "Godot-PID-windows-${TAG}.zip" "Godot-PID-windows-${TAG}.exe"
+          ls -la *.zip
+
+      - name: Upload to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          gh release create "$TAG" --title "G-PID ${TAG}" --generate-notes \
+            "Godot-PID-windows-${TAG}.zip" || gh release upload "$TAG" "Godot-PID-windows-${TAG}.zip" --clobber
+
+  macos:
+    name: macOS build (macos-latest)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install export templates (4.7.stable)
+        run: |
+          set -euo pipefail
+          TEMPLATE_DIR="$HOME/Library/Application Support/Godot/export_templates/4.7.stable"
+          rm -rf "$TEMPLATE_DIR"
+          mkdir -p "$TEMPLATE_DIR"
+          curl -fsSL -o /tmp/templates.tpz "$TPZ_URL"
+          # 同 Windows job：tpz 是 zip + 包内多一层 templates/，必须 unzip 并上提。
+          unzip -q -o /tmp/templates.tpz -d "$TEMPLATE_DIR"
+          mv "$TEMPLATE_DIR/templates"/* "$TEMPLATE_DIR/"
+          rmdir "$TEMPLATE_DIR/templates"
+          # ⚠️ 4.7 的 macOS 模板不是平铺的 macos_release_universal，而是按需解压的 macos.zip。
+          ls "$TEMPLATE_DIR" | grep -Ei "macos_release|macos\.zip" || { echo "macos template missing"; exit 1; }
+
+      - name: Install Godot (macOS universal)
+        run: |
+          set -euo pipefail
+          # macOS runner 上不一定装了 Godot，按版本号直接拉官方 universal 二进制。
+          # The macOS runner may not ship Godot, so fetch the official universal build by tag.
+          curl -fsSL -o /tmp/godot-mac.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_TAG}/Godot_v${GODOT_TAG}_macos.universal.zip"
+          unzip -q /tmp/godot-mac.zip -d /tmp/godot-mac
+          GODOT_MAC="/tmp/godot-mac/Godot.app/Contents/MacOS/Godot"
+          chmod +x "$GODOT_MAC"
+          "$GODOT_MAC" --version
+
+      - name: Export macOS release (.app)
+        run: |
+          set -euo pipefail
+          mkdir -p build/mac
+          /tmp/godot-mac/Godot.app/Contents/MacOS/Godot --headless --path . --export-release "macOS" build/mac/Godot-PID.app
+
+      - name: Package zip
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          ditto -c -k --keepParent build/mac/Godot-PID.app "Godot-PID-macos-${TAG}.zip"
+          ls -la *.zip
+
+      - name: Upload to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          gh release create "$TAG" --title "G-PID ${TAG}" --generate-notes \
+            "Godot-PID-macos-${TAG}.zip" || gh release upload "$TAG" "Godot-PID-macos-${TAG}.zip" --clobber

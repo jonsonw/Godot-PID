@@ -210,6 +210,7 @@ func gpSaveProject(gpForcePick: bool) -> void:
  # 尚无路径（或另存为）：用文件对话框询问用户。
 		gpHost.gpPendingFileAction = "save"
 		gpHost.gpFileDialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+		_gpApplyDialogFilters("")
 		gpHost.gpFileDialog.popup_centered()
 		return
 	gpWriteProject(gpHost.gpCurrentPath)
@@ -220,6 +221,7 @@ func gpSaveProject(gpForcePick: bool) -> void:
 func gpOpenProject() -> void:
 	gpHost.gpPendingFileAction = "open"
 	gpHost.gpFileDialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	_gpApplyDialogFilters("")
 	gpHost.gpFileDialog.popup_centered()
 
 
@@ -228,6 +230,33 @@ func gpOpenProject() -> void:
 func gpImportProject() -> void:
 	gpHost.gpPendingFileAction = "import"
 	gpHost.gpFileDialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	_gpApplyImportFilters()
+	gpHost.gpFileDialog.popup_centered()
+
+
+# The merged import dialog offers BOTH container formats: a *.pid.json merge archive and a
+# DEXPI *.pid.xml. Offering only *.pid.json forced users through "All Files", and the file
+# they picked then failed with a misleading "open failed" — the format was fine, the ROUTING
+# was not (see gpOnFileSelected).
+# 合并式导入对话框同时提供**两种**容器格式：*.pid.json 合并档案与 DEXPI *.pid.xml。
+# 只给 *.pid.json 会逼用户走「All Files」，随后选中的文件还以误导性的「打开失败」告终
+# —— 格式本身没问题，错的是**分发**（见 gpOnFileSelected）。
+func _gpApplyImportFilters() -> void:
+	gpHost.gpFileDialog.clear_filters()
+	gpHost.gpFileDialog.add_filter("*.pid.json", I18n.gpTr("doc.pid_filter"))
+	gpHost.gpFileDialog.add_filter("*.pid.xml", I18n.gpTr("doc.dexpi_filter"))
+
+
+# Ask where to read a DEXPI XML file from. Reuses the shared dialog but with the DEXPI
+# filter, so the user can actually SELECT a .pid.xml — the bare import dialog only offered
+# *.pid.json, which is the SAME silent-feature class the export side had before the fix.
+# 询问从哪个 DEXPI XML 文件读取。复用共享对话框但套用 DEXPI 过滤器，
+# 使用户**能选**到 .pid.xml —— 裸导入对话框此前只会提供 *.pid.json，
+# 与导出侧修复前「选不了 DEXPI」是同一类静默功能缺失。
+func gpPickImportDexpiPath() -> void:
+	gpHost.gpPendingFileAction = "import_dexpi"
+	gpHost.gpFileDialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	_gpApplyDialogFilters("dexpi")
 	gpHost.gpFileDialog.popup_centered()
 
 
@@ -237,7 +266,49 @@ func gpImportProject() -> void:
 func gpPickExportPath(gpKind: String) -> void:
 	gpHost.gpPendingFileAction = "export_" + gpKind
 	gpHost.gpFileDialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	_gpApplyDialogFilters(gpKind)
+	# Prefill from the current project name so the default already carries the RIGHT
+	# extension — the save dialog never appends one on its own.
+	# 以当前工程名预填，使默认名已带**正确**的扩展名 —— 保存对话框从不会自动补扩展名。
+	gpHost.gpFileDialog.current_file = _gpSuggestedExportName(gpKind)
 	gpHost.gpFileDialog.popup_centered()
+
+
+# Point the shared dialog's filters at the right format before EVERY popup. Without this the
+# dialog keeps whichever filters it had at startup — which is exactly how "Export DEXPI XML"
+# ended up offering only *.pid.json: the menu entry existed, the registry knew the extension,
+# but nothing told the dialog.
+# 每次**弹窗前**把共享对话框的过滤器指到正确格式。否则对话框沿用启动时的过滤器 ——
+# 「导出 DEXPI XML」只提供 *.pid.json 正是这么来的：菜单项存在、注册表知道扩展名，
+# 却没有任何东西告诉对话框。
+func _gpApplyDialogFilters(gpKind: String) -> void:
+	gpHost.gpFileDialog.clear_filters()
+	var gpPattern: String = GPExporterRegistry.gpFilterPatternOf(gpKind)
+	var gpLabelKey: String = GPExporterRegistry.gpFilterKeyOf(gpKind)
+	if gpPattern.is_empty() or gpLabelKey.is_empty():
+		# Not an export (open / save-as / import): the project container is the only format.
+		# 非导出（打开 / 另存为 / 导入）：工程容器是唯一格式。
+		gpPattern = "*.pid.json"
+		gpLabelKey = "doc.pid_filter"
+	gpHost.gpFileDialog.add_filter(gpPattern, I18n.gpTr(gpLabelKey))
+
+
+# "…/W6.pid.json" -> "W6.pid.xml"; no current project -> "" (the field stays blank).
+# The basename of "W6.pid.json" is "W6.pid" — an INCOMPLETE container name, not a prefix to
+# double. Strip the trailing ".pid" before attaching the registry extension, or the pre-filled
+# default lands on disk as "W6.pid.pid.xml" (observed in the wild).
+# 「…/W6.pid.json」->「W6.pid.xml」；无当前工程则返回空串（输入框保持空白）。
+# 「W6.pid.json」的 basename 是「W6.pid」—— 那是个**没写完**的容器名，不是用来翻倍的前缀。
+# 追加注册表扩展名前必须先剥掉结尾的「.pid」，否则预填的默认名会以
+# 「W6.pid.pid.xml」的形态落到磁盘上（实际发生过）。
+func _gpSuggestedExportName(gpKind: String) -> String:
+	var gpExt: String = GPExporterRegistry.gpExtensionOf(gpKind)
+	var gpBase: String = gpHost.gpCurrentPath.get_file().get_basename()
+	if gpBase.is_empty() or gpExt.is_empty():
+		return ""
+	if gpBase.ends_with(".pid"):
+		gpBase = gpBase.trim_suffix(".pid")
+	return gpBase + "." + gpExt
 
 
 # Forward the file-dialog result to the right handler.
@@ -248,7 +319,18 @@ func gpOnFileSelected(gpPath: String) -> void:
 	elif gpHost.gpPendingFileAction == "open":
 		gpReadProject(gpPath)
 	elif gpHost.gpPendingFileAction == "import":
-		gpDoImport(gpPath)
+		# Route by FORMAT, not by menu item: a .xml picked through the merged import dialog
+		# is DEXPI, whatever entry opened the dialog. Routing it to the JSON reader produced
+		# the misleading "open failed" the user actually hit.
+		# 按**格式**而非菜单项分发：合并导入对话框里选到的 .xml 就是 DEXPI，
+		# 与从哪个菜单项打开对话框无关。把它送进 JSON 读取器，就是用户实际撞上的
+		# 那个误导性「打开失败」。
+		if gpPath.get_file().ends_with(".xml"):
+			gpDoImportDexpi(gpPath)
+		else:
+			gpDoImport(gpPath)
+	elif gpHost.gpPendingFileAction == "import_dexpi":
+		gpDoImportDexpi(gpPath)
 	elif gpHost.gpPendingFileAction.begins_with("export_"):
 		gpDoExport(gpPath, gpHost.gpPendingFileAction.trim_prefix("export_"))
 
@@ -411,15 +493,97 @@ func gpDoImport(gpPath: String) -> void:
 		print("G-PID import report: ", gpReport.gpSummary())
 
 
-# Write one of the three export containers.
-# 写出三种导出容器之一。
+# Import a DEXPI XML file: read -> validate -> convert -> merge into the active drawing.
+# 导入 DEXPI XML 文件：读取 -> 校验 -> 转换 -> 合并进当前图纸。
+# Same non-destructive merge contract as gpDoImport (GPProjectImport): an import never
+# shrinks the drawing. The DEXPI container reuses gpMergeInto, so it inherits every
+# guarantee (uid reassignment, tag de-dup, non-destructive merge) for free — there is no
+# second, divergent import implementation.
+# 与 gpDoImport 相同的非破坏合并契约（GPProjectImport）：导入永不缩减图纸。
+# DEXPI 容器复用 gpMergeInto，故免费获得全部保障（uid 重分配、位号去重、非破坏合并），
+# 不存在第二套分叉的导入实现。
+func gpDoImportDexpi(gpPath: String) -> void:
+	# One entry point for the whole DEXPI import chain: the reader, validator and converter
+	# are NOT called individually from the shell. This keeps the UI trivial and the contract
+	# in exactly one place (see GPDexpiImporter.gpReadFileToV3).
+	# DEXPI 导入整条链路只有一个入口：reader / validator / converter 不单独由外壳调用，
+	# 使界面保持简单、契约只落在一处（见 GPDexpiImporter.gpReadFileToV3）。
+	# The def lookup lets the importer REBIND each pipe end to the port nearest its stored
+	# endpoint — without it, port_id stays "" and the renderer degrades to "first nozzle
+	# port", drawing pipes on the wrong sides of the symbols.
+	# 定义查找让导入器把每根管线端**重绑**到离其已存端点最近的端口 ——
+	# 不传则 port_id 保持空串，渲染器降级到「期望用途第一个端口」，
+	# 管线会被画到符号的错误侧面。
+	var gpRes: GPIOResult = GPDexpiImporter.gpReadFileToV3(gpPath, Callable(gpHost, "gpDefFor"))
+	if not gpRes.gpIsOk():
+		gpHost.gpSetState(gpRes.gpMessageKey, [gpPath])
+		return
+	var gpPayload: Dictionary = gpRes.gpPayload as Dictionary
+	var gpV3: Dictionary = gpPayload.get("v3", {}) as Dictionary
+	var gpReport: GPImportReport = gpPayload.get("report", null) as GPImportReport
+	var gpGraph: GPPIDGraph = gpHost.gpActiveGraph()
+	var gpMerge: GPIOResult = GPProjectImport.gpMergeInto(gpGraph, gpV3,
+		GPProjectImport.GP_MODE_MERGE)
+	if not gpMerge.gpIsOk():
+		gpHost.gpSetState("status.import_fail", [gpPath])
+		return
+	# Imported symbols may be new to the library, so both docks must be rebuilt (same as
+	# gpDoImport).
+	# 导入的图元对库可能为新，故两个停靠栏都要重建（同 gpDoImport）。
+	gpHost.gpDefs = GPSymbolLibrary.gpDefaultDefs()
+	gpHost.gpLeftDock.gpPopulate(gpHost.gpDefs)
+	gpHost.gpActiveCanvas().gpDefs = gpHost.gpDefs
+	gpHost.gpActiveCanvas().queue_redraw()
+	# An import IS an edit: the drawing changed, so the dirty flag must follow.
+	# 导入**就是**一次编辑：图纸变了，脏标记必须跟着走。
+	gpHost.gpDocManager.gpMarkDirty()
+	var gpErr: int = 0
+	var gpWarn: int = 0
+	if gpReport != null:
+		gpErr = gpReport.gpCountOf(GPImportReport.GP_ERROR)
+		gpWarn = gpReport.gpCountOf(GPImportReport.GP_WARNING)
+	gpHost.gpSetState("status.imported", [gpPath, gpErr, gpWarn])
+	if gpErr > 0 and gpReport != null:
+		print("G-PID DEXPI import report: ", gpReport.gpSummary())
+
+
+# Write one export container, whichever the registry says gpKind maps to.
+# 写出 gpKind 在注册表中对应的那一种导出容器。
+# The dispatch lives in the registry, so adding a format never touches this method again.
+# 分派逻辑在注册表中，故新增格式再也不会碰到本方法。
 func gpDoExport(gpPath: String, gpKind: String) -> void:
+	# The save dialog does not append extensions: a bare typed name would land on disk with
+	# no suffix at all. Completion lives in the registry (single source of truth) — it also
+	# finishes a trailing ".pid" instead of doubling it ("W6.pid" -> "W6.pid.xml", never
+	# "W6.pid.pid.xml").
+	# 保存对话框不补扩展名：手打的裸名会以**无后缀**落盘。补全逻辑归注册表（单一事实来源）
+	# —— 它还会补完结尾的「.pid」而非翻倍（「W6.pid」->「W6.pid.xml」，
+	# 绝不产生「W6.pid.pid.xml」）。
+	var gpExt: String = GPExporterRegistry.gpExtensionOf(gpKind)
+	gpPath = GPExporterRegistry.gpFinishName(gpPath, gpExt)
 	var gpPacks: Array = GPSymbolLibrary.gpUserPacks()
-	var gpOut: GPIOResult = GPProjectExport.gpExportToFile(gpKind, gpPath,
-		gpHost.gpActiveGraph(), gpPacks)
+	var gpOut: GPIOResult = GPExporterRegistry.gpExport(gpKind, gpPath,
+		gpHost.gpActiveGraph(), gpPacks, _gpActiveSheet())
 	if not gpOut.gpIsOk():
 		gpHost.gpSetState(gpOut.gpMessageKey, [gpPath])
 		return
 	var gpStats: Dictionary = gpOut.gpPayload as Dictionary
+	# A failed cast yields null, and calling .get() on null would abort the export flow at the
+	# very last step — after the file was already written.
+	# 失败的转换会产出 null，而对 null 调 .get() 会让导出流程在**最后一步**中断 ——
+	# 那时文件其实已经写好了。
+	if gpStats == null:
+		gpHost.gpSetState("status.exported", [gpPath, 0, 0])
+		return
 	gpHost.gpSetState("status.exported", [gpPath, int(gpStats.get("nodes", 0)),
 		int(gpStats.get("edges", 0))])
+
+
+# The sheet behind the active canvas. DEXPI needs it for the Diagram extent; other formats
+# ignore it.
+# 活动画布背后的图纸。DEXPI 需要它来给出 Diagram 范围；其它格式忽略它。
+func _gpActiveSheet() -> GPSheet:
+	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
+	if gpCanvas == null:
+		return null
+	return gpCanvas.gpSheet

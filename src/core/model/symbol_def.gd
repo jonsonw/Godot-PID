@@ -49,6 +49,73 @@ enum GPSymbolCategory { GP_EQUIPMENT, GP_VALVE, GP_PIPE, GP_FITTING, GP_INSULATI
 # (0,0) = 包络左上角，(1,1) = 右下角；"dir" 为可选的向外法线。
 @export var gpPorts: Array[GPPort] = []
 
+# ---- mounting: a SECOND relationship beside ports (see 图元层级架构规划) ----
+# ---- 挂载：与端口并列的**第二种**关系（见《图元层级架构规划》） ----
+# An edge's semantic is "flow from here to there". A mount's semantic is "this part is fitted
+# ONTO that part". They cannot share one representation: a mounted child must FOLLOW its
+# parent's move / rotate / flip (edges carry no transform), and a host has N children (1:N)
+# where edges are M:N. See the plan §2 for the full argument.
+# 边的语义是「从这里流到那里」；挂载的语义是「这个部件**装**在那个部件上」。二者无法共用一种
+# 表示：挂载子件必须**跟随**父件移动 / 旋转 / 翻转（边不传递变换），且宿主是 1:N 而边是 M:N。
+# 完整论证见规划 §2。
+#
+# Host side: the anchors a mounted child can snap into. Empty = this symbol is not a carrier.
+# 宿主侧：挂载子件可吸附进入的锚点。空 = 本图元不是载体。
+@export var gpAttachPoints: Array[GPAttachPoint] = []
+
+# Child side: this symbol's mount kind, e.g. "NOZZLE" / "ACTUATOR". "" = not mountable.
+# 子件侧：本图元的挂载类型，如 "NOZZLE" / "ACTUATOR"。"" = 不可挂载。
+@export var gpMountKind: String = ""
+
+# Optional whitelist of ANCHOR NAMES this child may land on; empty = any compatible anchor.
+# 可选的**锚点名**白名单，限定本子件可落在哪些锚点；空 = 任意兼容锚点。
+@export var gpMountFit: Array[String] = []
+
+# The child's canonical mount offset, in degrees. GPMountResolver adds it to the anchor's world
+# direction to obtain the child's world rotation (see gpAnchorDirToRotation). Symbols whose
+# mounting face is at their bottom end up positive, those that stick OUT end up negative — the
+# constant exists precisely because those two semantics differ.
+# 子件的规范安装偏置（度）。GPMountResolver 把它加到锚点的世界方向以得到子件的世界旋转
+# （见 gpAnchorDirToRotation）。安装面在底部的图元取正，向外**伸出**的图元取负 ——
+# 这个常量的存在，正是因为这两种语义不同。
+@export var gpBaseMountRot: float = 0.0
+
+# Multi-label slots. EMPTY = keep today's single-label behaviour (the backward-compat guarantee).
+# 多标签槽。**空 = 维持今日单标签行为**（向后兼容的保证）。
+@export var gpLabelSlots: Array[GPLabelSlot] = []
+
+# Whether the label slots are laid out relative to the part's MOUNT AXIS rather than the sheet.
+# 文本槽是否按部件的**安装轴**（而非图纸）排布。
+#
+# WHY OPT-IN / 为何要显式开关：
+# A nozzle is drawn along its own axis, so "number above, DN below" would put both texts on the
+# same side of the pipe once the nozzle stands vertically. With this flag the slots turn a quarter
+# turn whenever the mount axis is vertical, giving the drafting convention the user asked for:
+# a vertical nozzle reads "number left, DN right"; a horizontal one keeps "number above, DN below".
+# Only symbols that opt in change; every other symbol's slots stay exactly where they were.
+# 管嘴沿自身轴线绘制，故一旦它竖起来，「上编号、下 DN」会把两段文字挤到管线的同一侧。
+# 打开本开关后，安装轴为竖直时槽位整体转 90°，得到用户要求的制图约定：竖管「编号在左、
+# DN 在右」；横管保持「编号在上、DN 在下」。只有显式打开的图元会变，其余图元的槽位原封不动。
+@export var gpLabelFollowsMount: bool = false
+
+# Per-part AUTO NUMBERING contract (the "M1 / M2 per host" rule).
+# 部件**自动编号**契约（「每台宿主内 M1 / M2」规则）。
+#
+# ⚠️ NOT gpTagPrefix / 不是 gpTagPrefix：the pre-existing gpTagPrefix above is the PROJECT TAG
+# letter ("P" for pumps) consumed by the numbering-rule panel; parts deliberately carry no project
+# tag. THIS pair is the per-part series: gpPartTagKey is the PROPERTY the number is written to
+# ("nozzle_id", "manhole_id"), gpPartTagPrefix the series letter ("N", "M"). Both EMPTY for every
+# symbol that is not a numbered part, so the attach path can test gpPartTagKey alone.
+# GPMountResolver.gpNextPartTag() consumes the pair: it scans the host's other children for
+# "<letter><int>" and mints max+1 — sequential per host, and two different letters never collide.
+# ⚠️ 与上方既有的 gpTagPrefix（编号规则面板消费的**项目位号**字母，如泵 "P"）是两个概念；
+# 部件刻意不带项目位号。这一对才是部件系列：gpPartTagKey 是编号写入的**属性**
+#（"nozzle_id"、"manhole_id"），gpPartTagPrefix 是系列字母（"N"、"M"）。非编号部件两者恒为空，
+# 故挂载路径只需测 gpPartTagKey。GPMountResolver.gpNextPartTag() 消费这一对：扫描宿主其余子件中
+# 「<字母><整数>」并铸造 max+1 —— 宿主内按序，且两系字母不同永不相撞。
+@export var gpPartTagKey: String = ""
+@export var gpPartTagPrefix: String = ""
+
 # Attribute template the user can fill in (LEGACY, untyped). Kept for round-tripping old
 # symbol packs; new code uses gpSchema below.
 # 用户可填写的属性模板（历史遗留，无类型）。保留以兼容旧图元包往返；新代码用下方的 gpSchema。
@@ -156,6 +223,49 @@ func gpPortNamesUnique() -> bool:
 	return true
 
 
+# ---- mounting helpers / 挂载辅助 ----
+
+# Look up a mounting anchor by name. Returns null when there is no such anchor.
+# 按名称查找安装锚点；不存在时返回 null。
+func gpAttachPointByName(gpNameIn: String) -> GPAttachPoint:
+	for gpA in gpAttachPoints:
+		if gpA.gpName == gpNameIn:
+			return gpA
+	return null
+
+
+# Whether every anchor name is unique — the invariant that lets gpMountAnchor be a plain name.
+# 锚点名是否全部唯一 —— 该不变式使 gpMountAnchor 可以就是一个名字。
+func gpAttachNamesUnique() -> bool:
+	var gpSeen: Dictionary = {}
+	for gpA in gpAttachPoints:
+		if gpSeen.has(gpA.gpName):
+			return false
+		gpSeen[gpA.gpName] = true
+	return true
+
+
+# Whether this symbol can HOST mounted children (carrier side).
+# 本图元能否**承载**挂载子件（载体侧）。
+func gpIsCarrier() -> bool:
+	return not gpAttachPoints.is_empty()
+
+
+# Whether this symbol can BE mounted onto another (mounted side).
+# 本图元能否**被挂载**到别的图元上（子件侧）。
+func gpIsMounted() -> bool:
+	return gpMountKind != ""
+
+
+# Look up a label slot by key. Returns null when there is no such slot.
+# 按槽名查找文本槽；不存在时返回 null。
+func gpLabelSlotByKey(gpKeyIn: String) -> GPLabelSlot:
+	for gpS in gpLabelSlots:
+		if gpS.gpKey == gpKeyIn:
+			return gpS
+	return null
+
+
 # Derived render spec: rebuild the legacy {paths,circles,rects,box} dict from gpShapes().
 # 派生渲染规格：由 gpShapes() 重建历史 {paths,circles,rects,box} 字典。
 # Kept so the mature, ISO-compliant painter / normalizer keep working unchanged.
@@ -190,6 +300,30 @@ func gpToDict() -> Dictionary:
 	gpOut["label_format"] = gpLabelFormat
 	gpOut["label_anchor"] = gpLabelAnchor
 	gpOut["label_offset"] = [gpLabelOffset.x, gpLabelOffset.y]
+	# Mounting keys are written ONLY when non-default, so a definition that carries no anchors /
+	# slots serialises byte-for-byte as before (the archive-stability rule).
+	# 挂载相关的键**仅在非默认时**写出，故不含锚点 / 槽的定义序列化后与之前逐字节一致
+	# （存档稳定性规则）。
+	if not gpAttachPoints.is_empty():
+		gpOut["attach_points"] = GPAttachPoint.gpToDicts(gpAttachPoints)
+	if gpMountKind != "":
+		gpOut["mount_kind"] = gpMountKind
+	if not gpMountFit.is_empty():
+		gpOut["mount_fit"] = gpMountFit.duplicate()
+	if not is_zero_approx(gpBaseMountRot):
+		gpOut["base_mount_rot"] = gpBaseMountRot
+	if not gpLabelSlots.is_empty():
+		gpOut["label_slots"] = GPLabelSlot.gpToDicts(gpLabelSlots)
+	# Only written when ON, so every symbol that does not opt in keeps its previous bytes.
+	# 仅在开启时写出，故未开启的图元保持原有字节。
+	if gpLabelFollowsMount:
+		gpOut["label_follows_mount"] = gpLabelFollowsMount
+	# Only written when set, so unnumbered symbols keep their previous bytes.
+	# 仅在有值时写出，故无编号的图元保持原有字节。
+	if gpPartTagKey != "":
+		gpOut["part_tag_key"] = gpPartTagKey
+	if gpPartTagPrefix != "":
+		gpOut["part_tag_prefix"] = gpPartTagPrefix
 	return gpOut
 
 
@@ -247,3 +381,21 @@ func gpFromDict(gpD: Dictionary) -> void:
 		gpLabelOffset = Vector2(float(gpOff[0]), float(gpOff[1]))
 	else:
 		gpLabelOffset = Vector2.ZERO
+
+	# Mounting: absent in every pre-feature pack, so each read falls back to "not a carrier /
+	# not mountable / single label" and the symbol behaves exactly as before.
+	# 挂载：本功能之前的图元包均无这些键，故每次读取都回落到「非载体 / 不可挂载 / 单标签」，
+	# 图元行为与之前完全一致。
+	gpAttachPoints = GPAttachPoint.gpFromDicts(gpD.get("attach_points", []))
+	gpMountKind = str(gpD.get("mount_kind", ""))
+	var gpFitIn: Variant = gpD.get("mount_fit", [])
+	var gpFitOut: Array[String] = []
+	if gpFitIn is Array:
+		for gpF in (gpFitIn as Array):
+			gpFitOut.append(str(gpF))
+	gpMountFit = gpFitOut
+	gpBaseMountRot = float(gpD.get("base_mount_rot", 0.0))
+	gpLabelSlots = GPLabelSlot.gpFromDicts(gpD.get("label_slots", []))
+	gpLabelFollowsMount = bool(gpD.get("label_follows_mount", false))
+	gpPartTagKey = str(gpD.get("part_tag_key", ""))
+	gpPartTagPrefix = str(gpD.get("part_tag_prefix", ""))

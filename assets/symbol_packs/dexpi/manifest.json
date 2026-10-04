@@ -179,33 +179,21 @@
       "name_en": "Controlled Actuator",
       "type": "general",
       "size_mm": [
-        8.1,
-        4.05
+        4.05,
+        8.1
       ],
       "ports": [
         {
           "name": "sig",
           "pos": [
-            0.0,
-            0.5
+            0.5,
+            0.0
           ],
           "dir": [
-            -1,
-            0
+            0,
+            -1
           ],
           "type": "SIGNAL"
-        },
-        {
-          "name": "stem",
-          "pos": [
-            1.0,
-            0.5
-          ],
-          "dir": [
-            1,
-            0
-          ],
-          "type": "ACTUATOR"
         }
       ],
       "source_shape": "CONTROLLED_ACTUATOR_SHAPE",
@@ -408,20 +396,7 @@
         4.05,
         10.5
       ],
-      "ports": [
-        {
-          "name": "open",
-          "pos": [
-            0.0,
-            0.5
-          ],
-          "dir": [
-            -1,
-            0
-          ],
-          "type": "TERMINAL"
-        }
-      ],
+      "ports": [],
       "source_shape": "MANHOLE_SHAPE",
       "instance_scale": [
         0.3,
@@ -440,18 +415,6 @@
         2.0
       ],
       "ports": [
-        {
-          "name": "equip",
-          "pos": [
-            0.0,
-            0.5
-          ],
-          "dir": [
-            -1,
-            0
-          ],
-          "type": "NOZZLE"
-        },
         {
           "name": "pipe",
           "pos": [

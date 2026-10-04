@@ -43,10 +43,23 @@ func _initialize() -> void:
 
 	for gpPath in gpSuites:
 		var gpScript: GDScript = load(gpPath) as GDScript
-		if gpScript == null:
+		# ⚠️ A suite with a PARSE ERROR makes load() return a non-null but non-instantiable
+		# GDScript. Without this guard gpScript.new() returns null, root.add_child(null) aborts
+		# _initialize() before its final quit(), and a headless SceneTree with no window then idles
+		# FOREVER — the gate appears to HANG instead of reporting a failure. That is a much worse
+		# failure mode than a red assertion: it costs a 5-minute timeout and hides the real message.
+		# ⚠️ 有**解析错误**的套件会让 load() 返回非空但不可实例化的 GDScript。缺了这道护栏，
+		# gpScript.new() 返回 null，root.add_child(null) 会在 _initialize() 的最终 quit() 之前
+		# 中断整个函数，而无窗口的 headless SceneTree 此后**永久空转** —— 门禁表现为**挂死**而非
+		# 报错。这比一条红色断言糟糕得多：它耗掉一次 5 分钟超时，并把真正的错误信息藏起来。
+		if gpScript == null or not gpScript.can_instantiate():
 			gpSuiteFailures.append("LOAD_FAIL " + gpPath)
+			print("  [suite] %s :: LOAD_FAIL (parse error — see the SCRIPT ERROR above)" % gpPath.get_file())
 			continue
 		var gpInst: Node = gpScript.new()
+		if gpInst == null:
+			gpSuiteFailures.append("INSTANTIATE_FAIL " + gpPath)
+			continue
 		# Instance must be in the tree so Node lifecycle (_ready etc.) is valid.
 		# 实例需入树，使 Node 生命周期（_ready 等）有效。
 		root.add_child(gpInst)

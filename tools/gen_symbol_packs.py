@@ -18,6 +18,7 @@
 #                                              （每个已发现的图元包输出一个文件）
 
 import json
+import math
 import os
 import re
 import sys
@@ -153,6 +154,80 @@ def _build_shape(paths, circles, rects):
     miny, maxy = min(ys), max(ys)
     box = [round(minx, 2), round(miny, 2), round(maxx - minx, 2), round(maxy - miny, 2)]
     return {"paths": paths, "circles": circles, "rects": rects, "box": box}
+
+
+def _rotate_shape(shape, deg):
+    # Re-orient an AUTHOR-SPACE shape about its own bbox centre, then rebuild its box.
+    # 把**作者空间**形状绕自身包围盒中心重定向，并重建其 box。
+    #
+    # WHY NOT EDIT THE SVG: the DEXPI C01 SVGs are upstream artefacts; rotating the file would
+    # fork it from its provenance. Rotating the extracted primitive list keeps "file == upstream"
+    # true while letting the project declare the orientation the P&ID convention expects.
+    # 为何不改 SVG：DEXPI C01 的 SVG 是上游产物；改文件会使其脱离来源。对**提取出的**基元表
+    # 旋转，既保持「文件 == 上游」这一事实，又让本项目能声明制图惯例所要求的朝向。
+    #
+    # Only multiples of 90 degrees are supported: an arbitrary angle would turn every rectangle
+    # into a quadrilateral and silently change what the renderer draws.
+    # 仅支持 90 度的整数倍：任意角会把每个矩形变成四边形，静默改变渲染结果。
+    d = float(deg) % 360.0
+    if abs(d) < 1e-9:
+        return shape
+    if min(abs(d - 90.0), abs(d - 180.0), abs(d - 270.0)) > 1e-9:
+        raise ValueError("_rotate_shape: only multiples of 90 degrees are supported, got %s" % deg)
+    rad = math.radians(d)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+
+    def rot_vec(vx, vy):
+        return (vx * cos_a - vy * sin_a, vx * sin_a + vy * cos_a)
+
+    # Rotate about the bbox centre so the glyph stays put inside its own frame; the normalizer
+    # re-centres into the unit box anyway, so this only keeps the emitted numbers readable.
+    # 绕包围盒中心旋转，使字形留在自身画面内；归一化本就会重新居中到单位框，
+    # 故这样做只是让输出的数字更可读。
+    box = shape.get("box", [0.0, 0.0, 100.0, 100.0])
+    cx = box[0] + box[2] / 2.0
+    cy = box[1] + box[3] / 2.0
+
+    def rot_point(px, py):
+        rx, ry = rot_vec(px - cx, py - cy)
+        return [round(rx + cx, 2), round(ry + cy, 2)]
+
+    paths = []
+    for p in shape.get("paths", []):
+        # Bézier handles are per-vertex RELATIVE offsets, so they must rotate as VECTORS while the
+        # vertices rotate as POINTS. Refusing outright beats silently bending a curve — no symbol
+        # in the pack both curves and re-orients today.
+        # 贝塞尔手柄是逐顶点的**相对**偏移，故须作为**向量**旋转，而顶点作为**点**旋转。
+        # 直接拒绝胜过静默地把曲线掰弯 —— 目前包内没有任何图元既带曲线又需重定向。
+        if p.get("handles"):
+            raise ValueError("_rotate_shape: a curved path cannot be re-oriented implicitly")
+        paths.append({
+            "pts": [rot_point(pt[0], pt[1]) for pt in p.get("pts", [])],
+            "closed": bool(p.get("closed", False)),
+        })
+
+    circles = []
+    for c in shape.get("circles", []):
+        cc = rot_point(c["c"][0], c["c"][1])
+        circles.append({"c": cc, "r": c["r"]})
+
+    rects = []
+    for r in shape.get("rects", []):
+        x, y = r["pos"]
+        w, h = r["size"]
+        # Rotating a rectangle by a multiple of 90 keeps it axis-aligned, so its four rotated
+        # corners collapse back into a plain rect — no quadrilateral primitive is needed.
+        # 矩形旋转 90 的整数倍后仍是轴对齐的，故四个旋转后的角点可重新收拢为普通矩形，
+        # 无需引入四边形基元。
+        pts = [rot_point(x, y), rot_point(x + w, y), rot_point(x, y + h), rot_point(x + w, y + h)]
+        rxs = [p[0] for p in pts]
+        rys = [p[1] for p in pts]
+        rects.append({
+            "pos": [round(min(rxs), 2), round(min(rys), 2)],
+            "size": [round(max(rxs) - min(rxs), 2), round(max(rys) - min(rys), 2)],
+        })
+
+    return _build_shape(paths, circles, rects)
 
 
 def _infer_category(svg_path, csv_path):
@@ -295,6 +370,269 @@ def _ports_for(symbol_id, cat):
         ov = PORT_OVERRIDES[symbol_id]
         return [dict(p) for p in (INLINE_INSTRUMENT if ov is None else ov)]
     return [dict(p) for p in STD_PORTS.get(cat, [])]
+
+
+# ---- Mounting tables (P3) ----
+# ---- 挂载表（P3）----
+# A mount is the SECOND relationship beside a port/edge: an edge says "flow from here to there",
+# a mount says "this part is fitted ONTO that part" (see 图元层级架构规划 §2). These tables are
+# the definition side of it, and they mirror GP_STD_ATTACH / GP_ATTACH_OVERRIDES in
+# src/core/symbol/symbol_categories.gd exactly as the port tables mirror theirs.
+# 挂载是与端口/边并列的**第二种**关系：边说「从这里流到那里」，挂载说「这个部件**装**在那个
+# 部件上」（见规划 §2）。下列各表是它的定义侧，与端口表一样，同
+# src/core/symbol/symbol_categories.gd 的 GP_STD_ATTACH / GP_ATTACH_OVERRIDES 互为镜像。
+#
+# Anchor fields / 锚点字段：
+#   pos / dir      归一化锚点位置与**向外法线** / normalized position and OUTWARD normal
+#   accepts        本锚点接受的挂载类型；空 = 任意 / mount kinds accepted; empty = any
+#   default_child  放置宿主时自动实例化的子图元 id；"" = 预留空锚点 / auto-instantiated on host
+#                  placement; "" = reserved anchor
+#   required       该默认子件不可单独卸下（A 类关键管口）/ default child may not be unbolted
+#   default_props  盖到默认子件上的初始属性 / initial properties stamped onto the default child
+STD_ATTACH = {
+    # 阀门：顶部一个执行机构锚点（规划 §14.2）。刻意**不**默认实例化执行机构 ——
+    # 普通阀门不需要它，由用户在右键菜单按需添加（§16.6「不自动生成多余件」）。
+    # valve: one actuator anchor on top (§14.2). Deliberately NO default child — a plain valve
+    # does not need one; the user adds it from the context menu (§16.6).
+    "valve": [
+        {"name": "top_actuator", "pos": [0.5, 0.0], "dir": [0, -1], "accepts": ["ACTUATOR"]},
+    ],
+    # 泵（A 类，§16.3）：吸入 + 排出，两支内置管口，位置由泵型决定故不可卸下。
+    # pump (class A, §16.3): suction + discharge, both built in and non-removable.
+    "pump": [
+        {"name": "pump_suction", "pos": [0.0, 0.5], "dir": [-1, 0], "accepts": ["NOZZLE"],
+         "default_child": "DGENERAL008", "required": True,
+         "default_props": {"nozzle_id": "N1"}},
+        {"name": "pump_discharge", "pos": [0.5, 0.0], "dir": [0, -1], "accepts": ["NOZZLE"],
+         "default_child": "DGENERAL008", "required": True,
+         "default_props": {"nozzle_id": "N2"}},
+    ],
+    # 换热器（A 类，§16.3）：N1..N4 四个内置管口。编号按参照图（左列 N1/N3、右列 N2/N4）。
+    # heat exchanger (class A, §16.3): four built-in nozzles N1..N4, numbered as on the reference.
+    "heat": [
+        {"name": "hx_n3", "pos": [0.0, 0.25], "dir": [-1, 0], "accepts": ["NOZZLE"],
+         "default_child": "DGENERAL008", "required": True,
+         "default_props": {"nozzle_id": "N3"}},
+        {"name": "hx_n2", "pos": [1.0, 0.25], "dir": [1, 0], "accepts": ["NOZZLE"],
+         "default_child": "DGENERAL008", "required": True,
+         "default_props": {"nozzle_id": "N2"}},
+        {"name": "hx_n1", "pos": [0.0, 0.75], "dir": [-1, 0], "accepts": ["NOZZLE"],
+         "default_child": "DGENERAL008", "required": True,
+         "default_props": {"nozzle_id": "N1"}},
+        {"name": "hx_n4", "pos": [1.0, 0.75], "dir": [1, 0], "accepts": ["NOZZLE"],
+         "default_child": "DGENERAL008", "required": True,
+         "default_props": {"nozzle_id": "N4"}},
+    ],
+    # 塔 / 罐 / 反应器（B 类，§16.4）：默认 4 管口 + 1 人孔，中间预留搅拌位。
+    # 这些默认件**可**由用户增删（B 类管口随工艺而变），故 required 一律 False。
+    # column / tank / reactor (class B, §16.4): 4 nozzles + 1 manhole by default, with the
+    # stirrer socket left RESERVED. All removable — a class-B nozzle count follows the process.
+    "tank": [
+        {"name": "ves_bottom_nozzle", "pos": [0.5, 1.0], "dir": [0, 1],
+         "accepts": ["NOZZLE"], "default_child": "DGENERAL008",
+         "default_props": {"nozzle_id": "N1"}},
+        {"name": "ves_left_manhole", "pos": [0.0, 0.5], "dir": [-1, 0],
+         "accepts": ["MANHOLE"], "default_child": "DGENERAL007",
+         "default_props": {"manhole_id": "M1"}},
+        {"name": "ves_right_nozzle", "pos": [1.0, 0.5], "dir": [1, 0],
+         "accepts": ["NOZZLE"], "default_child": "DGENERAL008",
+         "default_props": {"nozzle_id": "N2"}},
+        {"name": "ves_top_left_nozzle", "pos": [0.3, 0.0], "dir": [0, -1],
+         "accepts": ["NOZZLE"], "default_child": "DGENERAL008",
+         "default_props": {"nozzle_id": "N3"}},
+        {"name": "ves_top_right_nozzle", "pos": [0.7, 0.0], "dir": [0, -1],
+         "accepts": ["NOZZLE"], "default_child": "DGENERAL008",
+         "default_props": {"nozzle_id": "N4"}},
+        # "中间"取顶部正中（搅拌电机在顶、轴居中下伸），与上左/上右两管口天然不冲突。
+        # The middle is the TOP CENTRE (the drive sits on top, the shaft drops down the axis),
+        # which by construction cannot collide with the two top corner nozzles.
+        {"name": "ves_stirrer", "pos": [0.5, 0.0], "dir": [0, -1],
+         "accepts": ["AGITATOR"], "default_child": ""},
+    ],
+    "instrument": [],
+    "general": [],
+}
+
+# Per-symbol anchor overrides. A present key REPLACES the category table entirely.
+# 按符号 id 的锚点覆盖表。存在该键即「整体替换」类别表。
+# An explicit [] documents "this symbol is not a carrier" — the same convention the port
+# overrides already use for the legend glyphs. It is NOT redundant: it stands as the reviewable
+# statement that a nozzle/actuator/manhole is a PART, never a host, so a future category
+# default can never silently give a part an anchoring socket.
+# 显式的 [] 是「本图元不是载体」的书面声明 —— 与端口覆盖表对图例图元所用约定一致。它并非
+# 冗余：它是可审阅的断言「管口 / 执行机构 / 人孔是**部件**而非宿主」，使未来的类别默认值
+# 绝不会悄悄给部件加上锚点插座。
+ATTACH_OVERRIDES = {
+    "DGENERAL003": [],   # 盲板 / blind cover
+    "DGENERAL004": [],   # 执行机构 / controlled actuator
+    "DGENERAL007": [],   # 人孔 / manhole
+    "DGENERAL008": [],   # 接管嘴（管口）/ nozzle
+    "DGENERAL009": [],   # 保温管道 / insulated piping
+    # 止回阀无执行机构：其启闭由介质流向决定，装不了 F.C./F.O. 执行机构。
+    # A check valve takes no actuator — its disc is driven by flow, not by a fail action.
+    "DVALVE005": [],
+}
+
+
+def _attach_for(symbol_id, cat):
+    # Resolve a symbol's attach anchors: explicit override wins, then the category table.
+    # 解析某符号的安装锚点：显式覆盖优先，其次类别表。
+    if symbol_id in ATTACH_OVERRIDES:
+        return [dict(a) for a in ATTACH_OVERRIDES[symbol_id]]
+    return [dict(a) for a in STD_ATTACH.get(cat, [])]
+
+
+# Child-side mount data (the "I can be fitted onto something" half).
+# 子件侧的挂载数据（「我能被装到别的东西上」的那一半）。
+#
+# mount_kind decides WHICH anchors accept the part. The strings are the single vocabulary the
+# hosts' "accepts" lists draw from, so a typo here silently makes a part unplaceable — hence the
+# dedicated table rather than a per-port guess.
+# mount_kind 决定**哪些**锚点接受该部件。这些字符串是宿主 "accepts" 列所引用的唯一词表，
+# 故此处拼错会让部件静默地无处可挂 —— 这正是单独成表、而非逐端口猜测的理由。
+MOUNT_KIND = {
+    "DGENERAL003": "BLIND",        # 盲板 / blind cover
+    "DGENERAL004": "ACTUATOR",     # 执行机构 / controlled actuator
+    "DGENERAL007": "MANHOLE",      # 人孔 / manhole
+    "DGENERAL008": "NOZZLE",       # 接管嘴（管口）/ nozzle
+    "DGENERAL009": "INSULATION",   # 保温 / insulation
+}
+
+# Canonical mount offset in degrees (GPSymbolDef.gpBaseMountRot). GPMountResolver ADDS it to the
+# anchor's world direction to obtain the child's world rotation.
+# 规范安装偏置（度，GPSymbolDef.gpBaseMountRot）。GPMountResolver 把它**加到**锚点的世界方向
+# 上以得到子件的世界旋转。
+#
+# DERIVED FROM THE PORTS, NOT FROM PROSE / 由端口推导，而非抄写文字：
+# a port's gpDir is the direction its line LEAVES along, so a nozzle's `pipe` port pointing +X
+# means the nozzle's outboard end is at +X. For the part to extend along an anchor's outward
+# normal, the rotation must map (+X) onto that normal, i.e. rot = atan2(dir) — which is exactly
+# gpAnchorDirToRotation(dir, 0). Hence 0 for the nozzle.
+# 端口的 gpDir 是其连线**离开**的方向，故管口的 `pipe` 端口指 +X，即管口的外端在 +X。要让部件
+# 沿锚点外法线伸出，旋转必须把 (+X) 映到该法线上，即 rot = atan2(dir) —— 这正是
+# gpAnchorDirToRotation(dir, 0)。故管口取 0。
+# The actuator is the other case: its glyph is drawn ALREADY upright (circle on top, stem down),
+# so its body points along -Y as authored; on a -Y anchor it must therefore not turn at all:
+# rot = 0 = atan2(0,-1) + base => base = 90.
+# 执行机构是另一种情形：其字形**已按直立绘制**（圆在上、杆朝下），故出图时其本体指向 -Y；
+# 落在 -Y 锚点上时它必须完全不转：rot = 0 = atan2(0,-1) + base ⇒ base = 90。
+BASE_MOUNT_ROT = {
+    "DGENERAL004": 90.0,
+    "DGENERAL008": 0.0,
+}
+
+# Label slots (multi-line annotation). Mirrors GPSymbolDef.gpLabelSlots.
+# 文本槽（多行标注）。与 GPSymbolDef.gpLabelSlots 互为镜像。
+# Anchor ints mirror GPLabelAnchor.GPAnchor: GP_AUTO=0 GP_BELOW=1 GP_ABOVE=2 GP_INSIDE=3
+# GP_LEFT=4 GP_RIGHT=5. gpToDict() OMITS the default (GP_BELOW) and the default tier (inline).
+# 锚点整数镜像 GPLabelAnchor.GPAnchor；gpToDict() 会省略默认值（GP_BELOW）与默认字高档（inline）。
+LABEL_SLOTS = {
+    # 管口双文本（§13）：上=管口编号、下=公称直径 DN，两行分居管口线两侧。
+    # Nozzle double text (§13): the number above, the nominal diameter below.
+    "DGENERAL008": [
+        {"key": "nozzle_no", "format": "{prop:nozzle_id}", "anchor": 2},
+        {"key": "dn", "format": "DN{prop:nominal_size}"},
+    ],
+    # 人孔单文本：编号（M1、M2…），随宿主内序自动分配（见 PART_TAG）。
+    # Manhole single text: the number (M1, M2, ...), assigned per host in sequence (PART_TAG).
+    "DGENERAL007": [
+        {"key": "manhole_no", "format": "{prop:manhole_id}", "anchor": 2},
+    ],
+    # 执行机构故障位（§14）：画布显示短码 F.C./F.O.，属性面板仍显示全称。
+    # Actuator fail action (§14): the canvas shows F.C./F.O. while the inspector keeps the full
+    # value — the mapping is display-only, so nothing the user typed is rewritten.
+    "DGENERAL004": [
+        {"key": "fail_action", "format": "{prop:fail_action}", "anchor": 5,
+         "short_map": {"FC 故障关": "F.C.", "FO 故障开": "F.O.", "FL 故障保位": "F.L."},
+         "visible_when": "fail_action != 不适用"},
+    ],
+}
+
+# Symbols whose label slots are laid out relative to the MOUNT AXIS instead of the sheet.
+# 文本槽按**安装轴**（而非图纸）排布的图元。
+#
+# The nozzle is the only one today, and the reason is geometric: its glyph runs along its own axis,
+# so on a vertical run "number above / DN below" would stack both texts on the same side of the
+# pipe. Turning the pair a quarter turn gives the drafting convention the reference drawing uses —
+# 竖管（管嘴朝上 / 朝下）：编号在左、公称直径在右；横管（朝左 / 朝右）：编号在上、公称直径在下。
+# 今天只有管嘴需要它，理由纯属几何：其字形沿自身轴线绘制，故竖起来后「上编号 / 下 DN」会把两段
+# 文字挤到管线同一侧。整体转 90° 即得到参照图所用的制图约定。
+LABEL_FOLLOWS_MOUNT = {"DGENERAL008"}
+
+# Per-part AUTO NUMBERING (the user's "M1 / M2 per host, never duplicated" rule).
+# 部件**自动编号**（用户的「每台宿主内 M1 / M2 按序、绝不重复」规则）。
+#
+# key    = the PROPERTY the number is written to (also the label slot's {prop:...} source);
+# prefix = the series letter. GPMountResolver.gpNextPartTag() scans the HOST'S OTHER CHILDREN for
+# "<prefix><int>" values and mints max+1, so a tank with a built-in manhole "M1" gets "M2", "M3"
+# for every manhole the user adds — and no number can ever repeat inside one host. Two series use
+# different letters (N for nozzles, M for manholes), so they can never collide.
+# key = 编号写入的**属性**（同时是文本槽 {prop:...} 的来源）；prefix = 系列字母。
+# GPMountResolver.gpNextPartTag() 扫描宿主的**其余子件**中 "<prefix><整数>" 的取值并铸造 max+1：
+# 自带人孔「M1」的罐，用户每加一支人孔便得到 M2、M3……且同一宿主内编号绝不重复。
+# 两个系列字母不同（管嘴 N、人孔 M），故两系之间也永不相撞。
+PART_TAG = {
+    "DGENERAL007": {"key": "manhole_id", "prefix": "M"},
+    "DGENERAL008": {"key": "nozzle_id", "prefix": "N"},
+}
+
+# Per-symbol property-schema overrides. A present key REPLACES the category schema entirely,
+# because a shared category field set cannot express "a nozzle has a number and a DN".
+# 按符号 id 的属性 schema 覆盖表。存在该键即「整体替换」类别 schema，
+# 因为共用的类别字段集无法表达「管口有编号与 DN」。
+SCHEMA_OVERRIDES = {
+    "DGENERAL007": [
+        {"key": "manhole_id", "label": "人孔编号", "kind": 0, "group": "工艺", "order": 10},
+        {"key": "description", "label": "描述", "kind": 5, "group": "工艺", "order": 90},
+    ],
+    "DGENERAL008": [
+        {"key": "nozzle_id", "label": "管口编号", "kind": 0, "group": "工艺", "order": 10},
+        {"key": "nominal_size", "label": "公称通径", "kind": 2, "unit": "mm",
+         "group": "工艺", "order": 20},
+        {"key": "description", "label": "描述", "kind": 5, "group": "工艺", "order": 90},
+    ],
+    "DGENERAL004": [
+        {"key": "fail_action", "label": "故障安全位", "kind": 4, "group": "仪表", "order": 10,
+         "options": ["FC 故障关", "FO 故障开", "FL 故障保位", "不适用"]},
+        {"key": "description", "label": "描述", "kind": 5, "group": "工艺", "order": 90},
+    ],
+    # 保温标识（D3 定为「件」）：可单独选中、填**厚度**。
+    # WHY THE KEY IS `insulation` AND NOT A NEW ONE / 为何键是 `insulation` 而非新键：
+    # GP_ATTRIBUTES already maps this exact key to InsulationThicknessAssignmentClass with
+    # Units=Millimetre and the one verified unit URI — so the DEXPI half needs no new row, and
+    # a second key naming the same assignment class would be a second spelling of one thing
+    # (the two would then be free to drift). What DIFFERS is only the schema's presentation:
+    # on an insulation part the value is a thickness in millimetres, i.e. NUMERIC (kind 2),
+    # whereas a pipe edge's `insulation` is a free-text grade. Same key, same file attribute,
+    # two object types — the label is what tells the user which they are filling in.
+    # 保温标识（D3 定为「件」）：可单独选中、填**厚度**。
+    # 为何键是 `insulation` 而非新键：GP_ATTRIBUTES 已把该键映射为
+    # InsulationThicknessAssignmentClass（Units=Millimetre，且带唯一已核实的单位 URI），
+    # 故 DEXPI 一侧无需新增行；而第二个键去命名同一个赋值类，等于同一件事的第二种拼法
+    #（两者随后便有漂移的自由）。**不同**的只是 schema 的呈现：保温件上该值是毫米厚度，
+    # 即**数值型**（kind 2）；而管道边上的 `insulation` 是自由文本的保温等级。
+    # 同键、同文件属性、两种对象类型 —— 靠标签告诉用户正在填的是哪一个。
+    "DGENERAL009": [
+        {"key": "insulation", "label": "保温厚度", "kind": 2, "unit": "mm",
+         "group": "工艺", "order": 10},
+        {"key": "description", "label": "描述", "kind": 5, "group": "工艺", "order": 90},
+    ],
+}
+
+# Explicit glyph re-orientation, in degrees, applied to the extracted shape WITHOUT touching the
+# upstream SVG. Used where the standard's own drawing is laid out in an orientation the P&ID
+# convention expects upright (规划 §14: the actuator is drawn as a flag lying sideways, while
+# C01's own drawing shows it as a circle whose stem drops onto the valve).
+# 对提取出的形状施加的**显式**重定向（度），**不**改动上游 SVG。用于标准的原图朝向与 P&ID
+# 制图惯例不一致之处（规划 §14：执行机构按横向旗形绘制，而 C01 参照图是「圆 + 竖直下伸杆」）。
+# WHY A TABLE AND NOT A NEW SVG: adding a symbol to a category renumbers that category's whole
+# id sequence (ids are <source><CATEGORY><seq> sorted by (category, source_key)), which would
+# silently repoint every saved *.pid.json at a different glyph. Re-orienting in place cannot.
+# 为何用表而不新增 SVG：往某类别新增图元会重排该类别**全部** id 序号（id 由
+# (类别, 源键) 排序后分配），从而让每个已存 *.pid.json 静默指向另一枚字形。原地重定向不会。
+GLYPH_ROTATE_DEG = {
+    "controlled_actuator": -90.0,
+}
 
 
 # Factory tag prefix per category (M9). Mirrors GPTagRule.GP_DEFAULT_CATEGORY_PREFIXES in
@@ -455,6 +793,12 @@ def _process_pack(pack_dir, pack_id, nominal_sizes):
                 continue
             paths, circles, rects, minx, maxx, miny, maxy = result
             shape = _build_shape(paths, circles, rects)
+            # Optional explicit re-orientation (see GLYPH_ROTATE_DEG). Keyed by SOURCE KEY because
+            # the canonical id does not exist yet at this point in the pipeline.
+            # 可选显式重定向（见 GLYPH_ROTATE_DEG）。以**源键**为键，因为此处尚未分配规范 id。
+            if base in GLYPH_ROTATE_DEG:
+                shape = _rotate_shape(shape, GLYPH_ROTATE_DEG[base])
+                print("[rotate] %s by %s deg" % (base, GLYPH_ROTATE_DEG[base]))
         except Exception as e:
             print("[skip] %s: %s (parse error: %s)" % (pack_id, fn, e), file=sys.stderr)
             continue
@@ -568,10 +912,19 @@ def _process_pack(pack_dir, pack_id, nominal_sizes):
     lines.append("\tvar gpOut: Array[GPSymbolDef] = []")
     for e in entries:
         env_expr = "Vector2(%s, %s)" % (_fmt(e["env"][0]), _fmt(e["env"][1]))
-        lines.append("\tgpOut.append(_gpMk(%s, %s, %s, %s, %s, %s, %s, %s))" % (
-            _to_gd(e["id"]), _to_gd(e["chinese_name"]), _to_gd(e["category"]),
-            _to_gd(e["ports"]), _to_gd(e["shape"]), env_expr,
-            _to_gd(e.get("tag_prefix", "")), _to_gd(_schema_for(e["category"]))))
+        # The mount dictionary is emitted ONLY when it carries something, so a symbol with no
+        # mounting keeps its previous call site byte-for-byte — the generated pack stays
+        # reviewable, and a diff shows exactly which symbols gained mounting.
+        # 挂载字典**仅在**确有内容时写出，故无挂载的图元保持原有调用点逐字节不变 ——
+        # 生成的包仍可审阅，diff 精确显示哪些图元获得了挂载。
+        args = [_to_gd(e["id"]), _to_gd(e["chinese_name"]), _to_gd(e["category"]),
+                _to_gd(e["ports"]), _to_gd(e["shape"]), env_expr,
+                _to_gd(e.get("tag_prefix", "")),
+                _to_gd(_schema_for_symbol(e["id"], e["category"]))]
+        mount = _mount_for(e["id"], e["category"])
+        if mount:
+            args.append(_to_gd(mount))
+        lines.append("\tgpOut.append(_gpMk(%s))" % ", ".join(args))
     lines.append("\treturn gpOut")
     lines.append("")
     lines.append("")
@@ -580,7 +933,8 @@ def _process_pack(pack_dir, pack_id, nominal_sizes):
     lines.append("static func _gpMk(gpId: String, gpChineseName: String, gpCat: String, "
                 "gpPorts: Array[Dictionary], gpShape: Dictionary, gpEnv: Vector2, "
                 "gpTagPrefix: String = \"\", "
-                "gpSchemaFields: Array[Dictionary] = []) -> GPSymbolDef:")
+                "gpSchemaFields: Array[Dictionary] = [], "
+                "gpMount: Dictionary = {}) -> GPSymbolDef:")
     lines.append("\tvar gpD: GPSymbolDef = GPSymbolDef.new()")
     lines.append("\tgpD.gpId = gpId")
     lines.append("\tgpD.gpDisplayName = gpChineseName")
@@ -609,6 +963,24 @@ def _process_pack(pack_dir, pack_id, nominal_sizes):
     lines.append("\t\t\tgpPd.gpFromDict(gpF as Dictionary)")
     lines.append("\t\t\tgpSc.gpFields.append(gpPd)")
     lines.append("\t\tgpD.gpSchema = gpSc")
+    lines.append("\t# P3 mounting: anchors / mount kind / canonical mount angle / label slots. Only the")
+    lines.append("\t# keys actually present are applied, so a symbol with no mounting keeps every")
+    lines.append("\t# default value and serialises exactly as it did before this feature.")
+    lines.append("\t# P3 挂载：锚点 / 挂载类型 / 规范安装角 / 文本槽。只应用确实携带的键，")
+    lines.append("\t# 故无挂载的图元保持全部默认值，序列化结果与引入该功能之前完全一致。")
+    lines.append("\tif not gpMount.is_empty():")
+    lines.append("\t\tvar gpAnchorsIn: Variant = gpMount.get(\"attach_points\", [])")
+    lines.append("\t\tif gpAnchorsIn is Array:")
+    lines.append("\t\t\tgpD.gpAttachPoints = GPAttachPoint.gpFromDicts(gpAnchorsIn as Array)")
+    lines.append("\t\tgpD.gpMountKind = str(gpMount.get(\"mount_kind\", \"\"))")
+    lines.append("\t\tgpD.gpBaseMountRot = float(gpMount.get(\"base_mount_rot\", 0.0))")
+    lines.append("\t\tvar gpSlotsIn: Variant = gpMount.get(\"label_slots\", [])")
+    lines.append("\t\tif gpSlotsIn is Array:")
+    lines.append("\t\t\tgpD.gpLabelSlots = GPLabelSlot.gpFromDicts(gpSlotsIn as Array)")
+    lines.append("\t\tgpD.gpLabelFollowsMount = "
+                 "bool(gpMount.get(\"label_follows_mount\", false))")
+    lines.append("\t\tgpD.gpPartTagKey = str(gpMount.get(\"part_tag_key\", \"\"))")
+    lines.append("\t\tgpD.gpPartTagPrefix = str(gpMount.get(\"part_tag_prefix\", \"\"))")
     lines.append("\treturn gpD")
     lines.append("")
 
@@ -726,6 +1098,47 @@ def _schema_for(cat):
     # runtime falls back to gpAttrsSchema).
     # 按类别取类型化 schema；未知类别返回空（gpSchema 保持 null，运行期回落 gpAttrsSchema）。
     return CATEGORY_SCHEMA.get(cat, [])
+
+
+def _schema_for_symbol(symbol_id, cat):
+    # A symbol's property schema: an explicit per-symbol override REPLACES the category set,
+    # because a shared category field list cannot express "a nozzle has a number and a DN".
+    # 某图元的属性 schema：显式的逐符号覆盖**整体替换**类别字段集，因为共用的类别字段表
+    # 无法表达「管口有编号与 DN」。
+    if symbol_id in SCHEMA_OVERRIDES:
+        return SCHEMA_OVERRIDES[symbol_id]
+    return _schema_for(cat)
+
+
+def _mount_for(symbol_id, cat):
+    # The mounting dictionary emitted for a symbol. ONLY keys that carry a value are written, so a
+    # symbol with no mounting serialises byte-for-byte as before (the archive-stability rule).
+    # 为某图元发出的挂载字典。**仅**写出确实带值的键，故无挂载的图元序列化后与之前逐字节一致
+    # （存档稳定性规则）。
+    out = {}
+    anchors = _attach_for(symbol_id, cat)
+    if anchors:
+        out["attach_points"] = anchors
+    kind = MOUNT_KIND.get(symbol_id, "")
+    if kind:
+        out["mount_kind"] = kind
+    rot = BASE_MOUNT_ROT.get(symbol_id, 0.0)
+    if rot:
+        out["base_mount_rot"] = rot
+    slots = LABEL_SLOTS.get(symbol_id)
+    if slots:
+        out["label_slots"] = slots
+    # Symbols whose slots must follow the mount axis (see GPSymbolDef.gpLabelFollowsMount).
+    # 槽位需随安装轴旋转的图元（见 GPSymbolDef.gpLabelFollowsMount）。
+    if symbol_id in LABEL_FOLLOWS_MOUNT:
+        out["label_follows_mount"] = True
+    # Auto-numbering contract (see PART_TAG): only when BOTH halves are present.
+    # 自动编号契约（见 PART_TAG）：两半齐备才写出。
+    tag = PART_TAG.get(symbol_id)
+    if tag:
+        out["part_tag_key"] = tag["key"]
+        out["part_tag_prefix"] = tag["prefix"]
+    return out
 
 
 def _chinese_name(pack_id, base_id):

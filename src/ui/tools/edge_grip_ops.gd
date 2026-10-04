@@ -625,5 +625,6 @@ func gpRerouteAround(gpEdgeId: String, gpSymNid: String) -> void:
 func gpSplitThroughSymbol(gpEdgeId: String, gpSymNid: String) -> bool:
 	return GPEdgeGripGeometry.gpSplitThroughSymbol(gpCv, gpEdgeId, gpSymNid)
 
-static func _gpPickSplitPorts(gpSym: GPPIDNode, gpDef: GPSymbolDef, gpA: Vector2, gpB: Vector2) -> Dictionary:
-	return GPEdgeGripGeometry.gpPickSplitPorts(gpSym, gpDef, gpA, gpB)
+static func _gpPickSplitPorts(gpSym: GPPIDNode, gpDef: GPSymbolDef, gpA: Vector2, gpB: Vector2,
+		gpGraph: GPPIDGraph = null, gpDefLookup: Callable = Callable()) -> Dictionary:
+	return GPEdgeGripGeometry.gpPickSplitPorts(gpSym, gpDef, gpA, gpB, gpGraph, gpDefLookup)

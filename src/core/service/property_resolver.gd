@@ -139,6 +139,41 @@ static func gpLabelText(gpFormat: String, gpTag: String, gpName: String) -> Stri
 	return gpFmt.replace("{tag}", gpTag).replace("{name}", gpName)
 
 
+# Expand a label template that may ALSO carry {prop:<key>} tokens — the language label slots use.
+# 展开可能还带 {prop:<key>} 占位符的标签模板 —— 文本槽所用的语言。
+#
+# A slot's text is filled from a PROPERTY, and the value must come through gpEffectiveValue() so
+# "library default unless the instance overrode it" holds here exactly as everywhere else.
+# 槽的文字取自**属性**，而取值必须经 gpEffectiveValue()，使「库默认、除非实例覆盖」这条规则
+# 在此与别处完全一致。
+# A key with no value renders EMPTY (the token disappears) rather than staying verbatim: a nozzle
+# whose DN was never entered should show just its number, not the literal "{prop:nominal_size}".
+# 无取值的键渲染为**空**（占位符消失）而非原样保留：未填 DN 的管口应只显示编号，
+# 而不是字面上的 "{prop:nominal_size}"。
+static func gpLabelTextWithProps(gpFormat: String, gpTag: String, gpName: String,
+		gpSchema: GPPropertySchema, gpProps: Dictionary) -> String:
+	var gpOut: String = gpLabelText(gpFormat, gpTag, gpName)
+	var gpAt: int = gpOut.find("{prop:")
+	while gpAt >= 0:
+		var gpEnd: int = gpOut.find("}", gpAt)
+		if gpEnd < 0:
+			break
+		var gpKey: String = gpOut.substr(gpAt + 6, gpEnd - gpAt - 6).strip_edges()
+		var gpVal: Variant = gpEffectiveValue(gpSchema, gpProps, gpKey)
+		# A label composed of props is meaningless with a piece missing: an unset nominal size
+		# must not leave a bare "DN" hanging next to the nozzle — the whole slot goes dark until
+		# the value exists. Nothing stored is dropped (data sovereignty is untouched); the text
+		# reappears the moment the property is filled in.
+		# 由属性拼成的标签缺了一块便失去意义：公称直径未填时，管嘴旁绝不能挂着一个光秃秃的
+		# 「DN」—— 整个槽位熄灭，直到取值存在。已存储的数据绝不被丢弃（数据主权不受影响）；
+		# 属性一填，文字即现。
+		if gpVal == null or str(gpVal).strip_edges() == "":
+			return ""
+		gpOut = gpOut.substr(0, gpAt) + str(gpVal) + gpOut.substr(gpEnd + 1)
+		gpAt = gpOut.find("{prop:")
+	return gpOut
+
+
 # Active label anchor: the instance wins only when it is set (GP_ANCHOR_UNSET = follow library).
 # 生效的标签锚点：实例仅在「已设置」时胜出（GP_ANCHOR_UNSET 表示跟随库）。
 static func gpActiveAnchor(gpLibraryAnchor: int, gpInstanceAnchor: int) -> int:

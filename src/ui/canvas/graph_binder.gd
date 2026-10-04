@@ -125,6 +125,12 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
  # GPSymbolDef 对象，若视图保留旧引用，就会静默地继续绘制过期几何。
  # 这一行正是「覆盖图元 → 所有已放置实例同步刷新」得以生效的关键。
 			gpV.gpDef = gpDefFor(gpN.gpSymbolId)
+ # Rebind the mount context BEFORE the transform: a mounted child derives its world frame
+ # from the graph's parent chain, so the graph must be in place when gpUpdateTransform() runs.
+ # 必须在更新变换**之前**重绑挂载上下文：挂载子件的世界坐标系由图中的父链推导，
+ # 故 gpUpdateTransform() 执行时图必须已就位。
+			gpV.gpGraph = gpGraph
+			gpV.gpDefLookupCb = Callable(self, "_gpLookupDef")
 			gpV.gpUpdateTransform()
  # The definition drives the painted geometry, so a rebind needs a repaint of BOTH
  # layers (label on the view, glyph + ports on the body child).
@@ -135,7 +141,7 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
  # 为该节点创建新视图。
 			gpV = GPSymbolView.new()
 			var gpDef: GPSymbolDef = gpDefFor(gpN.gpSymbolId)
-			gpV.gpInit(gpN, gpDef)
+			gpV.gpInit(gpN, gpDef, gpGraph, Callable(self, "_gpLookupDef"))
 			gpV.gpStyle = gpStyle
 			# Tags are text: oversample them for the camera scale so an N mm tag is rasterised at
 			# its on-screen size instead of being magnified from N pixels. The property is an ENUM
@@ -155,7 +161,78 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
 		if not gpFresh.has(gpId):
 			var gpV: Node2D = _gpSymbolViews[gpId]
 			gpV.queue_free()
+	# ---- z-order: a host must be painted BEFORE its mounted children ----
+	# ---- z 序：宿主必须先于其挂载子件绘制 ----
+	# The graph is flat, so the paint order is DERIVED from the mount depth (top-level = 0). Without
+	# this, a nozzle created after its vessel would be appended as a later sibling and could be drawn
+	# over the host — which is exactly what must NOT happen to a child that the host should occlude.
+	# Symbols are compacted into the LEADING sibling indices, so the edge views keep their existing
+	# "painted above the symbols" relationship.
+	# 图为平铺结构，故绘制顺序**由挂载深度推导**（顶层 = 0）。若不做，在宿主之后创建的管口会被
+	# 追加为更晚的同级节点而可能压住宿主 —— 这恰恰是「应当被宿主遮挡的子件」绝不能发生的。
+	# 图元被压实到**靠前的**同级下标，从而让连线视图保持其既有的「画在图元之上」的关系。
+	if gpWorldRoot != null:
+		var gpAt: int = 0
+		for gpId in _gpPaintOrder():
+			if not gpFresh.has(gpId):
+				continue
+			var gpView: GPSymbolView = gpFresh[gpId]
+			if gpView.get_index() != gpAt:
+				gpWorldRoot.move_child(gpView, gpAt)
+			gpAt += 1
 	_gpSymbolViews = gpFresh
+
+
+# Symbol ids in paint order: by mount depth ascending (hosts first), ties broken by the graph's own
+# declaration order so the sequence is deterministic frame to frame.
+# 图元 id 的绘制顺序：按挂载深度升序（宿主在前），同深度按图自身的声明顺序打破平局，
+# 使序列逐帧确定。
+func _gpPaintOrder() -> Array[String]:
+	var gpDepth: Dictionary = {}
+	var gpIndex: Dictionary = {}
+	var gpIds: Array[String] = []
+	for gpI in range(gpGraph.gpNodes.size()):
+		var gpId: String = gpGraph.gpNodes[gpI].gpInstanceId
+		gpIndex[gpId] = gpI
+		gpIds.append(gpId)
+	for gpId in gpIds:
+		_gpFillDepth(gpId, gpDepth)
+	var gpOut: Array[String] = gpIds.duplicate()
+	gpOut.sort_custom(func(gpA: String, gpB: String) -> bool:
+		var gpDA: int = int(gpDepth.get(gpA, 0))
+		var gpDB: int = int(gpDepth.get(gpB, 0))
+		if gpDA != gpDB:
+			return gpDA < gpDB
+		return int(gpIndex.get(gpA, 0)) < int(gpIndex.get(gpB, 0)))
+	return gpOut
+
+
+# Mount depth of gpId, memoised into gpDepth. Walks up the parent chain; a missing host, a cycle or
+# a top-level node all terminate at depth 0.
+# gpId 的挂载深度，结果记入 gpDepth。沿父链上溯；宿主缺失、出现环或到达顶层均终止于深度 0。
+func _gpFillDepth(gpId: String, gpDepth: Dictionary) -> void:
+	var gpChain: Array[String] = []
+	var gpSeen: Dictionary = {}
+	var gpCur: String = gpId
+	while gpCur != "" and not gpSeen.has(gpCur) and not gpDepth.has(gpCur):
+		var gpN: GPPIDNode = gpGraph.gpGetNode(gpCur)
+		if gpN == null:
+			# The host is not on this sheet: treat the walk as having reached a top-level node.
+			# 宿主不在本图纸上：视作已上溯到顶层节点。
+			gpCur = ""
+			break
+		gpSeen[gpCur] = true
+		gpChain.append(gpCur)
+		gpCur = gpN.gpParentUid
+	# The chain's top sits at depth 0 when the walk ended at a top-level node (or a cycle), or one
+	# past its known parent otherwise; the remaining ancestors then ascend from there.
+	# 链顶深度为 0（上溯终止于顶层节点或成环时），否则为其已知父件深度 +1；其余各代自该处递增。
+	var gpBase: int = 0
+	if gpCur != "" and gpDepth.has(gpCur):
+		gpBase = int(gpDepth[gpCur]) + 1
+	var gpSize: int = gpChain.size()
+	for gpI in range(gpSize):
+		gpDepth[gpChain[gpSize - 1 - gpI]] = gpBase + gpI
 
 # Incrementally sync edge view nodes with gpGraph.gpEdges.
 # 增量同步连线视图节点与 gpGraph.gpEdges。

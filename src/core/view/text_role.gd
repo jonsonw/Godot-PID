@@ -96,6 +96,34 @@ static func gpTagMM(gpCategory: String, gpBaseMM: float) -> float:
 	return gpBase
 
 
+# Text height (mm) for a LABEL SLOT's declared tier (see GPLabelSlot.gpTier).
+# 某个**文本槽**所声明字高档的文本高度（mm）（见 GPLabelSlot.gpTier）。
+#
+# Rationale identical to gpTagMM(): the standard fixes the RATIO between the two tiers, and the
+# user's font-size setting IS the in-line tier. A nozzle number / DN and an actuator's F.C./F.O.
+# are both measured at 3.0 mm in C01, i.e. the in-line tier — so they need no new tier, only the
+# mapping below.
+# 理由与 gpTagMM() 相同：标准固定的是两档之间的**比例**，而用户字号设置**就是**在管档。
+# 管口编号 / DN 与执行机构的 F.C./F.O. 在 C01 中均实测为 3.0mm，即属于在管档 ——
+# 故它们不需要新的档位，只需要下面的映射。
+static func gpTierMM(gpTier: String, gpBaseMM: float) -> float:
+	var gpBase: float = maxf(gpBaseMM, 0.1)
+	if gpTier == "equipment":
+		return gpBase * GP_EQUIPMENT_SCALE
+	return gpBase
+
+
+# Text height (mm) for a label SLOT on a symbol of this envelope: the role tier, clamped so the
+# text is never taller than the symbol's SHORTER side. A 4x2 mm nozzle annotated at the 3 mm
+# in-line tier carried text one and a half times its own height — the reported "the text is too
+# big". Equipment is untouched: its shorter side is far above every tier.
+# 某包络尺寸图元的标签**槽位**字高（mm）：按角色分档取值，再钳制为**永不超过图元较短边**。
+# 4x2mm 的管嘴按 3mm 在管档标注，字高是它自身高度的 1.5 倍 —— 即用户报告的「文字偏大」。
+# 设备不受影响：其短边远高于任何分档。
+static func gpSlotMM(gpTier: String, gpBaseMM: float, gpEnvelope: Vector2) -> float:
+	return minf(gpTierMM(gpTier, gpBaseMM), minf(gpEnvelope.x, gpEnvelope.y))
+
+
 # Line-number text height (mm) for a pipe.
 # 管线的管线号字高（mm）。
 # [param gpOverride] the per-project pipe-tag size; 0 or less means "use the standard in-line

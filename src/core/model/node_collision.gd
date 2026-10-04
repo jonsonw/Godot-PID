@@ -19,6 +19,25 @@ extends RefCounted
 #
 # Pure geometry + graph read; no Node/Control dependency, fully headless-testable.
 # 纯几何 + 图读取，无 Node/Control 依赖，可 headless 单测。
+#
+# MOUNTED CHILDREN ARE EXCLUDED / 挂载子件被排除在外：
+# A nozzle / actuator is a PART of its host, not a neighbour. Two reasons it must not take part:
+#   1. its gpPosition carries no meaning (its world placement is DERIVED from the parent chain —
+#      see GPMountResolver), so the solver would see a phantom envelope sitting at the sheet
+#      origin and push real symbols away from empty space;
+#   2. it cannot be moved independently — nudging it would tear it off its host, and the write
+#      would be discarded by the derived transform anyway.
+# The host's own envelope is already an obstacle, and a part sticks out of it only slightly, so
+# nothing is lost by leaving parts out. (This module lives in core/model and therefore must not
+# reach into core/geometry to resolve the derived origin — excluding them is both correct and
+# layering-safe. GPCanvasHitTest / GPPortResolver handle the "where is the part" question.)
+# 管口 / 执行机构是其宿主的**部件**，不是邻件。它不可参与的两条理由：
+#   1. 它的 gpPosition 不带意义（世界位置由父链**推导** —— 见 GPMountResolver），故解法会看到
+#      一个坐在图纸原点上的幽灵包络，把真实图元从空地上推开；
+#   2. 它无法被独立移动 —— 推它会把部件从宿主上撕下来，而且该写入本就会被推导变换丢弃。
+# 宿主自身的包络已是障碍物，而部件只略微探出宿主，故排除部件并无损失。
+# （本模块位于 core/model，故**不得**深入 core/geometry 去解析推导原点 —— 排除部件既正确又不
+# 破坏分层。GPCanvasHitTest / GPPortResolver 负责回答「部件在哪」。）
 
 # Default minimum gap (world units) enforced between two separated symbols' envelopes.
 # 两个被分离图元包络之间强制保留的最小间距（世界单位）。
@@ -45,11 +64,19 @@ static func gpResolve(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpFixed: Array
 	var gpFixedSet: Dictionary = {}
 	for gpId in gpFixed:
 		gpFixedSet[gpId] = true
+	# Parts of an assembly never take part in the relaxation (see the header).
+	# 组合体的部件绝不参与松弛（见头部说明）。
+	var gpParts: Dictionary = {}
+	for gpN in gpGraph.gpNodes:
+		if gpN.gpIsMounted():
+			gpParts[gpN.gpInstanceId] = true
 	# Mutable working copy of every node's current position + its nominal size.
 	# 每个节点当前位置与标称尺寸的可变工作副本。
 	var gpPos: Dictionary = {}
 	var gpSize: Dictionary = {}
 	for gpN in gpGraph.gpNodes:
+		if gpParts.has(gpN.gpInstanceId):
+			continue
 		gpPos[gpN.gpInstanceId] = gpN.gpPosition
 		var gpDef: GPSymbolDef = null
 		if gpDefLookup != null:
@@ -60,7 +87,7 @@ static func gpResolve(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpFixed: Array
 		var gpMoved: bool = false
 		for gpA in gpGraph.gpNodes:
 			var gpAid: String = gpA.gpInstanceId
-			if gpFixedSet.has(gpAid):
+			if gpFixedSet.has(gpAid) or gpParts.has(gpAid):
 				continue
 			var gpSzA: Vector2 = gpSize[gpAid]
  # Inflate A by half the padding on every side so the final gap equals gpPadding.
@@ -68,7 +95,7 @@ static func gpResolve(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpFixed: Array
 			var gpRa: Rect2 = Rect2(gpPos[gpAid] - gpSzA / 2.0, gpSzA).grow(gpHalfPad)
 			for gpB in gpGraph.gpNodes:
 				var gpBid: String = gpB.gpInstanceId
-				if gpBid == gpAid:
+				if gpBid == gpAid or gpParts.has(gpBid):
 					continue
 				var gpSzB: Vector2 = gpSize[gpBid]
 				var gpRb: Rect2 = Rect2(gpPos[gpBid] - gpSzB / 2.0, gpSzB).grow(gpHalfPad)
@@ -90,7 +117,7 @@ static func gpResolve(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpFixed: Array
 	var gpOut: Dictionary = {}
 	for gpN in gpGraph.gpNodes:
 		var gpId: String = gpN.gpInstanceId
-		if gpFixedSet.has(gpId):
+		if gpFixedSet.has(gpId) or gpParts.has(gpId):
 			continue
 		if (gpPos[gpId] as Vector2) != gpN.gpPosition:
 			gpOut[gpId] = gpPos[gpId]

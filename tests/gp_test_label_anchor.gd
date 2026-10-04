@@ -280,3 +280,71 @@ func gpTestOffsetSurvivesASaveLoadRoundTrip() -> void:
 	gpEq(gpBack.gpGetNode("a1").gpLabelOffset, Vector2(0.75, -0.5), "the offset survives")
 	gpEq(gpBack.gpGetNode("a1").gpLabelAnchor, GPLabelAnchor.GPAnchor.GP_ABOVE,
 		"the anchor survives")
+
+
+# ---------------------------------------------------------------- quarter turns (P5 follow-up)
+
+# A nozzle standing on a vessel top must lay its two texts SIDE BY SIDE while the same nozzle on a
+# vessel side stacks them. Turning the ANCHOR (never the text) is how the text stays upright while
+# moving to the correct side, so the four sides are pinned in both directions here.
+# 立在罐顶的管嘴要让两段文字**左右并排**，而同一管嘴装在罐侧则上下堆叠。旋转**锚点**（绝不旋
+# 转文字）正是「文字保持正立、位置却落到正确一侧」的做法，故此处双向钉住四个侧面。
+func gpTestRotateAnchorTurnsTheSidesClockwiseAndIsReversible() -> void:
+	gpEq(GPLabelAnchor.gpRotateAnchor(GPLabelAnchor.GPAnchor.GP_ABOVE, 1),
+		GPLabelAnchor.GPAnchor.GP_RIGHT, "one turn sends ABOVE to RIGHT")
+	gpEq(GPLabelAnchor.gpRotateAnchor(GPLabelAnchor.GPAnchor.GP_RIGHT, 1),
+		GPLabelAnchor.GPAnchor.GP_BELOW, "RIGHT becomes BELOW")
+	gpEq(GPLabelAnchor.gpRotateAnchor(GPLabelAnchor.GPAnchor.GP_BELOW, 1),
+		GPLabelAnchor.GPAnchor.GP_LEFT, "BELOW becomes LEFT")
+	gpEq(GPLabelAnchor.gpRotateAnchor(GPLabelAnchor.GPAnchor.GP_LEFT, 1),
+		GPLabelAnchor.GPAnchor.GP_ABOVE, "LEFT becomes ABOVE")
+	gpEq(GPLabelAnchor.gpRotateAnchor(GPLabelAnchor.GPAnchor.GP_ABOVE, -1),
+		GPLabelAnchor.GPAnchor.GP_LEFT,
+		"one turn the other way sends ABOVE to LEFT — the direction a riser needs")
+	gpEq(GPLabelAnchor.gpRotateAnchor(GPLabelAnchor.GPAnchor.GP_BELOW, -1),
+		GPLabelAnchor.GPAnchor.GP_RIGHT, "and BELOW to RIGHT")
+	gpEq(GPLabelAnchor.gpRotateAnchor(GPLabelAnchor.GPAnchor.GP_ABOVE, 4),
+		GPLabelAnchor.GPAnchor.GP_ABOVE, "four turns are the identity")
+	gpEq(GPLabelAnchor.gpRotateAnchor(GPLabelAnchor.GPAnchor.GP_ABOVE, -3),
+		GPLabelAnchor.GPAnchor.GP_RIGHT, "a negative count wraps")
+	gpEq(GPLabelAnchor.gpRotateAnchor(GPLabelAnchor.GPAnchor.GP_ABOVE, 0),
+		GPLabelAnchor.GPAnchor.GP_ABOVE, "no turn changes nothing")
+	gpEq(GPLabelAnchor.gpRotateAnchor(GPLabelAnchor.GPAnchor.GP_INSIDE, -1),
+		GPLabelAnchor.GPAnchor.GP_INSIDE, "INSIDE has no side to turn to, so it passes through")
+	gpEq(GPLabelAnchor.gpRotateAnchor(GPLabelAnchor.GPAnchor.GP_AUTO, 3),
+		GPLabelAnchor.GPAnchor.GP_AUTO, "AUTO has no side to turn to either")
+
+
+# The gap is an UPPER BOUND: a full-size symbol keeps the historic 7 mm exactly, while a 4x2 nozzle
+# takes half its shorter side. 7 mm on a 4 mm-long part put the number four nozzle lengths away —
+# the reported "the text sits far too far".
+# 间距是**上限**：满尺寸图元精确保持历史的 7mm，而 4x2 的管嘴取短边的一半。7mm 加在 4mm 长的
+# 部件上会把编号推到一个管嘴长度的四倍之外 —— 即用户报告的「文字离得太远」。
+func gpTestTheGapNeverDominatesATinySymbolButNeverGrows() -> void:
+	gpApprox(GPLabelGripOps.gpGapFor(Vector2(80.0, 56.0)), GPLabelGripOps.GP_GAP, 0.0001,
+		"a full-size symbol keeps the historic 7 mm gap")
+	gpApprox(GPLabelGripOps.gpGapFor(Vector2(10.5, 10.5)), GPLabelGripOps.GP_GAP, 0.0001,
+		"a 10.5 mm pump still gets 7 mm, so nothing already drawn moves")
+	gpApprox(GPLabelGripOps.gpGapFor(Vector2(4.0, 2.0)), 1.0, 0.0001,
+		"a 4x2 nozzle takes half its shorter side (1 mm) rather than 7 mm")
+	gpApprox(GPLabelGripOps.gpGapFor(Vector2(1.0, 1.0)), GPLabelGripOps.GP_MIN_GAP, 0.0001,
+		"the clamp has a floor, so the text never lands on the glyph itself")
+	# The historic look for a full-size symbol is unchanged — pinned against the gap function, not
+	# against a copy of its formula, so the two cannot drift together.
+	# 满尺寸图元的历史外观不变 —— 该钉子比对的是间距函数本身而非其公式副本，故两者无法一起漂移。
+	gpApprox(GPLabelGripOps.gpLocalOffset(_gpNode(), _gpDef()).y,
+		56.0 * 0.5 + GPLabelGripOps.gpGapFor(Vector2(80.0, 56.0)), 0.001,
+		"BELOW still sits half the height plus the (unchanged) gap under the envelope")
+
+
+# The slot text height never exceeds the symbol's SHORTER side: a 4x2 mm nozzle annotated at the
+# 3 mm in-line tier carried text 1.5x its own height (the reported "the text is too big").
+# 槽位字高绝不高于图元**较短边**：4x2mm 的管嘴按 3mm 在管档标注时字高是自身的 1.5 倍
+#（即用户报告的「文字偏大」）。
+func gpTestASlotTextIsNeverTallerThanItsSymbol() -> void:
+	gpApprox(GPTextRole.gpSlotMM("", 3.0, Vector2(4.0, 2.0)), 2.0, 0.0001,
+		"a 4x2 nozzle clamps the 3 mm tier down to its 2 mm height")
+	gpApprox(GPTextRole.gpSlotMM("", 3.0, Vector2(10.5, 10.5)), 3.0, 0.0001,
+		"a full-size symbol keeps the tier untouched")
+	gpApprox(GPTextRole.gpSlotMM("equipment", 3.0, Vector2(10.5, 10.5)), 4.5, 0.0001,
+		"the equipment tier still scales up on a big symbol")

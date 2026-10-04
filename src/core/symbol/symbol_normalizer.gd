@@ -70,6 +70,12 @@ static func gpNormalizeSymbol(gpRaw: Dictionary, gpCat: String, gpPackSizes: Dic
  # 未绘制任何图形：保留空形状，渲染层回退为纯矩形。
 		gpDef.gpShapes = []
 		gpDef.gpPorts = GPPortSpec.gpFromDicts(GPSymbolCategories.gpPortsForSymbol(gpDef.gpId, gpCat))
+		# Anchoring sockets fall back exactly like the ports do: a user symbol created from a
+		# category must be able to HOST the same parts as its built-in twin, or dragging a nozzle
+		# onto it would be silently refused for no reason the user can see.
+		# 锚点插座与端口走完全相同的回退：按类别新建的用户图元必须能像内置同族图元一样**承载**
+		# 同样的部件，否则把管口拖到它上面会被无声拒绝，而用户看不出任何理由。
+		gpDef.gpAttachPoints = GPSymbolCategories.gpAttachPointsForSymbol(gpDef.gpId, gpCat)
 		return gpDef
 
 	# (2) Uniform fit into the 100x100 unit box, centered. Uniform (not per-axis) scaling is
@@ -87,6 +93,15 @@ static func gpNormalizeSymbol(gpRaw: Dictionary, gpCat: String, gpPackSizes: Dic
 		gpDef.gpPorts = GPPortSpec.gpFromDicts(GPSymbolCategories.gpPortsForSymbol(gpDef.gpId, gpCat))
 	else:
 		gpDef.gpPorts = GPPortSpec.gpFromDicts(gpNormalizePorts(gpRawPorts, gpBBox, gpEnv))
+
+	# (4) Anchors are NOT drawn geometry, so there is no author-space form to transform: they come
+	# from the category table (or the per-id override) unconditionally, exactly like the port
+	# fallback above. gpDenormalizeSymbol() deliberately does NOT round-trip them — a draft has
+	# nowhere to put them — which keeps the symbol editor's round-trip pixel-exact.
+	# (4) 锚点**不是**绘制出来的几何，故没有作者空间形态可变换：它无条件取自类别表（或按 id 的
+	# 覆盖表），与上面的端口回退完全一致。gpDenormalizeSymbol() 刻意**不**做锚点往返 —— 草稿
+	# 结构里没有存放它的位置 —— 这使图元编辑器的往返保持逐像素精确。
+	gpDef.gpAttachPoints = GPSymbolCategories.gpAttachPointsForSymbol(gpDef.gpId, gpCat)
 	return gpDef
 
 

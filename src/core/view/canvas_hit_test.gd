@@ -10,15 +10,30 @@ extends RefCounted
 
 # Find the world center of a node by id. Returns Vector2.INF when not found.
 # 按 id 查找节点的世界中心；未找到返回 Vector2.INF。
-static func gpNodeCenter(gpGraph: GPPIDGraph, gpId: String) -> Vector2:
+#
+# MOUNT-AWARE / 感知挂载：
+# A mounted child's gpPosition is NOT its world location — that is derived from the parent chain
+# (see GPMountResolver). Reading the raw field would make a nozzle hittable at its stale
+# coordinate (usually the sheet origin) and NOT where the user sees it, so "select the nozzle and
+# edit its DN" would be impossible. The lookup is OPTIONAL so every pre-existing caller keeps the
+# exact old answer for an unmounted node, and a missing/invalid lookup degrades to the own frame
+# exactly as before.
+# 挂载子件的 gpPosition **不是**它的世界位置 —— 那是从父链推导的（见 GPMountResolver）。读原始
+# 字段会让管口在它过期的坐标（通常是图纸原点）处可命中，而**不是**在用户看到的位置，于是
+# 「选中管口改 DN」根本无法完成。查找器是**可选**的，故每个既有调用方对未挂载节点得到与旧实现
+# 完全相同的答案；查找器缺失 / 无效时亦如旧地降级为自身坐标系。
+static func gpNodeCenter(gpGraph: GPPIDGraph, gpId: String,
+		gpDefLookup: Callable = Callable()) -> Vector2:
 	for gpN in gpGraph.gpNodes:
 		if gpN.gpInstanceId == gpId:
-			return gpN.gpPosition
+			return GPPortResolver.gpNodeWorldOrigin(gpGraph, gpDefLookup, gpN)
 	return Vector2.INF
 
 
 # World-space bounding rect of a node, from its definition's nominal envelope (fallback 64x48).
 # 节点的世界坐标包围矩形，取自其定义标称包络（缺省回退 64x48）。
+# Mount-aware: the rect is centred on the node's DERIVED world origin (see gpNodeCenter()).
+# 感知挂载：矩形以节点**推导**的世界原点为中心（见 gpNodeCenter()）。
 static func gpNodeRect(gpGraph: GPPIDGraph, gpBinder: GPGraphBinder, gpId: String) -> Rect2:
 	if gpGraph == null or gpBinder == null:
 		return Rect2()
@@ -26,19 +41,70 @@ static func gpNodeRect(gpGraph: GPPIDGraph, gpBinder: GPGraphBinder, gpId: Strin
 		if gpN.gpInstanceId == gpId:
 			var gpDef: GPSymbolDef = gpBinder.gpDefFor(gpN.gpSymbolId)
 			var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef != null else Vector2(64.0, 48.0)
-			return Rect2(gpN.gpPosition - gpSz / 2.0, gpSz)
+			var gpOrigin: Vector2 = _gpWorldOrigin(gpGraph, gpBinder, gpN)
+			return Rect2(gpOrigin - gpSz / 2.0, gpSz)
 	return Rect2()
 
 
 # Topmost node id under the given world point, or "". Hit area = node rect.
 # 指定世界点下最上层节点 id，无则 ""。命中区域 = 节点矩形。
+#
+# MOUNT-AWARE PRIORITY / 感知挂载的优先级：
+# A mounted child overlaps its host by construction (an actuator SITS ON the valve), so the two
+# rects hit at the same point. The rule is "the DEEPER node wins": a part beats the thing it is
+# mounted on, which is what makes a nozzle / actuator selectable at all — and it is what lets the
+# user edit the nozzle's own DN instead of re-selecting the vessel.
+# 挂载子件按构造就与其宿主重叠（执行机构**坐**在阀门上），故两者在同一点击处都会命中。
+# 规则是「**更深**的节点胜出」：部件胜过它所安装的物件 —— 这正是管口 / 执行机构可被选中的前提，
+# 也是用户能编辑管口自身 DN 而非反复选到设备的原因。
+#
+# LEGACY PRESERVED ON TIES / 平局时保持既有行为：
+# Equal depth keeps the FIRST node in graph order, exactly as before this change. Only a strictly
+# deeper node displaces an already-found hit, so drawings without mounts hit-test identically.
+# 同深度仍取图声明顺序中的**第一个**节点，与本改动之前完全一致。只有**严格更深**的节点才会
+# 顶替已找到的命中，故没有挂载的图纸命中结果不变。
 static func gpHitNode(gpGraph: GPPIDGraph, gpBinder: GPGraphBinder, gpWorld: Vector2) -> String:
 	if gpGraph == null:
 		return ""
+	var gpLookup: Callable = Callable(gpBinder, "gpDefFor") if gpBinder != null else Callable()
+	var gpBest: String = ""
+	var gpBestDepth: int = -1
 	for gpN in gpGraph.gpNodes:
-		if gpNodeRect(gpGraph, gpBinder, gpN.gpInstanceId).has_point(gpWorld):
-			return gpN.gpInstanceId
-	return ""
+		var gpDef: GPSymbolDef = gpBinder.gpDefFor(gpN.gpSymbolId) if gpBinder != null else null
+		var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef != null else Vector2(64.0, 48.0)
+		var gpOrigin: Vector2 = GPPortResolver.gpNodeWorldOrigin(gpGraph, gpLookup, gpN)
+		if not Rect2(gpOrigin - gpSz / 2.0, gpSz).has_point(gpWorld):
+			continue
+		var gpDepth: int = _gpMountDepth(gpGraph, gpN)
+		if gpDepth > gpBestDepth:
+			gpBestDepth = gpDepth
+			gpBest = gpN.gpInstanceId
+	return gpBest
+
+
+# How many mount hops sit between a node and the top level (0 = top level).
+# 节点与顶层之间的挂载跳数（0 = 顶层）。
+# Cycle-safe: a hand-edited A-mounts-B-mounts-A pair terminates instead of looping forever.
+# 环安全：手改出的 A 挂 B、B 挂 A 会终止而非死循环。
+static func _gpMountDepth(gpGraph: GPPIDGraph, gpNode: GPPIDNode) -> int:
+	var gpSeen: Dictionary = {}
+	var gpCur: GPPIDNode = gpNode
+	var gpDepth: int = 0
+	while gpCur != null and gpCur.gpIsMounted() and not gpSeen.has(gpCur.gpInstanceId):
+		gpSeen[gpCur.gpInstanceId] = true
+		gpCur = gpGraph.gpGetNode(gpCur.gpParentUid)
+		if gpCur != null:
+			gpDepth += 1
+	return gpDepth
+
+
+# Derived world origin of a node through the binder's own definition lookup.
+# 经绑定器自身的定义查找器求节点的推导世界原点。
+static func _gpWorldOrigin(gpGraph: GPPIDGraph, gpBinder: GPGraphBinder,
+		gpNode: GPPIDNode) -> Vector2:
+	if gpBinder == null:
+		return gpNode.gpPosition
+	return GPPortResolver.gpNodeWorldOrigin(gpGraph, Callable(gpBinder, "gpDefFor"), gpNode)
 
 
 # Topmost edge id under the world point, or "".

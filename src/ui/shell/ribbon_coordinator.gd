@@ -182,3 +182,34 @@ func gpOnSymbolPicked(gpTypeId: String) -> void:
 	var gpDef: GPSymbolDef = gpHost.gpDefFor(gpTypeId)
 	var gpName: String = gpDef.gpDisplayName if gpDef else gpTypeId
 	gpHost.gpSetState("status.symbol_picked", [gpName])
+
+
+# A library tile was DRAGGED onto the canvas: arm the attachment gesture instead of the placement
+# mode (规划 §15, interaction mode 1).
+# 某图元库图块被**拖到**画布上：给附件手势上膛，而非进入放置模式（规划 §15 交互模式一）。
+#
+# WHY IT IS A SEPARATE ENTRY POINT AND NOT A FLAG ON gpOnSymbolPicked / 为何是独立入口而非
+# gpOnSymbolPicked 的一个开关：
+# the two gestures leave the canvas in INCOMPATIBLE states. A pick sets gpPendingDef, so the next
+# click drops a free-floating node at the cursor; a drag arms gpPendingAttach, so the next click
+# must land on a host anchor. Sharing one function would need a mode flag threaded through every
+# branch, and the failure mode of getting it wrong is silent (a stray node on the sheet).
+# 两个手势会让画布处于**互不兼容**的状态。点选设置 gpPendingDef，于是下一次点击在光标处丢下
+# 一个自由悬浮节点；拖动给 gpPendingAttach 上膛，于是下一次点击必须落在宿主锚点上。共用一个函数
+# 就得让一个模式开关穿过每个分支，而搞错的失败方式是静默的（图纸上多出一个游离节点）。
+#
+# A PRIMARY symbol can never be mounted, so gpArmAttach() refuses it here rather than letting the
+# user carry a gesture that is guaranteed to fail. NOTE: the palette already classifies a drag on a
+# primary symbol as a pick, so in practice this branch only fires for a stale/unknown definition.
+# 主图元永远无法挂载，故 gpArmAttach() 在此拒绝它，而不是让用户带着一个注定失败的手势。
+# 注意：图元库已把主图元上的拖动归类为点选，故实际上本分支只在定义过期 / 未知时触发。
+func gpOnSymbolDragStarted(gpTypeId: String) -> void:
+	var gpCv: GPCanvas2D = gpHost.gpActiveCanvas()
+	if gpCv == null:
+		return
+	var gpDef: GPSymbolDef = gpHost.gpDefFor(gpTypeId)
+	var gpName: String = gpDef.gpDisplayName if gpDef != null else gpTypeId
+	if not gpCv.gpArmAttach(gpTypeId):
+		gpHost.gpSetState("status.attach_not_mountable", [gpName])
+		return
+	gpHost.gpSetState("status.attach_armed", [gpName])

@@ -30,10 +30,32 @@ This project is in **early development** (app version `0.1.0`, Godot 4.7). The t
 | Edge tag (line number) drag with leader line | ✅ Working / 可用 |
 | Frame & title block, canvas text roles (single mm↔px source) | ✅ Working / 可用 |
 | Autosave: enabled after the first save (1 min dirty / 5 min clean) | ✅ Working / 可用 |
+| **DEXPI 1.4 export / import** (Proteus XML 4.2.0) | ✅ Working / 可用（概念层 + 图形层 + Extent；菜单：导出子菜单） |
 | DXF / PDF / basic list export | 🚧 Stubs / 接口已定义，实现为空桩 |
 | 3D linkage rendering | 🚧 Stub / 空桩 |
 | HAZOP knowledge, compliance checks, unit-op generation | 📋 Planned, delivered via `GPIPIDAddon` in Pro / 规划中，由 Pro 版提供 |
 | Cross-sheet links, off-page connectors | 📋 Planned / 规划中 |
+
+---
+
+## Downloads / 下载
+
+**v0.1.0** —— 首个可使用的桌面版本（引擎 Godot 4.7）。
+
+**v0.1.0** — the first usable desktop release (engine Godot 4.7).
+
+| Platform / 平台 | Download / 下载 |
+|---|---|
+| Windows x86_64 | [Godot-PID-windows-v0.1.0.zip](https://github.com/jonsonw/Godot-PID/releases/download/v0.1.0/Godot-PID-windows-v0.1.0.zip) · exe 内嵌 pck，单文件即可运行 / single-file exe with embedded pck |
+| macOS (Apple Silicon / Intel) | [Godot-PID-macos-v0.1.0.zip](https://github.com/jonsonw/Godot-PID/releases/download/v0.1.0/Godot-PID-macos-v0.1.0.zip) · .app 包 / .app bundle |
+
+⚠️ macOS 版为**未签名**构建，系统首申会被 Gatekeeper 拦下，二选一即可：右键以「打开」运行，或在终端执行 `xattr -cr Godot-PID.app`。
+
+⚠️ The macOS build is **unsigned**, so Gatekeeper may block it on first launch. Either right-click and choose *Open*, or run `xattr -cr Godot-PID.app` in Terminal.
+
+想看全部版本（含历史与更新日志）请到 [Releases 页](https://github.com/jonsonw/Godot-PID/releases)。
+
+See the [Releases page](https://github.com/jonsonw/Godot-PID/releases) for all versions and the changelog.
 
 ---
 
@@ -119,7 +141,16 @@ Godot-PID/                # GitHub repo root (local working folder: Godot-PID-Co
 │   ├── app/               # Application services: commands, undo stack, event bus, documents
 │   │   └── commands/      # 29 concrete commands (node/shape/edge add-delete-move, path & tag editing, drop restore)
 │   ├── render/            # GPSymbolView / GPEdgeView / frame GPFrameView / backdrop GPBackgroundView / painter
-│   ├── io/                # *.pid.json read/write; DXF / PDF / list export are stubs
+│   ├── io/                # *.pid.json read/write; DEXPI (Proteus XML) import/export;
+│   │   │                  # DXF / PDF / list export are stubs
+│   │   ├── dexpi_schema.gd    # version constants / dual RDL domains / reserved Set names
+│   │   ├── xml_text.gd        # single point for XML escaping; gpLang2() two-letter tags
+│   │   ├── dexpi_mapping.gd   # data-driven mapping; gpFlipY() / gpNormRgb() single points
+│   │   ├── dexpi_exporter.gd  # preflight → project → serialise → atomic write
+│   │   ├── dexpi_reader.gd    # XML → the SAME intermediate structure the exporter builds
+│   │   ├── dexpi_validator.gd # L1 structure + L2 rules → GPImportReport
+│   │   ├── dexpi_importer.gd  # intermediate → v3 container (feeds the existing gpMergeInto)
+│   │   └── exporter_registry.gd # export registry: a new format never touches the UI dispatch
 │   ├── ui/
 │   │   ├── shell/         # Main window composition root, menu bar, 7 coordinators, quick command bar, autosave
 │   │   ├── canvas/        # Canvas shell + 5 implementation classes, incremental sync, shortcuts, context menu

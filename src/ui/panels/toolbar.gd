@@ -13,11 +13,13 @@ extends VBoxContainer
 #                    (the former EDIT block moved wholesale to the top command
 #                     toolbar quick_toolbar.gd — undo / redo / delete / settings
 #                     no longer live here.)
-#   [滚动区]       — one collapsible category block per symbol category; each header
-#                    carries a small GEAR whose popup lets the user tick which symbols
-#                    stay visible in the palette (persisted via Settings).
-#                    每个类目一个可折叠块；标题右侧有小**齿轮**，弹出的复选清单决定
-#                    哪些图元显示在面板中（经 Settings 持久化）。
+#   [滚动区]       — TWO top-level groups: 主图元 (carriers) and 次级图元 (attachments).
+#                    Inside each, one collapsible category block per symbol category; each
+#                    block header carries a small GEAR whose popup lets the user tick which
+#                    symbols stay visible in the palette (persisted via Settings).
+#                    两个顶层分组：主图元（载体）与次级图元（附件）。组内每类目一个可折叠块；
+#                    块标题右侧有小**齿轮**，弹出的复选清单决定哪些图元显示在面板中
+#                    （经 Settings 持久化）。
 # The symbol BUTTONS are injected by code from SymbolLibrary so custom symbol packs
 # drop in without touching the layout.
 # 图元按钮由代码按类目从 SymbolLibrary 注入，自定义图元包无需改布局即可接入。
@@ -27,6 +29,13 @@ extends VBoxContainer
 # A symbol was picked from the library (its type id).
 # 从图元库选中某图元（返回其 type id）。
 signal gpSymbolPicked(type: String)
+
+# A library entry began a DRAG gesture (规划 §15, interaction mode 1). Kept separate from
+# gpSymbolPicked on purpose: a pick means "place this on the sheet", a drag means "mount this part
+# onto a host", and conflating them would make every drag also drop a free-floating node.
+# 图元库某条开始了**拖动**手势（规划 §15 交互模式一）。刻意与 gpSymbolPicked 分开：点选意为
+# 「把它放到图纸上」，拖动意为「把这个部件装到宿主上」；混为一谈会让每次拖动同时丢下一个自由节点。
+signal gpSymbolDragStarted(type: String)
 
 # A symbol deletion was requested from a palette item. Forwarded to the main window,
 # which owns the graphs (to cascade-remove canvas instances) and the live library.
@@ -62,6 +71,23 @@ const GP_TOOL_BLOCKS: Array = [
 		]
 	},
 ]
+
+# The two TOP-LEVEL groups of the symbol area, keyed by the very i18n key that titles them — so the
+# key doubles as the collapse-state key, exactly as GP_TOOL_BLOCKS' title_key already does for the
+# Draw block. A dotted key can never collide with a category name, which is what makes the shared
+# gpCollapsed dictionary safe to reuse.
+# 图元区的两个**顶层**分组，以给它们命名的同一个 i18n 键为键 —— 故该键同时充当折叠状态键，
+# 与 GP_TOOL_BLOCKS 的 title_key 对「绘制」块所做之事完全一致。带点的键绝不可能与类目名碰撞，
+# 这正是共用的 gpCollapsed 字典可以安全复用的原因。
+#
+# WHY SPLIT BY MOUNT KIND AND NOT BY CATEGORY / 为何按挂载类型而非类目划分：
+# a valve and a nozzle both live in "general", yet one is a host and the other is a part. Category
+# answers "what is this?", mount kind answers "how does it relate to another symbol?" — and the
+# palette's job here is the second question (规划 §2).
+# 阀门与管口同属「通用」类目，但一个是宿主、另一个是部件。类目回答「这是什么」，
+# 挂载类型回答「它与别的图元是什么关系」—— 而图元库此处要回答的正是第二个问题（规划 §2）。
+const GP_GRP_PRIMARY: String = "symbol_lib.grp_primary"
+const GP_GRP_ATTACH: String = "symbol_lib.grp_attach"
 
 # Currently displayed symbol definitions.
 # 当前显示的图元定义。
@@ -336,26 +362,104 @@ func _gpFilter(gpQ: String) -> Array[GPSymbolDef]:
 	return gpOut
 
 
-# Render the injected symbol list, grouped by category with a collapsible header per group.
-# 渲染注入的图元列表，按类目分组，每类目一个可折叠标题；缩略图用 GPSymbolGrid 多列自适应排布。
+# Render the injected symbol list: TWO top-level groups (primary / attachments), each holding the
+# collapsible per-category blocks, whose thumbnails use GPSymbolGrid's multi-column layout.
+# 渲染注入的图元列表：**两个顶层分组**（主图元 / 次级图元），各自包含可折叠的类目块，
+# 其缩略图用 GPSymbolGrid 多列排布。
 func _gpRender(gpList: Array[GPSymbolDef]) -> void:
-	# Read as an assembly list: clear -> column -> group -> one group per category -> reflow.
-	# 读作装配清单：清空 -> 建列 -> 分组 -> 每类目一个分组 -> 重排。
+	# Read as an assembly list: clear -> column -> one block per TOP-LEVEL group -> reflow.
+	# 读作装配清单：清空 -> 建列 -> 每个**顶层**分组一块 -> 重排。
 	_gpClearList()
 	var gpVbox: VBoxContainer = _gpNewColumn()
-	var gpByCat: Dictionary = _gpGroupByCategory(gpList)
-	var gpCatKeys: Array = _gpOrderedCategories(gpByCat)
-	var gpCatIdx: int = 0
-	for gpCat in gpCatKeys:
-		# A 1px hairline separates every two neighbouring categories (none before the first).
-		# 相邻类目之间以 1px 发丝线分隔（首个类目前不画）。
-		if gpCatIdx > 0:
+	var gpByGroup: Dictionary = _gpGroupByMountKind(gpList)
+	var gpFirst: bool = true
+	for gpGrp in [GP_GRP_PRIMARY, GP_GRP_ATTACH]:
+		var gpItems: Array = gpByGroup[gpGrp] as Array
+		# An empty group is skipped entirely: an "Attachments" header over nothing would read as a
+		# bug rather than as "this library has no parts yet".
+		# 空分组整体跳过：一个「次级图元」标题下面什么都没有，读起来像 bug 而不是「本库还没有部件」。
+		if gpItems.is_empty():
+			continue
+		# A 1px hairline separates the two groups (none before the first).
+		# 两分组之间以 1px 发丝线分隔（首个之前不画）。
+		if not gpFirst:
 			_gpAddHairline(gpVbox)
-		gpCatIdx += 1
-		gpVbox.add_child(_gpBuildCategoryGroup(str(gpCat), gpByCat[gpCat] as Array))
+		gpFirst = false
+		gpVbox.add_child(_gpBuildTopGroup(str(gpGrp), gpItems))
 	# Recompute columns now that grids exist (size may be 0 yet; resize handler refreshes later).
 	# 网格已建好，先按当前视口重排一次（此时尺寸可能仍为 0，缩放处理器之后会再刷新）。
 	gpReflow(-1.0)
+
+
+# Bucket the symbols into the two top-level groups, preserving first-appearance order inside each.
+# 把图元分入两个顶层分组，组内保持首次出现顺序。
+func _gpGroupByMountKind(gpList: Array) -> Dictionary:
+	var gpOut: Dictionary = {GP_GRP_PRIMARY: [], GP_GRP_ATTACH: []}
+	for gpD in gpList:
+		var gpDef: GPSymbolDef = gpD as GPSymbolDef
+		if gpDef == null:
+			continue
+		var gpKey: String = GP_GRP_ATTACH if gpDef.gpMountKind != "" else GP_GRP_PRIMARY
+		(gpOut[gpKey] as Array).append(gpDef)
+	return gpOut
+
+
+# One top-level group: a heavier header (accent edge, darker band) above the per-category blocks it
+# contains. Folding the header hides the whole group, which is the reason the row exists.
+# 一个顶层分组：较重的标题（accent 侧边、更深色带）位于其包含的各类目块之上。
+# 折叠该标题即隐藏整组 —— 这正是这一行存在的理由。
+func _gpBuildTopGroup(gpGrpKey: String, gpItems: Array) -> Control:
+	if not gpCollapsed.has(gpGrpKey):
+		gpCollapsed[gpGrpKey] = false
+	var gpFold: bool = gpCollapsed[gpGrpKey]
+
+	var gpOuter: VBoxContainer = VBoxContainer.new()
+	gpOuter.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpOuter.add_theme_constant_override("separation", 2)
+
+	var gpHead: Button = Button.new()
+	gpHead.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpHead.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	gpHead.flat = true
+	gpHead.clip_text = true
+	gpHead.add_theme_font_size_override("font_size", Settings.gpEffectiveFontSize())
+	gpHead.text = ("▾ " if not gpFold else "▸ ") + I18n.gpTr(gpGrpKey)
+	gpHead.set_meta("gpKey", gpGrpKey)
+	# One visual step ABOVE the category bands below: darker fill + an accent left edge, so the
+	# hierarchy (group > category > tiles) reads at a glance instead of only by indentation.
+	# 比下方类目色带高**一级**：更深底色 + accent 左侧边，使层级（分组 > 类目 > 图块）一眼可读，
+	# 而不是只能靠缩进分辨。
+	var gpBg: StyleBoxFlat = StyleBoxFlat.new()
+	gpBg.bg_color = Color(0.129, 0.165, 0.204)
+	gpBg.border_color = GPChromeStyle.GP_ACCENT
+	gpBg.border_width_left = 3
+	gpBg.content_margin_left = 6.0
+	gpBg.content_margin_top = 3.0
+	gpBg.content_margin_bottom = 3.0
+	gpHead.add_theme_stylebox_override("normal", gpBg)
+	gpHead.add_theme_stylebox_override("hover", gpBg)
+	gpHead.add_theme_stylebox_override("pressed", gpBg)
+	gpHead.add_theme_color_override("font_color", Color(0.88, 0.91, 0.95))
+	gpOuter.add_child(gpHead)
+
+	# The body holds one collapsible CATEGORY block per category present in this group, with the
+	# same hairline separation the ungrouped list used to have.
+	# 主体持有本组内每个类目一个可折叠**类目**块，并沿用未分组列表原先的发丝线分隔。
+	var gpBody: VBoxContainer = VBoxContainer.new()
+	gpBody.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpBody.add_theme_constant_override("separation", 2)
+	gpBody.visible = not gpFold
+	var gpByCat: Dictionary = _gpGroupByCategory(gpItems)
+	var gpCatKeys: Array = _gpOrderedCategories(gpByCat)
+	var gpCatIdx: int = 0
+	for gpCat in gpCatKeys:
+		if gpCatIdx > 0:
+			_gpAddHairline(gpBody)
+		gpCatIdx += 1
+		gpBody.add_child(_gpBuildCategoryGroup(str(gpCat), gpByCat[gpCat] as Array))
+	gpOuter.add_child(gpBody)
+	gpHead.pressed.connect(_gpToggleCategory.bind(gpGrpKey, gpBody, gpHead))
+	return gpOuter
 
 
 # Drop every child of the list and forget the grids built for the previous render.
@@ -384,12 +488,20 @@ func _gpNewColumn() -> VBoxContainer:
 
 # Bucket the symbols by category, preserving first-appearance order within each bucket.
 # 按类目把图元分桶，桶内保持首次出现顺序。
-func _gpGroupByCategory(gpList: Array[GPSymbolDef]) -> Dictionary:
+# Takes a plain Array on purpose: the two top-level groups hand it untyped slices of a Dictionary,
+# and an untyped Array cannot be passed where Array[GPSymbolDef] is expected without a conversion
+# that GDScript refuses at runtime.
+# 刻意接收无类型 Array：两个顶层分组传给它的是来自字典的无类型切片，而无类型 Array 传给
+# Array[GPSymbolDef] 形参会要求一次 GDScript 在运行期拒绝的转换。
+func _gpGroupByCategory(gpList: Array) -> Dictionary:
 	var gpByCat: Dictionary = {}
 	for gpD in gpList:
-		if not gpByCat.has(gpD.gpCategory):
-			gpByCat[gpD.gpCategory] = []
-		gpByCat[gpD.gpCategory].append(gpD)
+		var gpDef: GPSymbolDef = gpD as GPSymbolDef
+		if gpDef == null:
+			continue
+		if not gpByCat.has(gpDef.gpCategory):
+			gpByCat[gpDef.gpCategory] = []
+		gpByCat[gpDef.gpCategory].append(gpDef)
 	return gpByCat
 
 
@@ -519,6 +631,7 @@ func _gpFillCategoryGrid(gpGrid: GPSymbolGrid, gpItems: Array) -> void:
 		gpItem.gpDef = gpD
 		gpItem.size_flags_horizontal = SIZE_EXPAND_FILL
 		gpItem.gpPicked.connect(_gpOnPick)
+		gpItem.gpDragStarted.connect(_gpOnDragStarted)
 		gpItem.gpDeleteRequested.connect(_gpOnDeleteRequested)
 		# Apply the persisted visibility choice: an unticked symbol stays hidden
 		# (the grid lays out visible children only, so no hole is left).
@@ -630,12 +743,16 @@ func gpReflow(gpForcedWidth: float = -1.0) -> void:
 				gpG.queue_sort()
 
 
-# Toggle a category group's collapsed state and update the header arrow.
-# 切换某类目分组的折叠状态并更新标题箭头。
-func _gpToggleCategory(gpCat: String, gpGrid: GPSymbolGrid, gpHeader: Button) -> void:
+# Toggle a collapsible block (a category group OR a top-level group) and update its header arrow.
+# 切换一个可折叠块（类目分组**或**顶层分组）并更新其标题箭头。
+# [param gpBody] is typed Control, not GPSymbolGrid: the top-level group's body is a plain
+# VBoxContainer. Both callers only ever touch `visible`, which is the whole contract.
+# [param gpBody] 类型为 Control 而非 GPSymbolGrid：顶层分组的主体是普通 VBoxContainer。
+# 两个调用方都只碰 `visible`，而这就是全部契约。
+func _gpToggleCategory(gpCat: String, gpBody: Control, gpHeader: Button) -> void:
 	var gpNow: bool = not gpCollapsed.get(gpCat, false)
 	gpCollapsed[gpCat] = gpNow
-	gpGrid.visible = not gpNow
+	gpBody.visible = not gpNow
 	gpHeader.text = ("▾ " if not gpNow else "▸ ") + I18n.gpTr(gpCat)
 
 
@@ -679,6 +796,14 @@ func _gpOnSymbolStyleChanged() -> void:
 # 发出图元被选中信号。
 func _gpOnPick(gpTypeId: String) -> void:
 	gpSymbolPicked.emit(gpTypeId)
+
+
+# A library tile crossed the drag threshold. Forwarded verbatim: what a drag MEANS is the host's
+# business (arm an attachment), and this dock deliberately knows nothing about mounting.
+# 某图元库图块越过了拖动阈值。原样转发：拖动**意味着什么**是宿主的事（给附件上膛），
+# 本停靠栏刻意对挂载一无所知。
+func _gpOnDragStarted(gpTypeId: String) -> void:
+	gpSymbolDragStarted.emit(gpTypeId)
 
 
 # A palette item requested deletion: forward to the main window, which owns the graphs

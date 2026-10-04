@@ -74,7 +74,12 @@ func gpNodeRect(gpId: String) -> Rect2:
 # --- lookup ports delegate to GPCanvasHitTest ---
 # --- 查找端口委托给 GPCanvasHitTest---
 func gpNodeCenter(gpId: String) -> Vector2:
-	return GPCanvasHitTest.gpNodeCenter(gpHost.gpGraph, gpId)
+	# Mount-aware: a mounted child's world centre is DERIVED, so the binder's definition lookup is
+	# passed through. Without it a nozzle would report its stale gpPosition (layout #1 of §6 in
+	# GPMountResolver's degradation ladder) and the connect-preview line would aim at the origin.
+	# 感知挂载：挂载子件的世界中心是**推导**的，故把绑定器的定义查找器透传下去。缺它时管口会报告
+	# 其过期的 gpPosition（GPMountResolver 降级阶梯第 1 层），连线预览会指向图纸原点。
+	return GPCanvasHitTest.gpNodeCenter(gpHost.gpGraph, gpId, gpDefLookupCallable())
 
 # Public port: repaint every symbol view. M10b fix — the tag label is painted by
 # GPSymbolView, NOT by the canvas, and a parent's queue_redraw never cascades to

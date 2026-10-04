@@ -12,6 +12,27 @@ An open-source P&ID (Piping and Instrumentation Diagram) editor built on the God
 
 ---
 
+## 下载 / Downloads
+
+**v0.1.0** —— 首个可使用的桌面版本（引擎 Godot 4.7）。
+
+**v0.1.0** — the first usable desktop release (engine Godot 4.7).
+
+| 平台 / Platform | 下载 / Download |
+|---|---|
+| Windows x86_64 | [Godot-PID-windows-v0.1.0.zip](https://github.com/jonsonw/Godot-PID/releases/download/v0.1.0/Godot-PID-windows-v0.1.0.zip) · exe 内嵌 pck，单文件即可运行 / single-file exe with embedded pck |
+| macOS (Apple Silicon / Intel) | [Godot-PID-macos-v0.1.0.zip](https://github.com/jonsonw/Godot-PID/releases/download/v0.1.0/Godot-PID-macos-v0.1.0.zip) · .app 包 / .app bundle |
+
+⚠️ macOS 版为**未签名**构建，系统首申会被 Gatekeeper 拦下，二选一即可：右键以「打开」运行，或在终端执行 `xattr -cr Godot-PID.app`。
+
+⚠️ The macOS build is **unsigned**, so Gatekeeper may block it on first launch. Either right-click and choose *Open*, or run `xattr -cr Godot-PID.app` in Terminal.
+
+想看全部版本（含历史与更新日志）请到 [Releases 页](https://github.com/jonsonw/Godot-PID/releases)。
+
+See the [Releases page](https://github.com/jonsonw/Godot-PID/releases) for all versions and the changelog.
+
+---
+
 ## 当前状态 / Current status
 
 本项目处于**早期开发阶段**（应用版本 `0.1.0`，引擎 Godot 4.7）。下表如实区分已实现与规划中的能力，避免误判：
@@ -30,6 +51,7 @@ This project is in **early development** (app version `0.1.0`, Godot 4.7). The t
 | 边标签（管线号）拖拽 + 引出线 | ✅ 可用 / Working |
 | 图框与标题栏、画布文字档位（mm↔px 单一换算源） | ✅ 可用 / Working |
 | 自动保存：首次保存后启用（脏 1 min / 净 5 min） | ✅ 可用 / Working |
+| **DEXPI 1.4 导出 / 导入**（Proteus XML 4.2.0） | ✅ 可用 / Working（概念层 + 图形层 + Extent；导出入口：导出子菜单） |
 | DXF / PDF / 基础清单导出 | 🚧 接口已定义，实现为空桩 / Stubs |
 | 3D 联动渲染 | 🚧 空桩 / Stub |
 | HAZOP 知识沉淀、合规校验、单元操作生成 | 📋 规划中，经 `GPIPIDAddon` 由 Pro 版提供 / Planned via Pro |
@@ -118,7 +140,15 @@ Godot-PID/                # GitHub 仓库根（本地工作目录为 Godot-PID-C
 │   ├── app/               # 应用服务层：命令、撤销栈、事件总线、文档管理
 │   │   └── commands/      # 29 条具体命令（增删移图元/图形/连线、路径与标签编辑、落点恢复）
 │   ├── render/            # GPSymbolView / GPEdgeView / 图框 GPFrameView / 背景 GPBackgroundView / 绘制器
-│   ├── io/                # *.pid.json 读写；DXF / PDF / 清单导出为桩
+│   ├── io/                # *.pid.json 读写；DEXPI（Proteus XML）导入导出；DXF / PDF / 清单导出为桩
+│   │   ├── dexpi_schema.gd    # 版本常量 / RDL 双域 / 保留 Set 名 / 版本能力表
+│   │   ├── xml_text.gd        # XML 转义与缩进单点；gpLang2() 语言标签两字母
+│   │   ├── dexpi_mapping.gd   # 数据驱动映射表；gpFlipY() / gpNormRgb() 唯一实现
+│   │   ├── dexpi_exporter.gd  # 预检 → 投影 → 序列化 → 原子写
+│   │   ├── dexpi_reader.gd    # XML → 与导出同构的中间结构
+│   │   ├── dexpi_validator.gd # L1 结构 + L2 规则 → GPImportReport
+│   │   ├── dexpi_importer.gd  # 中间结构 → v3 容器（喂既有 gpMergeInto）
+│   │   └── exporter_registry.gd # 导出器注册表：新增格式不再改 UI 分发
 │   ├── ui/
 │   │   ├── shell/         # 主窗口组合根、菜单栏、7 个协调者、快捷命令条、自动保存
 │   │   ├── canvas/        # 画布外壳 + 5 个实现类、增量同步、快捷键、右键菜单

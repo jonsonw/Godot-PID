@@ -168,4 +168,18 @@ func gpTestInsertEdgeRestoresIndex() -> void:
 
 func gpTestMetaVersionBumped() -> void:
 	var gpG: GPPIDGraph = GPPIDGraph.new()
-	gpEq(gpG.gpMeta.get("version", ""), "1.1", "new graphs are written as version 1.1")
+	gpEq(gpG.gpMeta.get("version", ""), "1.2", "new graphs are written as version 1.2")
+	# The literal above and the constant must agree, or a future bump edits one and silently
+	# leaves the other behind.
+	# 上面的字面量与常量必须一致，否则将来升级版本会只改一处、把另一处静默留下。
+	gpEq(gpG.gpMeta.get("version", ""), GPPIDGraph.GP_META_VERSION,
+		"the written version IS the constant, so a bump cannot half-apply")
+	# 1.2 is a CAPABILITY statement, not a compatibility gate: an older file must still load,
+	# and must KEEP its own version. Restamping it would destroy the reader's only cheap way to
+	# tell "written before mounts existed" from "written after, with no mounts".
+	# 1.2 是**能力声明**而非兼容闸门：旧文件必须仍可加载，且必须**保留**自身版本。
+	# 重新盖章会毁掉读取方唯一廉价的判据 —— 区分「写于挂载存在之前」与「写于之后但无挂载」。
+	var gpOld: GPPIDGraph = GPPIDGraph.gpFromDict(
+		{"meta": {"version": "1.1"}, "nodes": [], "edges": []})
+	gpEq(gpOld.gpMeta.get("version", ""), "1.1", "a 1.1 file still loads and keeps its version")
+	gpEq(gpOld.gpNodes.size(), 0, "a 1.1 file with no nodes loads as an empty graph")

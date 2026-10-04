@@ -246,3 +246,50 @@ func gpTestToGraphDictPicksSheet() -> void:
 	if gpNodes.size() >= 1:
 		gpCheck(str((gpNodes[0] as Dictionary).get("tag", "")) == "P-201",
 			"sheet 2's node should be P-201")
+
+
+# Mounting keys must survive normalisation. Regression nail for the 2026-10-04 bug: the
+# normaliser's rebuild dropped every mount key, so each save->load round trip silently
+# UN-MOUNTED all child parts — nozzles collapsed onto the host centre, host port supersession
+# broke, and pipe ends latched onto the wrong ports.
+# 挂载键必须在归一化中存活。2026-10-04 缺陷的回归钉：归一化器的重建丢掉全部挂载键，
+# 以致每次「保存->打开」都把所有子件**静默卸载** —— 管嘴塌到宿主中心、宿主端口取代失效、
+# 管线端点吸附到错误端口。
+func gpTestMountKeysSurviveMigration() -> void:
+	var gpIn: Dictionary = {
+		"meta": {"version": "1.1"},
+		"nodes": [
+			{"instance_id": "n1", "symbol_id": "tank", "position": [10.0, 20.0]},
+			{"instance_id": "n2", "symbol_id": "nozzle", "position": [10.0, 20.0],
+				"parent_uid": "n1", "mount_anchor": "ves_bottom_nozzle",
+				"mount_offset": [1.5, -2.0], "mount_angle_deg": 90.0,
+				"label_slots": {"tag": "bottom"}},
+		],
+		"edges": [],
+	}
+	var gpOut: Dictionary = GPSchemaMigrate.gpMigrate(gpIn)
+	var gpNodes: Array = ((gpOut.get("sheets", []) as Array)[0] as Dictionary).get(
+		"nodes", []) as Array
+	gpCheck(gpNodes.size() == 2, "both nodes should survive")
+	if gpNodes.size() < 2:
+		return
+	var gpChild: Dictionary = gpNodes[1] as Dictionary
+	gpCheck(str(gpChild.get("parent_uid", "")) == "n1",
+		"parent_uid must survive migration")
+	gpCheck(str(gpChild.get("mount_anchor", "")) == "ves_bottom_nozzle",
+		"mount_anchor must survive migration")
+	var gpMo: Array = gpChild.get("mount_offset", []) as Array
+	gpCheck(gpMo.size() == 2 and float(gpMo[0]) == 1.5 and float(gpMo[1]) == -2.0,
+		"mount_offset must survive migration")
+	gpCheck(is_equal_approx(float(gpChild.get("mount_angle_deg", 0.0)), 90.0),
+		"mount_angle_deg must survive migration")
+	gpCheck(str((gpChild.get("label_slots", {}) as Dictionary).get("tag", "")) == "bottom",
+		"label_slots must survive migration")
+	# An UNMOUNTED node must grow no mount keys (byte-stability for untouched archives).
+	# 未挂载节点不得长出挂载键（未动过的存档保持字节稳定）。
+	var gpHost: Dictionary = gpNodes[0] as Dictionary
+	gpCheck(not gpHost.has("parent_uid") and not gpHost.has("mount_anchor"),
+		"an unmounted node must not grow mount keys")
+	# Idempotence must hold with mount keys present. / 带挂载键时幂等仍须成立。
+	gpCheck(GPSchemaMigrate.gpMigrate(gpOut) == gpOut,
+		"migration must stay idempotent for mounted nodes")

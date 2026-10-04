@@ -119,23 +119,26 @@ static func _gpSnapEndpoint(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpWorld:
 	var gpTypedD: float = gpR
 	var gpAnyD: float = gpR
 	for gpN in gpGraph.gpNodes:
-		var gpDef: GPSymbolDef = null
-		if gpDefLookup.is_valid():
-			gpDef = gpDefLookup.call(gpN.gpSymbolId) as GPSymbolDef
-		if gpDef == null or gpDef.gpPorts.is_empty():
-			continue
-		for gpP in gpDef.gpPorts:
-			var gpPos: Vector2 = gpN.gpPosition + GPPortResolver.gpPortLocalOriented(gpDef, gpN, gpP)
+		# The serving ports, not the definition's own: a host whose nozzles are mounted snaps at
+		# their tips, so a pipe leaves the nozzle the drawing shows instead of the vessel wall
+		# underneath it (see GPMountResolver.gpPortsSuperseded()).
+		# 取**实际承载**的端口，而非定义自带的：已装管嘴的宿主在其管嘴端吸附，使管线从图纸真正画出的
+		# 管嘴接出，而不是从压在它下面的罐壁接出（见 GPMountResolver.gpPortsSuperseded()）。
+		for gpS in GPMountResolver.gpServingPorts(gpGraph, gpDefLookup, gpN):
+			var gpSN: GPPIDNode = gpS["node"]
+			var gpSP: GPPort = gpS["port"]
+			var gpSDef: GPSymbolDef = gpS["def"]
+			var gpPos: Vector2 = GPPortResolver.gpPortWorld(gpGraph, gpDefLookup, gpSDef, gpSN, gpSP)
 			var gpD: float = gpPos.distance_to(gpWorld)
 			if gpD > gpR:
 				continue
-			var gpTyped: bool = gpWantTypes.is_empty() or gpWantTypes.has(gpP.gpType)
+			var gpTyped: bool = gpWantTypes.is_empty() or gpWantTypes.has(gpSP.gpType)
 			if gpTyped and gpD < gpTypedD:
 				gpTypedD = gpD
-				gpBestTyped = _gpPort(gpN, gpP, gpPos)
+				gpBestTyped = _gpPort(gpGraph, gpDefLookup, gpSN, gpSP, gpPos)
 			if gpD < gpAnyD:
 				gpAnyD = gpD
-				gpBestAny = _gpPort(gpN, gpP, gpPos)
+				gpBestAny = _gpPort(gpGraph, gpDefLookup, gpSN, gpSP, gpPos)
 	# A type-matching port always beats a closer mismatched one: clicking an actuator while the
 	# pipe tool is armed should report "wrong kind", not latch onto the wrong thing.
 	# 类型匹配的端口永远胜过更近但不匹配的那个：管道工具已激活时点到执行机构，应报告「类型不符」
@@ -146,9 +149,11 @@ static func _gpSnapEndpoint(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpWorld:
 		return gpBestAny
 	# Legacy packs and "general" symbols have no ports; their centre is the honest answer.
 	# 老符号包与 general 图元没有端口，其中心是诚实的答案。
+	# The centre is the WORLD origin, so a mounted child snaps at its host-derived position.
+	# 中心取**世界**原点，故挂载子件在其宿主推导位置处吸附。
 	for gpN in gpGraph.gpNodes:
-		if gpN.gpPosition.distance_to(gpWorld) <= gpR:
-			return _gpNode(gpN)
+		if GPPortResolver.gpNodeWorldOrigin(gpGraph, gpDefLookup, gpN).distance_to(gpWorld) <= gpR:
+			return _gpNode(gpGraph, gpDefLookup, gpN)
 	return _gpGrid(gpWorld)
 
 
@@ -369,24 +374,25 @@ static func gpIsPort(gpSnap: Dictionary) -> bool:
 	return str(gpSnap.get("kind", "")) == GP_PORT
 
 
-static func _gpPort(gpN: GPPIDNode, gpP: GPPort, gpPos: Vector2) -> Dictionary:
+static func _gpPort(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpN: GPPIDNode, gpP: GPPort,
+		gpPos: Vector2) -> Dictionary:
 	return {
 		"kind": GP_PORT,
 		"node_id": gpN.gpInstanceId,
 		"port_id": gpP.gpName,
 		"pos": gpPos,
-		"dir": GPPortResolver.gpPortDirOriented(gpN, gpP),
+		"dir": GPPortResolver.gpPortWorldDir(gpGraph, gpDefLookup, gpN, gpP),
 		"type": gpP.gpType,
 		"bound": true,
 	}
 
 
-static func _gpNode(gpN: GPPIDNode) -> Dictionary:
+static func _gpNode(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpN: GPPIDNode) -> Dictionary:
 	return {
 		"kind": GP_NODE,
 		"node_id": gpN.gpInstanceId,
 		"port_id": "",
-		"pos": gpN.gpPosition,
+		"pos": GPPortResolver.gpNodeWorldOrigin(gpGraph, gpDefLookup, gpN),
 		"dir": Vector2.ZERO,
 		"type": "",
 		"bound": true,

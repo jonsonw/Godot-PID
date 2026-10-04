@@ -111,10 +111,17 @@ func gpTagRules() -> GPProjectTagRules:
 # Returns false when nothing was deleted, so the caller can skip the repaint.
 # 把混合选择集（节点及其连边，外加注释图形）作为一步删除。
 # 未删掉任何东西时返回 false，调用方可据此跳过重绘。
-func gpDeleteSelection(gpNodeIds: Array[String], gpShapeIdxs: Array[int], gpEdgeIds: Array[String] = []) -> bool:
+#
+# gpDefLookup is what lets the node half recognise a REQUIRED part (an A-class built-in nozzle) and
+# refuse to delete it (规划 §16.2); passing an invalid lookup disables only that guard.
+# gpDefLookup 使节点部分能识别**必需**部件（A 类自带管口）并拒绝对其删除（规划 §16.2）；
+# 传入无效查找器只会关闭该护栏。
+func gpDeleteSelection(gpNodeIds: Array[String], gpShapeIdxs: Array[int],
+		gpEdgeIds: Array[String] = [], gpDefLookup: Callable = Callable()) -> bool:
 	if gpNodeIds.is_empty() and gpShapeIdxs.is_empty() and gpEdgeIds.is_empty():
 		return false
-	var gpCmd: GPDeleteSelectionCommand = GPDeleteSelectionCommand.new(gpNodeIds, gpShapeIdxs, gpEdgeIds)
+	var gpCmd: GPDeleteSelectionCommand = GPDeleteSelectionCommand.new(gpNodeIds, gpShapeIdxs,
+		gpEdgeIds, gpDefLookup)
 	return gpStack.gpDo(gpCmd, gpCtx)
 
 
@@ -236,13 +243,88 @@ func gpBatchSetProperty(gpNodeIds: Array[String], gpKey: String, gpValue: Varian
 
 # Place one symbol instance. Returns the new node's id, or "" when it could not be placed.
 # 放置一个图元实例。返回新节点 id，无法放置时返回 ""。
-func gpPlaceNode(gpSymbolId: String, gpWorld: Vector2, gpTag: String = "") -> String:
+#
+# The returned id is the HOST's. Placing a vessel also instantiates its built-in parts (nozzles,
+# manhole — 规划 §16) as ONE undo step, but they are secondary symbols and are deliberately not
+# what the caller selects next.
+# 返回的是**宿主** id。放置一台设备会同时实例化其自带部件（管口、人孔 —— 规划 §16），
+# 全在**一个**撤销步内；但它们是次级图元，刻意不是调用方随后要选中的对象。
+#
+# gpDefLookup lets the command recognise the host's default children; an invalid lookup falls back
+# to the global symbol library, so a caller that has a binder should still pass it in.
+# gpDefLookup 使命令能识别宿主的默认子件；无效时回退到全局图元库，
+# 故持有绑定器的调用方仍应把它传进来。
+func gpPlaceNode(gpSymbolId: String, gpWorld: Vector2, gpTag: String = "",
+		gpDefLookup: Callable = Callable()) -> String:
 	if gpSymbolId == "":
 		return ""
-	var gpCmd: GPAddNodeCommand = GPAddNodeCommand.new(gpSymbolId, gpWorld, gpTag)
+	var gpCmd: GPAddNodeCommand = GPAddNodeCommand.new(gpSymbolId, gpWorld, gpTag, gpDefLookup)
 	if not gpStack.gpDo(gpCmd, gpCtx):
 		return ""
 	return gpCmd.gpCreatedId
+
+
+# ---- P2: primary / secondary symbols (主图元 / 次级图元) ----
+# ---- P2：主图元 / 次级图元 ----
+
+# Attach one child onto a host anchor. Returns the new node's id, or "" when it was refused.
+# 把一个子件挂到宿主锚点上。返回新节点 id；被拒时返回 ""。
+#
+# The refusal is machine-readable in gpLastRefusal (mirrors gpConnectEdgeRouted()): the two attach
+# interactions both need to explain WHY nothing happened, and "the host is gone" is the only case
+# the UI cannot pre-check cheaply.
+# 拒绝原因以机器可读形式存入 gpLastRefusal（与 gpConnectEdgeRouted() 一致）：
+# 两种附件交互都需要说明「为何什么都没发生」，而「宿主已消失」是 UI 无法廉价预检的唯一情形。
+func gpAttachNode(gpSymbolId: String, gpParentUid: String, gpAnchor: String,
+		gpTag: String = "", gpOffset: Vector2 = Vector2.ZERO,
+		gpAngleDeg: float = 0.0) -> String:
+	gpLastRefusal = ""
+	if gpSymbolId == "" or gpParentUid == "":
+		# PREFIX-FREE, like the edge refusals: the "attach." namespace is added downstream by
+		# GPCanvasEditFacade.gpReportRefusal() (see attach_node_command.gd for the full reasoning).
+		# **不带前缀**，与边的拒绝原因一致："attach." 命名空间由下游的
+		# GPCanvasEditFacade.gpReportRefusal() 添加（完整理由见 attach_node_command.gd）。
+		gpLastRefusal = "no_host"
+		return ""
+	var gpCmd: GPAttachNodeCommand = GPAttachNodeCommand.new(gpSymbolId, gpParentUid, gpAnchor,
+		gpTag, gpOffset, gpAngleDeg)
+	if not gpStack.gpDo(gpCmd, gpCtx):
+		gpLastRefusal = gpCmd.gpRefusal
+		return ""
+	return gpCmd.gpCreatedId
+
+
+# Detach the given nodes from their hosts, baking each derived world transform into its own fields
+# so nothing jumps. Returns false when none of them was mounted.
+# 把给定节点从其宿主上卸下，并把推导出的世界变换烘焙进各自字段，使任何东西都不跳位。
+# 若没有一个处于挂载态则返回 false。
+func gpDetachNodes(gpNodeIds: Array[String], gpDefLookup: Callable = Callable()) -> bool:
+	if gpNodeIds.is_empty():
+		return false
+	var gpCmd: GPDetachNodesCommand = GPDetachNodesCommand.new(gpNodeIds, gpDefLookup)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Re-mount nodes onto new (host, anchor, offset, angle) tuples as ONE undo step. Returns false when
+# nothing actually changed, so a drag that ends on the anchor it started from records no undo step.
+# 一步把节点改挂到新的 (宿主, 锚点, 偏移, 角) 元组上。若实际无变化则返回 false，
+# 使「拖了一圈又落回原锚点」不产生撤销步。
+#
+# ⚠️ COMMIT ORDER (same trap as gpMoveNodes) / 提交时序（与 gpMoveNodes 同一个坑）：
+# During a drag the caller has ALREADY written the tuples live (that is how the part followed the
+# cursor). It must therefore RESTORE the pre-drag tuple before calling this, so the command sees a
+# real change and re-applies exactly the user's drag. Calling it with the live values still in place
+# makes the "nothing changed" guard fire, the stack records nothing, and the drag silently becomes
+# un-undoable — which is precisely the class of bug the guard exists to catch, not to cause.
+# 拖拽期间调用方**已经**把元组实时写入（部件跟随光标即由此而来）。因此它必须在此调用前**先恢复**
+# 拖拽前的元组，使命令看到真实变化并重新应用用户的那次拖拽。若带着实时结果调用，命令的
+# 「无变化」护栏会触发、栈什么也不记、这次拖拽就静默变成不可撤销 —— 而那恰是该护栏要**抓住**、
+# 而非造成的缺陷类别。
+func gpSetMount(gpNodeIds: Array[String], gpTargets: Array[Dictionary]) -> bool:
+	if gpNodeIds.is_empty() or gpTargets.is_empty():
+		return false
+	var gpCmd: GPSetMountCommand = GPSetMountCommand.new(gpNodeIds, gpTargets)
+	return gpStack.gpDo(gpCmd, gpCtx)
 
 
 # Connect two nodes with an edge. Returns false for a self-connection or a missing graph.
