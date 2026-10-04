@@ -40,20 +40,14 @@ This project is in **early development** (app version `0.1.0`, Godot 4.7). The t
 
 ## Downloads / 下载
 
-**v0.1.0** —— 首个可使用的桌面版本（引擎 Godot 4.7）。
-
 **v0.1.0** — the first usable desktop release (engine Godot 4.7).
 
-| Platform / 平台 | Download / 下载 |
+| Platform | Download |
 |---|---|
-| Windows x86_64 | [Godot-PID-windows-v0.1.0.zip](https://github.com/jonsonw/Godot-PID/releases/download/v0.1.0/Godot-PID-windows-v0.1.0.zip) · exe 内嵌 pck，单文件即可运行 / single-file exe with embedded pck |
-| macOS (Apple Silicon / Intel) | [Godot-PID-macos-v0.1.0.zip](https://github.com/jonsonw/Godot-PID/releases/download/v0.1.0/Godot-PID-macos-v0.1.0.zip) · .app 包 / .app bundle |
-
-⚠️ macOS 版为**未签名**构建，系统首申会被 Gatekeeper 拦下，二选一即可：右键以「打开」运行，或在终端执行 `xattr -cr Godot-PID.app`。
+| Windows x86_64 | [Godot-PID-windows-v0.1.0.zip](https://github.com/jonsonw/Godot-PID/releases/download/v0.1.0/Godot-PID-windows-v0.1.0.zip) · single-file exe with embedded pck |
+| macOS (Apple Silicon / Intel) | [Godot-PID-macos-v0.1.0.zip](https://github.com/jonsonw/Godot-PID/releases/download/v0.1.0/Godot-PID-macos-v0.1.0.zip) · .app bundle |
 
 ⚠️ The macOS build is **unsigned**, so Gatekeeper may block it on first launch. Either right-click and choose *Open*, or run `xattr -cr Godot-PID.app` in Terminal.
-
-想看全部版本（含历史与更新日志）请到 [Releases 页](https://github.com/jonsonw/Godot-PID/releases)。
 
 See the [Releases page](https://github.com/jonsonw/Godot-PID/releases) for all versions and the changelog.
 

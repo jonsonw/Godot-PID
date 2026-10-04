@@ -49,15 +49,20 @@ jobs:
       - name: Install export templates (4.7.stable)
         run: |
           set -euo pipefail
-          TEMPLATE_DIR="$HOME/.local/share/godot/templates/4.7.stable"
+          # ⚠️ Linux 上 Godot 找的是 <data>/export_templates/<ver>/（<data> = ~/.local/share/godot）。
+          # 写成 .../godot/templates/... 会让导出报 "No export template found"，CI 直接红。
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/4.7.stable"
           rm -rf "$TEMPLATE_DIR"
           mkdir -p "$TEMPLATE_DIR"
           curl -fsSL -o /tmp/templates.tpz "$TPZ_URL"
           # ⚠️ .tpz 是 zip 不是 tar；且 4.7 的包内多套一层 templates/，必须上提，
           # 否则 Godot 在 export_templates/<ver>/ 下找不到 windows_release_*.exe。
           unzip -q -o /tmp/templates.tpz -d "$TEMPLATE_DIR"
-          mv "$TEMPLATE_DIR/templates"/* "$TEMPLATE_DIR/"
-          rmdir "$TEMPLATE_DIR/templates"
+          # 4.7 的包内多套一层 templates/，必须上提；不存在则跳过（别让 set -e 中断）。
+          if [ -d "$TEMPLATE_DIR/templates" ]; then
+            find "$TEMPLATE_DIR/templates" -mindepth 1 -maxdepth 1 -exec mv -n {} "$TEMPLATE_DIR/" \;
+            rmdir "$TEMPLATE_DIR/templates"
+          fi
           ls "$TEMPLATE_DIR" | grep -Ei "windows_release" || { echo "windows template missing"; exit 1; }
 
       - name: Export Windows release (embedded pck → single exe)
@@ -80,8 +85,13 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
-          gh release create "$TAG" --title "G-PID ${TAG}" --generate-notes \
-            "Godot-PID-windows-${TAG}.zip" || gh release upload "$TAG" "Godot-PID-windows-${TAG}.zip" --clobber
+          ZIP="Godot-PID-windows-${TAG}.zip"
+          # 两个 job 并行推同一个 Release：谁先建谁 create，后到的一律走 upload --clobber。
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" --clobber
+          else
+            gh release create "$TAG" --title "G-PID ${TAG}" --generate-notes "$ZIP"
+          fi
 
   macos:
     name: macOS build (macos-latest)
@@ -99,8 +109,11 @@ jobs:
           curl -fsSL -o /tmp/templates.tpz "$TPZ_URL"
           # 同 Windows job：tpz 是 zip + 包内多一层 templates/，必须 unzip 并上提。
           unzip -q -o /tmp/templates.tpz -d "$TEMPLATE_DIR"
-          mv "$TEMPLATE_DIR/templates"/* "$TEMPLATE_DIR/"
-          rmdir "$TEMPLATE_DIR/templates"
+          # 4.7 的包内多套一层 templates/，必须上提；不存在则跳过（别让 set -e 中断）。
+          if [ -d "$TEMPLATE_DIR/templates" ]; then
+            find "$TEMPLATE_DIR/templates" -mindepth 1 -maxdepth 1 -exec mv -n {} "$TEMPLATE_DIR/" \;
+            rmdir "$TEMPLATE_DIR/templates"
+          fi
           # ⚠️ 4.7 的 macOS 模板不是平铺的 macos_release_universal，而是按需解压的 macos.zip。
           ls "$TEMPLATE_DIR" | grep -Ei "macos_release|macos\.zip" || { echo "macos template missing"; exit 1; }
 
@@ -135,5 +148,9 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
-          gh release create "$TAG" --title "G-PID ${TAG}" --generate-notes \
-            "Godot-PID-macos-${TAG}.zip" || gh release upload "$TAG" "Godot-PID-macos-${TAG}.zip" --clobber
+          ZIP="Godot-PID-macos-${TAG}.zip"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" --clobber
+          else
+            gh release create "$TAG" --title "G-PID ${TAG}" --generate-notes "$ZIP"
+          fi
