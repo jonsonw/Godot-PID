@@ -29,29 +29,106 @@ extends RefCounted
 # 顺序要紧：先镜像（在图元自身坐标系内），再旋转 —— 渲染器必须用同一顺序，否则「先翻转再旋转」
 # 的阀门端口会跑到错误一侧。
 static func gpPortLocalOriented(gpDef: GPSymbolDef, gpNode: GPPIDNode, gpPort: GPPort) -> Vector2:
-	if gpDef == null or gpNode == null or gpPort == null:
+	if gpNode == null:
 		return Vector2.ZERO
-	var gpL: Vector2 = gpDef.gpPortLocal(gpPort)
-	if gpNode.gpFlipped:
-		gpL.x = -gpL.x
-	if not is_zero_approx(gpNode.gpRotationDeg):
-		gpL = gpL.rotated(deg_to_rad(gpNode.gpRotationDeg))
-	return gpL
+	return gpPortLocalInFrame(gpDef, gpPort, gpNode.gpFlipped, gpNode.gpRotationDeg)
 
 
 # Outward normal of a port in world direction (unit length, or ZERO when the port declares none).
 # 端口向外法线的世界方向（单位长度；端口未声明法线时为零向量）。
 static func gpPortDirOriented(gpNode: GPPIDNode, gpPort: GPPort) -> Vector2:
-	if gpNode == null or gpPort == null:
+	if gpNode == null:
+		return Vector2.ZERO
+	return gpPortDirInFrame(gpPort, gpNode.gpFlipped, gpNode.gpRotationDeg)
+
+
+# ---- frame-explicit primitives + mount-aware world resolution ----
+# ---- 显式坐标系的原语 + 感知挂载的世界解析 ----
+#
+# WHY THE FRAME IS PASSED IN INSTEAD OF READ OFF THE NODE / 为何坐标系由外部传入而非从节点读取：
+# A MOUNTED child's orientation is NOT its own — it is derived from its host's chain. The two
+# primitives below take the flip / rotation explicitly, so the same math serves both an unmounted
+# node (its own fields) and a mounted child (its derived frame), and neither can drift from the
+# other because there is still exactly one implementation.
+# 挂载子件的朝向**不是它自己的** —— 它由宿主父链推导。下面两个原语把翻转 / 旋转显式传入，
+# 故同一套数学既服务未挂载节点（用其自身字段），也服务挂载子件（用其推导坐标系），
+# 且两者不会分家，因为实现仍然只有一处。
+
+# Local (node-centered) port offset under an EXPLICIT frame.
+# 在**显式**坐标系下，端口相对节点中心的本地偏移。
+static func gpPortLocalInFrame(gpDef: GPSymbolDef, gpPort: GPPort, gpFlipped: bool,
+		gpRotDeg: float) -> Vector2:
+	if gpDef == null or gpPort == null:
+		return Vector2.ZERO
+	var gpL: Vector2 = gpDef.gpPortLocal(gpPort)
+	if gpFlipped:
+		gpL.x = -gpL.x
+	if not is_zero_approx(gpRotDeg):
+		gpL = gpL.rotated(deg_to_rad(gpRotDeg))
+	return gpL
+
+
+# Outward port normal under an EXPLICIT frame, normalized (ZERO stays ZERO).
+# 在**显式**坐标系下，端口向外法线，已归一化（零向量保持零向量）。
+static func gpPortDirInFrame(gpPort: GPPort, gpFlipped: bool, gpRotDeg: float) -> Vector2:
+	if gpPort == null:
 		return Vector2.ZERO
 	var gpD: Vector2 = gpPort.gpDir
 	if gpD == Vector2.ZERO:
 		return Vector2.ZERO
-	if gpNode.gpFlipped:
+	if gpFlipped:
 		gpD.x = -gpD.x
-	if not is_zero_approx(gpNode.gpRotationDeg):
-		gpD = gpD.rotated(deg_to_rad(gpNode.gpRotationDeg))
+	if not is_zero_approx(gpRotDeg):
+		gpD = gpD.rotated(deg_to_rad(gpRotDeg))
 	return gpD.normalized()
+
+
+# A node's WORLD frame, folded through its mount chain. Top-level nodes return their own frame,
+# so every pre-mount caller keeps its exact current behaviour.
+# 节点经挂载父链折算后的**世界**坐标系。顶层节点返回其自身坐标系，
+# 故每个挂载前的调用方行为完全不变。
+static func gpNodeFrame(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpNode: GPPIDNode) -> Dictionary:
+	return GPMountResolver.gpWorldTransform(gpGraph, gpDefLookup, gpNode)
+
+
+# World origin of a node: its own position when top-level, the DERIVED origin when mounted.
+# 节点的世界原点：顶层时为其自身坐标，挂载时为**推导**而来的原点。
+static func gpNodeWorldOrigin(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpNode: GPPIDNode) -> Vector2:
+	if gpNode == null:
+		return Vector2.ZERO
+	# Fast path: an unmounted node's origin IS its position, and that is the overwhelming majority.
+	# 快路径：未挂载节点的原点**就是**它的坐标，而这是绝大多数情形。
+	if not gpNode.gpIsMounted():
+		return gpNode.gpPosition
+	return gpNodeFrame(gpGraph, gpDefLookup, gpNode)["origin"]
+
+
+# WORLD position of a port, with the node's mount chain folded in — the ONE place canvas, pipes,
+# snap, hit-test and grips all read a port's position from.
+# 端口的**世界**坐标，已把节点的挂载父链计入 —— 画布、管线、吸附、命中与抓取点读取端口位置的
+# 唯一来源。
+static func gpPortWorld(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpDef: GPSymbolDef,
+		gpNode: GPPIDNode, gpPort: GPPort) -> Vector2:
+	if gpNode == null or gpPort == null:
+		return Vector2.ZERO
+	if not gpNode.gpIsMounted():
+		return gpNode.gpPosition + gpPortLocalInFrame(gpDef, gpPort, gpNode.gpFlipped,
+			gpNode.gpRotationDeg)
+	var gpFrame: Dictionary = gpNodeFrame(gpGraph, gpDefLookup, gpNode)
+	return (gpFrame["origin"] as Vector2) + gpPortLocalInFrame(gpDef, gpPort,
+		bool(gpFrame["flipped"]), float(gpFrame["rot_deg"]))
+
+
+# WORLD direction of a port's outward normal, with the node's mount chain folded in.
+# 端口向外法线的**世界**方向，已把节点的挂载父链计入。
+static func gpPortWorldDir(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpNode: GPPIDNode,
+		gpPort: GPPort) -> Vector2:
+	if gpNode == null or gpPort == null:
+		return Vector2.ZERO
+	if not gpNode.gpIsMounted():
+		return gpPortDirInFrame(gpPort, gpNode.gpFlipped, gpNode.gpRotationDeg)
+	var gpFrame: Dictionary = gpNodeFrame(gpGraph, gpDefLookup, gpNode)
+	return gpPortDirInFrame(gpPort, bool(gpFrame["flipped"]), float(gpFrame["rot_deg"]))
 
 
 # Resolve one edge end into {"pos": Vector2, "dir": Vector2, "bound": bool, "why": String}.
@@ -90,8 +167,12 @@ static func gpResolveEnd(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpEdge: GPP
 	if gpDefLookup.is_valid():
 		gpDef = gpDefLookup.call(gpNode.gpSymbolId) as GPSymbolDef
 	# 3. No definition or no ports. / 无定义或无端口。
+	# The centre is the node's WORLD origin, not its stored position: a MOUNTED child stores no
+	# world coordinate at all, so its host chain has to supply it here too.
+	# 中心取节点的**世界**原点而非存储坐标：挂载子件根本不存世界坐标，故此处也须由宿主父链给出。
 	if gpDef == null or gpDef.gpPorts.is_empty():
-		return {"pos": gpNode.gpPosition, "dir": Vector2.ZERO, "bound": true, "why": "center"}
+		return {"pos": gpNodeWorldOrigin(gpGraph, gpDefLookup, gpNode), "dir": Vector2.ZERO,
+			"bound": true, "why": "center"}
 	# 1. Exact port hit. / 精确命中端口。
 	var gpPortId: String = str(gpRef.get("port_id", ""))
 	var gpPort: GPPort = gpDef.gpPortByName(gpPortId) if gpPortId != "" else null
@@ -100,12 +181,13 @@ static func gpResolveEnd(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpEdge: GPP
 	if gpPort == null:
 		var gpCands: Array[GPPort] = gpDef.gpPortsOfType(gpWantType) if gpWantType != "" else gpDef.gpPorts
 		if gpCands.is_empty():
-			return {"pos": gpNode.gpPosition, "dir": Vector2.ZERO, "bound": true, "why": "center"}
+			return {"pos": gpNodeWorldOrigin(gpGraph, gpDefLookup, gpNode), "dir": Vector2.ZERO,
+				"bound": true, "why": "center"}
 		gpPort = gpCands[0]
 		gpWhy = "typed"
 	return {
-		"pos": gpNode.gpPosition + gpPortLocalOriented(gpDef, gpNode, gpPort),
-		"dir": gpPortDirOriented(gpNode, gpPort),
+		"pos": gpPortWorld(gpGraph, gpDefLookup, gpDef, gpNode, gpPort),
+		"dir": gpPortWorldDir(gpGraph, gpDefLookup, gpNode, gpPort),
 		"bound": true,
 		"why": gpWhy,
 	}

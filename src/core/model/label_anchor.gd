@@ -60,6 +60,33 @@ static func gpClamp(gpAnchor: int, gpOffset: Vector2) -> Vector2:
 		clampf(gpOffset.y, -gpLim, gpLim))
 
 
+# Rotate an anchor position by N quarter turns, positive = clockwise on screen (the same sense as
+# Vector2.rotated()). AUTO and INSIDE have no side to rotate to, so they pass through unchanged.
+# 把锚点方位旋转 N 个 90°，正数 = 屏幕顺时针（与 Vector2.rotated() 同向）。
+# AUTO 与 INSIDE 没有「侧」可转，故原样返回。
+#
+# WHY IT EXISTS / 为何需要：
+# A part mounted on a vertical face (a nozzle standing on a vessel top) must lay its two texts
+# SIDE BY SIDE, while the same part on a horizontal face stacks them. Rotating the anchor — not
+# the text — is what keeps the text upright while moving it to the correct side.
+# 装在竖直面上的部件（立在罐顶的管嘴）要把它那两段文字**左右并排**，而同一部件在水平面上则上下
+# 堆叠。旋转**锚点**（而不是文字）正是「文字保持正立、位置却落到正确一侧」的做法。
+static func gpRotateAnchor(gpAnchor: int, gpQuarters: int) -> int:
+	if gpQuarters == 0:
+		return gpAnchor
+	var gpQ: int = ((gpQuarters % 4) + 4) % 4
+	if gpQ == 0:
+		return gpAnchor
+	# The four sides in CLOCKWISE order, so +1 quater turn moves each one to the next entry.
+	# 四个侧面按**顺时针**排列，故 +1 个 90° 即移到下一项。
+	var gpCW: Array[int] = [
+		GPAnchor.GP_BELOW, GPAnchor.GP_LEFT, GPAnchor.GP_ABOVE, GPAnchor.GP_RIGHT]
+	var gpAt: int = gpCW.find(gpAnchor)
+	if gpAt < 0:
+		return gpAnchor
+	return gpCW[(gpAt + gpQ) % 4]
+
+
 # Anchor base position in symbol-local pixels (before the user's offset is applied).
 # 锚点基准位置（图元本地像素坐标，尚未叠加用户偏移）。
 # [param gpSize] envelope size in pixels. / 包络尺寸（像素）。

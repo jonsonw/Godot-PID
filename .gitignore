@@ -40,3 +40,19 @@ gut_junit.xml
 /1.pid.json.bak
 /test.pid.json
 /test.pid.json.bak
+
+# ===== 手工测试存档 / DEXPI 导出产物（不同步入库）=====
+# 形如 W6.pid.xml / w7.pid.json 的手动测试稿与导出出的 XML，属 scratch 数据。
+# Scratch archives (e.g. W6.pid.xml) and exported XML from manual testing.
+/*.pid.xml
+/*.pid.xml.bak
+/W*.pid.json
+/W*.pid.json.bak
+
+# ===== 构建导出产物（v0.1 起每次 Release 打包输出，不入库）=====
+# 导出预设 export_path 指向 build/{mac,win}/；二进制一律走 GitHub Release 分发。
+# Build output produced by export presets (build/mac, build/win); binaries are
+# distributed via GitHub Releases, never committed.
+/build/
+*.dmg
+

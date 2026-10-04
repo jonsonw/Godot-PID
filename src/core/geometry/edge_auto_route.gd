@@ -49,6 +49,15 @@ const GP_MAX_CELLS: int = 60000
 # World-space envelopes of every node, EXCLUDING the given ids. The caller excludes the two
 # endpoint nodes: a pipe must be allowed to touch the very symbols it connects.
 # 每个节点的世界坐标包络，排除给定 id。调用方排除两个端点节点：管线必须被允许接触它所连接的图元。
+#
+# MOUNT-AWARE / 感知挂载：
+# The envelope is centred on the node's DERIVED world origin, not on its stored gpPosition — for a
+# mounted child the stored value is meaningless (see GPMountResolver), so using it would scatter
+# phantom obstacles across the sheet origin and the router would detour around empty space.
+# 包络以节点**推导**的世界原点为中心，而非其存储的 gpPosition —— 对挂载子件而言存储值不带意义
+# （见 GPMountResolver），用它会把幽灵障碍物散布到图纸原点，布线器会绕开一片空地。
+# This module lives in core/geometry alongside GPPortResolver, so the dependency is downward.
+# 本模块与 GPPortResolver 同属 core/geometry，故该依赖方向朝下、合法。
 static func gpObstacles(gpGraph: GPPIDGraph, gpDefLookup: Callable,
 		gpSkipIds: Array[String] = []) -> Array[Rect2]:
 	var gpOut: Array[Rect2] = []
@@ -61,7 +70,8 @@ static func gpObstacles(gpGraph: GPPIDGraph, gpDefLookup: Callable,
 		if gpDefLookup.is_valid():
 			gpDef = gpDefLookup.call(gpN.gpSymbolId) as GPSymbolDef
 		var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef != null else Vector2(64.0, 48.0)
-		gpOut.append(Rect2(gpN.gpPosition - gpSz / 2.0, gpSz))
+		var gpOrigin: Vector2 = GPPortResolver.gpNodeWorldOrigin(gpGraph, gpDefLookup, gpN)
+		gpOut.append(Rect2(gpOrigin - gpSz / 2.0, gpSz))
 	return gpOut
 
 

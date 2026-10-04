@@ -44,10 +44,12 @@ const GP_MENUS: Dictionary = {
 		["menu.file_save_as", "file_save_as"],
 		null,
 		["menu.file_import", "file_import"],
+		["menu.import_dexpi", "import_dexpi"],
 		{"title": "menu.export", "items": [
 			["menu.export_project", "export_project"],
 			["menu.export_library", "export_library"],
 			["menu.export_config", "export_config"],
+			["menu.export_dexpi", "export_dexpi"],
 			null,
 			["menu.export_pdf", "export_pdf"],
 			["menu.export_dxf", "export_dxf"],

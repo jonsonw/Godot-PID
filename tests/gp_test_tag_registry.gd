@@ -294,6 +294,16 @@ func gpTestPlacementMintsAUniqueTag() -> void:
 	var gpId2: String = gpSvc.gpPlaceNode("DPUMP001", Vector2(50, 0))
 	gpEq(gpG.gpGetNode(gpId1).gpTag, "P-1001", "the first placement is P-1001")
 	gpEq(gpG.gpGetNode(gpId2).gpTag, "P-1002", "the second placement is P-1002")
+	# The pump arrives with its nozzles (P3 / 规划 §16.3), and those parts must NOT consume tag
+	# numbers — otherwise the second pump would be P-1004 rather than P-1002. The assertion above
+	# already implies this; stating it explicitly is what turns an accident into a guarantee.
+	# 泵随自带管口一并到来（P3 / 规划 §16.3），而这些部件**不得**消耗位号 ——
+	# 否则第二台泵会是 P-1004 而非 P-1002。上面的断言已隐含此意；明确写出来才能把偶然变成保证。
+	gpEq(gpG.gpNodes.size(), 6, "two pumps brought six nodes in total (2 hosts + 4 nozzles)")
+	for gpN in gpG.gpNodes:
+		if gpN.gpIsMounted():
+			gpEq(gpN.gpTag, "", "an auto-created part carries no project tag (uid=%s)"
+				% gpN.gpInstanceId)
 
 
 func gpTestPlacementWithoutRegistryKeepsOldBehaviour() -> void:
@@ -313,9 +323,24 @@ func gpTestDuplicateGetsItsOwnTag() -> void:
 	gpSvc.gpBindGraph(gpG, GPIdGen.new(), gpR)
 	var gpSrc: String = gpSvc.gpPlaceNode("DPUMP001", Vector2.ZERO)
 	var gpCopies: Array[String] = gpSvc.gpDuplicateSelection([gpSrc])
-	gpEq(gpCopies.size(), 1, "one copy was made")
+	# Since P3 a pump is placed WITH its built-in nozzles (规划 §16.3: an A-class machine brings
+	# its suction + discharge), and duplicating copies the whole subtree — so three nodes come
+	# back, not one. The root is always FIRST (the expansion is breadth-first).
+	# 自 P3 起，泵被放置时**连同**其自带管口（规划 §16.3：A 类机械随身带来吸入 + 排出），
+	# 而复制会复制整个子树 —— 故返回三个节点而非一个。根永远在最前（扩展为广度优先）。
+	gpEq(gpCopies.size(), 3, "the pump and its two nozzles were copied")
 	gpEq(gpG.gpGetNode(gpCopies[0]).gpTag, "P-1002", "the copy does not inherit the source tag")
 	gpEq(gpR.gpIsTaken("P-1001"), true, "the source still owns P-1001")
+	# A mounted PART carries no project tag — neither when placed nor when duplicated. Pin both
+	# directions, because "the copy silently burns five tag numbers" is invisible in the drawing and
+	# only shows up later as a gap in the equipment numbering.
+	# 挂载**部件**不携带项目位号 —— 无论放置还是复制。两个方向都要钉住，因为「复制静默吃掉五个位号」
+	# 在图纸上看不出来，日后只会表现为设备编号里的空洞。
+	for gpI in range(1, gpCopies.size()):
+		var gpPart: GPPIDNode = gpG.gpGetNode(gpCopies[gpI])
+		gpEq(gpPart.gpTag, "", "a copied part (#%d) takes no project tag" % gpI)
+		gpEq(gpPart.gpParentUid, gpCopies[0], "a copied part (#%d) mounts on the copied host" % gpI)
+	gpEq(gpR.gpIsTaken("P-1003"), false, "no tag number was consumed by the parts")
 
 
 func gpTestUndoRedoKeepsTheRegistryConsistent() -> void:

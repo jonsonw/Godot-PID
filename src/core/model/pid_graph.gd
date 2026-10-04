@@ -8,15 +8,30 @@ extends RefCounted
 # See 从零落地架构_分步实施.md Step 1.2 (object graph refactor).
 # 见「从零落地架构_分步实施.md」Step 1.2（对象图重构）。
 
+# Current on-disk meta version. One constant, because three writers would otherwise drift.
+# 当前磁盘 meta 版本。集中为一个常量 —— 否则三个写出方迟早漂移。
+#   1.1 -> port-aware edge shape (signal_type / ortho / dangling ends) + "tag_seq" high-water marks
+#   1.2 -> hierarchical symbols: GPPIDNode.gpParentUid / gpMountAnchor, i.e. a node may be a
+#          CHILD of another node (a nozzle mounted on a vessel, an actuator on a valve).
+#   1.1 -> 端口感知的边（signal_type / ortho / 悬空端）+ "tag_seq" 管线号水位线
+#   1.2 -> 层级图元：GPPIDNode.gpParentUid / gpMountAnchor —— 即一个节点可以是另一节点的**子件**
+#          （装在容器上的管口、装在阀门上的执行机构）。
+#
+# ★ The version is a CAPABILITY statement, not a compatibility gate. Mount fields are still
+# read through get(key, default), so a 1.1 file loads unchanged and simply has no mounts; the
+# number only tells a reader that mounts MAY be present. Bumping it is therefore safe, and NOT
+# bumping it would be the unsafe choice: a reader would have no cheap way to tell.
+# ★ 版本号是**能力声明**，不是兼容闸门。挂载字段仍以 get(key, default) 读取，故 1.1 文件
+# 照常加载、只是没有挂载；版本号只说明「挂载**可能**存在」。因此升级它是安全的，
+# **不**升级反而不安全：读取方将无从廉价判断。
+const GP_META_VERSION: String = "1.2"
+
 # Project metadata stored inside the graph resource.
 # 图资源内部保存的工程元数据。
+# Older files keep loading: every new key is read through get(key, default).
+# 旧文件照常加载：每个新键都以 get(key, default) 读取。
 var gpMeta: Dictionary = {
-	# 1.1 adds the port-aware edge shape (signal_type / ortho / dangling ends) and the pipe
-	# tag high-water marks under "tag_seq". Older files keep loading: every new key is read
-	# through get(key, default).
-	# 1.1 引入端口感知的边（signal_type / ortho / 悬空端）与 "tag_seq" 下的管线号水位线。
-	# 旧文件照常加载：每个新键都以 get(key, default) 读取。
-	"version": "1.1",
+	"version": GP_META_VERSION,
 	"title": "",
 	"sheets": 1,
 }
@@ -190,6 +205,45 @@ func gpRemoveNodeWithEdges(gpId: String) -> void:
 	var gpKeep: Array[GPPIDEdge] = []
 	for gpE in gpEdges:
 		if gpE.gpFromRef.get("node_id", "") == gpId or gpE.gpToRef.get("node_id", "") == gpId:
+			gpEdgeRemoved.emit(gpE)
+		else:
+			gpKeep.append(gpE)
+	gpEdges = gpKeep
+	gpGraphChanged.emit()
+
+
+# Remove a WHOLE SET of nodes plus every edge touching ANY of them, emitting the same per-node /
+# per-edge signals the single-node helper does.
+# 一次性移除一**组**节点及触及其中任一节点的全部边，发出与单节点同名同序的信号。
+#
+# WHY A BATCH FORM / 为何需要批量形态：
+# A cascade delete (规划 §6: deleting a host deletes its mounted subtree) must be ONE model
+# operation. Looping the single-node helper would re-scan the whole edge list per node and, worse,
+# could leave an edge between two removed nodes filtered twice but an edge to a removed node
+# missed if the loop were ever reordered. Filtering once is both cheaper and impossible to get
+# half-right. Whether a node is a host is NOT this layer's business: the caller passes the ids.
+# 级联删除（规划 §6：删除宿主即删除其挂载子树）必须是一次模型操作。循环调用单节点辅助会对
+# 每个节点重扫整张边表；更糟的是，一旦循环顺序被改动，两被删节点之间的边会被过滤两次，而指向
+# 被删节点的边却可能被漏掉。一次性过滤既更快，也不可能只做对一半。
+# 「谁是宿主」不是本层的职责：id 集合由调用方给出。
+func gpRemoveNodesWithEdges(gpIds: Array[String]) -> void:
+	if gpIds.is_empty():
+		return
+	var gpSet: Dictionary = {}
+	for gpId in gpIds:
+		gpSet[gpId] = true
+	# Walk backwards so splicing does not shift the indices still to be visited.
+	# 反向遍历，使删除元素不会移动尚未访问的下标。
+	for gpI in range(gpNodes.size() - 1, -1, -1):
+		if gpSet.has(gpNodes[gpI].gpInstanceId):
+			var gpN: GPPIDNode = gpNodes[gpI]
+			gpNodes.remove_at(gpI)
+			gpNodeRemoved.emit(gpN)
+	var gpKeep: Array[GPPIDEdge] = []
+	for gpE in gpEdges:
+		var gpFromId: String = str(gpE.gpFromRef.get("node_id", ""))
+		var gpToId: String = str(gpE.gpToRef.get("node_id", ""))
+		if gpSet.has(gpFromId) or gpSet.has(gpToId):
 			gpEdgeRemoved.emit(gpE)
 		else:
 			gpKeep.append(gpE)

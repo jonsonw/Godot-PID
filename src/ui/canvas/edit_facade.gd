@@ -33,7 +33,10 @@ func gpDeleteSelection() -> void:
 # Surface a refusal to the user instead of failing silently: a click that produces no pipe must
 # SAY why, or the tool looks broken.
 # 把拒绝原因呈现给用户而非静默失败：一次点不出管线的点击必须「说明原因」，否则工具看起来是坏的。
-func gpReportRefusal(gpKey: String) -> void:
+# [param gpPrefix] i18n namespace the key lives under. Defaults to "edge." so every pre-existing
+# caller is unchanged; the attach paths pass "attach.".
+# [param gpPrefix] 键所在的 i18n 命名空间。默认 "edge."，故所有既有调用方不变；附件路径传 "attach."。
+func gpReportRefusal(gpKey: String, gpPrefix: String = "edge.") -> void:
 	if gpKey == "":
 		return
 	var gpMsg: String = gpKey
@@ -46,7 +49,7 @@ func gpReportRefusal(gpKey: String) -> void:
 	if gpHost.is_inside_tree():
 		var gpI18n: Object = gpHost.get_node_or_null("/root/I18n")
 		if gpI18n != null and gpI18n.has_method("gpTr"):
-			gpMsg = str(gpI18n.gpTr("edge." + gpKey))
+			gpMsg = str(gpI18n.gpTr(gpPrefix + gpKey))
 	var gpInfo: Dictionary = {"refusal": gpKey, "message": gpMsg}
 	gpHost.gpStatusUpdated.emit(gpInfo)
 	gpHost.gpEvents.gpStatusUpdated.emit(gpInfo)
@@ -175,10 +178,67 @@ func gpRequestAddShape(gpShape: GPShape) -> int:
 func gpRequestConnect(gpFromId: String, gpToId: String) -> bool:
 	return gpHost.gpActions.gpConnect(gpFromId, gpToId)
 
+# ============================ P2: attach / detach ============================
+# ============================ P2：挂载 / 卸载 ============================
+# Attach one child onto a host anchor (规划 §15, both interaction modes funnel through here).
+# Returns the new node's id, or "" when refused — in which case the reason has been surfaced.
+# 把一个子件挂到宿主锚点上（规划 §15，两种交互模式都汇聚到此处）。返回新节点 id；
+# 被拒时返回 ""，且原因已呈现给用户。
+#
+# The new node becomes the selection so the user can immediately edit its own properties (管口号 /
+# DN / 故障位) without hunting for it — the natural next action after dropping a part.
+# 新节点随即成为选中项，使用户能立即编辑它自身的属性（管口号 / DN / 故障位）而不必去找它 ——
+# 这是放下部件之后最自然的下一步。
+func gpRequestAttachNode(gpSymbolId: String, gpParentUid: String, gpAnchor: String,
+		gpOffset: Vector2 = Vector2.ZERO, gpAngleDeg: float = 0.0) -> String:
+	if gpHost.gpGraph == null:
+		return ""
+	var gpNid: String = gpHost.gpActions.gpAttachNode(gpSymbolId, gpParentUid, gpAnchor,
+		"", gpOffset, gpAngleDeg)
+	if gpNid == "":
+		gpReportRefusal(gpHost.gpActions.gpLastRefusal, "attach.")
+		return ""
+	gpSetSelection([gpNid])
+	gpHost.queue_redraw()
+	return gpNid
+
+
+# Detach every selected node from its host, keeping it exactly where it is on screen (the command
+# bakes the derived transform — see GPDetachNodesCommand).
+# 把每个选中节点从其宿主上卸下，并让它在屏幕上精确停在原处（命令会烘焙推导变换 —— 见
+# GPDetachNodesCommand）。
+# Returns false when nothing in the selection was mounted, so the action is silently inert rather
+# than pushing a meaningless undo step.
+# 选择集中没有任何挂载项时返回 false，使该动作静默无效，而不是压入一个无意义的撤销步。
+func gpRequestDetachSelected() -> bool:
+	if gpHost.gpGraph == null or gpHost.gpSelection.is_empty():
+		return false
+	if not gpHost.gpActions.gpDetachNodes(gpHost.gpSelection, gpHost.gpDefLookupCallable()):
+		return false
+	gpHost.queue_redraw()
+	return true
+
+
+# Commit a finished mount drag as ONE undo step. The caller must have RESTORED the pre-drag tuple
+# first (see GPEditService.gpSetMount()'s ⚠️ note).
+# 把一次完成的挂载拖拽提交为**一步**撤销。调用方必须先**恢复**拖拽前的元组
+# （见 GPEditService.gpSetMount() 的 ⚠️ 说明）。
+func gpRequestSetMount(gpNodeIds: Array[String], gpTargets: Array[Dictionary]) -> bool:
+	if gpHost.gpGraph == null:
+		return false
+	var gpOk: bool = gpHost.gpActions.gpSetMount(gpNodeIds, gpTargets)
+	if gpOk:
+		gpHost.queue_redraw()
+	return gpOk
+
+
 # Place one symbol instance (palette click). Returns the new node id, "" on failure.
 # 放置一个图元实例（调色板点击）。返回新节点 id，失败返回 ""。
+# The definition lookup is handed down so the command can instantiate the host's built-in parts
+# (nozzles / manhole) in the same undo step (规划 §16).
+# 定义查找器向下传递，使命令能在同一个撤销步内实例化宿主的自带部件（管口 / 人孔，规划 §16）。
 func gpRequestPlaceNode(gpSymbolId: String, gpWorld: Vector2) -> String:
-	return gpHost.gpActions.gpPlaceNode(gpSymbolId, gpWorld)
+	return gpHost.gpActions.gpPlaceNode(gpSymbolId, gpWorld, "", gpHost.gpDefLookupCallable())
 
 # Copy every selected node to a small offset, keeping its attributes and orientation.
 # 把所有选中节点复制到小幅偏移处，保留其属性与朝向。
@@ -278,7 +338,8 @@ func gpRequestDeleteSelected() -> void:
 		return
 	# Nodes, shapes AND edges go in one request, so a mixed delete stays ONE undo step.
 	# 节点、图形与边同在一次请求中提交，故混合删除仍是一个撤销步。
-	if not gpHost.gpActions.gpDeleteSelection(gpNodes, gpShapes, gpEdges):
+	if not gpHost.gpActions.gpDeleteSelection(gpNodes, gpShapes, gpEdges,
+			gpHost.gpDefLookupCallable()):
 		return
 	gpHost.gpShapeSel.clear()
 	gpSetSelection([])

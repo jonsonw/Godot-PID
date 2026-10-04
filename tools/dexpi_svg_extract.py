@@ -148,9 +148,12 @@ PORTS = {
         _nozzle("in", 0.0, 0.5, -1, 0),
         _nozzle("out", 1.0, 0.5, 1, 0),
     ],
-    # 接管嘴：设备侧与管道侧 / nozzle: equipment side and piping side
+    # 接管嘴：只有一条朝**外**的连接 / nozzle: ONE outward connection only.
+    # The inboard "equip" end is where the part MEETS the vessel — a mount, not a process
+    # connection — so it must not offer a port there (the user reported two dots on one nozzle).
+    # 内端「equip」是部件与设备的**接合面**——是挂载而非工艺连接——故不得设端口
+    #（用户报告一支管嘴出现两个圆点）。
     "NOZZLE_SHAPE": [
-        _nozzle("equip", 0.0, 0.5, -1, 0),
         _nozzle("pipe", 1.0, 0.5, 1, 0),
     ],
     # 保温管道：穿过的管段两端 / insulated piping: the run passes straight through
@@ -165,8 +168,12 @@ PORTS = {
     ],
     # 盲板：单侧法兰端点 / blind: a single terminal on the flanged side
     "BLIND_COVER_SHAPE": [_terminal("end", 0.5, 0.0, 0, -1)],
-    # 人孔：设备壁上的一个接口 / manhole: one opening on the vessel wall
-    "MANHOLE_SHAPE": [_terminal("open", 0.0, 0.5, -1, 0)],
+    # 人孔：设备壁上的一个接口，供人进出 —— **不是**工艺连接，没有任何端口。
+    # A manhole is an access opening in the wall, NOT a process connection: it carries no port
+    # at all (the user reported a stray dot plus a bare i18n key where "M1" belongs).
+    # 人孔是壁上的进出孔，**不是**工艺连接，一个端口都没有（用户报告：多出的圆点 +
+    # 本应是「M1」的位置裸显 i18n 键）。
+    "MANHOLE_SHAPE": [],
     # 执行机构：顶部信号输入 + 底部阀杆输出 / actuator: signal in at top, stem out at bottom
     "CONTROLLED_ACTUATOR_SHAPE": [
         {"name": "sig", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "SIGNAL"},

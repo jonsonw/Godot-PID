@@ -43,36 +43,85 @@ func _init(gpInIds: Array[String]) -> void:
 # Create the copies. Returns false when none of the ids resolves to a real node, so a stale
 # selection produces no undo step.
 # 创建副本。若所有 id 都找不到真实节点则返回 false，使过期选择集不产生撤销步。
+#
+# SUBTREE + PARENT REMAP / 子树 + 父链重映射：
+# Copying a vessel must bring its nozzles (they are parts of it), and the copies' gpParentUid must
+# point at the COPIES, never at the originals — otherwise "duplicate a pump" would grow a second
+# actuator on the FIRST pump, which is both wrong and invisible until the user drags one away.
+# The remap therefore runs as a second pass, because a child may be cloned before its host.
+# 复制一台设备必须带上它的管口（它们是它的一部分），且副本的 gpParentUid 必须指向**副本**而非
+# 原件 —— 否则「复制一台泵」会在**第一台**泵上多长出一个执行机构，既错又在用户拖走之前看不出来。
+# 因此重映射作为第二遍执行，因为子件可能先于其宿主被复制。
 func gpExecute(gpCtx: GPCommandContext) -> bool:
 	if gpCtx == null or not gpCtx.gpIsReady():
 		return false
 	_gpClones.clear()
 	gpNewIds.clear()
+	# Each requested id plus its mounted subtree, breadth-first.
+	# 每个被请求的 id 及其挂载子树，广度优先。
+	var gpAll: Array[String] = []
 	for gpId in _gpSrcIds:
+		for gpUid in GPMountResolver.gpSubtree(gpCtx.gpGraph, gpId):
+			if not (gpUid in gpAll):
+				gpAll.append(gpUid)
+	# Pass 1: clone every node, recording source id -> clone id. The mount fields are copied
+	# verbatim and the parent is remapped in pass 2.
+	# 第一遍：复制每个节点，记录 源 id -> 副本 id。挂载字段逐字复制，父链在第二遍重映射。
+	var gpMap: Dictionary = {}
+	for gpId in gpAll:
 		var gpSrc: GPPIDNode = gpCtx.gpGraph.gpGetNode(gpId)
 		if gpSrc == null:
 			continue
 		var gpNid: String = gpCtx.gpIds.gpNext("n")
- # A copy is a DIFFERENT piece of equipment, so it must NOT inherit the source's tag:
- # two identical tags on one sheet is a drafting defect, and the tag ends up in the
- # behaviour is preserved, which is what the pre-M9 tests assert.
- # 副本是另一台设备，故不应继承原件的位号：一张图纸上出现两个相同位号是制图缺陷，
- # 这正是 M9 之前测试所断言的。
+		# Only a subtree ROOT takes the visible offset: a mounted copy's position is derived from
+		# its host, so nudging it too would offset it twice relative to that host.
+		# 只有子树**根**吃可见偏移：挂载副本的位置由宿主推导，再给它偏移会让它相对宿主偏移两次。
+		var gpTopLevel: bool = not (gpSrc.gpParentUid in gpAll)
+		var gpCopyPos: Vector2 = gpSrc.gpPosition + (GP_OFFSET if gpTopLevel else Vector2.ZERO)
+ # A copy is a DIFFERENT piece of equipment, so it must NOT inherit the source's tag: two
+ # identical tags on one sheet is a drafting defect. A MOUNTED copy is not equipment at all,
+ # though — it is a PART of the copied host, so it keeps the source's tag text verbatim
+ # (normally "") instead of minting one.
+ # 副本是另一台设备，故不应继承原件的位号：一张图纸上出现两个相同位号是制图缺陷。但挂载副本
+ # 根本不是设备 —— 它是被复制宿主的**部件**，故原样保留源件的位号文本（通常为 ""）而不另行铸造。
+ #
+ # WHY THIS IS NOT COSMETIC / 为何这不是表面功夫：
+ # placing a vessel mints NO tag for its nozzles (they are identified by their nozzle_id property),
+ # so minting one per nozzle COPY would mean "create a second vessel" consumes a different number
+ # of project tag numbers depending on which gesture was used — place or duplicate. With six
+ # built-in parts on a B-class vessel that is a six-number drift per copy, silently shifting every
+ # later piece of equipment's number.
+ # 放置一台设备**不**为其管口铸造位号（它们由 nozzle_id 属性标识），因此若每个管口**副本**都铸造
+ # 一个位号，「再造一台设备」就会因所用手势不同（放置 vs 复制）而消耗不同数量的项目位号。
+ # 对一台带六个自带部件的 B 类设备，就是每复制一次漂移六个号，静默地推动其后续每一台设备的编号。
 		var gpCopyTag: String = gpSrc.gpTag
-		if gpCtx.gpTags != null:
+		if gpCtx.gpTags != null and gpTopLevel:
 			gpCtx.gpTags.gpGraph = gpCtx.gpGraph
 			gpCopyTag = gpCtx.gpTags.gpNextTag(GPSymbolLibrary.gpFindById(gpSrc.gpSymbolId))
 		var gpCopy: GPPIDNode = gpCtx.gpGraph.gpNewNode(
-			gpNid, gpSrc.gpSymbolId, gpCopyTag,
-			gpSrc.gpPosition + GP_OFFSET,
+			gpNid, gpSrc.gpSymbolId, gpCopyTag, gpCopyPos,
 			gpSrc.gpProps.duplicate(true))
 		gpCopy.gpRotationDeg = gpSrc.gpRotationDeg
 		gpCopy.gpFlipped = gpSrc.gpFlipped
+		gpCopy.gpMountAnchor = gpSrc.gpMountAnchor
+		gpCopy.gpMountOffset = gpSrc.gpMountOffset
+		gpCopy.gpMountAngleDeg = gpSrc.gpMountAngleDeg
+		gpCopy.gpParentUid = gpSrc.gpParentUid
 		gpCtx.gpGraph.gpAddNode(gpCopy)
 		if gpCtx.gpTags != null:
 			gpCtx.gpTags.gpRegister(gpNid, gpCopyTag)
 		_gpClones.append(gpCopy)
 		gpNewIds.append(gpNid)
+		gpMap[gpSrc.gpInstanceId] = gpNid
+	# Pass 2: point every clone whose source had a parent INSIDE the copied set at that parent's
+	# clone. Sources mounting onto something outside the set keep the outside host (correct: the
+	# copy is now a sibling of the original, sharing the same host).
+	# 第二遍：源父件**在**复制集合内的副本，改指该父件的副本。源挂在集合外部的副本保持原宿主
+	# （正确：副本现在是原件的兄弟，共用同一宿主）。
+	for gpI in range(_gpClones.size()):
+		var gpParentSrc: String = _gpClones[gpI].gpParentUid
+		if gpMap.has(gpParentSrc):
+			_gpClones[gpI].gpParentUid = str(gpMap[gpParentSrc])
 	return not _gpClones.is_empty()
 
 

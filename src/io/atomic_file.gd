@@ -137,7 +137,11 @@ static func gpReadJsonDict(gpPath: String) -> GPIOResult:
 		return gpRead
 	var gpParsed: Variant = JSON.parse_string(gpRead.gpPayload as String)
 	if gpParsed == null or not (gpParsed is Dictionary):
-		return GPIOResult.gpFailure("io.parse_failed", "status.load_fail", gpPath)
+		# "Parse failed", NOT "open failed": the file WAS opened — lying about the reason
+		# sent a user debugging file permissions that were never the problem.
+		# 报「解析失败」而**非**「打开失败」：文件其实已经打开了。
+		# 谎报原因会让用户去排查根本不是问题的文件权限。
+		return GPIOResult.gpFailure("io.parse_failed", "status.parse_fail", gpPath)
 	return GPIOResult.gpSuccessWith(gpParsed, "io.loaded", gpPath)
 
 

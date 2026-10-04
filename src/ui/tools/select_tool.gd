@@ -132,6 +132,12 @@ func _gpAvoidDuringDrag(gpCv: GPCanvas2D) -> Array[String]:
 	var gpFixed: Array[String] = []
 	for gpId in _gpDragOrigins.keys():
 		gpFixed.append(gpId)
+	# A node the dragged part could attach to must not be shoved away by that very gesture: pin
+	# every potential host so the drag reads as "snapping onto" rather than "pushing aside".
+	# 被拖部件可能挂上去的那个节点绝不能被该手势推开：把所有潜在宿主钉住，使这次拖拽读作
+	#「吸附上去」而不是「推开」。
+	for gpId in GPMountResolver.gpPinnedHosts(gpCv.gpGraph, gpCv.gpDefFor, gpFixed):
+		gpFixed.append(gpId)
 	var gpAvoid: Dictionary = GPNodeCollision.gpResolve(gpCv.gpGraph, gpCv.gpDefFor,
 		gpFixed, GPNodeCollision.GP_DEFAULT_PADDING, 4)
 	for gpId in gpAvoid.keys():
@@ -180,17 +186,29 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 	# M10b：单选节点的位号抓取点被**优先**检测，因为它可能落在字形之外（下方 / 侧旁），
 	# 而那里 gpHitTest() 会报未命中。
 	var gpSelId: String = ""
-	if gpCv.gpSelection.size() == 1 and gpCtx.gpLabelGrips != null:
+	# A press that landed on ANOTHER node is not a press on the host's tag handle, even when it
+	# happens to be within the handle's radius: a mounted PART of the selected host (a nozzle on a
+	# vessel) is a smaller, more specific target than the host's own tag, and letting the handle win
+	# there made those parts impossible to pick up — the reported "the built-in parts cannot be
+	# dragged". The handle still owns every press that hit no node at all, which is the case it
+	# exists for (it can sit outside the glyph).
+	# 落在**另一个节点**上的按下不算按在宿主位号手柄上，即使它恰好落在手柄半径内：选中宿主的
+	# **挂载部件**（罐上的管嘴）是比宿主位号更小、更具体的目标，让手柄在那里取胜会使这些部件
+	# 完全拾不起来 —— 即用户报告的「自带部件拖不动」。手柄仍然独占「没打中任何节点」的按下，
+	# 而那正是它存在的场景（它可以落在字形之外）。
+	var gpGripBlocked: bool = gpHit != "" and gpHit != gpSelId
+	if gpCv.gpSelection.size() == 1 and gpCtx.gpLabelGrips != null and not gpGripBlocked:
 		gpSelId = gpCv.gpSelection[0]
 		if gpDouble and gpCtx.gpLabelGrips.gpHitGrip(gpWorld,
 				gpCv.gpGraph.gpGetNode(gpSelId), gpCv.gpDefFor(
 					gpCv.gpGraph.gpGetNode(gpSelId).gpSymbolId if gpCv.gpGraph.gpGetNode(gpSelId) != null else ""),
-				8.0 / maxf(gpCv.gpViewZoom, 0.0001)):
+				8.0 / maxf(gpCv.gpViewZoom, 0.0001),
+				gpCv.gpGraph, gpCv.gpDefLookupCallable()):
  # Double-click the grip: reset to the type layer's default.
  # 双击抓取点：复位为类型层默认。
 			gpCtx.gpLabelGrips.gpReset(gpSelId)
 			return true
-	if gpCtx.gpLabelGrips.gpTryStart(gpWorld, gpSelId):
+	if not gpGripBlocked and gpCtx.gpLabelGrips.gpTryStart(gpWorld, gpSelId):
 		return true
 	# P3-4 (grip priority): when a single edge is already selected, its grips (midpoint AND endpoint)
 	# take priority over node / marquee handling, so a grip sitting on a symbol can still be grabbed.
@@ -236,6 +254,26 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 			gpCv.gpSetSelection(gpCv.gpSelection)
 		elif not gpCv.gpSelection.has(gpHit):
 			gpCv.gpSetSelection([gpHit])
+ # A MOUNTED node is dragged by RE-MOUNTING it, not by writing its position: its world placement is
+ # derived from the parent chain (see GPMountResolver), so a position drag would move the model and
+ # leave the picture exactly where it was. The drag is handed to GPPlaceAttachTool so the kernel,
+ # the preview and the single-undo-step commit stay shared with both §15 modes rather than being
+ # reimplemented here.
+ # 拖拽**已挂载**节点 = 重新挂载它，而不是写它的坐标：其世界位置由父链推导（见 GPMountResolver），
+ # 故坐标拖拽会改模型却让画面纹丝不动。该拖拽交给 GPPlaceAttachTool，使内核、预览与「一步撤销」
+ # 的提交与 §15 两种模式共用，而不是在此重写一遍。
+ # The press returns here WITHOUT starting a position drag; the next motion / release is routed to
+ # the attach tool, because arming it makes gpActiveTool() select it.
+ # 本次按下在此返回，**不**启动坐标拖拽；随后的移动 / 释放会路由到附件工具，因为上膛就使
+ # gpActiveTool() 选中它。
+		var gpHitNode: GPPIDNode = gpCv.gpGraph.gpGetNode(gpHit) if gpCv.gpGraph != null else null
+		if gpHitNode != null and gpHitNode.gpIsMounted():
+			# A REFUSED arming must not swallow the press: falling through hands it to the ordinary
+			# selection / drag path, instead of the part silently ignoring the user.
+			# 上膛被拒时**绝不**吞掉这次按下：继续往下走会把它交给普通的选择 / 拖拽路径，
+			# 而不是让部件静默地无视用户。
+			if gpCv.gpArmMountDrag(gpHit, false):
+				return true
  # Start a group drag only when the pressed node belongs to the selection.
  # 仅当按下的节点属于选择集时才开始整组拖拽。
 		if gpCv.gpSelection.has(gpHit):
@@ -396,8 +434,30 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 		var gpTargets: Dictionary = {}
 		for gpId in gpIds:
 			gpTargets[gpId] = (_gpDragOrigins[gpId] as Vector2) + gpDelta
+		# A single LOOSE part released on a host MOUNTS there instead of landing as a loose symbol
+		# on top of the equipment. The mount decision (anchor snap, body fallback, facing side) is
+		# the resolver's; this hook only routes the release to a mount command when it applies.
+		# 单个**松散部件**释放在宿主上时**就地挂载**，而不是作为松散图元压在设备上。
+		# 挂载判定（锚点吸附 / 本体兜底 / 朝向侧别）属解析器；此处仅把符合条件的释放路由到挂载命令。
+		if gpIds.size() == 1 and not is_zero_approx(gpDelta.length()):
+			var gpMountTuple: Dictionary = GPMountResolver.gpLooseReleaseAttach(gpCv.gpGraph,
+				gpCv.gpDefFor, gpIds[0], gpWorld, gpCv.gpViewZoom)
+			if not gpMountTuple.is_empty():
+				var gpMountIds: Array[String] = [gpIds[0]]
+				var gpMountTuples: Array[Dictionary] = [gpMountTuple]
+				if gpCv.gpRequestSetMount(gpMountIds, gpMountTuples):
+					_gpDragOrigins.clear()
+					_gpPushOrigins.clear()
+					_gpDragStartEdges.clear()
+					gpCv.gpGraphChanged.emit()
+					gpCv.queue_redraw()
+					gpCv.gpEmitStatus()
+					return true
+		var gpAvoidFixed: Array[String] = gpIds.duplicate()
+		for gpId in GPMountResolver.gpPinnedHosts(gpCv.gpGraph, gpCv.gpDefFor, gpIds):
+			gpAvoidFixed.append(gpId)
 		var gpAvoid: Dictionary = GPNodeCollision.gpResolve(gpCv.gpGraph, gpCv.gpDefFor,
-				gpIds, GPNodeCollision.GP_DEFAULT_PADDING, 24)
+				gpAvoidFixed, GPNodeCollision.GP_DEFAULT_PADDING, 24)
 		for gpId in gpAvoid.keys():
 			gpTargets[gpId] = (gpAvoid[gpId] as Vector2)
 		if not gpTargets.is_empty():

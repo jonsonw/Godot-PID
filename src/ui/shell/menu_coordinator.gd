@@ -157,6 +157,8 @@ func gpOnMenu(gpAction: String) -> void:
 			gpHost.gpFileCoord.gpOpenProject()
 		"file_import":
 			gpHost.gpFileCoord.gpImportProject()
+		"import_dexpi":
+			gpHost.gpFileCoord.gpPickImportDexpiPath()
 		"file_quit":
  # Route through the SAME close guard as the OS window-close button so the
  # unsaved-changes dialog behaves identically whether the user clicks the red X
@@ -171,6 +173,8 @@ func gpOnMenu(gpAction: String) -> void:
 			gpHost.gpFileCoord.gpPickExportPath("library")
 		"export_config":
 			gpHost.gpFileCoord.gpPickExportPath("config")
+		"export_dexpi":
+			gpHost.gpFileCoord.gpPickExportPath("dexpi")
 		"view_zoom_in":
 			gpHost.gpActiveCanvas().gpZoomStep(1.0)
 		"view_zoom_out":

@@ -305,6 +305,11 @@ func _gpAssemblePalette() -> void:
 	# ---- 左侧图元库：注入图元按钮 ----
 	gpLeftDock.gpPopulate(gpDefs)
 	gpLeftDock.gpSymbolPicked.connect(gpRibbonCoord.gpOnSymbolPicked)
+	# A tile was DRAGGED (not clicked). Distinct from a pick: a drag arms the attachment gesture on
+	# the active canvas so the very next click on a host mounts the part there (规划 §15 mode 1).
+	# 某图块被**拖动**（而非点击）。与点选不同：拖动会在活动画布上给附件手势上膛，
+	# 使用户随后在宿主上的一次点击即把该部件装到那里（规划 §15 模式一）。
+	gpLeftDock.gpSymbolDragStarted.connect(gpRibbonCoord.gpOnSymbolDragStarted)
 	gpLeftDock.gpToolSelected.connect(gpRibbonCoord.gpOnToolSelected)
 	# Tool-block commands (canvas modes / undo / redo / delete / settings) reuse the
 	# old Ribbon action ids and route through the SAME handler that served the Ribbon.

@@ -39,6 +39,7 @@ var _gpToolCtx: GPCanvasToolContext = null
 var _gpRegistry: GPCanvasToolRegistry = null
 var _gpSelectTool: GPSelectTool = null
 var _gpPlaceTool: GPPlaceTool = null
+var _gpAttachTool: GPPlaceAttachTool = null
 var _gpDrawTool: GPDrawShapeTool = null
 var _gpGripTool: GPGripTool = null
 # P3 connectivity tools / P3 连线工具。
@@ -67,11 +68,13 @@ func gpBuildTools() -> void:
 	_gpRegistry = GPCanvasToolRegistry.new()
 	_gpSelectTool = GPSelectTool.new()
 	_gpPlaceTool = GPPlaceTool.new()
+	_gpAttachTool = GPPlaceAttachTool.new()
 	_gpDrawTool = GPDrawShapeTool.new()
 	_gpGripTool = GPGripTool.new()
 	_gpPipeTool = GPPipeTool.new()
 	_gpSignalTool = GPSignalTool.new()
-	for gpT in [_gpSelectTool, _gpPlaceTool, _gpDrawTool, _gpGripTool, _gpPipeTool, _gpSignalTool]:
+	for gpT in [_gpSelectTool, _gpPlaceTool, _gpAttachTool, _gpDrawTool, _gpGripTool, _gpPipeTool,
+			_gpSignalTool]:
 		gpT.gpCtx = _gpToolCtx
 	_gpRegistry.gpRegister(GPCanvas2D.GPMode.GP_SELECT, _gpSelectTool)
 	_gpRegistry.gpRegister(GPCanvas2D.GPMode.GP_CONNECT, _gpSelectTool)
@@ -157,9 +160,60 @@ func gpOnLeftUp(gpScreen: Vector2) -> void:
 # 返回当前分派目标的交互工具：调色板待放置优先于模式；否则注册表按 GPMode 映射（CONNECT 复用
 # 选择工具）。瞬态拖拽状态现由各工具自持，画布仅经 gpCtx.gpCv 暴露公开端口。
 func gpActiveTool() -> GPCanvasTool:
+	# A pending ATTACH takes precedence over a pending PLACEMENT: the two are mutually exclusive by
+	# construction (the toolbar arms one or the other), and giving the attach gesture priority means
+	# a stray pending definition can never swallow the part the user is actually positioning.
+	# 待处理的**挂载**优先于待**放置**：两者按构造互斥（工具条只会给其中一个上膛），
+	# 而让挂载手势优先，意味着一个残留的待放置定义绝不会吞掉用户真正在定位的那个部件。
+	if not gpHost.gpPendingAttach.is_empty():
+		return _gpAttachTool
 	if gpHost.gpPendingDef != null:
 		return _gpPlaceTool
 	return _gpRegistry.gpGet(gpHost.gpMode)
+
+
+# ============================ P2: attach arming ============================
+# ============================ P2：附件上膛 ============================
+# Arm mode 1 (a library entry started being dragged). Only a MOUNTABLE definition may be armed: a
+# primary symbol has no gpMountKind, so it could never find an anchor and the gesture would be
+# guaranteed to fail. Rejecting it here keeps the refusal at the source instead of at the drop.
+# 模式一上膛（库中某条开始被拖动）。只有**可挂载**定义允许上膛：主图元没有 gpMountKind，
+# 因而永远找不到锚点、手势注定失败。在此拒绝可把失败拦在源头而非落点。
+func gpArmAttach(gpSymbolId: String) -> bool:
+	var gpDef: GPSymbolDef = gpHost.gpDefFor(gpSymbolId)
+	if gpDef == null or gpDef.gpMountKind == "":
+		return false
+	gpHost.gpPendingAttach = {
+		"symbol_id": gpSymbolId,
+		"node_id": "",
+		"mount_kind": gpDef.gpMountKind,
+		"undo_on_cancel": false,
+	}
+	gpHost.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	gpHost.queue_redraw()
+	return true
+
+
+# Arm mode 2 for an existing mounted node and enter the positioning drag. Undoing on cancel is what
+# makes "Esc right after adding a part" mean "remove it again" (规划 §15.3 step 4).
+# 为既有的已挂载节点上膛模式二并进入拖动定位。取消时撤销，正是「刚加完部件就按 Esc」意为
+# 「把它去掉」的原因（规划 §15.3 第 4 步）。
+func gpArmMountDrag(gpNodeId: String, gpUndoOnCancel: bool) -> bool:
+	if gpHost.gpGraph == null:
+		return false
+	var gpN: GPPIDNode = gpHost.gpGraph.gpGetNode(gpNodeId)
+	if gpN == null or not gpN.gpIsMounted():
+		return false
+	if not _gpAttachTool.gpBeginPositioning(gpNodeId):
+		return false
+	gpHost.gpPendingAttach = {
+		"symbol_id": "",
+		"node_id": gpNodeId,
+		"mount_kind": "",
+		"undo_on_cancel": gpUndoOnCancel,
+	}
+	gpHost.queue_redraw()
+	return true
 
 
 # Handle a left mouse button press.

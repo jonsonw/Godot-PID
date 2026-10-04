@@ -126,6 +126,36 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 	var gpCv: GPCanvas2D = gpCtx.gpCv
 	if gpCv.gpPendingDef == null:
 		return false
+	# A PART armed from the palette does not land as a loose top-level symbol when a compatible
+	# anchor is under the cursor — it ATTACHES. Two defects came from the old behaviour: the part
+	# became an orphan the moment it was dropped, and the collision pass then shoved the very host
+	# the user was aiming at (the reported "a nozzle dragged onto the vessel pushed the vessel
+	# away"). Clicking empty space still places it as a top-level node, so nothing is taken away.
+	# 从调色板上膛的**部件**在光标下存在兼容锚点时不会作为松散顶层图元落地 —— 它是**挂上去**。
+	# 旧行为带来两个缺陷：部件一落地即成孤儿，且碰撞松弛紧接着把用户瞄准的那个宿主推开
+	#（即用户报告的「把管嘴拖到罐上却把罐推开了」）。点在空白处仍按顶层图元放置，故没有任何能力被剥夺。
+	var gpPendDef: GPSymbolDef = gpCv.gpPendingDef
+	if gpPendDef.gpMountKind != "":
+		var gpCand: Dictionary = GPMountResolver.gpMountCandidate(gpCv.gpGraph,
+			gpCv.gpDefLookupCallable(), gpWorld, gpCv.gpViewZoom, gpPendDef.gpMountKind)
+		# Body fallback: a drop INSIDE a host but outside every anchor's snap radius still
+		# attaches — to the nearest anchor of the containing host — so the part never degrades
+		# into a loose, directionless symbol sitting on the host it was aimed at.
+		# 本体兜底：落在宿主**体内**却在所有锚点吸附半径之外时仍然挂载 —— 挂到该宿主最近的
+		# 兼容锚点 —— 使部件绝不降级成压在宿主上的松散无方向图元。
+		if not bool(gpCand.get("hit", false)):
+			gpCand = GPMountResolver.gpBodyCandidate(gpCv.gpGraph, gpCv.gpDefLookupCallable(),
+				gpWorld, gpPendDef.gpMountKind)
+		if bool(gpCand.get("hit", false)):
+			var gpAttached: String = gpCv.gpRequestAttachNode(gpPendDef.gpId,
+				str(gpCand["parent_uid"]), str(gpCand["anchor"]))
+			if gpAttached != "":
+				_gpGhostOn = false
+				gpCv.gpPendingDef = null
+				gpCv.gpSetSelection([gpAttached])
+				gpCv.queue_redraw()
+				gpCv.gpEmitStatus()
+				return true
 	# Leave the label empty so the canvas renders the localized type name and it switches with the
 	# UI language. The user can still type a custom label.
 	# 标签留空，使画布显示本地化的类型名并随界面语言切换；用户仍可在属性面板填自定义标签。
@@ -137,8 +167,14 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 	gpCv.gpSetSelection([gpNid])
 	# 放置避让：新图元固定不动，把与之重叠的其它图元推开，保持合理间距。
 	# Placement avoidance: the new symbol stays put; push overlapping neighbours aside to keep spacing.
+	# 若新图元是部件，则「它可能挂上去的宿主」同样固定不动 —— 否则避让会把用户正瞄准的设备推开。
+	# When the new symbol is a part, the hosts it could attach to are pinned as well — otherwise the
+	# avoidance would shove the very equipment the user is aiming at.
+	var gpFixed: Array[String] = [gpNid]
+	for gpId in GPMountResolver.gpPinnedHosts(gpCv.gpGraph, gpCv.gpDefFor, gpFixed):
+		gpFixed.append(gpId)
 	var gpAvoid: Dictionary = GPNodeCollision.gpResolve(gpCv.gpGraph, gpCv.gpDefFor,
-			[gpNid], GPNodeCollision.GP_DEFAULT_PADDING)
+			gpFixed, GPNodeCollision.GP_DEFAULT_PADDING)
 	if not gpAvoid.is_empty():
 		gpCv.gpRequestSetNodePositions(gpAvoid)
 	# 新图元压到既有连线上 -> 弹出「绕行 / 拆分」二选一。放在最后，因为菜单要用到刚落地的节点。

@@ -51,6 +51,17 @@ const GP_CTX_CLEAR_VERTICES: int = 25
 # 全图纸操作（图内含边时显示）。
 const GP_CTX_RENUMBER: int = 26
 const GP_CTX_AUTO_CONNECT: int = 27
+# P2 attach / detach (规划 §15.3). Space 28/29 was still free between the sheet-wide block and the
+# bump-anchor block, so the fixed ids stay contiguous and nothing has to be renumbered.
+# P2 挂载 / 卸载（规划 §15.3）。28/29 是「全图纸块」与「鼓包锚点块」之间仍空着的号段，
+# 故固定 id 保持连续、无需重新编号。
+const GP_CTX_ATTACH: int = 28
+const GP_CTX_DETACH: int = 29
+# One action id per candidate part type in the dynamic "添加附件 ▶" submenu. Parked far above every
+# other block so a dynamically built list can never collide with a fixed id, however long it grows.
+# 「添加附件 ▶」动态子菜单中每种候选部件各占一个动作 id。取值远高于其它号段，
+# 使动态构建的列表无论多长都不会与固定 id 撞号。
+const GP_CTX_ATTACH_BASE: int = 100
 # Bump-anchor action (shown when right-click lands on an existing orange bump anchor).
 # 鼓包锚点操作（右键命中既有橙色锚点时显示）。
 const GP_CTX_DELETE_BUMP: int = 30
@@ -98,6 +109,23 @@ var _gpCtxBumpWorld: Vector2 = Vector2.ZERO
 var _gpDropSymNid: String = ""
 var _gpDropEdgeId: String = ""
 
+# P2 attach submenu state. The host the submenu was built for, plus one entry per candidate part
+# type (symbol id + its free anchor names, computed when the menu opened).
+# P2 附件子菜单状态。子菜单所针对的宿主，以及每种候选部件一项（图元 id + 菜单打开时算出的空闲锚点名）。
+# The free-anchor list is snapshotted with the menu deliberately: the graph cannot change while a
+# modal popup is open, and snapshotting is what lets the disabled state and the eventual action
+# agree on the SAME anchor set.
+# 空闲锚点表是**随菜单一起**快照的：模态弹窗打开期间图不会变，而快照正是「置灰状态」与
+# 「最终动作」在**同一套**锚点上达成一致的原因。
+var _gpAttachHost: String = ""
+var _gpAttachChoices: Array[Dictionary] = []
+# The right-click POSITION, snapshotted with the menu. The attach choice uses it to pick the
+# free anchor NEAREST to where the user pointed, so "right-click the top of the vessel" adds
+# the nozzle at the top facing up instead of at the first declared anchor.
+# 右键**位置**，随菜单一起快照。附件选择用它挑距用户指向**最近**的空闲锚点，使「右键点容器
+# 上部」添加的管嘴落在上部朝上，而不是落在声明顺序的第一个锚点上。
+var _gpAttachWorld: Vector2 = Vector2.ZERO
+
 
 func _init(gpCanvas: GPCanvas2D) -> void:
 	gpCv = gpCanvas
@@ -111,6 +139,7 @@ func _init(gpCanvas: GPCanvas2D) -> void:
 # 先选中是让「删除」无歧义的原因 —— 用户能明确看到菜单将要作用于什么。
 func gpOnRightDown(gpScreen: Vector2) -> void:
 	var gpWorld: Vector2 = gpCv.gpWorldFromScreen(gpScreen)
+	_gpAttachWorld = gpWorld
 	_gpCtxVertex = -1
 	_gpCtxEdge = ""
 	_gpCtxBumpEid = ""
@@ -220,6 +249,11 @@ func _gpBuildMenuItems(gpMenu: PopupMenu, gpNodeHit: String) -> void:
 	if gpNodeCtx:
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_edit_symbol"), GP_CTX_EDIT)
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_duplicate"), GP_CTX_DUPLICATE)
+		# Attach / detach sit with the node-targeted items because both act on the node selection.
+		# 挂载 / 卸载与「作用于节点选择」的条目同处，因为两者都作用于节点选择。
+		_gpBuildAttachSubmenu(gpMenu, gpNodeHit)
+		if _gpDetachTargetCount(gpNodeHit) > 0:
+			gpMenu.add_item(I18n.gpTr("canvas.ctx_detach"), GP_CTX_DETACH)
 	# Delete applies to either shapes or nodes.
 	# 删除可同时作用于图形或图元。
 	var gpCanDelete: bool = gpNodeCtx or (not gpCv.gpShapeSel.is_empty())
@@ -363,6 +397,119 @@ func gpOnContext(gpId: int) -> void:
 				_gpCtxBumpWorld = Vector2.ZERO
 				_gpCtxEdge = ""
 			gpCv.queue_redraw()
+		GP_CTX_DETACH:
+ # Take the selected parts off their hosts, keeping them exactly where they are on screen
+ # (GPDetachNodesCommand bakes the derived transform).
+ # 把选中的部件从其宿主上卸下，并让它们在屏幕上精确停在原处（GPDetachNodesCommand 会烘焙
+ # 推导变换）。
+			gpCv.gpRequestDetachSelected()
+			gpCv.queue_redraw()
+		_:
+ # The dynamic "添加附件" items live at GP_CTX_ATTACH_BASE + index, so they must be matched by a
+ # range test rather than by a fixed id. Anything below the base is genuinely unknown and ignored.
+ # 动态的「添加附件」条目位于 GP_CTX_ATTACH_BASE + 下标，故只能按范围匹配、无法用固定 id。
+ # 低于该基值的 id 属真正的未知项，直接忽略。
+			if gpId >= GP_CTX_ATTACH_BASE:
+				gpOnAttachChoice(gpId - GP_CTX_ATTACH_BASE)
+
+
+# ============================ P2: 添加附件 / 卸载附件 ============================
+# ==================== P2: attach / detach ====================
+# Build the "添加附件 ▶" submenu: ONE entry per part type that can go on this host right now. A type
+# with no free compatible anchor is DISABLED with a reason instead of hidden — hiding it would make
+# the user believe the part does not exist at all (规划 §15.3 step 2).
+# 构建「添加附件 ▶」子菜单：能为当前宿主实际挂上的每种部件各一项。没有空闲兼容锚点的类型被
+# **置灰并给出原因**而非隐藏 —— 隐藏会让用户以为该部件根本不存在（规划 §15.3 第 2 步）。
+func _gpBuildAttachSubmenu(gpMenu: PopupMenu, gpNodeHit: String) -> void:
+	# Reset first: a previous menu's host must never leak into this one (same rule the bump fields
+	# follow in gpOnRightDown()).
+	# 先清零：上一个菜单的宿主绝不能泄漏到本次（与 gpOnRightDown() 中鼓包字段同一规则）。
+	_gpAttachHost = ""
+	_gpAttachChoices.clear()
+	if gpCv.gpGraph == null:
+		return
+	var gpHostUid: String = gpNodeHit if gpNodeHit != "" else gpCv.gpSelectedId
+	var gpHostNode: GPPIDNode = gpCv.gpGraph.gpGetNode(gpHostUid)
+	if gpHostNode == null:
+		return
+	var gpHostDef: GPSymbolDef = gpCv.gpDefFor(gpHostNode.gpSymbolId)
+	if gpHostDef == null or gpHostDef.gpAttachPoints.is_empty():
+		return
+	var gpLookup: Callable = gpCv.gpDefLookupCallable()
+	# Sorted by id inside the resolver, so the submenu order is stable frame to frame.
+	# 在解析器内按 id 排序，故子菜单顺序逐帧稳定。
+	var gpCands: Array[GPSymbolDef] = GPMountResolver.gpMountableDefs(GPSymbolLibrary.gpDefaultDefs())
+	if gpCands.is_empty():
+		return
+	var gpSub: PopupMenu = PopupMenu.new()
+	# An explicit name: add_submenu_item() refers to the child by NAME, and Godot's auto-generated
+	# child names are not under our control.
+	# 显式命名：add_submenu_item() 按**名字**引用子节点，而 Godot 自动生成的名字不受我们控制。
+	gpSub.name = "gp_attach_sub"
+	for gpChild in gpCands:
+		var gpFree: Array[String] = GPMountResolver.gpFreeAnchorsForDef(gpCv.gpGraph, gpLookup,
+			gpHostUid, gpChild)
+		_gpAttachChoices.append({"symbol_id": gpChild.gpId, "free": gpFree})
+		var gpActionId: int = GP_CTX_ATTACH_BASE + _gpAttachChoices.size() - 1
+		# The display name is an i18n KEY for DEXPI-pack symbols ("dexpi.dgeneral008"), so the
+		# label must go through the translator exactly as the palette item's tooltip does. Used
+		# raw, the submenu read "dexpi.dgeneral008" instead of "接管嘴 / Nozzle".
+		# 显示名对 DEXPI 包的图元而言是 i18n **键**（"dexpi.dgeneral008"），故标签必须与调色板
+		# 条目的 tooltip 一样经翻译器。直接使用会让子菜单显示 "dexpi.dgeneral008" 而非「接管嘴」。
+		var gpRaw: String = gpChild.gpDisplayName if gpChild.gpDisplayName != "" else gpChild.gpId
+		var gpLabel: String = I18n.gpTr(gpRaw)
+		gpSub.add_item(gpLabel, gpActionId)
+		var gpAt: int = gpSub.get_item_index(gpActionId)
+		gpSub.set_item_disabled(gpAt, gpFree.is_empty())
+		if gpFree.is_empty():
+			gpSub.set_item_tooltip(gpAt, I18n.gpTr("canvas.ctx_attach_no_room"))
+	_gpAttachHost = gpHostUid
+	gpSub.id_pressed.connect(gpOnContext)
+	gpMenu.add_child(gpSub)
+	gpMenu.add_submenu_item(I18n.gpTr("canvas.ctx_attach"), gpSub.name)
+
+
+# How many nodes the "卸载附件" action would actually act on: the mounted ones among the selection
+# (or the right-clicked node when it is not in the selection). The item is offered only when it can
+# do something, so the menu never presents a dead entry.
+# 「卸载附件」实际会作用到几个节点：选择集中的挂载项（右键节点不在选择集中时则取该节点）。
+# 仅在确有效果时才提供该条目，菜单绝不呈现死条目。
+func _gpDetachTargetCount(gpNodeHit: String) -> int:
+	if gpCv.gpGraph == null:
+		return 0
+	var gpIds: Array[String] = []
+	if gpNodeHit != "" and not gpCv.gpSelection.has(gpNodeHit):
+		gpIds = [gpNodeHit]
+	else:
+		gpIds = gpCv.gpSelection
+	var gpCount: int = 0
+	for gpId in gpIds:
+		var gpN: GPPIDNode = gpCv.gpGraph.gpGetNode(gpId)
+		if gpN != null and gpN.gpIsMounted():
+			gpCount += 1
+	return gpCount
+
+
+# Dispatch one "添加附件" choice: attach the chosen type to the free compatible anchor NEAREST to
+# where the user right-clicked (the first declared one when no position is known), then hand the
+# new node straight to the positioning drag, so it lands correctly FIRST and the user only ever
+# nudges from there (规划 §15.3 steps 3-4) — no aiming required to get it onto the host.
+# 分派一个「添加附件」选择：把所选类型挂到距**右键位置最近**的空闲兼容锚点（无位置信息时取
+# 声明顺序的第一个），随后把新节点直接交给拖动定位。于是它先落对位置，用户只需从那里微调
+#（规划 §15.3 第 3-4 步）—— 无需瞄准即可贴上宿主。
+func gpOnAttachChoice(gpChoiceIdx: int) -> void:
+	if gpChoiceIdx < 0 or gpChoiceIdx >= _gpAttachChoices.size() or _gpAttachHost == "":
+		return
+	var gpChoice: Dictionary = _gpAttachChoices[gpChoiceIdx]
+	var gpFree: Array[String] = gpChoice["free"]
+	if gpFree.is_empty():
+		return
+	# The nearest-anchor pick lives in the resolver so it stays testable and the menu stays thin.
+	# 最近锚点的挑选放在解析器里，保持可测且菜单层足够薄。
+	var gpBest: String = GPMountResolver.gpNearestAnchorName(gpCv.gpGraph, gpCv.gpDefLookupCallable(),
+		_gpAttachHost, gpFree, _gpAttachWorld)
+	gpCv.gpRequestAttachAndPosition(str(gpChoice["symbol_id"]), _gpAttachHost, gpBest)
+	gpCv.queue_redraw()
 
 
 # ============================ 放到连线上 ============================

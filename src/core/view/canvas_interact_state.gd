@@ -79,6 +79,25 @@ var gpMode: int = GPMode.GP_SELECT
 # 等待下一次左键放置的图元定义。
 var gpPendingDef: GPSymbolDef = null
 
+# Pending ATTACH interaction (规划 §15). ONE object covers BOTH modes, because both end up in the
+# same "drag a part, snap it to a compatible anchor, commit once" kernel and both must take over the
+# active tool — a second flag would only duplicate that.
+# 待处理的**挂载**交互（规划 §15）。**一个**对象同时覆盖两种模式：两者最终都进入同一个
+# 「拖动部件 → 吸附到兼容锚点 → 提交一次」内核，且都必须接管活动工具 —— 第二个标志位只会重复这点。
+#
+# Keys / 键：
+#   "symbol_id"      : String — mode 1's library definition id ("" for mode 2)
+#                      模式一的图库定义 id（模式二为 ""）
+#   "node_id"        : String — mode 2's already-created node being positioned ("" for mode 1)
+#                      模式二已创建、正在定位的节点 id（模式一为 ""）
+#   "undo_on_cancel" : bool   — ESC should also undo the freshly pushed attach step (mode 2 only),
+#                      so "Esc during the positioning drag" really means "I did not mean to add it"
+#                      ESC 还应撤销刚压入的挂载步（仅模式二）。使「定位拖拽中按 Esc」真正等价于
+#                      「我本来不想加它」
+# Empty dictionary = idle. Cleared by gpReset(), so File > New cannot leave a stale part armed.
+# 空字典 = 空闲。由 gpReset() 清空，故「文件 > 新建」不会留下一个仍上膛的部件。
+var gpPendingAttach: Dictionary = {}
+
 
 func _init() -> void:
 	gpCam = GPCanvasCamera.new()
@@ -132,6 +151,7 @@ func gpReset() -> void:
 	gpSel.gpClearAll()
 	gpMarquee.gpCancel()
 	gpPendingDef = null
+	gpPendingAttach = {}
 
 
 # Convenience for the canvas proxy: the raw id counter.

@@ -253,7 +253,10 @@ static func _gpStepV2ToV3(gpOut: Dictionary, gpSheetsOut: Array) -> void:
 # 就地修改 gpOut：写入 meta、格式标识、生成器信息与时间戳。
 static func _gpStepV3Header(gpOut: Dictionary, gpSheetsOut: Array) -> void:
 	var gpMeta: Dictionary = _gpMetaOf(gpOut).duplicate(true)
-	gpMeta["version"] = str(gpMeta.get("version", "1.1"))
+	# A file with no version key is ancient; migrating it makes it current, so the fallback is
+	# the CURRENT version rather than a historical one.
+	# 无 version 键的文件是远古文件；迁移即令其成为当前格式，故回落值取**当前**版本而非历史值。
+	gpMeta["version"] = str(gpMeta.get("version", GPPIDGraph.GP_META_VERSION))
 	if not gpMeta.has("sheets"):
 		gpMeta["sheets"] = gpSheetsOut.size()
 	else:
@@ -345,6 +348,18 @@ static func _gpNormalizeNode(gpN: Dictionary, gpDocId: String, gpUsedUids: Dicti
 	# 在下面重赋值 gpOut **之前**读取偏移 —— 新字典此时还没有这个键，
 	# 事后读取会静默丢掉全部自定义偏移。
 	var gpOffRaw: Variant = gpOut.get("label_offset", [])
+	# Mounting state must survive normalisation too: the rebuild below once dropped every
+	# mount key (they post-date the normaliser), so each save->load round trip silently
+	# UN-MOUNTED every child part — nozzles collapsed onto the host centre, host port
+	# supersession broke, and every pipe end latched onto the wrong port.
+	# 挂载状态同样必须在归一化中存活：下面的重建曾把全部挂载键丢掉（它们晚于归一化器诞生），
+	# 以致每次「保存->打开」都把所有子件**静默卸载** —— 管嘴塌到宿主中心、宿主端口取代失效、
+	# 每条管线端点都吸附到错误端口。
+	var gpParentUid: String = str(gpOut.get("parent_uid", ""))
+	var gpMountAnchor: String = str(gpOut.get("mount_anchor", ""))
+	var gpMountOffsetRaw: Variant = gpOut.get("mount_offset", null)
+	var gpMountAngle: float = float(gpOut.get("mount_angle_deg", 0.0))
+	var gpLabelSlotsRaw: Variant = gpOut.get("label_slots", null)
 	gpOut = {
 		"uid": gpUid,
 		"instance_id": gpInstanceId,
@@ -364,6 +379,22 @@ static func _gpNormalizeNode(gpN: Dictionary, gpDocId: String, gpUsedUids: Dicti
 		gpOut["label_offset"] = [float((gpOffRaw as Array)[0]), float((gpOffRaw as Array)[1])]
 	else:
 		gpOut.erase("label_offset")
+	# Carry the mounting keys through with the SAME write policy as GPPIDNode.gpToDict():
+	# parent_uid gates the pair, offset/angle only when non-default — unmounted nodes stay
+	# byte-identical and migrate() stays idempotent.
+	# 挂载键按与 GPPIDNode.gpToDict() **相同**的写出策略带回：parent_uid 领起成对键，
+	# 偏移/角度仅非默认时写出 —— 未挂载节点保持逐字节不变，migrate() 保持幂等。
+	if gpParentUid != "":
+		gpOut["parent_uid"] = gpParentUid
+		if gpMountAnchor != "":
+			gpOut["mount_anchor"] = gpMountAnchor
+		if gpMountOffsetRaw is Array and (gpMountOffsetRaw as Array).size() >= 2:
+			gpOut["mount_offset"] = [float((gpMountOffsetRaw as Array)[0]),
+				float((gpMountOffsetRaw as Array)[1])]
+		if not is_zero_approx(gpMountAngle):
+			gpOut["mount_angle_deg"] = gpMountAngle
+	if gpLabelSlotsRaw is Dictionary and not (gpLabelSlotsRaw as Dictionary).is_empty():
+		gpOut["label_slots"] = (gpLabelSlotsRaw as Dictionary).duplicate(true)
 	return gpOut
 
 

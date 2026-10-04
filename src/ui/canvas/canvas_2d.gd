@@ -321,6 +321,14 @@ var gpPendingDef: GPSymbolDef:
 		else:
 			mouse_default_cursor_shape = Control.CURSOR_ARROW
 
+# Pending ATTACH interaction (规划 §15). Proxy into the pure state object so a headless test can arm
+# it without a Control. Empty dictionary = idle; see GPCanvasInteractState for the keys.
+# 待处理的**挂载**交互（规划 §15）。代理进纯状态对象，使 headless 测试无需 Control 即可上膛。
+# 空字典 = 空闲；键的含义见 GPCanvasInteractState。
+var gpPendingAttach: Dictionary:
+	get: return _gpState.gpPendingAttach
+	set(gpV): _gpState.gpPendingAttach = gpV
+
 # Selection state owner (pure, headless-testable) reached via GPCanvasInteractState. gpSelection /
 # gpSelectedId are proxies into it; gpShapeSel stays a direct array (node<->shape mutual exclusion).
 # 选择状态源（纯模块，可 headless 单测）经 GPCanvasInteractState 访问。gpSelection / gpSelectedId 为
@@ -912,6 +920,82 @@ func gpRequestSetNodePositions(gpTargets: Dictionary) -> bool:
 
 func gpCancelActiveTool() -> bool:
 	return gpInputRouter.gpCancelActiveTool()
+
+
+# ============================ P2 挂载意图端口 ============================
+# ============================ P2 attach intent ports ============================
+# The two attach interactions of 规划 §15 reach the model only through these, plus the arming
+# helpers that hand the interaction over to GPPlaceAttachTool.
+# 规划 §15 的两种附件交互只经这些端口触达模型，另有把它交给 GPPlaceAttachTool 的上膛辅助。
+
+# Arm mode 1: a library entry began being dragged. Refuses a definition that is not mountable, so a
+# primary symbol can never be dropped into "attach" state (it would then have no anchor to find).
+# 模式一上膛：库中某条开始被拖动。拒绝不可挂载的定义，使主图元绝不会进入「挂载」态
+# （那样它将找不到任何锚点）。
+func gpArmAttach(gpSymbolId: String) -> bool:
+	return gpInputRouter.gpArmAttach(gpSymbolId)
+
+
+# Arm mode 2 for an EXISTING node, entering the positioning drag (规划 §15.3 step 4).
+# 为**既有**节点上膛模式二，进入拖动定位（规划 §15.3 第 4 步）。
+func gpArmMountDrag(gpNodeId: String, gpUndoOnCancel: bool = false) -> bool:
+	return gpInputRouter.gpArmMountDrag(gpNodeId, gpUndoOnCancel)
+
+
+# Disarm both modes and restore the arrow cursor.
+# 两种模式一并解除，并恢复箭头光标。
+func gpClearPendingAttach() -> void:
+	gpPendingAttach = {}
+	mouse_default_cursor_shape = Control.CURSOR_ARROW
+
+
+# Whether an attach interaction is armed / in flight — the toolbar and context menu use it to grey
+# out entries instead of letting the user start a gesture that cannot complete.
+# 是否有附件交互已上膛 / 进行中 —— 工具条与右键菜单据此置灰条目，而不是让用户开始一个无法完成的
+# 手势。
+func gpIsAttachPending() -> bool:
+	return not gpPendingAttach.is_empty()
+
+
+# Attach one child onto a host anchor (规划 §15). Returns the new node's id, "" when refused.
+# 把一个子件挂到宿主锚点上（规划 §15）。返回新节点 id；被拒时返回 ""。
+func gpRequestAttachNode(gpSymbolId: String, gpParentUid: String, gpAnchor: String,
+		gpOffset: Vector2 = Vector2.ZERO, gpAngleDeg: float = 0.0) -> String:
+	return gpEditFacade.gpRequestAttachNode(gpSymbolId, gpParentUid, gpAnchor, gpOffset, gpAngleDeg)
+
+
+# Mode 2 in one call: attach, then hand the new node straight to the positioning drag. Esc during
+# that drag undoes the attach, which is exactly what "I did not mean to add it" should mean.
+# 模式二一调用完成：先挂载，再把新节点直接交给拖动定位。该拖拽中按 Esc 会撤销这次挂载 ——
+# 这正是「我本来不想加它」应有的含义。
+func gpRequestAttachAndPosition(gpSymbolId: String, gpParentUid: String, gpAnchor: String) -> String:
+	var gpNid: String = gpRequestAttachNode(gpSymbolId, gpParentUid, gpAnchor)
+	if gpNid != "" and not gpArmMountDrag(gpNid, true):
+		# Positioning could not start (the node vanished, or it is not mounted): leave the part
+		# where it landed rather than half-armed.
+		# 拖动定位无法启动（节点消失，或它并未挂载）：让部件停在落点上，而不是卡在半个状态。
+		gpClearPendingAttach()
+	return gpNid
+
+
+# Detach the selected nodes from their hosts, keeping them visually where they are.
+# 把选中节点从其宿主上卸下，并让它们在视觉上停在原处。
+func gpRequestDetachSelected() -> bool:
+	return gpEditFacade.gpRequestDetachSelected()
+
+
+# Commit a finished mount drag as one undo step (the caller restores the pre-drag tuple first).
+# 把一次完成的挂载拖拽提交为一步撤销（调用方须先恢复拖拽前的元组）。
+func gpRequestSetMount(gpNodeIds: Array[String], gpTargets: Array[Dictionary]) -> bool:
+	return gpEditFacade.gpRequestSetMount(gpNodeIds, gpTargets)
+
+
+# Surface an attach refusal. Separate from gpReportRefusal() so the pinned single-argument arity of
+# that port stays untouched, while attach keys keep their own i18n namespace.
+# 呈现一条附件拒绝原因。与 gpReportRefusal() 分开，使该端口被钉死的单参形态保持不变，
+# 同时附件键拥有自己的 i18n 命名空间。
+func gpReportAttachRefusal(gpKey: String) -> void:
+	gpEditFacade.gpReportRefusal(gpKey, "attach.")
 
 
 # ============================ P3 连线意图端口 ============================
