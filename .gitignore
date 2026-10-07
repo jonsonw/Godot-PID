@@ -23,9 +23,22 @@ pdf_text.txt
 *.tmp
 *.log
 
+# ===== 开发过程文档（仅本地，不上传远端）=====
+# docs/ADR（决策记录）、docs/SDLC（按周长期方向）、docs/YAGNI（不做清单）是本项目的
+# **开发过程文档**：属内部资产，不随之推送 —— 避免把内部决策过程、排期与试错记录暴露给
+# 远端访客。对外可读的架构与开发规则见 docs/DEVELOPMENT.md 与 docs/ARCHITECTURE*.md。
+# Process docs (decision records / weekly direction / do-not-do list) are LOCAL-ONLY.
+/docs/ADR/
+/docs/SDLC/
+/docs/YAGNI/
+
 # ===== 本地开发文档与知识库（仅本地参考，不入库） =====
-# 注意：docs/ 现按《开发指南》纳入仓库（ARCHITECTURE.md / samples / knowledge 镜像）。
-# 仅排除根目录零散的规划类 HTML（本仓库内不含此类文件，保留规则以防误入）。
+# 现状：docs/ 的**公开**部分入库（README.md 索引、DEVELOPMENT.md、ARCHITECTURE.md、
+# ARCHITECTURE_FOR_BEGINNERS.md）；ADR/SDLC/YAGNI 与零散规划类 HTML 不上传
+# （见上一条与此处的 *.html）。注：docs/knowledge/、P4_CONNECTION_PANEL.md、
+# connection_feature_baseline.md、samples/ 已于 2026-10-07 取消
+# （samples/ 原含一份带客户项目名的历史存档；空白 A3 模板改由 tools/make_blank_a3.gd
+#  在本地生成到 user://，不入库）。
 *.html
 
 # ===== GUT 测试产物 =====

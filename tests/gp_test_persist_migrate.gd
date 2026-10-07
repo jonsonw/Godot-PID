@@ -21,35 +21,38 @@ static func _gpV1() -> Dictionary:
 	}
 
 
-# The historic multi-document shape found in docs/samples/sample_detox.pid.json: each
-# document wraps its own graph one level deeper. This is the case that used to read back
-# as ZERO nodes — the whole reason the migration chain had to be written.
-# docs/samples/sample_detox.pid.json 中的历史多文档形态：每个 document 把自己的 graph
-# 多包了一层。这正是过去会被读成 **0 节点** 的情形 —— 也是迁移链必须存在的全部理由。
+# The historic multi-document shape: each document wraps its own graph one level deeper.
+# This is the case that used to read back as ZERO nodes — the whole reason the migration
+# chain had to be written. The fixture is SYNTHETIC and de-identified on purpose: the real
+# archive it once mirrored carried a client project name and was removed from the repo
+# (2026-10-07), so the contract is pinned here instead of by a shipped sample file.
+# 历史多文档形态：每个 document 把自己的 graph 多包了一层。这正是过去会被读成 **0 节点**
+# 的情形 —— 也是迁移链必须存在的全部理由。此 fixture 是**合成的、已脱敏**：它曾经复刻的
+# 真实存档带客户项目名，已于 2026-10-07 从仓库移除，故契约固定在这里而不是靠随库样例文件。
 static func _gpHistoricDocuments() -> Dictionary:
 	return {
-		"meta": {"schema": "pid-1.0", "title": "***REMOVED***", "docs": 2},
+		"meta": {"schema": "pid-1.0", "title": "Historic multi-document sample", "docs": 2},
 		"documents": [
-			{"id": "D1", "title": "***REMOVED***", "graph": {
+			{"id": "D1", "title": "Sheet A", "graph": {
 				"meta": {"version": "1.0"},
 				"nodes": [
-					{"instance_id": "u-1", "symbol_id": "valve", "tag": "FV-101",
+					{"instance_id": "u-1", "symbol_id": "valve", "tag": "FV-001",
 					 "position": [120, 80], "attr_values": {"size": "DN80"}},
-					{"instance_id": "u-2", "symbol_id": "tank", "tag": "T-101",
+					{"instance_id": "u-2", "symbol_id": "tank", "tag": "T-001",
 					 "position": [220, 80]},
 				],
 				"edges": [{"instance_id": "e-1",
 					"from_ref": {"node_id": "u-1", "port_id": "out"},
 					"to_ref": {"node_id": "u-2", "port_id": "in"}}],
 			}},
-			{"id": "D2", "title": "***REMOVED***", "graph": {
-				"nodes": [{"instance_id": "u-3", "symbol_id": "pump", "tag": "P-201",
+			{"id": "D2", "title": "Sheet B", "graph": {
+				"nodes": [{"instance_id": "u-3", "symbol_id": "pump", "tag": "P-001",
 					"position": [120, 80]}],
 				"edges": [],
 			}},
 		],
 		"cross_links": [{"from_doc": "D1", "from_node": "u-2", "to_doc": "D2",
-			"to_node": "u-3", "tag": "PL-201"}],
+			"to_node": "u-3", "tag": "PL-001"}],
 	}
 
 
@@ -126,7 +129,7 @@ func gpTestHistoricDocumentsBecomeSheets() -> void:
 		return
 	var gpD1: Dictionary = gpSheets[0] as Dictionary
 	gpCheck(str(gpD1.get("id", "")) == "D1", "sheet id should come from the document id")
-	gpCheck(str(gpD1.get("name", "")) == "***REMOVED***", "sheet name should come from the title")
+	gpCheck(str(gpD1.get("name", "")) == "Sheet A", "sheet name should come from the title")
 	gpCheck(((gpD1.get("nodes", []) as Array).size()) == 2, "D1 should keep its two nodes")
 	var gpD2: Dictionary = gpSheets[1] as Dictionary
 	gpCheck(((gpD2.get("nodes", []) as Array).size()) == 1, "D2 should keep its one node")
@@ -244,8 +247,8 @@ func gpTestToGraphDictPicksSheet() -> void:
 	var gpNodes: Array = gpOut.get("nodes", []) as Array
 	gpCheck(gpNodes.size() == 1, "sheet 2 has one node, got " + str(gpNodes.size()))
 	if gpNodes.size() >= 1:
-		gpCheck(str((gpNodes[0] as Dictionary).get("tag", "")) == "P-201",
-			"sheet 2's node should be P-201")
+		gpCheck(str((gpNodes[0] as Dictionary).get("tag", "")) == "P-001",
+			"sheet 2's node should be P-001")
 
 
 # Mounting keys must survive normalisation. Regression nail for the 2026-10-04 bug: the

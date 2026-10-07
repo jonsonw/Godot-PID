@@ -114,8 +114,8 @@ func gpIsMounted() -> bool:
 
 # Serialize this node to a plain dictionary (object graph -> dict graph).
 # 将本节点序列化为普通字典（对象图 → 字典图）。
-# The shape matches docs/samples/sample_detox.pid.json so JSON stays forward-compatible.
-# 该形状与 docs/samples/sample_detox.pid.json 一致，保证 JSON 向前兼容。
+# The shape matches the historic multi-document form so JSON stays forward-compatible.
+# 该形状与历史多文档形态一致，保证 JSON 向前兼容。
 func gpToDict() -> Dictionary:
 	var gpD: Dictionary = {}
 	gpD["uid"] = gpUid

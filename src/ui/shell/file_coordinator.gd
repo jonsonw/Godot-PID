@@ -514,7 +514,8 @@ func gpDoImportDexpi(gpPath: String) -> void:
 	# 定义查找让导入器把每根管线端**重绑**到离其已存端点最近的端口 ——
 	# 不传则 port_id 保持空串，渲染器降级到「期望用途第一个端口」，
 	# 管线会被画到符号的错误侧面。
-	var gpRes: GPIOResult = GPDexpiImporter.gpReadFileToV3(gpPath, Callable(gpHost, "gpDefFor"))
+	# Bare method reference: parse-time checked, rename-safe. / 裸方法引用：解析期受检，重命名安全。
+	var gpRes: GPIOResult = GPDexpiImporter.gpReadFileToV3(gpPath, gpHost.gpDefFor)
 	if not gpRes.gpIsOk():
 		gpHost.gpSetState(gpRes.gpMessageKey, [gpPath])
 		return

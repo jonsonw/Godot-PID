@@ -130,7 +130,7 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
  # 必须在更新变换**之前**重绑挂载上下文：挂载子件的世界坐标系由图中的父链推导，
  # 故 gpUpdateTransform() 执行时图必须已就位。
 			gpV.gpGraph = gpGraph
-			gpV.gpDefLookupCb = Callable(self, "_gpLookupDef")
+			gpV.gpDefLookupCb = _gpLookupDef
 			gpV.gpUpdateTransform()
  # The definition drives the painted geometry, so a rebind needs a repaint of BOTH
  # layers (label on the view, glyph + ports on the body child).
@@ -141,7 +141,7 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
  # 为该节点创建新视图。
 			gpV = GPSymbolView.new()
 			var gpDef: GPSymbolDef = gpDefFor(gpN.gpSymbolId)
-			gpV.gpInit(gpN, gpDef, gpGraph, Callable(self, "_gpLookupDef"))
+			gpV.gpInit(gpN, gpDef, gpGraph, _gpLookupDef)
 			gpV.gpStyle = gpStyle
 			# Tags are text: oversample them for the camera scale so an N mm tag is rasterised at
 			# its on-screen size instead of being magnified from N pixels. The property is an ENUM
@@ -257,7 +257,7 @@ func _gpSyncEdgeViews(gpSelection: Array[String], gpEdgeSelection: Array[String]
  # Create a new view for this edge.
  # 为该连线创建新视图。
 			gpV = GPEdgeView.new()
-			gpV.gpInit(gpE, gpGraph, Callable(self, "_gpLookupDef"))
+			gpV.gpInit(gpE, gpGraph, _gpLookupDef)
 			gpV.gpStyle = gpStyle
 			# Pipe line numbers are text too — same oversampling reason and enum caveat as above.
 			# 管线位号同样是文字 —— 过采样理由与枚举注意事项同上。

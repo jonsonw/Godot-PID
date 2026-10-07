@@ -9,6 +9,12 @@ extends "res://tests/gp_test.gd"
 # See 持久化实现方案 §12 (不变式) / 见「持久化实现方案」§12。
 
 const GP_TMP: String = "user://gp_test_roundtrip.pid.json"
+# Synthetic, de-identified stand-in for the historic multi-document shape. The real archive
+# this once mirrored carried a client project name and was removed from the repo (2026-10-07),
+# so the coverage lives here instead of depending on a shipped sample file.
+# 历史多文档形态的**合成脱敏**替身。它曾复刻的真实存档含客户项目名，已于 2026-10-07 移除，
+# 故覆盖写在这里，而不是依赖随库分发的样例文件。
+const GP_HISTORIC: String = "user://gp_test_roundtrip_historic.pid.json"
 
 
 # A graph exercising every serialised field: props, names, anchor, offset, routing.
@@ -36,10 +42,42 @@ func _gpSampleGraph() -> GPPIDGraph:
 	return gpG
 
 
+# Write the historic-shape fixture to disk, so the read path runs against a REAL file
+# (that is what the sample file used to provide).
+# 把历史形态 fixture 写到磁盘，使读取路径作用在**真实文件**上（这正是样例文件原先提供的东西）。
+static func _gpWriteHistoric(gpPath: String) -> void:
+	var gpFixture: Dictionary = {
+		"meta": {"schema": "pid-1.0", "title": "Historic multi-document sample", "docs": 2},
+		"documents": [
+			{"id": "D1", "title": "Sheet A", "graph": {
+				"meta": {"version": "1.0"},
+				"nodes": [
+					{"instance_id": "u-1", "symbol_id": "valve", "tag": "FV-001",
+					 "position": [120, 80], "attr_values": {"size": "DN80"}},
+					{"instance_id": "u-2", "symbol_id": "tank", "tag": "T-001",
+					 "position": [220, 80]},
+				],
+				"edges": [{"instance_id": "e-1",
+					"from_ref": {"node_id": "u-1", "port_id": "out"},
+					"to_ref": {"node_id": "u-2", "port_id": "in"}}],
+			}},
+			{"id": "D2", "title": "Sheet B", "graph": {
+				"nodes": [{"instance_id": "u-3", "symbol_id": "pump", "tag": "P-001",
+					"position": [120, 80]}],
+				"edges": [],
+			}},
+		],
+		"cross_links": [{"from_doc": "D1", "from_node": "u-2", "to_doc": "D2",
+			"to_node": "u-3", "tag": "PL-001"}],
+	}
+	GPAtomicFile.gpWriteJsonAtomic(gpPath, gpFixture)
+
+
 func _gpCleanup() -> void:
-	var gpAbs: String = ProjectSettings.globalize_path(GP_TMP)
-	if FileAccess.file_exists(gpAbs):
-		DirAccess.remove_absolute(gpAbs)
+	for gpPath in [GP_TMP, GP_HISTORIC]:
+		var gpAbs: String = ProjectSettings.globalize_path(gpPath)
+		if FileAccess.file_exists(gpAbs):
+			DirAccess.remove_absolute(gpAbs)
 
 
 # Write -> migrate -> flatten -> rebuild: every field must come back identical.
@@ -123,16 +161,21 @@ func gpTestSaveReopenThroughProjectIO() -> void:
 	_gpCleanup()
 
 
-# Every real archive in the repository must open, migrate and keep its geometry.
-# 仓库中每个真实存档都必须能打开、迁移并保住其几何。
+# Every real archive shipped in the repo, plus the historic-shape fixture, must open,
+# migrate and keep its geometry.
+# 仓库中随库分发的真实存档 + 历史形态 fixture，都必须能打开、迁移并保住其几何。
+# NO existence guard here, on purpose: the guard this test used to carry made a deleted file
+# silently drop assertions while the suite still reported failed=0 (2026-10-07 incident —
+# 15 assertions vanished unnoticed). A missing archive must FAIL, not skip.
+# 此处**刻意不设存在性护栏**：原先的护栏让「文件被删」静默丢掉断言，而套件仍报 failed=0
+# （2026-10-07 事故：15 条断言无声消失）。存档缺失必须**失败**，而不是跳过。
 func gpTestRealArchivesOpen() -> void:
+	_gpWriteHistoric(GP_HISTORIC)
 	var gpPaths: Array[String] = [
 		"res://project.pid.json",
-		"res://docs/samples/sample_detox.pid.json",
+		GP_HISTORIC,
 	]
 	for gpPath in gpPaths:
-		if not FileAccess.file_exists(gpPath):
-			continue
 		var gpR: GPIOResult = GPAtomicFile.gpReadJsonDict(gpPath)
 		gpCheck(gpR.gpIsOk(), gpPath + " should parse")
 		if not gpR.gpIsOk():
@@ -146,17 +189,17 @@ func gpTestRealArchivesOpen() -> void:
 		gpCheck(gpG != null, gpPath + " should rebuild into a graph")
 		if gpG != null:
 			gpCheck(gpG.gpNodes.size() >= 0, gpPath + " node count must be non-negative")
-	# The historic sample specifically: it used to read back as ZERO nodes.
-	# 历史样例尤为关键：它过去会被读成 **0 节点**。
-	if FileAccess.file_exists("res://docs/samples/sample_detox.pid.json"):
-		var gpRR: GPIOResult = GPAtomicFile.gpReadJsonDict("res://docs/samples/sample_detox.pid.json")
-		if gpRR.gpIsOk():
-			var gpTotal: int = 0
-			for gpS in (GPSchemaMigrate.gpMigrate(gpRR.gpPayload as Dictionary).get(
-					"sheets", []) as Array):
-				gpTotal += ((gpS as Dictionary).get("nodes", []) as Array).size()
-			gpCheck(gpTotal == 3,
-				"the historic sample must yield 3 nodes across its sheets, got " + str(gpTotal))
+	# The historic shape specifically: it used to read back as ZERO nodes.
+	# 历史形态尤为关键：它过去会被读成 **0 节点**。
+	var gpRR: GPIOResult = GPAtomicFile.gpReadJsonDict(GP_HISTORIC)
+	if gpRR.gpIsOk():
+		var gpTotal: int = 0
+		for gpS in (GPSchemaMigrate.gpMigrate(gpRR.gpPayload as Dictionary).get(
+				"sheets", []) as Array):
+			gpTotal += ((gpS as Dictionary).get("nodes", []) as Array).size()
+		gpCheck(gpTotal == 3,
+			"the historic shape must yield 3 nodes across its sheets, got " + str(gpTotal))
+	_gpCleanup()
 
 
 # Exporting then re-importing the same graph must be loss-free.

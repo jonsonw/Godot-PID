@@ -158,7 +158,7 @@ func _gpBuildChildren(gpCtx: GPCommandContext) -> void:
 	# 兜底（见 _gpResolveDef），但把那个无效的裸 Callable 透传过去，会让每个默认子件都「无法解析」
 	# 从而静默地一个部件都不生成 —— 而这种失败没有任何门禁能抓到，因为「没有子件」本身也是合法结果。
 	var gpDefaults: Array[Dictionary] = GPMountResolver.gpDefaultChildren(
-		Callable(self, "_gpResolveDef"), _gpResolveDef(gpSymbolId))
+		_gpResolveDef, _gpResolveDef(gpSymbolId))
 	for gpD in gpDefaults:
 		var gpId: String = gpCtx.gpIds.gpNext("n")
  # DELIBERATELY NO TAG / 刻意不编位号：

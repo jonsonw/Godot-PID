@@ -8,12 +8,48 @@ extends "res://tests/gp_test.gd"
 # See 持久化实现方案 §6 / 见「持久化实现方案」§6。
 
 const GP_TMP: String = "user://gp_test_sheets.pid.json"
+# Synthetic, de-identified stand-in for the historic multi-document shape (see the same
+# fixture in gp_test_persist_migrate.gd). The real client archive was removed 2026-10-07.
+# 历史多文档形态的**合成脱敏**替身（另见 gp_test_persist_migrate.gd 中的同名 fixture）。
+# 真实客户存档已于 2026-10-07 移除。
+const GP_HISTORIC: String = "user://gp_test_sheets_historic.pid.json"
 
 
 func _gpCleanup() -> void:
-	var gpAbs: String = ProjectSettings.globalize_path(GP_TMP)
-	if FileAccess.file_exists(gpAbs):
-		DirAccess.remove_absolute(gpAbs)
+	for gpPath in [GP_TMP, GP_HISTORIC]:
+		var gpAbs: String = ProjectSettings.globalize_path(gpPath)
+		if FileAccess.file_exists(gpAbs):
+			DirAccess.remove_absolute(gpAbs)
+
+
+# Write the historic-shape fixture so gpReadSheets() runs against a REAL file on disk.
+# 写出历史形态 fixture，使 gpReadSheets() 作用在磁盘上的**真实文件**上。
+static func _gpWriteHistoric(gpPath: String) -> void:
+	var gpFixture: Dictionary = {
+		"meta": {"schema": "pid-1.0", "title": "Historic multi-document sample", "docs": 2},
+		"documents": [
+			{"id": "D1", "title": "Sheet A", "graph": {
+				"meta": {"version": "1.0"},
+				"nodes": [
+					{"instance_id": "u-1", "symbol_id": "valve", "tag": "FV-001",
+					 "position": [120, 80], "attr_values": {"size": "DN80"}},
+					{"instance_id": "u-2", "symbol_id": "tank", "tag": "T-001",
+					 "position": [220, 80]},
+				],
+				"edges": [{"instance_id": "e-1",
+					"from_ref": {"node_id": "u-1", "port_id": "out"},
+					"to_ref": {"node_id": "u-2", "port_id": "in"}}],
+			}},
+			{"id": "D2", "title": "Sheet B", "graph": {
+				"nodes": [{"instance_id": "u-3", "symbol_id": "pump", "tag": "P-001",
+					"position": [120, 80]}],
+				"edges": [],
+			}},
+		],
+		"cross_links": [{"from_doc": "D1", "from_node": "u-2", "to_doc": "D2",
+			"to_node": "u-3", "tag": "PL-001"}],
+	}
+	GPAtomicFile.gpWriteJsonAtomic(gpPath, gpFixture)
 
 
 # Three sheets, each with distinguishable content.
@@ -141,18 +177,21 @@ func gpTestSingleSheetStaysV2() -> void:
 	_gpCleanup()
 
 
-# The historic multi-document sample must reopen as its two real sheets.
-# 历史多文档样例必须重新打开为它真正的两页。
+# The historic multi-document shape must reopen as its two real sheets — from a fixture
+# written on the spot, not from a shipped sample file (the client archive was removed
+# 2026-10-07). A missing fixture must FAIL here, not skip: the old existence guard hid the
+# fact that a deleted file was silently deleting coverage.
+# 历史多文档形态必须重新打开为它真正的两页 —— 用**当场写出的 fixture**，而不是随库样例文件
+# （客户存档已于 2026-10-07 移除）。fixture 缺失必须在此**失败**而非跳过：
+# 旧的护栏掩盖了「文件被删＝覆盖被删」的事实。
 func gpTestHistoricDocumentsReopenAsSheets() -> void:
-	var gpPath: String = "res://docs/samples/sample_detox.pid.json"
-	if not FileAccess.file_exists(gpPath):
-		return
-	var gpR: GPIOResult = GPProjectIO.gpReadSheets(gpPath)
-	gpCheck(gpR.gpIsOk(), "the historic sample must read as sheets")
+	_gpWriteHistoric(GP_HISTORIC)
+	var gpR: GPIOResult = GPProjectIO.gpReadSheets(GP_HISTORIC)
+	gpCheck(gpR.gpIsOk(), "the historic shape must read as sheets")
 	if not gpR.gpIsOk():
 		return
 	var gpSheets: Array = gpR.gpPayload as Array
-	gpCheck(gpSheets.size() == 2, "the historic sample has 2 documents, got "
+	gpCheck(gpSheets.size() == 2, "the historic shape has 2 documents, got "
 		+ str(gpSheets.size()))
 	if gpSheets.size() < 2:
 		return
@@ -161,8 +200,9 @@ func gpTestHistoricDocumentsReopenAsSheets() -> void:
 	gpCheck(gpD1.gpId == "D1", "the first document id must be preserved")
 	gpCheck(gpD1.gpGraph.gpNodes.size() == 2, "D1 has 2 nodes")
 	gpCheck(gpD2.gpGraph.gpNodes.size() == 1, "D2 has 1 node")
-	gpCheck((gpD2.gpGraph.gpNodes[0] as GPPIDNode).gpTag == "P-201",
+	gpCheck((gpD2.gpGraph.gpNodes[0] as GPPIDNode).gpTag == "P-001",
 		"D2's node keeps its tag")
+	_gpCleanup()
 
 
 # An empty sheet list must be refused, not written as a broken archive.

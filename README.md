@@ -106,7 +106,7 @@ The core code is released under the **MIT License** — free to use, modify, and
 ### 运行测试 / Run the tests
 
 ```bash
-# 自研 GPGTest：61 套 / 2,901 断言（编译 0 错 · SCRIPT ERROR 0）
+# 自研 GPGTest：73 套 / 4,867 断言（编译 0 错 · SCRIPT ERROR 0）
 godot --headless --script res://tests/run_core_tests.gd
 
 # 首次克隆或新增 class_name 后必须先 import，否则 GUT 报 "class_names have not been imported"
@@ -138,7 +138,7 @@ Godot-PID/                # GitHub 仓库根（本地工作目录为 Godot-PID-C
 │   │   ├── platform/      # DPI 窗口、弹窗辅助
 │   │   └── service/       # GPIdGen、GPIOResult
 │   ├── app/               # 应用服务层：命令、撤销栈、事件总线、文档管理
-│   │   └── commands/      # 29 条具体命令（增删移图元/图形/连线、路径与标签编辑、落点恢复）
+│   │   └── commands/      # 32 条具体命令（增删移图元/图形/连线、路径与标签编辑、落点恢复）
 │   ├── render/            # GPSymbolView / GPEdgeView / 图框 GPFrameView / 背景 GPBackgroundView / 绘制器
 │   ├── io/                # *.pid.json 读写；DEXPI（Proteus XML）导入导出；DXF / PDF / 清单导出为桩
 │   │   ├── dexpi_schema.gd    # 版本常量 / RDL 双域 / 保留 Set 名 / 版本能力表
@@ -161,7 +161,7 @@ Godot-PID/                # GitHub 仓库根（本地工作目录为 Godot-PID-C
 ├── assets/                # 图元 SVG、中文字体、主题
 ├── tools/                 # 图元包生成脚本（Python）
 ├── tests/                 # GPGTest 套件 + GUT 用例与桥接
-└── docs/                  # 架构文档：ARCHITECTURE.md、新手导读
+└── docs/                  # 文档入口见 docs/README.md（架构、开发指南、新手导读、样例）
 ```
 
 ---
@@ -182,6 +182,8 @@ Godot-PID/                # GitHub 仓库根（本地工作目录为 Godot-PID-C
 
 ### 了解更多 / Learn more
 
+- [`docs/README.md`](docs/README.md) — **文档总索引**（公开文档 / 本地过程文档的分工与阅读路径）
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — **开发指南**：架构地图、强制规则、扩展点、门禁与常见陷阱
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 架构总览（分层、依赖规则、调用链路）
 - [`docs/ARCHITECTURE_FOR_BEGINNERS.md`](docs/ARCHITECTURE_FOR_BEGINNERS.md) — **新手导读**，从 Godot 概念讲到「加功能该改哪里」
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — 编码与命名规范（`gp` / `GP` 前缀、显式类型、中英双语注释）

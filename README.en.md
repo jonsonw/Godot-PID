@@ -100,7 +100,7 @@ The core code is released under the **MIT License** — free to use, modify, and
 ### Run the tests / 运行测试
 
 ```bash
-# Home-grown GPGTest: 61 suites / 2,901 assertions (compile-clean, 0 SCRIPT ERROR)
+# Home-grown GPGTest: 73 suites / 4,867 assertions (compile-clean, 0 SCRIPT ERROR)
 godot --headless --script res://tests/run_core_tests.gd
 
 # Required after a fresh clone or whenever a class_name is added,
@@ -133,7 +133,7 @@ Godot-PID/                # GitHub repo root (local working folder: Godot-PID-Co
 │   │   ├── platform/      # DPI window, popup helpers
 │   │   └── service/       # GPIdGen, GPIOResult
 │   ├── app/               # Application services: commands, undo stack, event bus, documents
-│   │   └── commands/      # 29 concrete commands (node/shape/edge add-delete-move, path & tag editing, drop restore)
+│   │   └── commands/      # 32 concrete commands (node/shape/edge add-delete-move, path & tag editing, drop restore)
 │   ├── render/            # GPSymbolView / GPEdgeView / frame GPFrameView / backdrop GPBackgroundView / painter
 │   ├── io/                # *.pid.json read/write; DEXPI (Proteus XML) import/export;
 │   │   │                  # DXF / PDF / list export are stubs
@@ -157,7 +157,7 @@ Godot-PID/                # GitHub repo root (local working folder: Godot-PID-Co
 ├── assets/                # Symbol SVGs, CJK fonts, theme
 ├── tools/                 # Symbol pack generator (Python)
 ├── tests/                 # GPGTest suites + GUT cases and bridge
-└── docs/                  # Architecture docs: ARCHITECTURE.md, beginner's guide
+└── docs/                  # start at docs/README.md (architecture, dev guide, beginner's guide, samples)
 ```
 
 ---
@@ -178,6 +178,8 @@ Godot-PID/                # GitHub repo root (local working folder: Godot-PID-Co
 
 ### Learn more / 了解更多
 
+- [`docs/README.md`](docs/README.md) — **documentation index** (public docs vs. local-only process docs)
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — **development guide**: architecture map, mandatory rules, extension seams, gates, pitfalls
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — architecture overview (layering, dependency rules, call chains)
 - [`docs/ARCHITECTURE_FOR_BEGINNERS.md`](docs/ARCHITECTURE_FOR_BEGINNERS.md) — **beginner's guide**, from Godot concepts to "where to add a feature"
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — coding & naming rules (`gp` / `GP` prefixes, explicit types, bilingual comments)

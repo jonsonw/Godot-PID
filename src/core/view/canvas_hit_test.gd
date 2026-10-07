@@ -66,7 +66,7 @@ static func gpNodeRect(gpGraph: GPPIDGraph, gpBinder: GPGraphBinder, gpId: Strin
 static func gpHitNode(gpGraph: GPPIDGraph, gpBinder: GPGraphBinder, gpWorld: Vector2) -> String:
 	if gpGraph == null:
 		return ""
-	var gpLookup: Callable = Callable(gpBinder, "gpDefFor") if gpBinder != null else Callable()
+	var gpLookup: Callable = gpBinder.gpDefFor if gpBinder != null else Callable()
 	var gpBest: String = ""
 	var gpBestDepth: int = -1
 	for gpN in gpGraph.gpNodes:
@@ -104,7 +104,8 @@ static func _gpWorldOrigin(gpGraph: GPPIDGraph, gpBinder: GPGraphBinder,
 		gpNode: GPPIDNode) -> Vector2:
 	if gpBinder == null:
 		return gpNode.gpPosition
-	return GPPortResolver.gpNodeWorldOrigin(gpGraph, Callable(gpBinder, "gpDefFor"), gpNode)
+	# Bare method reference: parse-time checked, rename-safe. / 裸方法引用：解析期受检，重命名安全。
+	return GPPortResolver.gpNodeWorldOrigin(gpGraph, gpBinder.gpDefFor, gpNode)
 
 
 # Topmost edge id under the world point, or "".

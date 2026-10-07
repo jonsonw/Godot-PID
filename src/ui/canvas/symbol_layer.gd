@@ -43,10 +43,12 @@ func gpDefLookup(gpSymbolId: String) -> GPSymbolDef:
 	return gpHost.gpBinder.gpDefFor(gpSymbolId)
 
 # Symbol-id -> definition, handed to the pure geometry / hit-test modules so they never need the
-# binder (or the canvas) themselves.
+# binder (or the canvas) themselves. Bound as a bare method reference (not Callable(self, "…")) so
+# the binding is checked at parse time and a rename can never silently break it.
 # 符号 id -> 定义，交给纯几何与命中测试模块，使它们无需直接依赖绑定器（或画布）。
+# 用裸方法引用绑定（而非 Callable(self, "…")）：绑定在解析期即受检，重命名不会静默失效。
 func gpDefLookupCallable() -> Callable:
-	return Callable(self, "gpDefLookup")
+	return gpDefLookup
 
 # Hit-test: index of the topmost annotation shape under the world point, or -1. Delegates to
 # GPCanvasHitTest ; tolerance scales with zoom (6px at 100%).

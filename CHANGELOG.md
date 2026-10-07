@@ -21,7 +21,7 @@
 - **1:1 手绘复刻能力** / **1:1 tracing capability**
   - `GPBackgroundView` 背景追踪底图层（z_index = -2）：可载入标准图位图淡色铺满整张图纸，作为描摹底图。
   - 标题栏对话框新增「追踪底图」分组：路径选择、清除、透明度调节。
-  - 新增空白 A3 模板 `docs/samples/blank_a3.pid.json`（由真实代码路径生成，schema 与运行时一致）。
+  - 新增空白 A3 模板 `docs/samples/blank_a3.pid.json`（由真实代码路径生成，schema 与运行时一致）。**（自 2026-10-07 起仓库不再分发样例文件，改为运行 `tools/make_blank_a3.gd` 在本地生成到 `user://`）**
 
 ### 变更 / Changed
 - **图元库切换为 DEXPI C01**：内置库由已删除的 ISO 10628 包（25 符号）切换为 DEXPI C01 包（24 符号，提取自标准示例图）。
@@ -39,4 +39,4 @@
 
 ## 计划 / Roadmap
 - **Phase 7（v0.1 后）**：按 `B` 键呼出类游戏「背包」图元选择界面；多文档深化（W21）；跨页连接器（W22）；AI 辅助仅桩（W23）。
-- **DEXPI 双向校验器（W10 / W18）** 与导入器（W18）按既定顺序推进，详见 `docs/adr/ADR-8-原生存档与DEXPI.md`。
+- **DEXPI 双向校验器（W10 / W18）** 与导入器（W18）按既定顺序推进（决策记录 ADR-8「原生存档与 DEXPI」）。

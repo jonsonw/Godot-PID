@@ -2,12 +2,12 @@ extends "res://tests/gp_test.gd"
 # Headless tests for GPEdgeStyle (P1 of the connection feature).
 # 连线功能 P1 —— GPEdgeStyle 的 headless 测试。
 #
-# Drafting rule under test (see docs/adr/ADR-UI-02-线型语义.md):
+# Drafting rule under test (see docs/ADR/2026-09-11-ADR-UI-02-线型语义.md):
 #   - PROCESS stays a SOLID CONTINUOUS line; line weight is its only visual distinction.
 #   - UTILITY adopts the AutoCAD DASHED convention so utility mains read as dashed.
 # The style sheet is a pure function so that restyling is a one-line edit instead of a
 # migration over every saved archive.
-# 被测的制图规则（见 docs/adr/ADR-UI-02-线型语义.md）：
+# 被测的制图规则（见 docs/ADR/2026-09-11-ADR-UI-02-线型语义.md）：
 #   - PROCESS 仍用实线 CONTINUOUS，线宽是其唯一可见区分手段。
 #   - UTILITY 采用 AutoCAD DASHED 惯例，使公用工程主线呈虚线。
 # 样式表是纯函数，改样式即一行编辑，不必遍历每个存档做迁移。

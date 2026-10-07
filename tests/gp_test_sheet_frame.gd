@@ -41,7 +41,7 @@ func gpTestFrameSurvivesRoundTrip() -> void:
 	gpS.gpWidthMM = 594.0
 	gpS.gpHeightMM = 420.0
 	gpS.gpLabelMode = GPSheet.GP_LABEL_EN
-	gpS.gpTitleBlock["project"] = {"value": {"zh": "***REMOVED*** ***REMOVED***", "en": "***REMOVED***"}}
+	gpS.gpTitleBlock["project"] = {"value": {"zh": "示例项目", "en": "Sample Project"}}
 	var gpD: Dictionary = gpS.gpToDict()
 	var gpBack: GPSheet = GPSheet.gpFromDict(gpD)
 	gpEq(gpBack.gpWidthMM, 594.0, "图幅宽应随存档往返")
@@ -51,8 +51,8 @@ func gpTestFrameSurvivesRoundTrip() -> void:
 	gpCheck(gpEntry != null, "标题栏的 project 字段应回来")
 	if gpEntry != null:
 		var gpV: Variant = (gpEntry as Dictionary).get("value")
-		gpEq(str((gpV as Dictionary).get("en", "")), "***REMOVED***", "英文值应随存档往返")
-		gpEq(str((gpV as Dictionary).get("zh", "")), "***REMOVED*** ***REMOVED***", "中文值应随存档往返")
+		gpEq(str((gpV as Dictionary).get("en", "")), "Sample Project", "英文值应随存档往返")
+		gpEq(str((gpV as Dictionary).get("zh", "")), "示例项目", "中文值应随存档往返")
 
 
 # An untouched sheet writes NO frame keys, so archives from older builds stay byte-stable.
@@ -128,13 +128,13 @@ func gpTestSheetSizeCellTracksSheet() -> void:
 # （ADR-7 旧档字节稳定）。
 func gpTestBackgroundRoundTrip() -> void:
 	var gpS: GPSheet = GPSheet.gpNew("sheet-1", "首页", 0)
-	gpS.gpBackgroundPath = "res://docs/samples/c01_a3.png"
+	gpS.gpBackgroundPath = "user://trace_underlay.png"
 	gpS.gpBackgroundAlpha = 0.5
 	var gpD: Dictionary = gpS.gpToDict()
 	gpCheck(gpD.has("background_path"), "设置了底图应写出 background_path")
 	gpCheck(gpD.has("background_alpha"), "非默认透明度应写出 background_alpha")
 	var gpBack: GPSheet = GPSheet.gpFromDict(gpD)
-	gpEq(gpBack.gpBackgroundPath, "res://docs/samples/c01_a3.png",
+	gpEq(gpBack.gpBackgroundPath, "user://trace_underlay.png",
 		"底图路径应随存档往返")
 	gpEq(gpBack.gpBackgroundAlpha, 0.5, "底图透明度应随存档往返")
 

@@ -13,8 +13,8 @@ extends RefCounted
 # v1 {meta, nodes:[{id,type,label,pos,attr_values}], edges:[{id,from,to}]}
 # v2 {meta, nodes:[{instance_id,symbol_id,uid,props}], tag_rules, user_symbol_packs}
 # v3 {format, format_version, kind, sheets:[...], library:{...}, config:{...}}
-# Plus the HISTORIC multi-document shape found in docs/samples/sample_detox.pid.json:
-# 以及 docs/samples/sample_detox.pid.json 中的历史多文档形态：
+# Plus the HISTORIC multi-document shape (each document wraps its own graph one level deeper):
+# 以及历史多文档形态（每个 document 把自己的 graph 多包一层）：
 # {meta, documents:[{id,title,graph:{meta,nodes,edges}}], cross_links:[...]}
 # See 持久化实现方案 §7 (版本演进与迁移链) / 见「持久化实现方案」§7。
 # Coding rule: every variable must declare its type explicitly. / 编码规范：变量显式类型。
