@@ -88,7 +88,14 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		var gpTagToUse: String = gpTag
 		if gpTagToUse == "" and gpCtx.gpTags != null:
 			gpCtx.gpTags.gpGraph = gpCtx.gpGraph
-			gpTagToUse = gpCtx.gpTags.gpNextTag(_gpResolveDef(gpSymbolId))
+			# Stage 2 (gpTaggable): a definition that opted out of tagging mints NO tag —
+			# annotation-type symbols never occupy the project-wide number sequence, and the
+			# exclusion is EXPLICIT, never "the prefix happened to be empty".
+			# 阶段 2（gpTaggable）：声明**不可编号**的定义不铸位号 —— 标注类图元绝不占用
+			# 工程级唯一号段，且排除是**显式**的，绝不靠「前缀碰巧为空」碰运气。
+			var gpDefForTag: GPSymbolDef = _gpResolveDef(gpSymbolId)
+			if gpDefForTag == null or gpDefForTag.gpTaggable:
+				gpTagToUse = gpCtx.gpTags.gpNextTag(gpDefForTag)
 		_gpNode = gpCtx.gpGraph.gpNewNode(gpId, gpSymbolId, gpTagToUse, gpPos)
 		if gpCtx.gpTags != null:
 			gpCtx.gpTags.gpRegister(_gpNode.gpInstanceId, _gpNode.gpTag)

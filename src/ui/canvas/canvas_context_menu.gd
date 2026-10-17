@@ -74,6 +74,15 @@ const GP_CTX_ADD_ANCHOR: int = 31
 # 图元落到连线上的两个动作：让管线绕开新图元 / 拆成两根穿过它。id 空间与上方边级块错开。
 const GP_CTX_DROP_REROUTE: int = 32
 const GP_CTX_DROP_SPLIT: int = 33
+# Stage 3 grid-table structure ops (only offered when the right-click landed on a CELL of a
+# GENERATOR:grid table; they act on the clicked row/col). Id space 34..37, clear of every
+# block above.
+# 阶段 3 grid 表格结构操作（仅当右键落在 GENERATOR:grid 表格的**格子**上时提供；
+# 作用于被点的行/列）。id 空间 34..37，与上方所有号段错开。
+const GP_CTX_TABLE_INS_ROW: int = 34
+const GP_CTX_TABLE_DEL_ROW: int = 35
+const GP_CTX_TABLE_INS_COL: int = 36
+const GP_CTX_TABLE_DEL_COL: int = 37
 
 # Canvas this menu acts on (state owner).
 # 本菜单作用的画布（状态持有者）。
@@ -126,6 +135,15 @@ var _gpAttachChoices: Array[Dictionary] = []
 # 上部」添加的管嘴落在上部朝上，而不是落在声明顺序的第一个锚点上。
 var _gpAttachWorld: Vector2 = Vector2.ZERO
 
+# Stage 3: the grid-table CELL the right-click landed on ("" / -1 / -1 when not on a cell).
+# Cleared at the top of gpOnRightDown() so a non-cell right-click never leaves a stale target.
+# The menu items and the dispatch BOTH read this — one snapshot, like the attach choices.
+# 阶段 3：右键所落的 grid 表格**格子**（非格子时为 "" / -1 / -1）。在 gpOnRightDown() 顶部
+# 清零，非格子右键绝不残留旧目标。菜单项与分派**都**读它 —— 与附件选择一样，一份快照。
+var _gpCtxCellKey: String = ""
+var _gpCtxCellRow: int = -1
+var _gpCtxCellCol: int = -1
+
 
 func _init(gpCanvas: GPCanvas2D) -> void:
 	gpCv = gpCanvas
@@ -142,6 +160,9 @@ func gpOnRightDown(gpScreen: Vector2) -> void:
 	_gpAttachWorld = gpWorld
 	_gpCtxVertex = -1
 	_gpCtxEdge = ""
+	_gpCtxCellKey = ""
+	_gpCtxCellRow = -1
+	_gpCtxCellCol = -1
 	_gpCtxBumpEid = ""
 	_gpCtxBumpAi = -1
 	_gpCtxBumpWorld = Vector2.ZERO
@@ -150,6 +171,16 @@ func gpOnRightDown(gpScreen: Vector2) -> void:
 		if not gpCv.gpSelection.has(gpHit):
 			gpCv.gpSetSelection([gpHit])
 		_gpCtxHit = gpHit
+		# Stage 3: resolve the grid CELL under the click so the menu can offer row/col ops
+		# on the exact row/column the user pointed at. A non-table hit leaves the cell state
+		# cleared (set above).
+		# 阶段 3：解析点击处的 grid **格子**，使菜单能对用户所指的行/列提供结构操作。
+		# 非表格命中保持格子状态为空（上方已清零）。
+		var gpCell: Dictionary = _gpResolveCell(gpWorld, gpHit)
+		if str(gpCell["key"]) != "":
+			_gpCtxCellKey = str(gpCell["key"])
+			_gpCtxCellRow = int(gpCell["row"])
+			_gpCtxCellCol = int(gpCell["col"])
 		gpShowContextMenu(gpHit)
 		return
 	# No symbol hit: try an annotation shape instead.
@@ -254,6 +285,16 @@ func _gpBuildMenuItems(gpMenu: PopupMenu, gpNodeHit: String) -> void:
 		_gpBuildAttachSubmenu(gpMenu, gpNodeHit)
 		if _gpDetachTargetCount(gpNodeHit) > 0:
 			gpMenu.add_item(I18n.gpTr("canvas.ctx_detach"), GP_CTX_DETACH)
+		# Stage 3: grid-table structure ops, offered ONLY when the right-click landed on a
+		# CELL (the clicked row/col is the operation's anchor — a cell-less table menu would
+		# have to guess which row the user means).
+		# 阶段 3：grid 表格结构操作，**仅当**右键落在格子上时提供（被点行/列就是操作的锚 ——
+		# 没有格子信息的表格菜单只能猜用户指的是哪一行）。
+		if _gpCtxCellKey != "":
+			gpMenu.add_item(I18n.gpTr("canvas.ctx_table_ins_row"), GP_CTX_TABLE_INS_ROW)
+			gpMenu.add_item(I18n.gpTr("canvas.ctx_table_del_row"), GP_CTX_TABLE_DEL_ROW)
+			gpMenu.add_item(I18n.gpTr("canvas.ctx_table_ins_col"), GP_CTX_TABLE_INS_COL)
+			gpMenu.add_item(I18n.gpTr("canvas.ctx_table_del_col"), GP_CTX_TABLE_DEL_COL)
 	# Delete applies to either shapes or nodes.
 	# 删除可同时作用于图形或图元。
 	var gpCanDelete: bool = gpNodeCtx or (not gpCv.gpShapeSel.is_empty())
@@ -324,6 +365,18 @@ func gpOnContext(gpId: int) -> void:
 				gpCv.gpSymbolEditRequested.emit(gpN.gpSymbolId)
 		GP_CTX_DUPLICATE:
 			gpCv.gpRequestDuplicateSelected()
+		GP_CTX_TABLE_INS_ROW:
+			gpCv.gpRequestTableOp(GPSymbolGeneratorRegistry.GP_OP_INSERT_ROW, _gpCtxHit,
+				_gpCtxCellRow, _gpCtxCellCol)
+		GP_CTX_TABLE_DEL_ROW:
+			gpCv.gpRequestTableOp(GPSymbolGeneratorRegistry.GP_OP_DELETE_ROW, _gpCtxHit,
+				_gpCtxCellRow, _gpCtxCellCol)
+		GP_CTX_TABLE_INS_COL:
+			gpCv.gpRequestTableOp(GPSymbolGeneratorRegistry.GP_OP_INSERT_COL, _gpCtxHit,
+				_gpCtxCellRow, _gpCtxCellCol)
+		GP_CTX_TABLE_DEL_COL:
+			gpCv.gpRequestTableOp(GPSymbolGeneratorRegistry.GP_OP_DELETE_COL, _gpCtxHit,
+				_gpCtxCellRow, _gpCtxCellCol)
 		GP_CTX_DELETE:
 			gpCv.gpRequestDeleteSelected()
 		GP_CTX_SMOOTH_VERTEX:
@@ -559,3 +612,30 @@ func _gpRefuseDrop() -> void:
 	# 两种结局都释放，否则对话框泄漏并使画布无法释放。
 	gpDlg.confirmed.connect(gpDlg.queue_free)
 	gpDlg.popup_hide.connect(gpDlg.queue_free)
+
+
+# Stage 3: resolve the grid CELL (if any) under a world right-click on node gpNodeId.
+# Returns {"key": String, "row": int, "col": int}; an empty key means the node is not a
+# GENERATOR:grid table or the point misses the grid. Geometry comes from the SAME registry
+# the renderer paints (one source, no drift).
+# 阶段 3：解析右键落在 gpNodeId 节点上的 grid **格子**（若有）。返回
+# {"key": String, "row": int, "col": int}；key 为空表示该节点不是 GENERATOR:grid 表格、
+# 或该点在格网之外。几何取自渲染所用的**同一个**注册表（单一来源，零漂移）。
+func _gpResolveCell(gpWorld: Vector2, gpNodeId: String) -> Dictionary:
+	var gpMiss: Dictionary = {"key": "", "row": -1, "col": -1}
+	if gpCv.gpGraph == null:
+		return gpMiss
+	var gpN: GPPIDNode = gpCv.gpGraph.gpGetNode(gpNodeId)
+	if gpN == null:
+		return gpMiss
+	var gpDef: GPSymbolDef = gpCv.gpDefFor(gpN.gpSymbolId)
+	if gpDef == null or GPSymbolGeneratorRegistry.gpGeneratorId(gpDef.gpGeometrySource) != "grid":
+		return gpMiss
+	var gpOrigin: Vector2 = GPPortResolver.gpNodeWorldOrigin(gpCv.gpGraph,
+		gpCv.gpDefLookupCallable(), gpN)
+	var gpKey: String = GPSymbolGeneratorRegistry.gpCellAt(gpDef, gpN, gpWorld - gpOrigin)
+	if gpKey == "":
+		return gpMiss
+	var gpParts: PackedStringArray = gpKey.trim_prefix(
+		GPSymbolGeneratorRegistry.GP_CELL_PREFIX).split("_")
+	return {"key": gpKey, "row": int(gpParts[0]), "col": int(gpParts[1])}

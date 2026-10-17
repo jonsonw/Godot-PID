@@ -128,6 +128,65 @@ static func gpTextScale(gpFit: Vector2, gpScale: float) -> Vector2:
 	return gpCounterScale(gpScale) * gpFit.y
 
 
+# ---------------------------------------------------------------------------
+# PHYSICAL-PIXEL FAMILY / 物理像素族 —— title block + zone ruler (2026-10-16)
+# ---------------------------------------------------------------------------
+# WHY A SECOND FAMILY / 为何要第二族：the design-pixel family above rasterises a glyph at
+# round(mm x zoom) DESIGN pixels; on a Retina display (device scale ~2) that bitmap is then
+# MAGNIFIED onto the screen — a 2.5 mm field lands as a ~6 px bitmap stretched to ~12 physical
+# pixels, which is the grey smudge the user reported on the title block. This family rasterises
+# the SAME sheet heights at PHYSICAL pixel density: the font size carries the device scale, the
+# counter-scale and the draw position divide it back out, so the painted height in millimetres
+# and the on-screen size are UNCHANGED — only the bitmap density doubles. The algebra (all three
+# functions must be used together):
+#   font size   F  = round(mm x scale x deviceScale)
+#   draw scale  k  = gpSheetTextScale(...) = 1/(scale x deviceScale) x residual
+#   position    p' = gpSheetDrawPos(...)   = p_mm x scale x deviceScale / residual
+#   => glyph world height = F x k = mm            (exact, via the residual)
+#   => glyph screen size  = F x k x scale x deviceScale = mm x scale x deviceScale (unchanged)
+#   => bitmap density     = F / (F x k x scale x deviceScale) = 1:1 physical pixels (FIXED)
+# 为何要第二族：上面的设计像素族按 round(mm×zoom) 个**设计**像素光栅化字形；Retina 屏（设备密度
+# ~2）上该位图随后被**放大**贴到屏幕 —— 2.5mm 的字段落成 ~6px 位图拉伸到 ~12 物理像素，即用户
+# 报告的标题栏灰糊块。本族按**物理**像素密度光栅化同样的图面字高：字号带上设备密度，反缩放与
+# 绘制坐标把它除回去，故画出的毫米字高与屏幕尺寸**不变** —— 只有位图密度翻倍。代数（三个函数
+# 必须成套使用）：
+#   字号   F  = round(mm × scale × deviceScale)
+#   绘制缩放 k = gpSheetTextScale(...) = 1/(scale × deviceScale) × 残差
+#   坐标   p' = gpSheetDrawPos(...)   = p_mm × scale × deviceScale / 残差
+#   => 字形世界高 = F × k = mm           （经残差，精确）
+#   => 字形屏幕尺寸 = F × k × scale × deviceScale = mm × scale × deviceScale（不变）
+#   => 位图密度 = 1:1 物理像素（**修复本体**）
+
+# True-scale font rasterised at PHYSICAL pixel density, as (integer size, residual).
+# 按**物理**像素密度光栅化的真实比例字号，形如（整数号, 残差）。
+# The cache ceiling scales with the device density so the physical meaning of GP_MAX_PX
+# (design pixels) is preserved.
+# 缓存上限随设备密度放大，使 GP_MAX_PX（设计像素）的语义保持不变。
+static func gpSheetFontFit(gpMM: float, gpScale: float, gpDeviceScale: float) -> Vector2:
+	var gpDs: float = maxf(gpDeviceScale, 0.0001)
+	var gpWant: float = clampf(gpMM * maxf(gpScale, 0.0001) * gpDs,
+		1.0, GP_MAX_PX * maxf(gpDs, 1.0))
+	var gpPx: float = maxf(1.0, round(gpWant))
+	return Vector2(gpPx, gpWant / gpPx)
+
+
+# Draw-transform scale for the physical-pixel family: cancels the parent magnification AND the
+# device density, and carries the residual. Pair with gpSheetFontFit and gpSheetDrawPos.
+# 物理像素族的绘制变换缩放：既抵消父级放大**也**抵消设备密度，并带上残差。须与
+# gpSheetFontFit、gpSheetDrawPos 成套使用。
+static func gpSheetTextScale(gpFit: Vector2, gpScale: float, gpDeviceScale: float) -> Vector2:
+	var gpK: float = 1.0 / (maxf(gpScale, 0.0001) * maxf(gpDeviceScale, 0.0001))
+	return Vector2(gpK, gpK) * gpFit.y
+
+
+# Draw coordinate for the physical-pixel family. Pair with the other two.
+# 物理像素族的绘制坐标。与另两个函数成套使用。
+static func gpSheetDrawPos(gpLocalPos: Vector2, gpFit: Vector2, gpScale: float,
+		gpDeviceScale: float) -> Vector2:
+	return gpLocalPos * maxf(gpScale, 0.0001) * maxf(gpDeviceScale, 0.0001) \
+		/ maxf(gpFit.y, 0.0001)
+
+
 # The coordinate to hand draw_string so that a text authored at gpLocalPos in the ITEM'S OWN UNIT
 # (millimetres on the sheet) is painted exactly there, when the draw transform is
 # gpTextScale(gpFit, gpScale).

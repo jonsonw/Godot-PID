@@ -131,6 +131,17 @@ func gpTestPaletteGroupKeysBilingual() -> void:
 	_gpAssertKey("status.attach_not_mountable", "P3 palette drag status")
 
 
+# 阶段 4 S1 清单导出链路：菜单行 project_export_list 由 gpTestMenuRowKeysBilingual 覆盖；
+# 此处钉住它的**状态栏回报键**——gpExportLists 的结果经 gpSetState 上屏，
+# 缺键时用户只会看到裸键名加一个数字，正是一条无人报错的静默缺陷。
+# Phase 4 S1 list-export chain: the menu row project_export_list is covered by
+# gpTestMenuRowKeysBilingual; what is pinned HERE is its STATUS-LINE key — gpExportLists'
+# result reaches the screen through gpSetState, and a missing key would show the user a
+# raw key name plus a number, exactly the kind of silent defect nothing reports.
+func gpTestListExportStatusKeyBilingual() -> void:
+	_gpAssertKey("status.list_exported", "S1 list export status")
+
+
 # Label anchor dropdown rows in the inspector.
 # 属性面板中的标签锚点下拉选项。
 func gpTestAnchorRowKeysBilingual() -> void:

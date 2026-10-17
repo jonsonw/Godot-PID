@@ -28,6 +28,16 @@ signal gpStatusUpdated(info: Dictionary)
 # 挂在画布而非节点上，由宿主决定把编辑器挂到哪里。
 signal gpSymbolEditRequested(gpSymbolId: String)
 
+@warning_ignore("unused_signal")
+# Emitted when the user double-clicks the TITLE BLOCK: the host opens the existing frame /
+# title-block dialog (the same entry the menu uses). The block has no in-place editor — its
+# 13 fields live in the dialog — so a double click opening that dialog is the smallest honest
+# answer to "I cannot edit the block" (2026-10-16 user report).
+# 用户**双击图签**时发出：宿主打开既有的图框 / 图签对话框（与菜单同一入口）。图签没有就地编辑
+# 器 —— 它的 13 个字段都在对话框里 —— 故「双击打开该对话框」是对「图签改不了」（2026-10-16 用户
+# 报告）的最小且诚实的回答。
+signal gpTitleBlockEditRequested()
+
 # Emitted whenever the interaction mode (select / connect) changes so the host toolbar
 # keeps its highlight in sync with the canvas (e.g. when toggled from the context menu).
 # 交互模式（选择 / 连线）变化时发出，使宿主工具栏与画布保持高亮同步（例如右键菜单切换时）。
@@ -134,6 +144,31 @@ var gpLabelGrips: GPLabelGripOps = null
 # 寄于此，与图元位号之于 gpLabelGrips 同形。
 var gpEdgeTagGrips: GPEdgeTagGripOps = null
 
+# Drawing-frame (图框) grab / drag delegate . Rev.3 stage 0c: the frame's four lines form a grab
+# band, and its four side midpoints are resize handles. Mirrors gpLabelGrips — the transient drag
+# state lives here, and the COMMIT travels through the command layer as one undo step.
+# 图框抓取 / 拖拽委托。Rev.3 阶段 0c：图框的四条线构成抓取带，四边中点为改尺寸手柄。与
+# gpLabelGrips 同形 —— 瞬态拖拽状态存于此，而**提交**经命令层作为**一个**撤销步。
+var gpFrameGrips: GPFrameGripOps = null
+
+# Title-block (图签) grab / drag delegate . Rev.3 stage 1: the block is an object with its own extent, so
+# its WHOLE area is the target (there is no "click anywhere" ambiguity to remove, unlike the frame).
+# Mirrors gpFrameGrips in shape and in one more respect — this is the second, and so far last, interaction
+# whose COMMIT writes a SHEET rather than the graph.
+# 图签抓取 / 拖拽委托。Rev.3 阶段 1：图签是一个有自身范围的对象，故它**整块**都是目标（与图框不同，这里没有
+# 「点哪都选中」的歧义要消除）。形态与 gpFrameGrips 同，还有一点也相同 —— 这是第二个、也是目前最后一个
+# **提交**写的是**图纸**而非图的交互。
+var gpTitleBlockGrips: GPTitleBlockGripOps = null
+
+# Grid-table column-boundary drag delegate. Stage 3 S4: a press on a single-selected table's
+# internal vertical separator drags the widths of the two columns it separates. Mirrors
+# gpFrameGrips — transient drag state lives here, the COMMIT travels through the command
+# layer as one undo step (a graph write, unlike the title block's sheet write).
+# grid 表格列边界拖拽委托。阶段 3 S4：在**单选**表格的内部竖向分隔线上按下，即拖动其两侧
+# 两列的宽度。与 gpFrameGrips 同形 —— 瞬态拖拽状态存于此，**提交**经命令层作为**一个**撤销步
+#（写的是图，不同于图签写的图纸）。
+var gpTableGrips: GPTableGripOps = null
+
 # Backing field for the gpGraph property. Kept explicit so the setter cannot recurse.
 # gpGraph 属性的后备字段。显式保留以避免 setter 递归。
 var _gpGraphRef: GPPIDGraph
@@ -228,6 +263,13 @@ var gpAnno: GPAnnotationEditor = null
 # 边管线号编辑器委托：双击边时打开的浮层 LineEdit，经命令层以一个撤销步提交。在 _ready() 中以
 # 本画布创建。
 var gpEdgeEditor: GPEdgeTagEditor = null
+
+# Node tag in-place editor delegate (Rev.3 stage 1.5, R1): a floating LineEdit opened by
+# double-clicking a node's LABEL TEXT, committing through the command layer as one undo step.
+# Created in _ready() with this canvas, mirroring gpEdgeEditor.
+# 图元位号就地编辑器委托（Rev.3 阶段 1.5，R1）：双击图元**标签文字**时打开的浮层 LineEdit，
+# 经命令层以一个撤销步提交。在 _ready() 中以本画布创建，与 gpEdgeEditor 同形。
+var gpNodeEditor: GPNodeTextEditor = null
 
 # Edge grip / route editing delegate : drag an endpoint to reconnect or a vertex to re-route,
 # each commit going through the command layer as one undo step. Created in _ready() with this canvas.
@@ -536,6 +578,9 @@ func _gpBuildDelegates() -> void:
 	# 创建边编辑委托，状态持有者为本画布。选择工具经 gpCtx 访问它们（与 gpAnno 同形），
 	# 故边的瞬态编辑状态不落在本画布上。
 	gpEdgeEditor = GPEdgeTagEditor.new(self)
+	# Node tag in-place editor (Rev.3 stage 1.5, R1). Same delegate shape as the edge's editor.
+	# 图元位号就地编辑器（Rev.3 阶段 1.5，R1）。与边编辑器同一委托形态。
+	gpNodeEditor = GPNodeTextEditor.new(self)
 	gpEdgeGrips = GPEdgeGripOps.new(self)
 	# The tag label gets the same grip treatment as an edge vertex.
 	# 位号标签获得与边拐点相同的抓取点待遇。
@@ -543,6 +588,22 @@ func _gpBuildDelegates() -> void:
 	# Edge line-number grip: the pipe's number is itself draggable, with a leader line drawn
 	# back to the pipe when dragged far enough. / 边管线号抓取点：管线编号可拖动，拖远时画引出线。
 	gpEdgeTagGrips = GPEdgeTagGripOps.new(self)
+	# Drawing-frame grab band / side handles (Rev.3 stage 0c). Same shape as the grips above; its
+	# COMMIT is the only one that has to reach the command layer with a SHEET rather than a graph.
+	# 图框抓取带 / 侧手柄（Rev.3 阶段 0c）。与上方各抓取点同形；唯它的**提交**必须携带**图纸**
+	# 而非图进入命令层。
+	gpFrameGrips = GPFrameGripOps.new(self)
+	# Title-block whole-block drag (Rev.3 stage 1). Built after the frame's grips because the press chain
+	# tests it FIRST — the two targets overlap along the frame's bottom-right corner (see the class header).
+	# 图签整块拖拽（Rev.3 阶段 1）。在图框抓取之后构造，因为按下链**先**测它 —— 两个目标沿图框右下角
+	# 重叠（见该类文件头）。
+	gpTitleBlockGrips = GPTitleBlockGripOps.new(self)
+	# Grid-table column-boundary drag (stage 3 S4). Built last among the delegates: its press
+	# probe runs INSIDE the node-hit branch (the separator sits on the table's body), after
+	# the sheet furniture above.
+	# grid 表格列边界拖拽（阶段 3 S4）。在各委托中最后构造：它的按下探测跑在**图元命中分支内**
+	#（分隔线就在表格本体上），位于上方各图纸陈设之后。
+	gpTableGrips = GPTableGripOps.new(self)
 	# Endpoint-anchor interaction delegate (highlight / pick / drag-to-connect).
 	# 端点锚点交互委托（高亮 / 拾取 / 拖拽连线）。
 	gpPortOps = GPPortConnectOps.new(self)
@@ -669,6 +730,23 @@ func _gpOnGraphDataChanged() -> void:
 	# 程序化改模型同样必须重绘。否则命令（删除、移动）改了模型却留下残影，
 	# 只要调用方忘了显式 queue_redraw，画面就是旧的。
 	queue_redraw()
+	# Stage 3 S4 fix: a parent's queue_redraw() does NOT cascade to child CanvasItems (the
+	# trap GPCanvasSymbolLayer's header documents), and the binder's rebind-repaint guard is
+	# reference-based — an IN-PLACE mutation (grid-table structure op, cell text, tag edit,
+	# and every command UNDO/REDO) keeps the same GPPIDNode object, so gpSync() never
+	# repainted the view. The user saw "insert/delete row did nothing and text misaligned,
+	# Ctrl+Z dead": the model was correct all along, only the pixels were stale — and the
+	# live hit test then disagreed with the stale picture. Refresh the child views here so
+	# EVERY command execute/undo/redo reaches the screen in one systemic place.
+	# 阶段 3 S4 修复：父节点的 queue_redraw() **不会**级联到子 CanvasItem（GPCanvasSymbolLayer
+	# 文件头已记载的陷阱），且绑定器的重绑-重绘判据是**引用相等** —— 原地变换（表格结构操作、
+	# 格子文字、位号编辑，以及一切命令的撤销/重做）始终是同一个 GPPIDNode 对象，gpSync()
+	# 因此从不重绘视图。用户看到的是「增删行列没反应、文字错位、Ctrl+Z 失灵」：模型一直是
+	# 对的，只是像素是旧的 —— 而实时命中测试随即与陈旧画面相互矛盾。在此统一刷新子视图，
+	# 使每条命令的执行/撤销/重做都经这一处系统性地到达屏幕。
+	if gpSymbolLayer != null:
+		gpRefreshSymbolViews()
+		gpRefreshEdges()
 
 
 # Forward canvas graph changes onto the app event bus .
@@ -797,6 +875,52 @@ func _draw() -> void:
 
 func gpRefreshSymbolViews() -> void:
 	gpSymbolLayer.gpRefreshSymbolViews()
+
+
+# Repaint every edge view (Rev.3 stage 0d).
+# 重绘每条边视图（Rev.3 阶段 0d）。
+#
+# WHY A CANVAS PORT AND NOT A REACH INTO gpSymbolLayer / 为何是画布端口、而不是直接伸手进 gpSymbolLayer：
+# the whole-sheet drag moves every edge, so it must repaint them all — and a TOOL may only drive the host
+# through its public ports (the rule GPCanvasSheetLayer's own header states). Reaching through
+# `gpSymbolLayer` would make the tool depend on the layer's internal shape, which is exactly the coupling
+# the 1-root + 4-impl split removed. This is the edge counterpart of gpRefreshSymbolViews().
+# 整图拖拽会移动每一条边，故必须把全部边视图重绘一遍 —— 而**工具**只经宿主的公开端口驱动宿主（这是
+# GPCanvasSheetLayer 自己所声明的规则）。穿透 `gpSymbolLayer` 会让工具依赖该层的内部形状，而那正是
+# 「1 根 + 4 实现类」那次拆分所消除的耦合。它是 gpRefreshSymbolViews() 在边一侧的对应物。
+func gpRefreshEdges() -> void:
+	gpSymbolLayer.gpRefreshEdges()
+
+
+# Repaint the sheet frame (and everything derived from the sheet: zone ruler, title block).
+# 重绘图框（以及一切由图纸推导之物：坐标带、标题栏）。
+#
+# WHY THIS PORT EXISTS / 为何需要本端口：a frame DRAG writes the sheet's margins on every mouse move
+# (see GPFrameGripOps.gpOnGripMove). Those writes are deliberately silent — the sheet signal fires once,
+# on commit — so the drag needs a cheap repaint it can call without marking the document dirty dozens of
+# times a second. This is the frame counterpart of gpRefreshSymbolViews().
+# 图框**拖拽**每次鼠标移动都会写图纸边距（见 GPFrameGripOps.gpOnGripMove）。这些写入刻意保持静默 ——
+# 图纸信号只在提交时发一次 —— 故拖拽需要一个廉价的、每秒调用数十次也不会把文档标脏的重绘入口。
+# 它是 gpRefreshSymbolViews() 在图框一侧的对应物。
+func gpRefreshSheetFrame() -> void:
+	gpSheetLayer.gpRefreshFrame()
+
+
+# A SHEET-level field changed (Rev.3 stage 0c): the frame margins moved, so this is a document edit.
+# 图纸级字段发生变化（Rev.3 阶段 0c）：图框边距移动了，故这是一次文档编辑。
+#
+# It travels the DOCUMENT-CHANGED channel (gpGraphChanged -> the app bus -> the dirty flag) rather than
+# a second one, because to the user "I moved the frame" and "I moved a valve" are the same fact: the
+# drawing has unsaved work. The frame view is refreshed here too — a graph change never needs that,
+# which is the only respect in which the two differ. The sheet layer subscribes to the sheet's signal
+# and forwards here, so the ONE place that emits is the command (see GPSheet.gpSheetChanged).
+# 它走**文档已变**这条通道（gpGraphChanged -> 应用总线 -> 脏标记），而不另开一条：对用户而言「我挪了图框」
+# 与「我挪了阀门」是同一件事 —— 图纸有未保存的改动。此处同时刷新图框视图 —— 图变化从不需要这一步，
+# 这正是二者唯一的差别。图纸层订阅图纸信号并转发到此处，故**唯一**的发射点是命令
+# （见 GPSheet.gpSheetChanged）。
+func gpOnSheetDataChanged() -> void:
+	gpRefreshSheetFrame()
+	_gpOnGraphDataChanged()
 
 
 # Repaint everything whose appearance is baked from the camera scale: the symbol views, the edge
@@ -1017,6 +1141,45 @@ func gpRequestSetLabelOffset(gpNodeId: String, gpOffset: Vector2) -> bool:
 	return gpEditFacade.gpRequestSetLabelOffset(gpNodeId, gpOffset)
 
 
+# Set the frame margins of the displayed sheet as ONE undo step (Rev.3 stage 0c).
+# 把所显示图纸的图框边距作为**一个**撤销步写入（Rev.3 阶段 0c）。
+# The canvas supplies the sheet, so the caller never has to hold one — and the SHEET that is written is
+# by construction the one on screen, which is what makes "the frame you dragged" and "the frame that
+# gets undone" the same object.
+# 图纸由画布提供，故调用方无需持有它 —— 而所写的那张图纸按构造就是屏幕上那张，这正是「你拖的那个图框」
+# 与「被撤销的那个图框」是同一对象的原因。
+func gpRequestSetFrameMargins(gpMargins: Array) -> bool:
+	return gpEditFacade.gpRequestSetFrameMargins(gpMargins)
+
+
+# Dock the title block to a corner at an offset, as ONE undo step (Rev.3 stage 1).
+# 把图签停靠到某个角、并带上偏移，作为**一个**撤销步（Rev.3 阶段 1）。
+#
+# WHY A SEPARATE PORT FROM gpRequestSetFrameMargins / 为何与 gpRequestSetFrameMargins 分开：the margins
+# describe the FRAME, the docking pair describes the TITLE BLOCK. Sharing one port would force the two
+# gestures to share an undo label ("调整图框" on a title-block drag reads as a lie) and would tie two
+# unrelated key sets to one entry point, so that adding a third would have to widen the first.
+# 边距描述的是**图框**，停靠对描述的是**图签**。共用一个端口会迫使两种手势共用一个撤销标签（在拖图签时显示
+# 「调整图框」就是谎报），并把两组无关的键绑到同一个入口，使将来加第三组时必须把第一个撑开。
+func gpRequestSetTitleBlockPlacement(gpAnchor: int, gpOffset: Vector2) -> bool:
+	return gpEditFacade.gpRequestSetTitleBlockPlacement(gpAnchor, gpOffset)
+
+
+# Move the WHOLE SHEET (paper + frame + every graphic) as ONE undo step (Rev.3 stage 0d).
+# 平移**整张图纸**（纸面 + 图框 + 全部图形）作为**一个**撤销步（Rev.3 阶段 0d）。
+#
+# WHY A SEPARATE PORT FROM gpRequestSetFrameMargins / 为何与 gpRequestSetFrameMargins 分开：
+# the margin write reaches only GPSheet, while this one also transforms every absolute coordinate on
+# the GRAPH (nodes, edges, shapes). They are different edits with different undo labels and different
+# refusal conditions (a zero delta here, no paper bound there), so folding them into one port would
+# force one of the two to lie about what it did.
+# 边距写入只触及 GPSheet，而本次还会变换**图**上的每一个绝对坐标（图元、边、图形）。它们是不同的编辑
+# —— 撤销标签不同、拒绝条件也不同（此处是零位移，那边是纸面约束）—— 合成一个端口就会迫使其中之一
+# 谎报自己做了什么。
+func gpRequestTranslateSheet(gpDelta: Vector2) -> bool:
+	return gpEditFacade.gpRequestTranslateSheet(gpDelta)
+
+
 func gpRequestSetEdgeTagOffset(gpEdgeId: String, gpOffset: Vector2) -> bool:
 	return gpEditFacade.gpRequestSetEdgeTagOffset(gpEdgeId, gpOffset)
 
@@ -1036,6 +1199,39 @@ func gpRequestDeleteEdges(gpEdgeIds: Array[String]) -> bool:
 
 func gpRequestSetEdgeTag(gpEdgeId: String, gpTag: String) -> bool:
 	return gpEditFacade.gpRequestSetEdgeTag(gpEdgeId, gpTag)
+
+
+# Rename one NODE's tag (Rev.3 stage 1.5, R1): the in-place editor's commit port, mirroring
+# gpRequestSetEdgeTag. One undo step; duplicates are refused by the service.
+# 修改一个**图元**的位号（Rev.3 阶段 1.5，R1）：就地编辑器的提交端口，与 gpRequestSetEdgeTag
+# 同形。一个撤销步；重复位号由服务拒绝。
+func gpRequestSetNodeTag(gpNodeId: String, gpTag: String) -> bool:
+	return gpEditFacade.gpRequestSetNodeTag(gpNodeId, gpTag)
+
+
+# Set one property value of one node (stage 2): mirrors gpRequestSetNodeTag for GENERATOR
+# text blocks whose content lives in gpProps. One undo step.
+# 设置某节点的一个属性值（阶段 2）：与 gpRequestSetNodeTag 同形，服务内容存于 gpProps 的
+# GENERATOR 文本块。一个撤销步。
+func gpRequestSetNodeProp(gpNodeId: String, gpKey: String, gpValue: Variant) -> bool:
+	return gpEditFacade.gpRequestSetNodeProp(gpNodeId, gpKey, gpValue)
+
+
+# Stage 3 (S3): grid-table row/col structure ops, routed to the edit service through the
+# facade (same layering as every other canvas request — the canvas never touches the
+# command stack directly).
+# 阶段 3（S3）：grid 表格行/列结构操作，经 facade 路由到编辑服务（与其余画布请求同一
+# 分层 —— 画布绝不直接触碰命令栈）。
+func gpRequestTableOp(gpOp: String, gpNodeId: String, gpRow: int, gpCol: int) -> bool:
+	return gpEditFacade.gpRequestTableOp(gpOp, gpNodeId, gpRow, gpCol)
+
+
+# Stage 3 (S4): commit a grid-table props snapshot pair (the column-width drag's commit),
+# same layering as gpRequestTableOp.
+# 阶段 3（S4）：提交一对 grid 表格 props 快照（列宽拖拽的提交），与 gpRequestTableOp 同一分层。
+func gpRequestTableSnapshot(gpNodeId: String, gpBefore: Dictionary,
+		gpAfter: Dictionary) -> bool:
+	return gpEditFacade.gpRequestTableSnapshot(gpNodeId, gpBefore, gpAfter)
 
 
 func gpRequestReconnectEdge(gpEdgeId: String, gpIsFrom: bool, gpNewRef: Dictionary) -> bool:

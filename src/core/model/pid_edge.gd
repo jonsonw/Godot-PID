@@ -136,6 +136,80 @@ func gpSetDanglingPoint(gpIsFrom: bool, gpPos: Vector2) -> void:
 	gpRef["point"] = [gpPos.x, gpPos.y]
 
 
+# ---------------------------------------------------------------------------
+# 整图平移（Rev.3 阶段 0d） / Whole-sheet translation
+# ---------------------------------------------------------------------------
+# Move every ABSOLUTE world coordinate this edge owns by gpDelta. There are exactly two kinds, and both
+# are world-space by definition:
+# 把本边持有的每个**绝对世界坐标**按 gpDelta 平移。恰有两类，且按定义都是世界坐标：
+#   1. gpRouting — the intermediate waypoints (see that field's own note: "world coordinates").
+#   2. the `point` of a DANGLING end — a free-floating pipe end, which is a world position precisely
+#      because it is bound to no port (gpDanglingPoint / gpSetDanglingPoint).
+#   1. gpRouting —— 中间拐点（见该字段自身的注释：「世界坐标」）。
+#   2. **悬空端**的 `point` —— 自由悬空的管端；它之所以是世界坐标，正因为它不绑定在任何端口上
+#      （gpDanglingPoint / gpSetDanglingPoint）。
+#
+# ⚠️ A BOUND EDGE STORES NO ENDPOINTS AT ALL, SO THERE IS NOTHING TO MOVE — they are resolved live from
+# the port refs, which is exactly what makes a moved symbol drag its pipe ends along (see gpRouting's
+# note above). ⚠️ 绑定端**根本不存端点**，故无可平移：它们由端口引用实时解析，这正是「图元一动、管线
+# 端点跟随」的原因（见上方 gpRouting 的注释）。
+#
+# ⚠️ tag_offset IS NOT TOUCHED, THOUGH IT IS MEASURED IN MILLIMETRES / ⚠️ tag_offset 虽以毫米计，却**不动**：
+# it is a displacement RELATIVE to the line number's automatic placement, not a position (gpTagOffset).
+# Adding the delta would move every line number a SECOND time — it already follows its pipe, because the
+# automatic placement is derived from the edge geometry this function has just translated.
+# 它是相对管线号**自动落位处**的位移，而非一个位置（gpTagOffset）。再加上位移会让每个管线号移动**两次**：
+# 它本就随管线而行 —— 自动落位由边的几何推导，而该几何正被本函数平移。
+func gpTranslate(gpDelta: Vector2) -> void:
+	for gpI in range(gpRouting.size()):
+		gpRouting[gpI] = gpRouting[gpI] + gpDelta
+	_gpShiftPair(gpFromRef.get("point", null), gpDelta)
+	_gpShiftPair(gpToRef.get("point", null), gpDelta)
+
+
+# The same translation applied to a SERIALIZED edge (the shape gpToDict writes). Needed because a
+# drop-restore record snapshots a whole edge as a plain dict — `{"kind": "split", "orig": edge.gpToDict()}`
+# — i.e. a store of world coordinates that lives on the GRAPH rather than on any edge, and that would
+# otherwise be replayed at pre-move positions the next time that symbol is deleted.
+# 把同一次平移施加到**序列化**的边（即 gpToDict 写出的形态）。之所以需要：落点恢复记录会把整条边快照成
+# 普通字典 —— `{"kind": "split", "orig": edge.gpToDict()}` —— 即一份挂在**图**上、而非任何边上的世界坐标
+# 存量；否则在下次删除该图元、重放此记录时，连线会出现在搬家之前的位置。
+#
+# In place, deliberately: the caller owns the dict it is fixing up, and rebuilding it here would mean
+# choosing which keys to re-emit — a second, silent copy of the write policy.
+# 刻意就地修改：字典由调用方拥有；在此重建则意味着要决定「重新写出哪些键」—— 那会是写入策略的第二份、
+# 且是静默的副本。
+#
+# Kept beside gpTranslate so the two can never disagree about what carries a coordinate: the shape walked
+# here is the one gpToDict writes, and a test compares the in-memory and serialized paths directly.
+# 与 gpTranslate 相邻，使二者绝不会对「什么携带坐标」产生分歧：此处遍历的形态正是 gpToDict 写出的形态，
+# 且有测试直接比对「内存路径」与「序列化路径」。
+static func gpTranslateDict(gpD: Dictionary, gpDelta: Vector2) -> void:
+	var gpR: Variant = gpD.get("routing", null)
+	if gpR is Array:
+		var gpRoute: Array = gpR as Array
+		for gpI in range(gpRoute.size()):
+			_gpShiftPair(gpRoute[gpI], gpDelta)
+	for gpKey in ["from_ref", "to_ref"]:
+		var gpRef: Variant = gpD.get(gpKey, null)
+		if gpRef is Dictionary:
+			_gpShiftPair((gpRef as Dictionary).get("point", null), gpDelta)
+
+
+# Shift one serialized [x, y] pair in place. Tolerant on purpose: anything that is not an array of two
+# or more numbers is left exactly as it was, so a hand-edited archive can never crash a drag or an undo.
+# 就地平移一个序列化的 [x, y] 对。刻意容错：任何「非两元素以上的数组」原样保留，使手工改过的存档
+# 绝不可能让拖拽或撤销崩溃。
+static func _gpShiftPair(gpRaw: Variant, gpDelta: Vector2) -> void:
+	if not (gpRaw is Array):
+		return
+	var gpPair: Array = gpRaw as Array
+	if gpPair.size() < 2:
+		return
+	gpPair[0] = float(gpPair[0]) + gpDelta.x
+	gpPair[1] = float(gpPair[1]) + gpDelta.y
+
+
 # Serialize this edge to a plain dictionary (object graph -> dict graph).
 # 将本边序列化为普通字典（对象图 → 字典图）。
 # The shape matches the historic multi-document form so JSON stays forward-compatible.

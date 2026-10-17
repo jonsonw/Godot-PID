@@ -41,7 +41,15 @@ func _draw() -> void:
 	# sheet (e.g. an A3 render for an A3 sheet), so stretching does not distort.
 	# 把参考位图拉伸铺满整张物理图纸矩形，使 100% 缩放下与图纸 1:1。用户应放入与图幅
 	# 匹配的图（如 A3 图纸用 A3 渲染图），故拉伸不变形。
-	draw_texture_rect(gpTex, Rect2(0.0, 0.0, gpW, gpH), false,
+	# ⚠️ THE RECT FOLLOWS THE PAPER (Rev.3 stage 0d) / ⚠️ 该矩形随纸面走（Rev.3 阶段 0d）：
+	# the underlay is stretched over the PAPER, so when the sheet is dragged the underlay must travel
+	# with it. Anchoring it at the world origin instead would leave the reference image behind on a
+	# moved sheet — the one part of the drawing the user explicitly asked to travel with the rest
+	# (「带底图」). The origin comes from the sheet, so it stays one fact with gpPaperRect().
+	# 底图铺在**纸面**上，故图纸被拖动时底图必须同行。若改锚在世界原点，被移动过的图纸上就会把参考图留在
+	# 原地 —— 而它是用户明确要求「带底图」一起走的那一部分。原点取自图纸，从而与 gpPaperRect() 保持为
+	# 同一个事实。
+	draw_texture_rect(gpTex, Rect2(gpSheet.gpPaperOrigin, Vector2(gpW, gpH)), false,
 		Color(1.0, 1.0, 1.0, clampf(gpSheet.gpBackgroundAlpha, 0.0, 1.0)))
 
 

@@ -331,12 +331,16 @@ func gpTestRealMillimetreSizesFromC01() -> void:
 	var gpTank: GPSymbolDef = _gpDefById("DTANK001")
 	var gpValve: GPSymbolDef = _gpDefById("DVALVE002")
 	gpCheck(gpTank != null and gpValve != null, "vessel and ball valve exist")
+	# ⚠️ A1 REBASE (2026-10-16): the C01 real sizes were rebased ×2 in the manifest (60x102 /
+	# 8x4); the PROPORTIONS the assertions below pin are unchanged by a uniform scale.
+	# ⚠️ A1 重定基（2026-10-16）：C01 真实尺寸已在 manifest 中 ×2（60×102 / 8×4）；下方所钉的
+	# **比例**不随等比缩放改变。
 	if gpTank != null:
-		gpCheck(absf(gpTank.gpDefaultSize.x - 30.0) < 0.5 and absf(gpTank.gpDefaultSize.y - 51.0) < 0.5,
-			"vessel keeps its real C01 size 30x51 mm, got %s" % gpTank.gpDefaultSize)
+		gpCheck(absf(gpTank.gpDefaultSize.x - 60.0) < 0.5 and absf(gpTank.gpDefaultSize.y - 102.0) < 0.5,
+			"vessel keeps its real C01 size 60x102 mm (x2 A1 rebase), got %s" % gpTank.gpDefaultSize)
 	if gpValve != null:
-		gpCheck(absf(gpValve.gpDefaultSize.x - 4.0) < 0.5 and absf(gpValve.gpDefaultSize.y - 2.0) < 0.5,
-			"ball valve keeps its real C01 size 4x2 mm, got %s" % gpValve.gpDefaultSize)
+		gpCheck(absf(gpValve.gpDefaultSize.x - 8.0) < 0.5 and absf(gpValve.gpDefaultSize.y - 4.0) < 0.5,
+			"ball valve keeps its real C01 size 8x4 mm (x2 A1 rebase), got %s" % gpValve.gpDefaultSize)
 	if gpTank != null and gpValve != null:
 		gpCheck(gpTank.gpDefaultSize.y > gpValve.gpDefaultSize.y * 5.0,
 			"canvas proportions follow C01: the vessel dwarfs the valve")

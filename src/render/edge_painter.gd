@@ -11,24 +11,35 @@ extends RefCounted
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
-# Flow-arrow geometry, in world units (mm), straight from the reference drawing.
-# 流向箭头几何，世界单位（mm），直接取自参照图。
+# Flow-arrow geometry, in world units (mm), from the reference drawing.
+# 流向箭头几何，世界单位（mm），取自参照图。
 # WHY THESE EXACT NUMBERS / 为何是这两个数：
 # DEXPI Example C01 draws the flow marker as a 5.0 x 2.5 unit triangle placed by
 # `transform="translate(x,y) rotate(r) scale(0.70,0.70)"`, i.e. 3.5 mm long and 1.75 mm wide overall
-# — and the pack's own manifest records the same (`direction_of_flow_for_primary_segment`,
-# size_mm = [1.75, 3.5]). Half-width is therefore 0.875 mm.
-# DEXPI Example C01 的流向标记是一个 5.0×2.5 单位的三角形，由
-# `transform="translate(x,y) rotate(r) scale(0.70,0.70)"` 放置，即整体 3.5mm 长、1.75mm 宽 ——
-# 图元包清单记录的尺寸完全一致（`direction_of_flow_for_primary_segment`，size_mm = [1.75, 3.5]）。
-# 故半宽为 0.875mm。
+# on the A3-era reference — and the pack's own manifest recorded the same
+# (`direction_of_flow_for_primary_segment`, originally size_mm = [1.75, 3.5]); half-width 0.875 mm.
+# ⚠️ A1 REBASE (2026-10-16): the A1 default sheet doubles every drawing CONTENT size, and the
+# manifest now carries [3.5, 7.0] — so these constants are the C01 measurements ×2: 7.0 mm long,
+# 1.75 mm half-width. The proportions are untouched.
+# DEXPI 示例 C01 的流向标记是一个 5.0×2.5 单位的三角形，由
+# `transform="translate(x,y) rotate(r) scale(0.70,0.70)"` 放置，在 A3 时代参照图上即整体 3.5mm 长、
+# 1.75mm 宽 —— 图元包清单当时记录的尺寸完全一致（`direction_of_flow_for_primary_segment`，最初
+# size_mm = [1.75, 3.5]），半宽 0.875mm。
+# ⚠️ A1 重定基（2026-10-16）：A1 默认图幅使一切**图面内容**尺寸翻倍，manifest 现载 [3.5, 7.0]
+# —— 故这两个常量即 C01 实测 ×2：长 7.0mm、半宽 1.75mm。比例不变。
 # The previous values (10.0 / 4.5) were pixel-era numbers, and once the world unit became 1 mm they
 # meant a 10 x 9 mm arrow — 2.9x too long and 5.1x too wide, i.e. the reported "the arrow is far too
 # big compared with the standard drawing".
 # 此前的数值（10.0 / 4.5）是像素时代的数字；世界单位改为 1mm 后，它们意味着 10×9mm 的箭头 ——
 # 长 2.9 倍、宽 5.1 倍，正是用户报告的「箭头比标准图大太多」。
-const GP_ARROW_LEN: float = 3.5
-const GP_ARROW_HALF: float = 0.875
+# ⚠️ A1 REBASE (2026-10-16): the arrow is drawing CONTENT — it rides the symbols, which were
+# rebased ×2 in data (the manifest's size_mm for this very marker is now [3.5, 7.0]), so these
+# constants double with it. The C01 PROPORTIONS (5.0 × 2.5 units at scale 0.70) are unchanged.
+# ⚠️ A1 重定基（2026-10-16）：箭头是**图面内容** —— 它随图元走，而图元已在数据层 ×2（正是本标记
+# 在 manifest 中的 size_mm 现为 [3.5, 7.0]），故这两个常量随之翻倍。C01 的**比例**（5.0×2.5 单位
+# 乘 0.70 缩放）不变。
+const GP_ARROW_LEN: float = 7.0
+const GP_ARROW_HALF: float = 1.75
 
 # ---- Dangling-end ring / 悬空端圆环 ----------------------------------------
 # Radius in MILLIMETRES (1 world unit = 1 mm), i.e. a 10 mm ring. Deliberately NOT reduced to a

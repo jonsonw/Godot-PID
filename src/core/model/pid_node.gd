@@ -112,6 +112,41 @@ func gpIsMounted() -> bool:
 	return gpParentUid != ""
 
 
+# ---------------------------------------------------------------------------
+# 整图平移（Rev.3 阶段 0d） / Whole-sheet translation
+# ---------------------------------------------------------------------------
+# Move this node by gpDelta (world mm). THE complete list of absolute world coordinates a node owns
+# is exactly one line — gpPosition. That is the whole reason a whole-sheet move is a rigid
+# translation: everything else a node stores is RELATIVE and therefore travels for free.
+# 把本节点按 gpDelta（世界 mm）平移。节点持有的绝对世界坐标**完整清单**只有一行 —— gpPosition。
+# 这正是整图移动之所以是刚性平移的全部理由：节点存的其它东西都是**相对量**，因而免费随行。
+#
+# ⚠️ TRANSLATED EVEN WHEN MOUNTED, ON PURPOSE / ⚠️ 被挂载时**照样**平移，刻意如此：
+# while mounted, gpPosition is not consulted — mount_resolver's ladder 1 derives the origin from the
+# parent + anchor + gpMountOffset, so this write is inert. But the field is declared (and read) as the
+# node's WORLD position: it is the fallback frame in ladder 2, used when a host has vanished without
+# cleaning up. Skipping mounted nodes would therefore strand exactly those orphans the sheet has just
+# travelled away from. Excluding them would also give this rule an exception that every future reader
+# would have to rediscover. / 挂载期间 gpPosition 并不被读取 —— mount_resolver 的阶梯 1 由父件 + 锚点 +
+# gpMountOffset 推导原点，故这次写入是惰性的。但该字段的声明与读取都是**世界**坐标：它是阶梯 2 的兜底
+# 坐标系，用于「宿主被删而未清理」的情形。故跳过挂载节点，恰恰会让这些孤儿留在图纸刚离开的地方。把
+# 它们排除在外，也会给这条规则添一个后人必须重新发现的例外。
+#
+# ⚠️ NOT TOUCHED, AND WHY / ⚠️ 不动的字段及其理由:
+#   * gpLabelOffset — NORMALISED (1.0 == half the glyph envelope), i.e. relative to this node, so it
+#     travels by construction. Adding the delta would push every tag off its symbol by
+#     (delta / envelope) — an offset that grows with the drag.
+#     gpLabelOffset 是**归一化**的（1.0 == 半个字形包络），即相对本节点，故构造上已随行。若再加位移，
+#     每个位号都会按 (位移 / 包络) 离开图元 —— 且该量随拖拽增大。
+#   * gpMountOffset / gpMountAngleDeg — relative to the PARENT's anchor (host-local mm / relative
+#     degrees). A world delta here would move the child twice: once by the parent's move, once by its
+#     own local nudge.
+#     gpMountOffset / gpMountAngleDeg 相对**父件**锚点（宿主本地 mm / 相对角度）。在此叠加世界位移会让
+#     子件移动两次：一次随父件、一次因自身的本地微调。
+func gpTranslate(gpDelta: Vector2) -> void:
+	gpPosition += gpDelta
+
+
 # Serialize this node to a plain dictionary (object graph -> dict graph).
 # 将本节点序列化为普通字典（对象图 → 字典图）。
 # The shape matches the historic multi-document form so JSON stays forward-compatible.

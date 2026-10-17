@@ -159,7 +159,25 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 	# Leave the label empty so the canvas renders the localized type name and it switches with the
 	# UI language. The user can still type a custom label.
 	# 标签留空，使画布显示本地化的类型名并随界面语言切换；用户仍可在属性面板填自定义标签。
-	var gpNid: String = gpCv.gpRequestPlaceNode(gpCv.gpPendingDef.gpId, gpWorld)
+	# Stage 2 (gpPlacePolicy): a SHEET_ANCHOR:<code> definition lands on the inner frame's corner
+	# the code names (BR/BL/TR/TL), wherever the user clicked — the same "travels with the frame"
+	# semantics the title block has, expressed as a definition policy instead of a special case.
+	# A missing sheet degrades to the clicked point (headless / no frame = nothing to anchor to).
+	# 阶段 2（gpPlacePolicy）：声明 "SHEET_ANCHOR:<code>" 的定义落在编码所指的内框角
+	#（BR/BL/TR/TL），无论用户点在哪 —— 与图签同一条「跟着图框走」语义，只是表达为定义
+	# 策略而非特例。无图纸时退化为点击点（headless / 无图框 = 无处可锚）。
+	var gpDropAt: Vector2 = gpWorld
+	if gpPendDef.gpPlacePolicy != GPSymbolDef.GP_PLACE_FREE \
+			and gpPendDef.gpPlacePolicy.begins_with(GPSymbolDef.GP_PLACE_SHEET_ANCHOR_PREFIX) \
+			and gpCv.gpSheet != null:
+		var gpFrame: Rect2 = GPFrameGeometry.gpFrameRect(gpCv.gpSheet)
+		var gpCode: String = gpPendDef.gpPlacePolicy \
+			.trim_prefix(GPSymbolDef.GP_PLACE_SHEET_ANCHOR_PREFIX)
+		# Corner decoding lives in GPFrameGeometry (the geometry single source), where the
+		# tests can pin it; this tool only wires the policy through.
+		# 角点解码住在 GPFrameGeometry（几何单一事实源），测试在那里钉它；本工具只把策略接通。
+		gpDropAt = GPFrameGeometry.gpFrameCorner(gpFrame, gpCode, gpWorld)
+	var gpNid: String = gpCv.gpRequestPlaceNode(gpCv.gpPendingDef.gpId, gpDropAt)
 	if gpNid == "":
 		return false
 	_gpGhostOn = false

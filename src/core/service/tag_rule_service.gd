@@ -84,10 +84,17 @@ static func gpRenumberItems(gpGraph: GPPIDGraph) -> Array[Dictionary]:
 	if gpGraph == null:
 		return gpOut
 	for gpN in gpGraph.gpNodes:
+		# Stage 2 (gpTaggable): definitions that opted out of tagging are EXCLUDED from the
+		# renumber candidate set — renumbering must never mint tags for tables / multiline text.
+		# 阶段 2（gpTaggable）：声明**不可编号**的定义被排除出重排候选集 —— 重排绝不给
+		# 表格 / 多行文本铸位号。
+		var gpDef: GPSymbolDef = GPSymbolLibrary.gpFindById(gpN.gpSymbolId)
+		if gpDef != null and not gpDef.gpTaggable:
+			continue
 		gpOut.append({
 			"uid": gpN.gpInstanceId,
 			"tag": gpN.gpTag,
-			"def": GPSymbolLibrary.gpFindById(gpN.gpSymbolId),
+			"def": gpDef,
 		})
 	return gpOut
 

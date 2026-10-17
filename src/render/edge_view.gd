@@ -105,13 +105,22 @@ func _ready() -> void:
 	add_child(gpInkLine)
 
 
-# Push per-frame view state from the binder.
-# 由绑定器逐帧推送视图状态。
-func gpSetView(gpZoomIn: float, gpSelectedIn: bool, gpHoveredIn: bool, gpEditingIn: bool = false) -> void:
-	gpZoom = maxf(gpZoomIn, 0.01)
+# Push per-frame view state from the binder. Returns TRUE when anything actually CHANGED, so the
+# sync can skip the redraw when nothing did (the flicker fix: sync runs on every canvas repaint,
+# and zoom / selection / editing live here — a zoom change must still repaint every edge, a
+# selection change exactly one).
+# 由绑定器推送视图状态。任何东西**真正变化**时返回 true，使 sync 能在无变化时跳过重绘（闪烁修复：
+# sync 在画布每一次重绘时都会跑，而 zoom / 选中 / 编辑态都住在这里 —— zoom 变化仍须重绘每一条边，
+# 选中变化则只重绘那一条）。
+func gpSetView(gpZoomIn: float, gpSelectedIn: bool, gpHoveredIn: bool, gpEditingIn: bool = false) -> bool:
+	var gpNewZoom: float = maxf(gpZoomIn, 0.01)
+	var gpChanged: bool = gpZoom != gpNewZoom or gpSelected != gpSelectedIn \
+		or gpHovered != gpHoveredIn or gpEditing != gpEditingIn
+	gpZoom = gpNewZoom
 	gpSelected = gpSelectedIn
 	gpHovered = gpHoveredIn
 	gpEditing = gpEditingIn
+	return gpChanged
 
 
 # The full routed polyline, endpoints included. Exposed so hit-testing and the inspector can

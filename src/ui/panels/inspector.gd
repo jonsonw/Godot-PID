@@ -50,6 +50,18 @@ signal gpBatchAttrChanged(gpIds: Array[String], key: String, val)
 # 只有用户本人才能丢弃它。
 signal gpCleanOrphansRequested(gpNodeId: String)
 
+# A CUSTOM property entry was added (Rev.3 stage 1.5, R2 / D7): node id, key, initial value.
+# 一条**自定义**属性条目被新增（Rev.3 阶段 1.5，R2 / D7）：节点 id、键、初始值。
+signal gpPropAddRequested(gpNodeId: String, gpKey: String, gpVal)
+
+# A custom entry was RENAMED: node id, old key, new key. One undo step via the dedicated command.
+# 一条自定义条目被**改名**：节点 id、旧键、新键。经专用命令成为一个撤销步。
+signal gpPropRenamed(gpNodeId: String, gpOldKey: String, gpNewKey: String)
+
+# A custom entry was deleted: node id, key (the value is erased, letting nothing back).
+# 一条自定义条目被删除：节点 id、键（取值被擦除）。
+signal gpPropDeleteRequested(gpNodeId: String, gpKey: String)
+
 # Key prefix for a multi-language name edit (e.g. "name:zh_CN").
 # 多语言名称编辑的键前缀（如 "name:zh_CN"）。
 const GP_NAME_PREFIX: String = "name:"
@@ -103,6 +115,16 @@ var _gpBatchNodes: Array[GPPIDNode] = []
 #（与左栏类目分隔一致，2026-09-25 需求）。每次重建表单时归零。
 var _gpHeadCount: int = 0
 
+# Property search box contents (Rev.3 stage 1.5, R2). Reset on a NEW selection (gpShow /
+# gpShowMulti), kept across in-form rebuilds so applying a search does not erase itself.
+# 属性检索框内容（Rev.3 阶段 1.5，R2）。**新**选中时重置（gpShow / gpShowMulti），
+# 表单内部重建时保留，使「应用检索」不会抹掉自己。
+var _gpSearchQuery: String = ""
+
+# Inline note label under the add-entry row (refusals surface here, in place).
+# 「新增条目」行下方的就地提示标签（拒绝原因就地显示于此）。
+var _gpAdhocNote: Label = null
+
 
 # Find the form root and show the empty hint.
 # 找到表单根并显示空提示。
@@ -120,6 +142,7 @@ func _ready() -> void:
 func gpShow(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> void:
 	_gpBatchIds = []
 	_gpBatchNodes = []
+	_gpSearchQuery = ""
 	# A typed array is built explicitly: passing a bare `[]` literal into a typed
 	# Array[GPPIDNode] parameter is a runtime type error in Godot 4.
 	# 显式构建类型化数组：把裸 `[]` 字面量传给类型化的 Array[GPPIDNode] 参数
@@ -139,6 +162,7 @@ func gpShow(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> void:
 func gpShowMulti(gpDef: GPSymbolDef, gpNodes: Array[GPPIDNode]) -> void:
 	_gpBatchNodes = []
 	_gpBatchIds = []
+	_gpSearchQuery = ""
 	for gpN in gpNodes:
 		if gpN == null:
 			continue
@@ -194,15 +218,27 @@ func _gpBuildNodeForm(gpDef: GPSymbolDef, gpNodes: Array[GPPIDNode]) -> void:
 	_gpAddHead(I18n.gpTr("inspector.label"))
 	_gpAddAnchorRow(gpPrimary)
 
-	# ---- typed property fields, straight from the library schema ----
-	# ---- 类型化属性字段，直接来自库 schema ----
+	# ---- property search (Rev.3 stage 1.5, R2) + typed property fields ----
+	# ---- 属性检索（Rev.3 阶段 1.5，R2）+ 类型化属性字段 ----
 	var gpSchema: GPPropertySchema = gpDef.gpSchema
 	var gpPropsList: Array = []
 	for gpN in gpNodes:
 		gpPropsList.append(gpN.gpProps)
+	if not gpIsBatch:
+		_gpAddSearchBox()
 	if gpSchema == null or gpSchema.gpFields.is_empty():
 		_gpAddHead(I18n.gpTr("inspector.properties"))
 		_gpAddNote(I18n.gpTr("inspector.no_props"))
+	elif _gpSearchQuery != "":
+		# Searching: the matching rows are flattened into ONE section, rendered by the very
+		# same row builder, so a hit looks exactly like it does in its own group.
+		# 检索时：命中行摊平为**一个**小节，仍用同一个行构建器渲染，故命中项的样子
+		# 与它在原分组中完全一致。
+		var gpHits: Array[Dictionary] = GPPropertyForm.gpSearch(gpSchema, gpPrimary.gpProps,
+			_gpSearchQuery)
+		_gpAddHead("%s · %d" % [I18n.gpTr("inspector.search"), gpHits.size()])
+		for gpRow in gpHits:
+			_gpAddPropertyRow(gpRow, gpSchema, gpPropsList, false)
 	else:
 		for gpSec in GPPropertyForm.gpSections(gpSchema, gpPrimary.gpProps):
 			_gpAddHead(GPPropertyForm.gpSectionTitle(str(gpSec["group"]),
@@ -210,18 +246,31 @@ func _gpBuildNodeForm(gpDef: GPSymbolDef, gpNodes: Array[GPPIDNode]) -> void:
 			for gpRow in (gpSec["fields"] as Array):
 				_gpAddPropertyRow(gpRow, gpSchema, gpPropsList, gpIsBatch)
 
-	# ---- orphans: values the library no longer declares, kept on purpose ----
-	# ---- 孤儿：库中已不再声明、但刻意保留的取值 ----
-	var gpOrphans: Array[Dictionary] = GPPropertyForm.gpOrphanRows(gpSchema, gpPrimary.gpProps)
-	if not gpOrphans.is_empty():
-		_gpAddHead(I18n.gpTr("inspector.orphan"))
-		for gpRow in gpOrphans:
-			_gpAddTextField(str(gpRow["key"]), str(gpRow["value"]), "", true)
- # Cleaning is ONE explicit button, never an automatic sweep.
- # 清理是**一个明确的按钮**，绝不是自动清扫。
+	# ---- custom entries: user-owned keys outside the schema (Rev.3 stage 1.5, R2) ----
+	# ---- 自定义条目：schema 之外、用户自有的键（Rev.3 阶段 1.5，R2） ----
+	# Same storage as the old "orphans" (gpProps keys the schema does not declare), now EDITABLE:
+	# rename / delete per row, add at the bottom — instance level only (D7). Batch mode and a
+	# denied permission both fall back to the old read-only display; only the user may discard
+	# these values, so the sweep button stays explicit and is gated too.
+	# 与旧「孤儿」同源存储（schema 未声明的 gpProps 键），现在**可编辑**：逐行改名 / 删除，
+	# 底部新增 —— 仅实例级（D7）。批量模式与权限被拒都回落旧的只读展示；这些值只有用户
+	# 本人可丢弃，故一键清理仍是显式按钮、且同样被闸控。
+	var gpAdhoc: Array[Dictionary] = GPPropertyForm.gpAdhocRows(gpSchema, gpPrimary.gpProps)
+	var gpMayEditProps: bool = GPPermissions.gpCanEditProps() and not gpIsBatch
+	if not gpAdhoc.is_empty():
+		_gpAddHead(I18n.gpTr("inspector.adhoc"))
+		for gpRow in gpAdhoc:
+			if gpMayEditProps:
+				_gpAddAdhocRow(str(gpRow["key"]), str(gpRow["value"]))
+			else:
+				_gpAddTextField(str(gpRow["key"]), str(gpRow["value"]), "", true)
+	if gpMayEditProps:
+		_gpAddAdhocCreator()
+	if not gpAdhoc.is_empty():
 		var gpBtn: Button = Button.new()
-		gpBtn.text = I18n.gpTr("inspector.clean_orphans") % [gpOrphans.size()]
+		gpBtn.text = I18n.gpTr("inspector.clean_orphans") % [gpAdhoc.size()]
 		gpBtn.size_flags_horizontal = SIZE_EXPAND_FILL
+		gpBtn.disabled = not GPPermissions.gpCanEditProps()
 		gpBtn.pressed.connect(func() -> void:
 			if gpCurrentNode != null:
 				gpCleanOrphansRequested.emit(gpCurrentNode.gpInstanceId))
@@ -346,6 +395,102 @@ func _gpMultilangText(gpValue: Variant) -> String:
 		var gpD: Dictionary = gpValue as Dictionary
 		return str(gpD.get(GPPropertyResolver.GP_FALLBACK_LOCALE, ""))
 	return str(gpValue)
+
+
+# ---- custom-entry CRUD widgets (Rev.3 stage 1.5, R2 / D7) ----
+# ---- 自定义条目增删改控件（Rev.3 阶段 1.5，R2 / D7） ----
+
+# One CUSTOM entry: editable key (commit = rename, one undo step), editable value (commit =
+# set), and a per-row delete. Only reached when the permission allows and the selection is
+# single, so the editors can bind straight to gpCurrentNode.
+# 一条**自定义**条目：键可编辑（提交 = 改名，一个撤销步）、值可编辑（提交 = 写入）、
+# 行内删除。仅在权限允许且单选时到达此处，故编辑器可直接绑定 gpCurrentNode。
+func _gpAddAdhocRow(gpKey: String, gpVal: String) -> void:
+	var gpRow: HBoxContainer = _gpFieldRow(gpKey)
+	var gpKeyEdit: LineEdit = LineEdit.new()
+	gpKeyEdit.text = gpKey
+	gpKeyEdit.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpKeyEdit.tooltip_text = I18n.gpTr("inspector.adhoc_rename_hint")
+	gpKeyEdit.text_submitted.connect(func(gpNew: String) -> void:
+		var gpName: String = gpNew.strip_edges()
+		if gpName == "" or gpName == gpKey or gpCurrentNode == null:
+			return
+		gpPropRenamed.emit(gpCurrentNode.gpInstanceId, gpKey, gpName))
+	gpRow.add_child(gpKeyEdit)
+	var gpValEdit: LineEdit = LineEdit.new()
+	gpValEdit.text = gpVal
+	gpValEdit.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpValEdit.text_submitted.connect(func(gpV: String) -> void:
+		_gpEmit(gpKey, gpV))
+	gpRow.add_child(gpValEdit)
+	var gpDel: Button = Button.new()
+	gpDel.text = "✕"
+	gpDel.tooltip_text = I18n.gpTr("inspector.adhoc_delete_hint")
+	gpDel.pressed.connect(func() -> void:
+		if gpCurrentNode != null:
+			gpPropDeleteRequested.emit(gpCurrentNode.gpInstanceId, gpKey))
+	gpRow.add_child(gpDel)
+
+
+# The add-entry row: key + optional initial value + the add button. A key the LIBRARY declares
+# is refused here (with an inline note) instead of silently becoming an override.
+# 「新增条目」行：键 + 可选初始值 + 添加按钮。**库已声明**的键在此被拒（就地提示），
+# 而不是静默变成一条覆盖。
+func _gpAddAdhocCreator() -> void:
+	var gpRow: HBoxContainer = _gpFieldRow(I18n.gpTr("inspector.adhoc_add"))
+	var gpKeyEdit: LineEdit = LineEdit.new()
+	gpKeyEdit.placeholder_text = I18n.gpTr("inspector.adhoc_key_ph")
+	gpKeyEdit.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpRow.add_child(gpKeyEdit)
+	var gpValEdit: LineEdit = LineEdit.new()
+	gpValEdit.placeholder_text = I18n.gpTr("inspector.adhoc_val_ph")
+	gpValEdit.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpRow.add_child(gpValEdit)
+	var gpBtn: Button = Button.new()
+	gpBtn.text = I18n.gpTr("inspector.adhoc_add_btn")
+	gpBtn.pressed.connect(func() -> void:
+		var gpK: String = gpKeyEdit.text.strip_edges()
+		if gpK == "" or gpCurrentNode == null:
+			return
+		if gpCurrentDef != null and gpCurrentDef.gpSchema != null \
+				and gpCurrentDef.gpSchema.gpFieldByKey(gpK) != null:
+			_gpSetAdhocNote(I18n.gpTr("inspector.adhoc_declared"))
+			return
+		if gpCurrentNode.gpProps.has(gpK):
+			_gpSetAdhocNote(I18n.gpTr("inspector.adhoc_exists"))
+			return
+		_gpSetAdhocNote("")
+		gpPropAddRequested.emit(gpCurrentNode.gpInstanceId, gpK, gpValEdit.text))
+	gpRow.add_child(gpBtn)
+	_gpAdhocNote = Label.new()
+	_gpAdhocNote.modulate = Color(0.85, 0.45, 0.3)
+	gpFormRoot.add_child(_gpAdhocNote)
+
+
+# Show / clear the inline note under the add-entry row. No-op when the row is absent
+# (batch mode / no permission never builds it).
+# 显示 / 清除「新增条目」行下方的就地提示。行不存在时（批量 / 无权限）为空操作。
+func _gpSetAdhocNote(gpText: String) -> void:
+	if _gpAdhocNote != null:
+		_gpAdhocNote.text = gpText
+
+
+# The property search box (single selection only; batch keeps the full grouped view).
+# Commits on ENTER, not per keystroke: a rebuild-per-keystroke would free the very widget the
+# user is typing in. The query survives the rebuild via _gpSearchQuery.
+# 属性检索框（仅单选；批量保持完整分组视图）。**回车**提交而非逐键：
+# 逐键重建会释放用户正在输入的控件本身。查询词经 _gpSearchQuery 在重建后存活。
+func _gpAddSearchBox() -> void:
+	var gpRow: HBoxContainer = _gpFieldRow(I18n.gpTr("inspector.search"))
+	var gpEdit: LineEdit = LineEdit.new()
+	gpEdit.placeholder_text = I18n.gpTr("inspector.search_ph")
+	gpEdit.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpEdit.text = _gpSearchQuery
+	gpEdit.text_submitted.connect(func(gpV: String) -> void:
+		_gpSearchQuery = gpV.strip_edges()
+		if gpCurrentDef != null and gpCurrentNode != null:
+			_gpBuildNodeForm(gpCurrentDef, [gpCurrentNode]))
+	gpRow.add_child(gpEdit)
 
 
 # ============================ widget helpers / 控件辅助 ============================
@@ -560,6 +705,7 @@ func _gpAddNumberField(gpLabel: String, gpInitial: Variant, gpMin: float, gpMax:
 # Remove every child of the form root. / 清空表单根的全部子节点。
 func _gpClearForm() -> void:
 	_gpHeadCount = 0
+	_gpAdhocNote = null
 	for gpC in gpFormRoot.get_children():
 		gpFormRoot.remove_child(gpC)
 		gpC.queue_free()

@@ -73,7 +73,23 @@ static func gpHitNode(gpGraph: GPPIDGraph, gpBinder: GPGraphBinder, gpWorld: Vec
 		var gpDef: GPSymbolDef = gpBinder.gpDefFor(gpN.gpSymbolId) if gpBinder != null else null
 		var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef != null else Vector2(64.0, 48.0)
 		var gpOrigin: Vector2 = GPPortResolver.gpNodeWorldOrigin(gpGraph, gpLookup, gpN)
-		if not Rect2(gpOrigin - gpSz / 2.0, gpSz).has_point(gpWorld):
+		# Stage 2 pick modes (gpPickMode): NONE = never pickable (the frame-like furniture);
+		# BORDER = only a band along the envelope's edge, so a pick inside a big annotation
+		# (table / multiline text) falls through to what is UNDER it instead of grabbing the
+		# whole sheet-sized rectangle. Band is a fixed world-mm width — hit-testing has no
+		# zoom here, and 3 mm reads as a visible rim at every working zoom.
+		# 阶段 2 拾取模式（gpPickMode）：NONE = 永不可拾取（图框类陈设）；BORDER = 仅包络
+		# 边缘一圈带，使点在大幅标注（表格 / 多行文本）**内部**的拾取落到其**下方**的图元上，
+		# 而不是抓住整个占纸矩形。带宽为固定世界毫米 —— 命中测试此处无缩放入参，3mm 在各
+		# 工作缩放下都是可辨识的一圈边。
+		if gpDef != null and gpDef.gpPickMode == GPSymbolDef.GP_PICK_NONE:
+			continue
+		var gpRect: Rect2 = Rect2(gpOrigin - gpSz / 2.0, gpSz)
+		if gpDef != null and gpDef.gpPickMode == GPSymbolDef.GP_PICK_BORDER:
+			if not (gpRect.has_point(gpWorld)
+					and not gpRect.grow(-3.0).has_point(gpWorld)):
+				continue
+		elif not gpRect.has_point(gpWorld):
 			continue
 		var gpDepth: int = _gpMountDepth(gpGraph, gpN)
 		if gpDepth > gpBestDepth:

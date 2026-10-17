@@ -41,8 +41,10 @@ static func _gpGraph() -> GPPIDGraph:
 
 func gpTestRegistryKnowsEveryFormat() -> void:
 	var gpKinds: Array[String] = GPExporterRegistry.gpAllKinds()
-	gpEq(gpKinds.size(), 4, "project, library, config and dexpi")
-	for gpWant in ["project", "library", "config", "dexpi"]:
+	# 6 = project, library, config, dexpi, dxf, pdf.
+	# 6 = project、library、config、dexpi、dxf、pdf。
+	gpEq(gpKinds.size(), 6, "project, library, config, dexpi, dxf and pdf")
+	for gpWant in ["project", "library", "config", "dexpi", "dxf", "pdf"]:
 		gpCheck(GPExporterRegistry.gpIsKnown(gpWant), gpWant + " is registered")
 
 

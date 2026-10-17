@@ -49,6 +49,16 @@ const GP_STRINGS: Dictionary = {
 	"dexpi.dvalve003":	{ "zh": "蝶阀", "en": "Butterfly Valve" },
 	"dexpi.dvalve004":	{ "zh": "截止阀", "en": "Globe Valve" },
 	"dexpi.dvalve005":	{ "zh": "旋启式止回阀", "en": "Swing Check Valve" },
+	# ---- annotation templates (GPSymbolAnnotationTemplates, Rev.3 stage 2) ----
+	# ---- 注释类模板（GPSymbolAnnotationTemplates，Rev.3 阶段 2）----
+	"sym.text_multiline":	{ "zh": "多行文本", "en": "Multi-line Text" },
+	"sym.table_device_param":	{ "zh": "设备参数表", "en": "Equipment Data Table" },
+	"canvas.ctx_table_ins_row":	{ "zh": "插入行", "en": "Insert Row" },
+	"canvas.ctx_table_del_row":	{ "zh": "删除行", "en": "Delete Row" },
+	"canvas.ctx_table_ins_col":	{ "zh": "插入列", "en": "Insert Column" },
+	"canvas.ctx_table_del_col":	{ "zh": "删除列", "en": "Delete Column" },
+	"table.err_structure":	{ "zh": "表格结构无法变更（已到最少行列或数量上限）",
+		"en": "Table structure refused (at the min or max row/column limit)" },
 	# ---- app chrome ----
 	"symbol_lib.title":        { "zh": "图元库",           "en": "Symbol Library" },
 	"symbol_lib.search":       { "zh": "搜索图元名称 / 类目…", "en": "Search symbols / categories…" },
@@ -97,7 +107,6 @@ const GP_STRINGS: Dictionary = {
 	"inspector.name_en":       { "zh": "名称（英文）", "en": "Name (English)" },
 	"inspector.anchor":        { "zh": "标签位置", "en": "Label Position" },
 	"inspector.anchor_follow": { "zh": "跟随图元库默认", "en": "Follow library default" },
-	"inspector.orphan":        { "zh": "库中已删除的字段（值保留）", "en": "Removed from library (values kept)" },
 	"inspector.default":       { "zh": "默认",     "en": "default" },
 	"inspector.required":      { "zh": "必填",     "en": "required" },
 	"inspector.no_props":      { "zh": "（该图元暂无可配置属性）", "en": "(no configurable properties)" },
@@ -105,6 +114,24 @@ const GP_STRINGS: Dictionary = {
 								 "en": "Batch edit: %d instances selected — edits apply to all" },
 	"inspector.clean_orphans":  { "zh": "清理这 %d 项孤儿值", "en": "Discard these %d orphaned values" },
 	"inspector.group_general": { "zh": "通用",     "en": "General" },
+	# ---- custom-entry CRUD + property search (Rev.3 stage 1.5, R2) ----
+	# ---- 自定义条目增删改 + 属性检索（Rev.3 阶段 1.5，R2） ----
+	"inspector.adhoc":          { "zh": "自定义属性", "en": "Custom Properties" },
+	"inspector.adhoc_add":      { "zh": "新增条目", "en": "Add Entry" },
+	"inspector.adhoc_add_btn":  { "zh": "添加", "en": "Add" },
+	"inspector.adhoc_key_ph":   { "zh": "键名", "en": "key name" },
+	"inspector.adhoc_val_ph":   { "zh": "初始值（可留空）", "en": "initial value (optional)" },
+	"inspector.adhoc_rename_hint": { "zh": "输入新键名后回车即改名（一个撤销步）",
+		"en": "Type a new key and press Enter to rename (one undo step)" },
+	"inspector.adhoc_delete_hint": { "zh": "删除此条目", "en": "Delete this entry" },
+	"inspector.adhoc_declared": { "zh": "该键由图元库声明，请到对应分组修改",
+		"en": "This key is declared by the symbol library; edit it in its own group" },
+	"inspector.adhoc_exists":   { "zh": "该键已存在", "en": "This key already exists" },
+	"inspector.search":         { "zh": "检索", "en": "Search" },
+	"inspector.search_ph":      { "zh": "输入后回车过滤属性…", "en": "Type + Enter to filter…" },
+	"perm.err_props":           { "zh": "当前无属性编辑权限", "en": "Property editing is not permitted" },
+	"adhoc.err_exists":         { "zh": "键已存在", "en": "Key already exists" },
+	"adhoc.err_missing":        { "zh": "条目不存在", "en": "Entry not found" },
 
 	# ---- label anchors (GPLabelAnchor) ----
 	"anchor.auto":   { "zh": "自动", "en": "Auto" },
@@ -178,6 +205,7 @@ const GP_STRINGS: Dictionary = {
 	"status.exported":         { "zh": "已导出：%s（节点 %d / 连线 %d）",
 								 "en": "Exported: %s (%d nodes / %d edges)" },
 	"status.export_fail":      { "zh": "导出失败：%s",    "en": "Export failed: %s" },
+	"status.list_exported":    { "zh": "已导出 %d 类清单到 %s", "en": "Exported %d list(s) to %s" },
 	"status.export_empty":     { "zh": "没有可导出的内容", "en": "Nothing to export" },
 	"status.imported":         { "zh": "已导入：%s（错误 %d / 警告 %d）",
 								 "en": "Imported: %s (%d error(s) / %d warning(s))" },
@@ -189,6 +217,8 @@ const GP_STRINGS: Dictionary = {
 				  "en": "G-PID Project\nDocument metadata (title / drawing no. / revision) pending." },
 	"doc.pid_filter": { "zh": "G-PID 工程 (*.pid.json)", "en": "G-PID Project (*.pid.json)" },
 	"doc.dexpi_filter": { "zh": "DEXPI XML (*.pid.xml)", "en": "DEXPI XML (*.pid.xml)" },
+	"doc.dxf_filter":    { "zh": "DXF 图形交换 (*.dxf)", "en": "DXF Drawing Exchange (*.dxf)" },
+	"doc.pdf_filter":    { "zh": "PDF 文档 (*.pdf)", "en": "PDF Document (*.pdf)" },
 
 	"settings.title":      { "zh": "设置",          "en": "Settings" },
 	"settings.font_size":  { "zh": "界面字体大小",   "en": "UI Font Size" },
@@ -264,6 +294,7 @@ const GP_STRINGS: Dictionary = {
 	"instrument": { "zh": "仪表",     "en": "Instrument" },
 	"heat":       { "zh": "换热器",   "en": "Heat Exchanger" },
 	"general":    { "zh": "通用",     "en": "General" },
+	"annotation": { "zh": "注释",     "en": "Annotation" },
 
 	# ---- main canvas interaction / 主画布交互 ----
 	"canvas.ctx_edit_symbol":  { "zh": "修改图元…", "en": "Modify Symbol…" },
@@ -460,6 +491,27 @@ const GP_STRINGS: Dictionary = {
 	"frame.mode_hint":        { "zh": "仅作用于图纸自带文字；位号/管线号始终单语。",
 							  "en": "Applies to drawing text only; tag numbers stay monolingual." },
 	"frame.applied":          { "zh": "图框已更新", "en": "Drawing frame updated" },
+	# 图框边距（Rev.3 阶段 0c 附属：数值入口 + 一键复位）。
+	# Frame margins (Rev.3 stage 0c appendix: numeric entry + one-click reset).
+	"frame.margin.title":     { "zh": "图框边距（mm）", "en": "Frame margins (mm)" },
+	"frame.margin.left":      { "zh": "左", "en": "L" },
+	"frame.margin.top":       { "zh": "上", "en": "T" },
+	"frame.margin.right":     { "zh": "右", "en": "R" },
+	"frame.margin.bottom":    { "zh": "下", "en": "B" },
+	"frame.margin.reset":     { "zh": "复位默认", "en": "Reset to default" },
+	"frame.margin.hint":      { "zh": "可拖拽调整；负值表示该条边在图幅之外（图框不受纸边限制）。",
+							  "en": "Draggable; a negative value puts that edge outside the sheet (the frame is not bound by the paper)." },
+	# 图签停靠（Rev.3 阶段 1：锚角 + 吸附；图签位置由图框推导，故它始终跟着图框走）。
+	# Title-block docking (Rev.3 stage 1: anchor + snapping; the block's place is DERIVED from the frame,
+	# which is what makes it travel with the frame).
+	"frame.tb.title":         { "zh": "图签停靠", "en": "Title block docking" },
+	"frame.tb.anchor":        { "zh": "锚角", "en": "Anchor" },
+	"frame.tb.anchor.br":     { "zh": "右下", "en": "Bottom right" },
+	"frame.tb.anchor.bl":     { "zh": "左下", "en": "Bottom left" },
+	"frame.tb.anchor.tr":     { "zh": "右上", "en": "Top right" },
+	"frame.tb.anchor.tl":     { "zh": "左上", "en": "Top left" },
+	"frame.tb.hint":          { "zh": "图签贴住内框的锚角并随图框移动；在画布上拖动它会按内边吸附，越过中线的轴自动换角。",
+							  "en": "The block hugs that inner corner and travels with the frame; dragging it on the canvas snaps it to the inner edges, and crossing the centre line flips that axis." },
 	# 追踪底图（背景参照层，Phase 5）。
 	# Tracing underlay (background reference layer, Phase 5).
 	"frame.bg.title":         { "zh": "追踪底图", "en": "Tracing Underlay" },

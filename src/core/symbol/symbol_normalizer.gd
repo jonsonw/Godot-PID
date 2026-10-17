@@ -55,11 +55,35 @@ static func gpNormalizeSymbol(gpRaw: Dictionary, gpCat: String, gpPackSizes: Dic
 	if not gpRawSchema.is_empty():
 		gpDef.gpSchema = _gpSchemaFromDicts(gpRawSchema)
 
+	# Stage-2 policy fields pass straight through the raw draft (full .get(key, default),
+	# definition-layer only — never the node whitelist). Defaults == today's behaviour.
+	# 阶段 2 策略字段自原始草稿直通（全量 .get(key, default)，仅在定义层 —— 绝不进节点
+	# 白名单）。默认值 == 今天的行为。
+	gpDef.gpSizeMode = str(gpRaw.get("size_mode", GPSymbolDef.GP_SIZE_MODE_CATEGORY))
+	gpDef.gpGeometrySource = str(gpRaw.get("geometry_source", GPSymbolDef.GP_GEOMETRY_STATIC))
+	gpDef.gpPickMode = str(gpRaw.get("pick_mode", GPSymbolDef.GP_PICK_FULL))
+	gpDef.gpAvoidRouting = bool(gpRaw.get("avoid_routing", true))
+	gpDef.gpTaggable = bool(gpRaw.get("taggable", true))
+	gpDef.gpPlacePolicy = str(gpRaw.get("place_policy", GPSymbolDef.GP_PLACE_FREE))
+	gpDef.gpMountable = bool(gpRaw.get("mountable", true))
+
 	# (1) Nominal envelope comes from the category, never from the drawing — that is what makes
 	# every member of a family render equal-sized.
 	# (1) 标称包络取自类别而非图形本身 —— 这正是同族图元恒为等大的原因。
+	# ⚠️ 尺寸豁免（阶段 2）：gpSizeMode=EXPLICIT 的定义保留作者尺寸，不被类别包络覆写 ——
+	# 表格 / 多行文本等标注类图元按自己的显式尺寸参与布局与碰撞。
+	# ⚠️ Size exemption (stage 2): an EXPLICIT definition keeps its authored size instead of
+	# being overwritten by the category envelope — annotation-type symbols take part in layout
+	# and collision at their own explicit size.
 	var gpEnv: Vector2 = GPSymbolCategories.gpSizeFor(gpCat, gpPackSizes)
-	gpDef.gpDefaultSize = gpEnv
+	if gpDef.gpSizeMode == GPSymbolDef.GP_SIZE_MODE_EXPLICIT:
+		gpDef.gpDefaultSize = Vector2(
+			float((gpRaw.get("default_size", [0.0, 0.0]) as Array)[0]),
+			float((gpRaw.get("default_size", [0.0, 0.0]) as Array)[1]))
+		if gpDef.gpDefaultSize.x <= 0.0 or gpDef.gpDefaultSize.y <= 0.0:
+			gpDef.gpDefaultSize = gpEnv
+	else:
+		gpDef.gpDefaultSize = gpEnv
 
 	var gpShapes: Dictionary = gpRaw.get("shapes", {}) as Dictionary
 	var gpBBox: Rect2 = gpComputeBBox(gpShapes)

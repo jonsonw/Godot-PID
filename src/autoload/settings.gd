@@ -151,7 +151,32 @@ func _ready() -> void:
 # Build a Font resource from a preset key. Always returns a usable Font
 # (falls back to the "system" preset if the key is unknown).
 # 按预设键构造 Font 资源，始终返回可用字体（键未知时回退到 system 预设）。
+#
+# ⚠️ THE CACHE IS NOT AN OPTIMISATION, IT IS A CORRECTNESS CONTRACT (2026-10-16).
+# This used to build a FRESH SystemFont on every call, and GPFrameView fetched its font INSIDE
+# _draw, holding it only in a local. The recorded canvas commands survive until the END of the
+# frame, but the local died the moment the draw function returned — so at render time the glyphs
+# belonged to a FREED font: every title-block letter and zone numeral painted as a SOLID BAR
+# (a glyph quad sampling a dead texture). Views that kept their own reference (gpTheme /
+# gpSymbolFont below) always rendered fine, which is why only the frame was hit. One instance
+# per key, owned by this autoload (which lives forever), keeps every recorded command valid.
+# ⚠️ 这份缓存不是优化，是**正确性契约**（2026-10-16）。此前每次调用都新建 SystemFont，而
+# GPFrameView 在 _draw **内部**取字体、只存在局部变量里。画布命令要活到**帧末**才真正渲染，
+# 而局部变量在绘制函数返回的瞬间就死了 —— 于是渲染时字形属于一个**已释放**的字体：图签的每个
+# 字母、坐标带的每个数字都画成**实心条**（字形四边形采样了已死的纹理）。自带引用的视图
+#（下方的 gpTheme / gpSymbolFont）始终正常，这正是只有图框中招的原因。每个键一个实例、由
+# 本 autoload（永生）持有，让每条已记录的命令保持有效。
+var _gpFontCache: Dictionary = {}
+
 func gpLoadFont(p_gpKey: String) -> Font:
+	var gpKey: String = _gpSanitizeFontKey(p_gpKey)
+	if _gpFontCache.has(gpKey):
+		return _gpFontCache[gpKey] as Font
+	var gpFont: Font = _gpBuildFont(gpKey)
+	_gpFontCache[gpKey] = gpFont
+	return gpFont
+
+func _gpBuildFont(p_gpKey: String) -> Font:
 	var gpSpec: Dictionary = GP_FONT_PRESETS.get(p_gpKey, GP_FONT_PRESETS["system"])
 	# 1) Bundled font file: host-independent, always available.
 	# 1) 内置字体文件：不依赖宿主，始终可用。

@@ -362,19 +362,30 @@ func gpTestCanvasTextRasterisesAtScreenSize() -> void:
 # DEFECT 1 (the title-block half) — the frame converts mm to pixels the same way, but WITHOUT the
 # reading floor: its internal millimetre layout must stay exact.
 # 缺陷 1（标题栏侧）—— 图框用同一套换算，但**不加阅读下限**：其内部毫米排布必须保持精确。
+# ★ 2026-10-16 THE DENSITY HALF OF THE STORY / ★ 2026-10-16 密度这半边：the frame now rasterises at
+# PHYSICAL pixel density (gpSheetFontFit family) — the old design-pixel path produced a ~6 px bitmap
+# for a 2.5 mm field and then MAGNIFIED it on a Retina screen: the grey smudge the user reported.
+# Same painted millimetres, double the bitmap density.
+# 图框现按**物理**像素密度光栅化（gpSheetFontFit 族）—— 旧设计像素路径给 2.5mm 字段只生成 ~6px
+# 位图、再在 Retina 屏上被**放大**：即用户报告的灰糊块。画出的毫米不变，位图密度翻倍。
 # The regression: the frame used to return round(mm), so a 2.8 mm field value was drawn from a 3 px
 # bitmap.
 # 失效复现：图框曾返回 round(mm)，故 2.8mm 的字段值由一个 3px 字模画出。
 func gpTestFrameTextUsesSameConversion() -> void:
 	var gpFrame: GPFrameView = GPFrameView.new()
-	# gpFontFit() reads the scale captured by _draw(); setting it directly is the only way to exercise
-	# the conversion without a canvas, and it is exactly the value _draw() would have captured.
-	# gpFontFit() 读取 _draw() 捕获的缩放；无画布时只能直接赋值，而它正是 _draw() 会捕获的那个值。
+	# gpFontFit() reads the scales captured by _draw(); setting them directly is the only way to
+	# exercise the conversion without a canvas, and they are exactly the values _draw() captures.
+	# gpFontFit() 读取 _draw() 捕获的缩放；无画布时只能直接赋值，而它们正是 _draw() 会捕获的值。
 	gpFrame._gpTextScale = GP_FIT_ZOOM
-	gpEq(int(gpFrame.gpFontFit(GPFrameView.GP_VALUE_MM).x), 5,
-		"适配缩放下 2.5mm 字段值应为 5px（真实尺寸 5.30 取整），而非旧公式的 3px")
-	gpEq(int(gpFrame.gpFontFit(GPFrameView.GP_CAPTION_MM).x), 5,
-		"适配缩放下 2.5mm 字段名同为 5px —— 参照图对字段名与字段值取同一字高")
+	gpFrame._gpDeviceScale = GP_DEVICE_SCALE
+	# 2.5 mm x 2.1217 x 2.142857 = 11.36 -> an 11 PHYSICAL-pixel bitmap, where the old path gave 5
+	# design pixels that the display then stretched to ~11 — blurry. Same on-screen size, denser bitmap.
+	# 2.5mm × 2.1217 × 2.142857 = 11.36 → 11 个**物理**像素位图；旧路径给 5 个设计像素、再被显示器
+	# 拉伸到 ~11 —— 发糊。屏幕尺寸相同，位图更密。
+	gpEq(int(gpFrame.gpFontFit(GPFrameView.GP_VALUE_MM).x), 11,
+		"适配缩放下 2.5mm 字段值应按物理像素密度取 11px（旧设计像素路径仅 5px 且被放大）")
+	gpEq(int(gpFrame.gpFontFit(GPFrameView.GP_CAPTION_MM).x), 11,
+		"适配缩放下 2.5mm 字段名同为 11px —— 参照图对字段名与字段值取同一字高")
 	# The frame's own constants must equal the reference tiers, and GDScript will not let a const
 	# initialiser reference another class, so the equality is kept HERE rather than in the constants.
 	# 图框自身的常量必须等于参照图的档位；GDScript 不允许常量初始化式引用其它类，故该等式维护在**此处**
@@ -384,27 +395,71 @@ func gpTestFrameTextUsesSameConversion() -> void:
 	gpEq(GPFrameView.GP_VALUE_MM, GPTextRole.GP_TITLE_FIELD_MM,
 		"字段值字高必须等于标准标题栏档 2.5mm")
 	# The drawing title is the ONE field the reference draws larger; at the fit zoom its 4.0 mm
-	# becomes 8 px, so the distinction is visible in pixels, not just in the table.
-	# 图纸标题是参照图中唯一被放大的字段；在适配缩放下其 4.0mm 为 8px，故该区别在像素上也看得见。
-	gpEq(int(gpFrame.gpFontFit(GPTextRole.GP_DRAWING_TITLE_MM).x), 8,
-		"图纸标题在适配缩放下应为 8px（4.0mm，参照图中的放大档）")
+	# becomes 18 physical px, so the distinction is visible in pixels, not just in the table.
+	# 图纸标题是参照图中唯一被放大的字段；在适配缩放下其 4.0mm 为 18 物理px，故该区别在像素上也看得见。
+	gpEq(int(gpFrame.gpFontFit(GPTextRole.GP_DRAWING_TITLE_MM).x), 18,
+		"图纸标题在适配缩放下应为 18 物理px（4.0mm，参照图中的放大档）")
 	gpCheck(gpFrame.gpFontFit(GPTextRole.GP_DRAWING_TITLE_MM).x
 			> gpFrame.gpFontFit(GPFrameView.GP_VALUE_MM).x,
 		"图纸标题必须大于普通字段，否则「图纸标题更大」这条标准没有被实现")
-	# No floor here: the value the frame asks for equals mm x scale, so a title-block cell's authored
-	# millimetre spacing is never inflated.
-	# 此处无下限：图框索取的字号恰为「毫米 × 缩放」，故标题栏单元格的作者毫米间距永不被放大。
+	# No floor here: the value the frame asks for equals mm x scale x deviceScale, so a title-block
+	# cell's authored millimetre spacing is never inflated.
+	# 此处无下限：图框索取的字号恰为「毫米 × 缩放 × 设备密度」，故标题栏单元格的作者毫米间距永不被放大。
 	gpEq(int(gpFrame.gpFontFit(GPFrameView.GP_VALUE_MM).x),
-		int(GPCanvasText.gpExactFontFit(GPFrameView.GP_VALUE_MM, GP_FIT_ZOOM).x),
-		"图框字号应与「真实比例」换算完全一致")
-	gpCheck(int(gpFrame.gpFontFit(GPFrameView.GP_VALUE_MM).x) < GPCanvasText.GP_MIN_DEVICE_PX,
-		"标题栏字号可以低于文字下限（它按真实比例绘制，不受阅读下限保护）")
-	# At 100% nothing changes — the conversion is scale-aware, not a blanket enlargement.
-	# 100% 下结果不变 —— 该换算是随缩放的，而非无差别放大。
+		int(GPCanvasText.gpSheetFontFit(GPFrameView.GP_VALUE_MM, GP_FIT_ZOOM, GP_DEVICE_SCALE).x),
+		"图框字号应与「真实比例·物理密度」换算完全一致")
+	# DENSITY, not size: with the device scale at 1 the family degrades to the old design-pixel
+	# numbers exactly — the fix changed the bitmap density, never the painted size.
+	# 变的是**密度**而非尺寸：设备密度取 1 时本族精确退化为旧设计像素数值 —— 修复改变的是位图
+	# 密度，绝不是画出的尺寸。
+	gpFrame._gpDeviceScale = 1.0
+	gpEq(int(gpFrame.gpFontFit(GPFrameView.GP_VALUE_MM).x), 5,
+		"1:1 密度屏上退化为旧值 5px —— 修复只改密度、不改尺寸")
+	# At 100% zoom on the dense display the physical count is still density-aware.
+	# 高密度屏上 100% 缩放的物理像素数依然感知密度。
 	gpFrame._gpTextScale = 1.0
-	gpEq(int(gpFrame.gpFontFit(GPFrameView.GP_VALUE_MM).x), 3,
-		"100% 缩放下 2.5mm 应取整为 3px（随缩放，而非固定）")
+	gpFrame._gpDeviceScale = GP_DEVICE_SCALE
+	gpEq(int(gpFrame.gpFontFit(GPFrameView.GP_VALUE_MM).x), 5,
+		"100% 缩放 + 高密度屏：2.5mm × 2.142857 = 5.36 → 5 物理px（随缩放，而非固定）")
 	gpFrame.free()
+
+
+# THE THREE NEW FAMILY FUNCTIONS MUST AGREE WITH EACH OTHER — font size, draw scale and draw
+# position are one algebra; if any one of them drifts, the text lands in the wrong place at the
+# wrong size while every per-function test still passes.
+# 物理像素族的三个新函数必须彼此自洽 —— 字号、绘制缩放与绘制坐标是**同一套代数**；任何一个漂移，
+# 文字就会以错误的尺寸落在错误的位置，而每个单函数测试却仍然全绿。
+func gpTestSheetTextFamilyIsSelfConsistent() -> void:
+	for gpTriple in [[2.5, GP_FIT_ZOOM, GP_DEVICE_SCALE], [4.0, GP_FIT_ZOOM, GP_DEVICE_SCALE],
+			[2.85, 1.0, 1.0], [2.5, 8.0, 1.0], [2.5, 0.5, 2.0]]:
+		var gpMM: float = gpTriple[0]
+		var gpS: float = gpTriple[1]
+		var gpDS: float = gpTriple[2]
+		var gpFit: Vector2 = GPCanvasText.gpSheetFontFit(gpMM, gpS, gpDS)
+		var gpK: float = GPCanvasText.gpSheetTextScale(gpFit, gpS, gpDS).x
+		# World height of the glyph = font size x draw scale, which must be the authored mm exactly.
+		# 字形的世界高 = 字号 × 绘制缩放，必须精确等于作者设定的毫米值。
+		gpApprox(gpFit.x * gpK, gpMM, 1e-6,
+			"字号×绘制缩放必须还原 %s mm（残差承担取整误差）" % [gpMM])
+		# A millimetre position must survive the round trip through draw coordinates. The epsilon is
+		# 1e-4, not 1e-6: Vector2 is 32-bit and at a ~123 mm magnitude the float32 rounding of the
+		# four multiplications/divisions lands around 1e-5 — the algebra is exact in 64-bit, the
+		# storage is not.
+		# 毫米坐标必须能经绘制坐标往返而不失真。eps 取 1e-4 而非 1e-6：Vector2 是 32 位，~123mm
+		# 量级上四次乘除的 float32 舍入落在 ~1e-5 —— 代数在 64 位下精确，存储不是。
+		var gpP: Vector2 = Vector2(123.4, 56.7)
+		var gpBack: Vector2 = GPCanvasText.gpSheetDrawPos(gpP, gpFit, gpS, gpDS) * gpK
+		gpApprox(gpBack.x, gpP.x, 1e-4, "绘制坐标往返 X 应还原 %s" % [gpP.x])
+		gpApprox(gpBack.y, gpP.y, 1e-4, "绘制坐标往返 Y 应还原 %s" % [gpP.y])
+	# The on-screen size is INVARIANT under the device scale (that is the fix's contract):
+	# screen px = font size x draw scale x scale x deviceScale = mm x scale x deviceScale.
+	# 屏幕尺寸在设备密度下**不变**（这正是修复的契约）：屏幕px = 字号×绘制缩放×缩放×设备密度
+	# = mm × 缩放 × 设备密度。
+	for gpDS2 in [1.0, GP_DEVICE_SCALE]:
+		var gpFit2: Vector2 = GPCanvasText.gpSheetFontFit(2.5, GP_FIT_ZOOM, gpDS2)
+		var gpK2: float = GPCanvasText.gpSheetTextScale(gpFit2, GP_FIT_ZOOM, gpDS2).x
+		gpApprox(gpFit2.x * gpK2 * GP_FIT_ZOOM * gpDS2, 2.5 * GP_FIT_ZOOM * gpDS2, 1e-6,
+			"设备密度 %s 下屏幕尺寸必须保持 mm × 缩放 × 密度（尺寸不变、密度翻倍）" % [gpDS2])
 
 
 # THE HALF A FONT SIZE ALONE CANNOT EXPRESS — a size is an INTEGER pixel count, so the sheet height
@@ -611,31 +666,39 @@ func gpTestLabelAnchorEdgeIgnoresZoom() -> void:
 # 失效复现：10.0×9.0mm，写于「1 世界单位 = 1 像素」的时代；在 1 单位 = 1mm 下即长 2.9 倍、宽 5.1 倍。
 # 本测试同时对照常量与图元包数据，使二者无法脱节。
 func gpTestFlowArrowMatchesStandard() -> void:
-	# The reference's marker: a 5.0 x 2.5 unit triangle at instance scale 0.70.
-	# 参照图的标记：5.0×2.5 单位三角形，实例缩放 0.70。
-	gpApprox(GPEdgePainter.GP_ARROW_LEN, 5.0 * 0.70, 1e-6, "箭头长度应为 5.0 × 0.70 = 3.5mm")
-	gpApprox(GPEdgePainter.GP_ARROW_HALF, 2.5 * 0.70 * 0.5, 1e-6, "箭头半宽应为 2.5 × 0.70 / 2 = 0.875mm")
-	gpApprox(GPEdgePainter.GP_ARROW_HALF * 2.0, 1.75, 1e-6, "箭头全宽应为 1.75mm（C01 的 size_mm[0]）")
+	# The reference's marker: a 5.0 x 2.5 unit triangle at instance scale 0.70 — 3.5 mm on the
+	# A3-era reference, DOUBLED to 7.0 mm by the A1 rebase (the manifest was rebased with it).
+	# 参照图的标记：5.0×2.5 单位三角形，实例缩放 0.70 —— A3 时代参照上为 3.5mm，经 A1 重定基
+	# 翻倍为 7.0mm（manifest 已随之重定基）。
+	gpApprox(GPEdgePainter.GP_ARROW_LEN, 5.0 * 0.70 * 2.0, 1e-6,
+		"箭头长度应为 5.0 × 0.70 × 2 = 7.0mm（C01 实测 ×2）")
+	gpApprox(GPEdgePainter.GP_ARROW_HALF, 2.5 * 0.70 * 0.5 * 2.0, 1e-6,
+		"箭头半宽应为 2.5 × 0.70 / 2 × 2 = 1.75mm")
+	gpApprox(GPEdgePainter.GP_ARROW_HALF * 2.0, 3.5, 1e-6, "箭头全宽应为 3.5mm（manifest 的 size_mm[0]）")
 
-	# The arrow must FIT the symbol it is drawn on: shorter than a ball valve's own width (4 mm) and
-	# narrower than its height (2 mm). The old 10 x 9 mm arrow was 2.5x the whole valve.
-	# 箭头必须**装得进**它所绘制的图元：短于球阀自身的宽度（4mm）、窄于其高度（2mm）。
-	# 旧的 10×9mm 箭头是整个阀门的 2.5 倍。
-	gpCheck(GPEdgePainter.GP_ARROW_LEN <= 4.0, "箭头长度不得超过球阀宽度 4mm")
-	gpCheck(GPEdgePainter.GP_ARROW_HALF * 2.0 < 2.0, "箭头全宽应窄于球阀高度 2mm")
+	# The arrow must FIT the symbol it is drawn on: shorter than a ball valve's own width (8 mm
+	# after the ×2 rebase) and narrower than its height (4 mm) — the same proportions as before.
+	# 箭头必须**装得进**它所绘制的图元：短于球阀自身宽度（×2 后 8mm）、窄于其高度（4mm）——
+	# 比例与重定基前一致。
+	gpCheck(GPEdgePainter.GP_ARROW_LEN <= 8.0, "箭头长度不得超过球阀宽度 8mm")
+	gpCheck(GPEdgePainter.GP_ARROW_HALF * 2.0 < 4.0, "箭头全宽应窄于球阀高度 4mm")
 
-	# The in-line tier is 3.0 mm, so an arrow is under 1.2x the text height — visually a marker, not
-	# a badge. The old one was 3.3x the text height.
-	# 在管标注档为 3.0mm，故箭头不足文字高度的 1.2 倍 —— 视觉上是一个标记，而非一块牌子。
-	# 旧值则是文字高度的 3.3 倍。
+	# The in-line tier doubled with the arrow (6.0 mm), so an arrow is still under 1.2x the text
+	# height — visually a marker, not a badge. The old one was 3.3x the text height.
+	# 在管标注档随箭头同步翻倍（6.0mm），故箭头仍不足文字高度的 1.2 倍 —— 视觉上是一个标记，
+	# 而非一块牌子。旧值则是文字高度的 3.3 倍。
 	gpCheck(GPEdgePainter.GP_ARROW_LEN < GPTextRole.GP_INLINE_TAG_MM * 1.2,
 		"箭头长度应与管线号字高相称，否则它比它标注的文字还抢眼")
-	gpCheck(10.0 > GPEdgePainter.GP_ARROW_LEN * 2.5,
-		"新箭头必须远小于像素时代的 10mm（差距 2.5 倍以上）")
+	# The pixel-era arrow was 10 mm on the A3-era paper = 20 mm at A1 scale; the standard arrow
+	# stays far below that. / 像素时代的箭头在 A3 纸上是 10mm = A1 比例下的 20mm；标准箭头仍远小于它。
+	gpCheck(20.0 > GPEdgePainter.GP_ARROW_LEN * 2.5,
+		"新箭头必须远小于像素时代箭头的 A1 等效值 20mm（差距 2.5 倍以上）")
 
 	# Cross-check against the pack that reproduces the reference drawing: its own manifest records the
-	# flow marker at [1.75, 3.5] mm, so the constant and the symbol data agree by construction.
-	# 与复刻参照图的图元包交叉核对：其清单记录的流向标记即 [1.75, 3.5]mm，故常量与图元数据天然一致。
+	# flow marker at [3.5, 7.0] mm after the rebase, so the constant and the symbol data agree by
+	# construction.
+	# 与复刻参照图的图元包交叉核对：重定基后其清单记录的流向标记即 [3.5, 7.0]mm，故常量与图元数据
+	# 天然一致。
 	var gpRaw: String = FileAccess.get_file_as_string(
 		"res://assets/symbol_packs/dexpi/manifest.json")
 	gpCheck(gpRaw.length() > 0, "应能读到 DEXPI 包清单以核对箭头尺寸")
@@ -666,12 +729,17 @@ func gpTestFlowArrowMatchesStandard() -> void:
 # 失效复现：设备与在管标注共用单一 3.0mm，使设备位号比参照图小三分之一；标题栏用 2.2 / 2.8mm ——
 # 既不匹配参照图，也不对应任何标准档位。
 func gpTestTextHeightsMatchTheStandardDrawing() -> void:
-	# The five measured tiers. / 实测出的五个档位。
-	gpEq(GPTextRole.GP_EQUIPMENT_TAG_MM, 4.5, "设备位号字高应为 4.5mm（C01 的 equipmenttagnamelabel）")
-	gpEq(GPTextRole.GP_INLINE_TAG_MM, 3.0, "在管标注字高应为 3.0mm（C01 的 valvelabel / 管线号 / 管口）")
-	gpEq(GPTextRole.GP_TITLE_FIELD_MM, 2.5, "标题栏字段字高应为 2.5mm（C01 的 label 组）")
-	gpEq(GPTextRole.GP_DRAWING_TITLE_MM, 4.0, "图纸标题字高应为 4.0mm")
-	gpEq(GPTextRole.GP_FRAME_GRID_MM, 2.85, "图框栅格参考号字高应为 2.85mm")
+	# The five measured tiers. ⚠️ A1 REBASE (2026-10-16): the two drawing-area tiers ride the
+	# SYMBOLS (rebased ×2 in data), so 4.5/3.0 became 9.0/6.0; the three title-block/frame tiers
+	# keep their A3-era values and are scaled by GPSheet.gpFrameScale() at the consumer.
+	# 实测出的五个档位。⚠️ A1 重定基（2026-10-16）：图面区两档随**图元**（已在数据层 ×2），
+	# 故 4.5/3.0 变为 9.0/6.0；图签/图框三档保持 A3 时代值，由消费方按 GPSheet.gpFrameScale()
+	# 缩放。
+	gpEq(GPTextRole.GP_EQUIPMENT_TAG_MM, 9.0, "设备位号字高应为 9.0mm（C01 实测 4.5mm ×2 A1 重定基）")
+	gpEq(GPTextRole.GP_INLINE_TAG_MM, 6.0, "在管标注字高应为 6.0mm（C01 实测 3.0mm ×2 A1 重定基）")
+	gpEq(GPTextRole.GP_TITLE_FIELD_MM, 2.5, "标题栏字段字高应为 2.5mm（C01 的 label 组；A3 基准，消费方乘图幅比例）")
+	gpEq(GPTextRole.GP_DRAWING_TITLE_MM, 4.0, "图纸标题字高应为 4.0mm（A3 基准）")
+	gpEq(GPTextRole.GP_FRAME_GRID_MM, 2.85, "图框栅格参考号字高应为 2.85mm（A3 基准）")
 	# The two drawing-area tiers are related by a fixed ratio, and the scale constant must encode it.
 	# 图面两档之间存在固定比例，缩放常量必须如实表达它。
 	gpApprox(GPTextRole.GP_EQUIPMENT_TAG_MM, GPTextRole.GP_INLINE_TAG_MM * GPTextRole.GP_EQUIPMENT_SCALE,
@@ -680,12 +748,12 @@ func gpTestTextHeightsMatchTheStandardDrawing() -> void:
 	# With the default setting (the standard in-line height) each category lands on its standard tier.
 	# 在默认设置（标准在管字高）下，每个类别都落在其标准档位上。
 	var gpBase: float = GPTextRole.GP_INLINE_TAG_MM
-	gpEq(GPTextRole.gpTagMM("tank", gpBase), 4.5, "容器位号应为 4.5mm")
-	gpEq(GPTextRole.gpTagMM("heat", gpBase), 4.5, "换热器位号应为 4.5mm")
-	gpEq(GPTextRole.gpTagMM("pump", gpBase), 4.5, "泵位号应为 4.5mm")
-	gpEq(GPTextRole.gpTagMM("valve", gpBase), 3.0, "阀门标注应为 3.0mm")
-	gpEq(GPTextRole.gpTagMM("instrument", gpBase), 3.0, "仪表标注应为 3.0mm")
-	gpEq(GPTextRole.gpTagMM("general", gpBase), 3.0, "在管管件标注应为 3.0mm")
+	gpEq(GPTextRole.gpTagMM("tank", gpBase), 9.0, "容器位号应为 9.0mm（4.5 ×2）")
+	gpEq(GPTextRole.gpTagMM("heat", gpBase), 9.0, "换热器位号应为 9.0mm（4.5 ×2）")
+	gpEq(GPTextRole.gpTagMM("pump", gpBase), 9.0, "泵位号应为 9.0mm（4.5 ×2）")
+	gpEq(GPTextRole.gpTagMM("valve", gpBase), 6.0, "阀门标注应为 6.0mm（3.0 ×2）")
+	gpEq(GPTextRole.gpTagMM("instrument", gpBase), 6.0, "仪表标注应为 6.0mm（3.0 ×2）")
+	gpEq(GPTextRole.gpTagMM("general", gpBase), 6.0, "在管管件标注应为 6.0mm（3.0 ×2）")
 
 	# An unknown category falls back to the user's setting rather than to a silent default.
 	# 未知类别回落到用户设置，而非一个沉默的默认值。
@@ -710,12 +778,16 @@ func gpTestTextHeightsMatchTheStandardDrawing() -> void:
 		gpCheck(not GPTextRole.GP_INLINE_CATEGORIES.has(gpCat2),
 			"类别 %s 不可同时属于设备档与在管档" % [gpCat2])
 
-	# A line number is an in-line annotation: 3.0 mm unless the project overrides it.
-	# 管线号属在管标注：除非项目覆盖，否则为 3.0mm。
-	gpEq(GPTextRole.gpPipeTagMM(0.0, 3.0), 3.0, "管线号默认应为标准的 3.0mm")
-	gpEq(GPTextRole.gpPipeTagMM(2.5, 3.0), 2.5, "项目级覆盖应优先于标准档")
-	gpEq(GPTextRole.gpPipeTagMM(0.0, 3.0), GPTextRole.GP_INLINE_TAG_MM,
-		"管线号默认值必须等于在管档（二者在 C01 中同为 3.0mm）")
+	# A line number is an in-line annotation: the standard in-line tier unless the project overrides
+	# it. ⚠️ A1 rebase: the tier height doubled (3.0 → 6.0), so the base is DERIVED from the
+	# constant, never hard-coded.
+	# 管线号属在管标注：除非项目覆盖，否则为标准在管档。⚠️ A1 重定基：该档字高已翻倍
+	# （3.0 → 6.0），故 base 从常量**推导**，绝不硬编码。
+	var gpTagBase: float = GPTextRole.GP_INLINE_TAG_MM
+	gpEq(GPTextRole.gpPipeTagMM(0.0, gpTagBase), gpTagBase, "管线号默认应等于传入的标准在管档")
+	gpEq(GPTextRole.gpPipeTagMM(2.5, gpTagBase), 2.5, "项目级覆盖应优先于标准档")
+	gpEq(GPTextRole.gpPipeTagMM(0.0, gpTagBase), GPTextRole.GP_INLINE_TAG_MM,
+		"管线号默认值必须等于在管档（二者在 C01 中同为在管档）")
 
 
 # THE TITLE-BLOCK DRIFT DEFECT — a field's text must sit on its authored millimetre baseline at EVERY
@@ -799,7 +871,37 @@ func gpTestTitleBlockTextStaysOnItsBaseline() -> void:
 	gpCheck(gpAt >= 0, "GPFrameView 应提供 _gpDrawText()")
 	var gpNext: int = gpSrc.find("\nfunc ", gpAt + 1)
 	var gpFn: String = gpSrc.substr(gpAt, (gpNext - gpAt) if gpNext > 0 else gpSrc.length() - gpAt)
-	gpCheck(gpFn.find("GPCanvasText.gpDrawPos(") >= 0,
-		"_gpDrawText() 必须经 gpDrawPos() 换算位置，否则会重复换算一次缩放（标题栏文字飞出图框）")
+	# ★ 2026-10-16: the title block now uses the PHYSICAL-pixel family (gpSheetDrawPos, paired with
+	# gpSheetTextScale / gpSheetFontFit) — the density fix. The invariant is the same: the position
+	# must go through THE matching draw-pos function of whichever family is in use, never through
+	# the transform origin.
+	# ★ 2026-10-16：标题栏现用**物理像素**族（gpSheetDrawPos，与 gpSheetTextScale / gpSheetFontFit
+	# 成套）—— 即密度修复。不变量相同：位置必须经当前所用**那一族**的 draw-pos 函数换算，
+	# 绝不能改由变换原点承载。
+	gpCheck(gpFn.find("GPCanvasText.gpSheetDrawPos(") >= 0,
+		"_gpDrawText() 必须经 gpSheetDrawPos() 换算位置，否则会重复换算一次缩放（标题栏文字飞出图框）")
 	gpCheck(gpFn.find("draw_set_transform(Vector2.ZERO, 0.0") >= 0,
 		"_gpDrawText() 的变换原点必须为 ZERO；位置若改由原点承载，就会绕过 gpDrawPos 的单位换算")
+
+
+# ⚠️ THE FONT CACHE IS A CORRECTNESS CONTRACT, NOT AN OPTIMISATION (2026-10-16).
+# GPFrameView fetches its font INSIDE _draw() and holds it only in a local; the recorded canvas
+# commands survive until the END of the frame, but a FRESH SystemFont per gpLoadFont() call died
+# the moment the draw function returned — at render time every glyph belonged to a FREED font and
+# painted as a SOLID BAR (the user's "图签里面的文字都是方块" report). One instance per key, owned
+# by the forever-living Settings autoload, keeps every recorded command valid.
+# ⚠️ 字体**缓存**是正确性契约，不是优化（2026-10-16）。GPFrameView 在 _draw() **内部**取字体、
+# 只存在局部变量里；画布命令要活到**帧末**才渲染，而每次 gpLoadFont() 都新建的 SystemFont 在
+# 绘制函数返回的瞬间就死了 —— 渲染时每个字形都属于一个**已释放**的字体，画出来就是**实心条**
+#（即用户报告的「图签里面的文字都是方块」）。每个键一个实例、由永生的 Settings autoload 持有，
+# 让每条已记录的命令保持有效。
+func gpTestFontCacheKeepsOneInstancePerKey() -> void:
+	var gpS: Node = (load("res://src/autoload/settings.gd") as GDScript).new() as Node
+	var gpA: Font = gpS.gpLoadFont("system")
+	var gpB: Font = gpS.gpLoadFont("system")
+	gpCheck(gpA != null, "system 预设必须返回可用字体")
+	gpCheck(gpA == gpB, "同键两次 gpLoadFont 必须返回**同一实例**——缓存是渲染生存期契约，"
+		+ "不是优化：_draw 内取的字体若在帧末渲染前被释放，字形会画成实心条")
+	var gpC: Font = gpS.gpLoadFont("pingfang")
+	gpCheck(gpC != null and gpC != gpA, "不同键必须返回不同实例")
+	gpS.free()

@@ -445,6 +445,217 @@ static func _gpDropRecordFromDict(gpRD: Dictionary) -> Dictionary:
 	return gpR
 
 
+# The drop-restore records in their ARCHIVE shape: [{"sym": String, "recs": [plain record dicts]}].
+# Extracted from gpToDict() so the whole-sheet snapshot can carry the SAME representation — which is what
+# lets the restore reuse _gpDropRecordFromDict() and thereby keep `orig_routing`'s declared
+# Array[Vector2] type instead of silently degrading it to a plain Array.
+# 落点恢复记录的**存档**形态。自 gpToDict() 抽出，使整图快照能携带**同一**表示 —— 这正是还原因而复用
+# _gpDropRecordFromDict()、从保住所声明的 Array[Vector2] 类型（而非静默退化为普通数组）的原因。
+func _gpDropRestoreToArchive() -> Array:
+	var gpDR: Array = []
+	for gpSym in gpDropRestore.keys():
+		var gpOutRecs: Array = []
+		for gpRec in gpDropRestore[gpSym]:
+			gpOutRecs.append(_gpDropRecordToDict(gpRec))
+		gpDR.append({"sym": gpSym, "recs": gpOutRecs})
+	return gpDR
+
+
+# Put the drop-restore records back from their archive shape, optionally shifted by gpDelta.
+# 把落点恢复记录自存档形态装回，可选地按 gpDelta 平移。
+# Shared with gpFromDict() for the same reason gpToDict() shares the capture half: one description of the
+# record shape, several callers.
+# 与 gpFromDict() 共用，理由与 gpToDict() 共用捕捉那一半相同：记录形态只有一处描述、却有多个调用方。
+#
+# ⚠️ THE SEQUENCE COUNTER ONLY EVER MOVES FORWARD / ⚠️ 单调 id 源**只前进、绝不后退**：it is seeded from
+# the max of the ids just loaded AND its current value, never reset to zero. `gpFromDict()` loads into a
+# brand-new graph where the current value IS zero, so a file load is unchanged — but this method is also
+# the replay half of the whole-sheet snapshot (gpRestoreGeometry), and there an undo legitimately
+# restores an OLDER record set. Resetting here would then hand the next freshly recorded entry an id
+# that an existing record already holds, and gpRemoveDrop() — which matches on that id — would delete
+# the wrong record.
+# 它取「刚载入的 id」与「当前值」的较大者，绝不重置为零。`gpFromDict()` 载入的是一张全新的图，其当前值
+# 本就是零，故载入文件的行为不变 —— 但本方法同时是整图快照的重放那一半（gpRestoreGeometry），而在那里，
+# 撤销**合理地**恢复一组更**旧**的记录。此时若在此处归零，下一条新记下的记录就会拿到某个已有记录正持有的
+# id，而按 id 匹配的 gpRemoveDrop() 便会删错记录。
+func _gpDropRestoreFromArchive(gpData: Array, gpDelta: Vector2 = Vector2.ZERO) -> void:
+	gpDropRestore.clear()
+	for gpEntry in gpData:
+		var gpSym: String = str((gpEntry as Dictionary).get("sym", ""))
+		if gpSym == "":
+			continue
+		var gpRecs: Array = []
+		for gpRD in (gpEntry as Dictionary).get("recs", []):
+			var gpR: Dictionary = _gpDropRecordFromDict(gpRD)
+			_gpDropSeq = maxi(_gpDropSeq, int(gpR.get("_rid", 0)))
+			if gpDelta != Vector2.ZERO:
+				_gpTranslateDropRecord(gpR, gpDelta)
+			gpRecs.append(gpR)
+		if not gpRecs.is_empty():
+			gpDropRestore[gpSym] = gpRecs
+
+
+# Shift every coordinate inside one drop-restore record. Two kinds carry geometry, and both hold WORLD
+# coordinates the user cannot see — which is precisely why they must not be forgotten: a record replayed
+# after a move would rebuild a line where the sheet used to be.
+# 平移一条落点恢复记录内的每个坐标。两类记录携带几何，且都是用户看不见的**世界**坐标 —— 这正是它们
+# 绝不能被遗漏的原因：搬家之后重放的记录，会在图纸**曾经**所在之处重建出一条连线。
+#   * reroute — `orig_routing`, the edge's waypoints before the drop. Rebuilt as a typed Array[Vector2]
+#     rather than mutated element-wise, to preserve the declared type (the same rule GPShape.gpFromDict
+#     follows for its handles).
+#     reroute —— `orig_routing`，即该边落点前的拐点。以**类型化** Array[Vector2] 重建，而非逐元素就地改，
+#     以保住所声明的类型（与 GPShape.gpFromDict 处理手柄所遵循的同一条规则）。
+#   * split — `orig`, a whole SERIALIZED edge, so its translation belongs to GPPIDEdge.gpTranslateDict()
+#     (one home for a serialized edge's coordinates).
+#     split —— `orig`，整条**序列化**的边，故其平移归 GPPIDEdge.gpTranslateDict() 管
+#     （序列化边的坐标只有一个家）。
+static func _gpTranslateDropRecord(gpRec: Dictionary, gpDelta: Vector2) -> void:
+	match str(gpRec.get("kind", "")):
+		"reroute":
+			var gpRaw: Variant = gpRec.get("orig_routing", null)
+			if not (gpRaw is Array):
+				return
+			var gpRouted: Array[Vector2] = []
+			for gpP in (gpRaw as Array):
+				if gpP is Vector2:
+					gpRouted.append((gpP as Vector2) + gpDelta)
+			gpRec["orig_routing"] = gpRouted
+		"split":
+			var gpOrig: Variant = gpRec.get("orig", null)
+			if gpOrig is Dictionary:
+				GPPIDEdge.gpTranslateDict(gpOrig as Dictionary, gpDelta)
+
+
+# ---------------------------------------------------------------------------
+# 整图平移（Rev.3 阶段 0d） / Whole-sheet translation
+# ---------------------------------------------------------------------------
+# WHY THESE LIVE ON THE GRAPH / 为何这两个方法落在图上：
+# a whole-sheet move must shift EVERY absolute world coordinate the document holds. The graph owns three
+# of the four families — nodes, edges, annotation shapes (the fourth is the sheet's paper origin, which
+# belongs to GPSheet and is captured by the caller). Enumerating them anywhere else would be a second copy
+# of "what carries a coordinate", and the failure mode of a missed family is SILENT: one kind of object
+# stays put while the rest of the sheet travels, and no assertion about the others can notice.
+# 整图移动必须平移文档持有的**每一个**绝对世界坐标。四族之中有三族归图所有 —— 图元、边、注释图形
+# （第四族是图纸的纸面原点，属 GPSheet，由调用方捕获）。在别处枚举它们就等于「什么携带坐标」的第二份
+# 副本，而漏掉一族的失效是**静默**的：某一类对象留在原地、图纸其余部分却走了，且没有任何关于其它对象的
+# 断言能察觉。
+#
+# WHAT THE FOUR FAMILIES ARE / 这四族是什么：nodes' gpPosition; edges' gpRouting + dangling `point`s
+# (GPPIDEdge.gpTranslate); shapes' gpPoints (GPShape.gpTranslate); and the drop-restore records above.
+# 四族为：图元的 gpPosition；边的 gpRouting + 悬空端 `point`（GPPIDEdge.gpTranslate）；注释图形的
+# gpPoints（GPShape.gpTranslate）；以及上方的落点恢复记录。
+#
+# WHY A SNAPSHOT, AND NOT "SHIFT BY MINUS-DELTA TO UNDO" / 为何要快照，而非「撤销时平移 −位移」：
+# Vector2 components are 32-bit, so `(x + d) - d` is not guaranteed to return x — a replayed move would
+# creep by one ULP of the current magnitude on every cycle. The DRAG needs the snapshot too: like
+# GPSelectTool's group drag and GPAnnotationEditor's shape move, its preview is computed as
+# "baseline + TOTAL delta", never by accumulating per-motion deltas (which drifts with the frame rate).
+# Vector2 分量是 32 位，故 `(x + d) − d` 不保证回到 x —— 重放式移动每来一轮就会按当前量级漂移一个 ULP。
+# **拖拽**同样需要它：与 GPSelectTool 的整组拖拽、GPAnnotationEditor 的整图形移动一样，其预览以
+# 「基线 + **总**位移」算出，绝不逐帧累加位移（那会随帧率漂移）。
+#
+# Captured as plain data, so the two callers (the drag preview and GPTranslateSheetCommand) share ONE
+# description of the geometry instead of each walking the model its own way.
+# 以普通数据捕获，使两个调用方（拖拽预览与 GPTranslateSheetCommand）共享**同一**份几何描述，而不是各自
+# 按自己的方式遍历模型。
+func gpCaptureGeometry() -> Dictionary:
+	var gpNodePos: Dictionary = {}
+	for gpN in gpNodes:
+		gpNodePos[gpN.gpInstanceId] = gpN.gpPosition
+	var gpEdgeGeom: Dictionary = {}
+	for gpE in gpEdges:
+		var gpRoute: Array[Vector2] = []
+		for gpP in gpE.gpRouting:
+			gpRoute.append(gpP)
+		gpEdgeGeom[gpE.gpInstanceId] = {
+			"routing": gpRoute,
+			"from": _gpCopyPoint(gpE.gpFromRef),
+			"to": _gpCopyPoint(gpE.gpToRef),
+		}
+	var gpShapePts: Array = []
+	for gpS in gpShapes:
+		gpShapePts.append(gpS.gpPoints.duplicate())
+	return {
+		"nodes": gpNodePos,
+		"edges": gpEdgeGeom,
+		"shapes": gpShapePts,
+		"drops": _gpDropRestoreToArchive(),
+	}
+
+
+# Write every absolute world coordinate captured by gpCaptureGeometry() back, shifted by gpDelta.
+# 把 gpCaptureGeometry() 捕获的每个绝对世界坐标写回，并按 gpDelta 平移。
+#
+# ⚠️ THE SAME CALL IS BOTH THE MOVE AND THE UNDO / ⚠️ 同一次调用既是「移动」也是「撤销」：
+#   * gpRestoreGeometry(snap)          -> exact undo (delta = ZERO);
+#   * gpRestoreGeometry(snap, delta)   -> the whole-sheet move itself, and its redo.
+# A snapshot is the only input, so a replay can never accumulate error — which is what makes the drag
+# preview, the commit and the undo agree to the last bit.
+#   * gpRestoreGeometry(snap)  -> 精确撤销（位移 = ZERO）；
+#   * gpRestoreGeometry(snap, 位移) -> 整图移动本身，也是它的重做。
+# 快照是唯一输入，故重放绝不可能累积误差 —— 这正是拖拽预览、提交与撤销能逐位一致的原因。
+#
+# Tolerant on purpose: ids absent from the snapshot (an object created after it was taken) and arrays
+# shorter than the capture are skipped rather than guessed at.
+# 刻意容错：快照里没有的 id（捕获之后新建的对象）与比捕获时更短的数组一律跳过，绝不臆测。
+func gpRestoreGeometry(gpSnap: Dictionary, gpDelta: Vector2 = Vector2.ZERO) -> void:
+	if gpSnap.is_empty():
+		return
+	var gpNodePos: Dictionary = gpSnap.get("nodes", {})
+	for gpN in gpNodes:
+		var gpSaved: Variant = gpNodePos.get(gpN.gpInstanceId, null)
+		if gpSaved is Vector2:
+			gpN.gpPosition = (gpSaved as Vector2) + gpDelta
+	var gpEdgeGeom: Dictionary = gpSnap.get("edges", {})
+	for gpE in gpEdges:
+		var gpSavedRef: Variant = gpEdgeGeom.get(gpE.gpInstanceId, null)
+		if not (gpSavedRef is Dictionary):
+			continue
+		var gpRec: Dictionary = gpSavedRef as Dictionary
+		var gpRoute: Array[Vector2] = []
+		for gpP in gpRec.get("routing", []):
+			if gpP is Vector2:
+				gpRoute.append((gpP as Vector2) + gpDelta)
+		gpE.gpRouting = gpRoute
+		_gpWritePoint(gpE.gpFromRef, gpRec.get("from", null), gpDelta)
+		_gpWritePoint(gpE.gpToRef, gpRec.get("to", null), gpDelta)
+	var gpShapePts: Array = gpSnap.get("shapes", [])
+	var gpCount: int = mini(gpShapes.size(), gpShapePts.size())
+	for gpI in range(gpCount):
+		var gpSavedPts: Variant = gpShapePts[gpI]
+		if not (gpSavedPts is PackedVector2Array):
+			continue
+		var gpOut: PackedVector2Array = PackedVector2Array()
+		for gpP in (gpSavedPts as PackedVector2Array):
+			gpOut.append(gpP + gpDelta)
+		gpShapes[gpI].gpPoints = gpOut
+	_gpDropRestoreFromArchive(gpSnap.get("drops", []), gpDelta)
+
+
+# Copy a ref's dangling `point`, or null when the end is bound to a port (nothing is stored for it —
+# see GPPIDEdge.gpTranslate).
+# 复制某个引用上的悬空 `point`；该端绑定到端口时返回 null（其无可存之物 —— 见 GPPIDEdge.gpTranslate）。
+static func _gpCopyPoint(gpRef: Dictionary) -> Variant:
+	var gpRaw: Variant = gpRef.get("point", null)
+	if gpRaw is Array:
+		return (gpRaw as Array).duplicate()
+	return null
+
+
+# Write a captured `point` back into a ref, shifted. A ref whose capture carried no point keeps whatever
+# it has: creating the key would turn a BOUND end into a dangling one, and gpIsDangling()/gpDanglingPoint()
+# would then hand every consumer a bogus world position.
+# 把捕获到的 `point` 按位移写回引用。捕获中没有 point 的引用保持原样：凭空造出该键会把**绑定**端变成悬空端，
+# 而 gpIsDangling() / gpDanglingPoint() 随后就会把一个假的世界坐标交给每个消费方。
+static func _gpWritePoint(gpRef: Dictionary, gpSaved: Variant, gpDelta: Vector2) -> void:
+	if not (gpSaved is Array):
+		return
+	var gpArr: Array = gpSaved as Array
+	if gpArr.size() < 2:
+		return
+	gpRef["point"] = [float(gpArr[0]) + gpDelta.x, float(gpArr[1]) + gpDelta.y]
+
+
 # Serialize the graph to a plain dictionary (object graph -> dict graph).
 # 将图序列化为普通字典（对象图 → 字典图）。
 func gpToDict() -> Dictionary:
@@ -485,13 +696,7 @@ func gpToDict() -> Dictionary:
 	# Persist drop-restore records only when non-empty, so an untouched file keeps its byte shape.
 	# 仅当非空时持久化落点恢复记录，使未触及本功能的文件保持原字节形态。
 	if not gpDropRestore.is_empty():
-		var gpDR: Array = []
-		for gpSym in gpDropRestore.keys():
-			var gpOutRecs: Array = []
-			for gpRec in gpDropRestore[gpSym]:
-				gpOutRecs.append(_gpDropRecordToDict(gpRec))
-			gpDR.append({"sym": gpSym, "recs": gpOutRecs})
-		gpOut["drop_restore"] = gpDR
+		gpOut["drop_restore"] = _gpDropRestoreToArchive()
 	return gpOut
 
 
@@ -541,22 +746,15 @@ static func gpFromDict(gpData: Dictionary) -> GPPIDGraph:
 				gpRestoredDefs.append(gpSym)
 		if gpRestoredDefs.size() > 0:
 			GPSymbolLibrary.gpRegisterDefs(gpRestoredDefs)
-	# Restore drop-restore records (absent in every pre-feature file). The sequence counter is
-	# re-seeded from the max loaded rid so freshly recorded entries never collide with them.
-	# 恢复落点恢复记录（本功能之前的文件均无此键）。单调 id 源从载入的最大 rid 重置，
-	# 使新记录的 id 不会与之冲突。
+	# Restore drop-restore records (absent in every pre-feature file). The sequence counter is seeded
+	# from the max loaded rid so freshly recorded entries never collide with them — on this brand-new
+	# graph that seeding is exactly "reset to the max loaded", see _gpDropRestoreFromArchive.
+	# Routed through _gpDropRestoreFromArchive() rather than inlined, because the whole-sheet snapshot
+	# carries the SAME shape through that very method — one description of a record, several callers.
+	# 恢复落点恢复记录（本功能之前的文件均无此键）。单调 id 源自载入的最大 rid 播种，使新记录的 id 不会
+	# 与之冲突 —— 在这张全新的图上，该播种恰等于「重置为载入的最大值」，见 _gpDropRestoreFromArchive。
+	# 改由 _gpDropRestoreFromArchive() 承接而非内联，因为整图快照也经同一个方法携带**同一**形态 ——
+	# 记录只有一处描述、却有多个调用方。
 	if gpData.has("drop_restore"):
-		var gpMaxRid: int = 0
-		for gpEntry in gpData["drop_restore"]:
-			var gpSym: String = str(gpEntry.get("sym", ""))
-			if gpSym == "":
-				continue
-			var gpRecs: Array = []
-			for gpRD in gpEntry.get("recs", []):
-				var gpR: Dictionary = _gpDropRecordFromDict(gpRD)
-				gpMaxRid = maxi(gpMaxRid, int(gpR.get("_rid", 0)))
-				gpRecs.append(gpR)
-			if not gpRecs.is_empty():
-				gpG.gpDropRestore[gpSym] = gpRecs
-		gpG._gpDropSeq = gpMaxRid
+		gpG._gpDropRestoreFromArchive(gpData["drop_restore"])
 	return gpG

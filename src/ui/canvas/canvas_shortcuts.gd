@@ -85,8 +85,14 @@ func gpOnEscape() -> void:
 		return
 	# P3-4: the in-place tag editor is the innermost layer — close it before anything else so a
 	# half-typed number is never stranded on screen. / 就地位号编辑器是最内层，先关闭它。
+	# Rev.3 stage 1.5: the NODE tag editor is the SAME innermost layer.
+	# Rev.3 阶段 1.5：**图元**位号编辑器属同一最内层。
 	if gpCv.gpEdgeEditor.gpIsEditing():
 		gpCv.gpEdgeEditor.gpClose()
+		gpCv.queue_redraw()
+		return
+	if gpCv.gpNodeEditor != null and gpCv.gpNodeEditor.gpIsEditing():
+		gpCv.gpNodeEditor.gpClose()
 		gpCv.queue_redraw()
 		return
 	# P3-4: an in-flight edge grip drag is abandoned next, before the tool/annotation cancels.

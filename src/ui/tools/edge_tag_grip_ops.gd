@@ -99,6 +99,17 @@ var _gpStartOffset: Vector2 = Vector2.ZERO
 # 拖拽过程中应用到边上的实时预览偏移。
 var _gpLiveOffset: Vector2 = Vector2.ZERO
 
+# Cursor claim flag — see label_grip_ops for the full mechanism note. In one line:
+# the cursor has many writers on one motion event and the setter pushes to the OS
+# immediately on every value change, so an unconditional per-motion ARROW reset here
+# would fight the title-block / frame-band writers and flip the OS cursor at event
+# rate. Claim while hovered / dragging; hand back exactly once on the way out.
+# 光标认领标记 —— 机制详注见 label_grip_ops。一句话：同一移动事件里光标有多个写入者，
+# 且 setter 每次值变化都会**立即**下发 OS，故此处一条逐移动的无条件 ARROW 重置会与
+# 图签 / 图框带的写入者互相翻转、使 OS 光标以事件频率抖动。悬停 / 拖拽期间认领，
+# 退出时恰好一次归还。
+var _gpCursorClaimed: bool = false
+
 
 func _init(gpCanvas: GPCanvas2D) -> void:
 	gpCv = gpCanvas
@@ -111,6 +122,12 @@ func _init(gpCanvas: GPCanvas2D) -> void:
 # 悬停反馈：抓取点在光标下时显示移动光标。返回 true 表示调用方应消费该移动事件。
 # 仅对选中边做悬停反馈（开销低、覆盖常见情形）；按下时的命中检测仍扫描所有边，
 # 故未选中而被拖远的编号依然可抓（只是没有悬停光标）。
+#
+# ⚠️ CLAIM / RELEASE, NOT PER-MOTION RESETS — see _gpCursorClaimed. The old unconditional
+# `= CURSOR_ARROW` at the bottom ran on every motion event before the title-block probe and
+# was half of the cursor-flicker pair.
+# ⚠️ 「认领 / 归还」，绝不逐移动重置 —— 见 _gpCursorClaimed。旧版末尾那条无条件
+# `= CURSOR_ARROW` 在每个移动事件里、且先于图签探测运行，正是光标闪烁组合拳的一半。
 func gpUpdateHoverCursor(gpWorld: Vector2) -> bool:
 	if gpCv == null:
 		return false
@@ -119,15 +136,31 @@ func gpUpdateHoverCursor(gpWorld: Vector2) -> bool:
 	if gpCv.gpPendingDef != null:
 		return false
 	if _gpEdgeId != "":
-		gpCv.mouse_default_cursor_shape = Control.CURSOR_MOVE
+		# Drag in flight: claim (idempotent). / 拖拽进行中：认领（幂等）。
+		if not _gpCursorClaimed:
+			gpCv.mouse_default_cursor_shape = Control.CURSOR_MOVE
+			_gpCursorClaimed = true
 		return true
 	if gpCv.gpEdgeSel.is_empty():
+		if _gpCursorClaimed:
+			gpCv.mouse_default_cursor_shape = Control.CURSOR_ARROW
+			_gpCursorClaimed = false
 		return false
+	var gpHit: bool = false
 	for gpEid in gpCv.gpEdgeSel:
 		if gpHitGrip(gpWorld, gpEid):
+			gpHit = true
+			break
+	if gpHit:
+		if not _gpCursorClaimed:
 			gpCv.mouse_default_cursor_shape = Control.CURSOR_MOVE
-			return true
-	gpCv.mouse_default_cursor_shape = Control.CURSOR_ARROW
+			_gpCursorClaimed = true
+		return true
+	# Leave edge (or never claimed): hand the cursor back exactly ONCE.
+	# 离开沿（或从未认领）：恰好**一次**归还光标。
+	if _gpCursorClaimed:
+		gpCv.mouse_default_cursor_shape = Control.CURSOR_ARROW
+		_gpCursorClaimed = false
 	return false
 
 

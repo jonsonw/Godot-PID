@@ -29,6 +29,8 @@ const GP_PROJECT: String = "project"
 const GP_LIBRARY: String = "library"
 const GP_CONFIG: String = "config"
 const GP_DEXPI: String = "dexpi"
+const GP_DXF: String = "dxf"
+const GP_PDF: String = "pdf"
 
 # kind -> {label_key, extension, filter_key, needs_sheet}
 # `filter_key`: the i18n key for this format's file-dialog filter label. The dialog reads it
@@ -48,6 +50,10 @@ const GP_EXPORTERS: Dictionary = {
 		"filter_key": "doc.pid_filter", "needs_sheet": false},
 	GP_DEXPI: {"label_key": "menu.export_dexpi", "extension": "pid.xml",
 		"filter_key": "doc.dexpi_filter", "needs_sheet": true},
+	GP_DXF: {"label_key": "menu.export_dxf", "extension": "dxf",
+		"filter_key": "doc.dxf_filter", "needs_sheet": true},
+	GP_PDF: {"label_key": "menu.export_pdf", "extension": "pdf",
+		"filter_key": "doc.pdf_filter", "needs_sheet": true},
 }
 
 
@@ -145,4 +151,16 @@ static func gpExport(gpKind: String, gpPath: String, gpGraph: GPPIDGraph,
 		if gpSheet == null:
 			return GPIOResult.gpFailure("dexpi.no_sheet", "status.export_fail", gpPath)
 		return GPDexpiExporter.gpExportSheet(gpGraph, gpSheet, gpPath)
+	if gpKind == GP_DXF:
+		# DXF projects the whole sheet (frame included), so it cannot work without one.
+		# DXF 投影整张图纸（含图框），故缺图纸则无法工作。
+		if gpSheet == null:
+			return GPIOResult.gpFailure("dxf.no_sheet", "status.export_fail", gpPath)
+		return GPDxfExporter.gpExportSheet(gpGraph, gpSheet, gpPath)
+	if gpKind == GP_PDF:
+		# PDF projects the whole sheet (frame included), so it cannot work without one.
+		# PDF 投影整张图纸（含图框），故缺图纸则无法工作。
+		if gpSheet == null:
+			return GPIOResult.gpFailure("pdf.no_sheet", "status.export_fail", gpPath)
+		return GPPdfExporter.gpExportSheet(gpGraph, gpSheet, gpPath)
 	return GPProjectExport.gpExportToFile(gpKind, gpPath, gpGraph, gpPacks)

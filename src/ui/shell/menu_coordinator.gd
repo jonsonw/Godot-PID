@@ -52,8 +52,16 @@ func gpOpenFrameDialog() -> void:
 	if gpSheet == null:
 		return
 	var gpDlg = (load("res://src/ui/dialogs/title_block_dialog.gd") as GDScript).new()
-	gpHost.add_child(gpDlg)
+	# ⚠️ CONFIGURE BEFORE add_child — ORDER IS LOAD-BEARING / ⚠️ 先 configure 再 add_child —— 顺序是承重的：
+	# add_child fires _ready synchronously, and _ready -> _gpBuild() reads gpSheet to lay out every
+	# row. Configuring AFTER add_child therefore built the whole dialog against a null sheet: the
+	# early return left a bare title bar and an empty client area (both the menu path and the
+	# title-block double click share this one function, so both entrances were dead the same way).
+	# 先 configure 后进树：add_child 会**同步**触发 _ready，而 _ready -> _gpBuild() 需要 gpSheet 才能铺出
+	# 每一行。在 add_child 之后再 configure 等于让整个对话框对着 null 图纸构建 —— 早退后只剩标题栏与空白
+	# 客户区（菜单入口与图签双击共用本函数，故两个入口以同一种方式一起失效）。
 	gpDlg.gpConfigure(gpSheet, gpCanvas)
+	gpHost.add_child(gpDlg)
 	gpDlg.gpPopupOverHost()
 
 
@@ -175,6 +183,12 @@ func gpOnMenu(gpAction: String) -> void:
 			gpHost.gpFileCoord.gpPickExportPath("config")
 		"export_dexpi":
 			gpHost.gpFileCoord.gpPickExportPath("dexpi")
+		"export_dxf":
+			gpHost.gpFileCoord.gpPickExportPath("dxf")
+		"export_pdf":
+			gpHost.gpFileCoord.gpPickExportPath("pdf")
+		"project_export_list":
+			gpHost.gpFileCoord.gpPickListExportDir()
 		"view_zoom_in":
 			gpHost.gpActiveCanvas().gpZoomStep(1.0)
 		"view_zoom_out":

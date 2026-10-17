@@ -133,3 +133,46 @@ func gpTestPortsWorkOutsideTheTree() -> void:
 	gpCheck(gpSnap.has("mode"), "gpSnapshot 含 mode / snapshot carries the mode")
 	gpCheck(gpSnap.has("view_zoom"), "gpSnapshot 含 view_zoom / snapshot carries the zoom")
 	gpCv.free()
+
+
+# A counting binder: records the refresh fan-out without a scene tree (off-tree, like every
+# fixture in this file — the refresh ports are null-safe there by design).
+# 计数绑定器：无需场景树即可记录刷新扇出（树外，与本文件所有夹具一致 —— 刷新端口在设计
+# 上就是空安全的）。
+class _gpCountBinder extends GPGraphBinder:
+	var gpSymbolRefreshes: int = 0
+	var gpEdgeRefreshes: int = 0
+
+	func gpRefreshSymbols() -> void:
+		gpSymbolRefreshes += 1
+
+	func gpRefreshEdges() -> void:
+		gpEdgeRefreshes += 1
+
+
+# Stage 3 S4 fix: the CORE graph's change signal must reach the CHILD CanvasItems. A parent's
+# queue_redraw() does not cascade to children, and the binder's rebind guard is reference-based,
+# so an in-place mutation (grid-table structure op, cell text, tag edit) — and every command
+# UNDO/REDO — used to leave stale pixels while the hit test moved on. The refresh now lives in
+# _gpOnGraphDataChanged; this pin keeps it there.
+# 阶段 3 S4 修复：核心图的变化信号必须到达**子** CanvasItem。父节点 queue_redraw() 不级联到
+# 子节点，而绑定器的重绑判据是引用相等 —— 原地变换（表格结构操作、格子文字、位号编辑）以及
+# 一切命令的撤销/重做都曾留下陈旧像素而命中测试已前移。刷新现居于 _gpOnGraphDataChanged；
+# 本钉防止它再次丢失。
+func gpTestGraphSignalRepaintsChildViews() -> void:
+	var gpCv: GPCanvas2D = GPCanvas2D.new()
+	var gpB: _gpCountBinder = _gpCountBinder.new()
+	gpCv.gpBinder = gpB
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	gpCv.gpGraph = gpG
+	gpEq(gpB.gpSymbolRefreshes, 0, "仅绑定不刷新 / bind alone does not refresh")
+	# One emit = one command execute / undo / redo reaching the views.
+	# 一次发射 = 一次命令执行 / 撤销 / 重做到达视图。
+	gpG.gpGraphChanged.emit()
+	gpEq(gpB.gpSymbolRefreshes, 1, "核心图信号必须重绘图元子视图 / core graph signal repaints symbol views")
+	gpEq(gpB.gpEdgeRefreshes, 1, "核心图信号必须重绘边子视图 / core graph signal repaints edge views")
+	gpG.gpGraphChanged.emit()
+	gpEq(gpB.gpSymbolRefreshes, 2, "再次变化再次刷新（撤销/重做同路径）/ second change refreshes again (undo/redo same path)")
+	gpEq(gpB.gpEdgeRefreshes, 2, "边视图同步再刷新 / edge views refresh in step")
+	gpB.free()
+	gpCv.free()

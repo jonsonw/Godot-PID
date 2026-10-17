@@ -18,7 +18,23 @@ const GP_SUITE_PREFIX: String = "gp_test_"
 const GP_METHOD_PREFIX: String = "gpTest"
 # Expected suite count; bump when a new gp_test_*.gd is added.
 # 预期套件数量；新增 gp_test_*.gd 时同步 +1。
-const GP_EXPECTED_SUITES: int = 73
+# 74 = 73 + gp_test_frame_geometry.gd (Rev.3 stage 0a).
+# 74 = 73 + gp_test_frame_geometry.gd（Rev.3 阶段 0a）。
+# 75 = 74 + gp_test_frame_grip.gd (Rev.3 stage 0c).
+# 75 = 74 + gp_test_frame_grip.gd（Rev.3 阶段 0c）。
+# 76 = 75 + gp_test_translate_sheet.gd (Rev.3 stage 0d).
+# 76 = 75 + gp_test_translate_sheet.gd（Rev.3 阶段 0d）。
+# 77 = 76 + gp_test_title_block_grip.gd (Rev.3 stage 1).
+# 77 = 76 + gp_test_title_block_grip.gd（Rev.3 阶段 1）。
+# 80 = 79 + gp_test_symbol_policy.gd (Rev.3 stage 2 policy fields + generator registry).
+# 80 = 79 + gp_test_symbol_policy.gd（Rev.3 阶段 2 策略字段 + 生成器注册表）。
+# 81 = 80 + gp_test_table_grid.gd (Rev.3 stage 3 equipment data table, GENERATOR:grid).
+# 81 = 80 + gp_test_table_grid.gd（Rev.3 阶段 3 设备参数表，GENERATOR:grid）。
+# 82 = 81 + gp_test_print_model.gd (Rev.3 stage 4 print model, DXF/PDF common ground).
+# 82 = 81 + gp_test_print_model.gd（Rev.3 阶段 4 打印模型，DXF/PDF 共同地基）。
+# 84 = 83 + gp_test_pdf_export.gd (Rev.3 stage 4 PDF writer, subset-embedded CJK font).
+# 84 = 83 + gp_test_pdf_export.gd（Rev.3 阶段 4 PDF 写出器，子集内嵌中文字体）。
+const GP_EXPECTED_SUITES: int = 84
 
 # Engine errors the legacy suites are *expected* to emit. GUT fails any test that leaves an
 # error unhandled, so these are marked handled explicitly (see _gpHandleExpectedErrors).

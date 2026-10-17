@@ -48,6 +48,15 @@ const GP_KEEP_BACKUP: bool = true
 # Returns GPIOResult with gpDetail = the final path on success, the failing path on failure.
 # 返回 GPIOResult：成功时 gpDetail 为最终路径，失败时为出错的路径。
 static func gpWriteAtomic(gpPath: String, gpText: String) -> GPIOResult:
+	return gpWriteBytesAtomic(gpPath, gpText.to_utf8_buffer())
+
+
+# Write raw bytes atomically — the shared channel under gpWriteAtomic; the PDF exporter
+# pours its (partly binary) file through the same tmp/verify/rename pipeline so a killed
+# export can never leave a truncated PDF on disk.
+# 原子写入原始字节 —— gpWriteAtomic 之下的共享通道；PDF 导出器把（部分为二进制的）文件
+# 走同一条 tmp/校验/rename 管线，使被中途杀死的导出绝不会在磁盘上留下截断的 PDF。
+static func gpWriteBytesAtomic(gpPath: String, gpBytes: PackedByteArray) -> GPIOResult:
 	if gpPath == "":
 		return GPIOResult.gpFailure("io.write_failed", "status.save_fail", gpPath)
 	var gpTmpPath: String = gpPath + GP_TMP_SUFFIX
@@ -57,7 +66,7 @@ static func gpWriteAtomic(gpPath: String, gpText: String) -> GPIOResult:
 	var gpOut: FileAccess = FileAccess.open(gpTmpPath, FileAccess.WRITE)
 	if gpOut == null:
 		return GPIOResult.gpFailure("io.write_failed", "status.save_fail", gpTmpPath)
-	gpOut.store_string(gpText)
+	gpOut.store_buffer(gpBytes)
 	gpOut.flush()
 	var gpWriteErr: int = gpOut.get_error()
 	gpOut.close()
@@ -67,11 +76,11 @@ static func gpWriteAtomic(gpPath: String, gpText: String) -> GPIOResult:
 
 	# ---- 2) verify the temp file is complete (catches a full disk / quota) ----
 	# ---- 2) 校验临时文件完整（可抓住磁盘满 / 配额超限）----
-	# A partial write is the silent killer: store_string reports no error on a full disk
+	# A partial write is the silent killer: store_buffer reports no error on a full disk
 	# until the flush fails, so compare the byte count actually on disk against the payload.
-	# 部分写入是静默杀手：磁盘满时 store_string 在 flush 失败前并不报错，
+	# 部分写入是静默杀手：磁盘满时 store_buffer 在 flush 失败前并不报错，
 	# 故需把磁盘上的实际字节数与载荷比对。
-	var gpWantBytes: int = gpText.to_utf8_buffer().size()
+	var gpWantBytes: int = gpBytes.size()
 	var gpGotBytes: int = _gpFileSize(gpTmpPath)
 	if gpGotBytes != gpWantBytes:
 		_gpRemoveFile(gpTmpPath)

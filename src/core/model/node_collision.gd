@@ -67,15 +67,31 @@ static func gpResolve(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpFixed: Array
 	# Parts of an assembly never take part in the relaxation (see the header).
 	# 组合体的部件绝不参与松弛（见头部说明）。
 	var gpParts: Dictionary = {}
+	# Stage 2: definitions that opted OUT of avoidance (gpAvoidRouting=false — tables, multiline
+	# text) take part in the relaxation NEITHER as pushers NOR as pushed. One exclusion covers
+	# both directions because every loop below reads gpPos/gpSize, and an excluded id is in
+	# neither. ⚠️ Semantic note: "not pushing neighbours" and "not being pushed" are ONE decision
+	# here by construction — a table shoved aside by a valve is exactly as wrong as a table
+	# shoving the valve.
+	# 阶段 2：声明退出避让（gpAvoidRouting=false —— 表格、多行文本）的定义**既不推人也不被推**。
+	# 一处排除同时关掉两个方向：下方所有循环都读 gpPos/gpSize，被排除的 id 两者皆不在。
+	# ⚠️ 语义注记：「不推挤邻件」与「不被邻件推挤」在此**按构造**是同一个判断 —— 阀门把表格
+	# 推开与表格把阀门推开，错得一样。
+	var gpNoAvoid: Dictionary = {}
 	for gpN in gpGraph.gpNodes:
 		if gpN.gpIsMounted():
 			gpParts[gpN.gpInstanceId] = true
+			continue
+		if gpDefLookup != null:
+			var gpDef0: GPSymbolDef = gpDefLookup.call(gpN.gpSymbolId) as GPSymbolDef
+			if gpDef0 != null and not gpDef0.gpAvoidRouting:
+				gpNoAvoid[gpN.gpInstanceId] = true
 	# Mutable working copy of every node's current position + its nominal size.
 	# 每个节点当前位置与标称尺寸的可变工作副本。
 	var gpPos: Dictionary = {}
 	var gpSize: Dictionary = {}
 	for gpN in gpGraph.gpNodes:
-		if gpParts.has(gpN.gpInstanceId):
+		if gpParts.has(gpN.gpInstanceId) or gpNoAvoid.has(gpN.gpInstanceId):
 			continue
 		gpPos[gpN.gpInstanceId] = gpN.gpPosition
 		var gpDef: GPSymbolDef = null
@@ -87,7 +103,7 @@ static func gpResolve(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpFixed: Array
 		var gpMoved: bool = false
 		for gpA in gpGraph.gpNodes:
 			var gpAid: String = gpA.gpInstanceId
-			if gpFixedSet.has(gpAid) or gpParts.has(gpAid):
+			if gpFixedSet.has(gpAid) or gpParts.has(gpAid) or gpNoAvoid.has(gpAid):
 				continue
 			var gpSzA: Vector2 = gpSize[gpAid]
  # Inflate A by half the padding on every side so the final gap equals gpPadding.
@@ -95,7 +111,7 @@ static func gpResolve(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpFixed: Array
 			var gpRa: Rect2 = Rect2(gpPos[gpAid] - gpSzA / 2.0, gpSzA).grow(gpHalfPad)
 			for gpB in gpGraph.gpNodes:
 				var gpBid: String = gpB.gpInstanceId
-				if gpBid == gpAid or gpParts.has(gpBid):
+				if gpBid == gpAid or gpParts.has(gpBid) or gpNoAvoid.has(gpBid):
 					continue
 				var gpSzB: Vector2 = gpSize[gpBid]
 				var gpRb: Rect2 = Rect2(gpPos[gpBid] - gpSzB / 2.0, gpSzB).grow(gpHalfPad)
@@ -112,12 +128,15 @@ static func gpResolve(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpFixed: Array
 					gpMoved = true
 		if not gpMoved:
 			break
-	# Only report nodes whose position actually changed.
-	# 仅报告位置真正发生变化的节点。
+	# Only report nodes whose position actually changed. No-avoid nodes never entered gpPos
+	# (they are excluded from the relaxation entirely), so they must be skipped here too or
+	# the lookup below would read a key that does not exist.
+	# 仅报告位置真正发生变化的节点。无避让节点从未进入 gpPos（它们被整体排除在松弛之外），
+	# 故此处也必须跳过，否则下面的查找会读到不存在的键。
 	var gpOut: Dictionary = {}
 	for gpN in gpGraph.gpNodes:
 		var gpId: String = gpN.gpInstanceId
-		if gpFixedSet.has(gpId) or gpParts.has(gpId):
+		if gpFixedSet.has(gpId) or gpParts.has(gpId) or gpNoAvoid.has(gpId):
 			continue
 		if (gpPos[gpId] as Vector2) != gpN.gpPosition:
 			gpOut[gpId] = gpPos[gpId]

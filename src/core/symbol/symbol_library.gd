@@ -87,6 +87,14 @@ static func _gpLoadAllPacks() -> Array[GPSymbolDef]:
 	for gpD in gpDexpiPack:
 		gpD.gpBuiltin = true
 	gpOut.append_array(gpDexpiPack)
+	# Annotation templates (stage 2): one template + one policy row each, geometry produced
+	# by the generator registry. Built-in per decision D3 (read-only in the library).
+	# 注释类模板（阶段 2）：各自为「一行模板 + 一行策略」，几何由生成器注册表产出。
+	# 按决策 D3 标记内置（库内只读）。
+	var gpAnno: Array[GPSymbolDef] = GPSymbolAnnotationTemplates.gpDefs()
+	for gpD in gpAnno:
+		gpD.gpBuiltin = true
+	gpOut.append_array(gpAnno)
 	return gpOut
 
 

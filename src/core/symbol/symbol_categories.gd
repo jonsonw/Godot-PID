@@ -22,18 +22,25 @@ extends RefCounted
 # 这仅是「无显式尺寸的图元」的兜底（如用户手绘图元或省略 size_mm 的包）；内置 DEXPI 包经生成器
 # 逐符号写入真实 C01 毫米尺寸（见计划 Phase 4），故同族等大规则在那里让位于真实标准比例。
 # ISO 10628 包自行硬编码尺寸，不受本表影响。
+# 2026-10-16 A1 default-sheet rebase: every nominal size doubled from the original A3-era
+# values (user decision D-A1: sizes live in DATA, not a runtime multiplier). Archives persist
+# no per-node size, so pre-existing A3-era drawings will render symbols at these new sizes
+# too (ports/mounts/collisions follow automatically; layout may need manual adjustment).
+# 2026-10-16 默认图幅 A1 重定基：全部标称尺寸在原 A3 时代数值上 ×2（用户决策 D-A1：尺寸走
+# 数据层，绝不引入运行时比例乘数）。存档不持久化逐节点尺寸，故既有 A3 时代图纸也会按新尺寸
+# 渲染图元（端口/挂载/碰撞自动跟随，布局可能需手动调整）。
 const GP_NOMINAL: Dictionary = {
-	"valve": Vector2(12, 9),
-	"pump": Vector2(15, 11),
-	"tank": Vector2(14, 20),
-	"instrument": Vector2(11, 11),
-	"heat": Vector2(16, 12),
-	"general": Vector2(12, 12),
+	"valve": Vector2(24, 18),
+	"pump": Vector2(30, 22),
+	"tank": Vector2(28, 40),
+	"instrument": Vector2(22, 22),
+	"heat": Vector2(32, 24),
+	"general": Vector2(24, 24),
 }
 
 # Fallback envelope for unknown categories, in millimetres.
 # 未知类别的兜底包络尺寸（毫米）。
-const GP_FALLBACK_SIZE: Vector2 = Vector2(12, 12)
+const GP_FALLBACK_SIZE: Vector2 = Vector2(24, 24)
 
 # Category -> standard port anchors, normalized 0..1 against the nominal envelope.
 # 类别 → 标准端口锚点，相对标称包络归一化到 0..1。

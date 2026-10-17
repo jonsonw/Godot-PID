@@ -76,13 +76,40 @@ func gpBuild(gpWorldRoot: Node2D) -> void:
 #（center_area 先建画布、绑图纸、再把画布入树），首次调用时 gpFrame 仍为 null，赋值会被吞 ——
 # 在 gpBuild() 之后重放一次即可覆盖任何装配顺序。
 func gpSetSheet(gpValue: GPSheet) -> void:
+	# Re-point the sheet's change signal (Rev.3 stage 0c). The subscription is per-SHEET, so the old
+	# sheet must be detached first: leaving it connected would let a background tab's undo repaint the
+	# frame of the tab in front — the classic "one signal, two owners" bug, made visible only by the
+	# disappearing repaint. is_connected() guards each side so this stays idempotent.
+	# 重新指向图纸的变化信号（Rev.3 阶段 0c）。订阅是**按图纸**的，故必须先解绑旧图纸：留着它连着，
+	# 后台标签的撤销就会重绘前台标签的图框 —— 典型的「一个信号两个属主」，且只在重绘消失时才显形。
+	# 每侧都加 is_connected() 守卫，使其保持幂等。
+	if gpSheet != null and gpSheet.gpSheetChanged.is_connected(_gpOnSheetChanged):
+		gpSheet.gpSheetChanged.disconnect(_gpOnSheetChanged)
 	gpSheet = gpValue
+	if gpSheet != null and not gpSheet.gpSheetChanged.is_connected(_gpOnSheetChanged):
+		gpSheet.gpSheetChanged.connect(_gpOnSheetChanged)
 	if gpFrame != null:
 		gpFrame.gpSheet = gpValue
 		gpFrame.gpRefresh()
 	if gpBackground != null:
 		gpBackground.gpSheet = gpValue
 		gpBackground.gpRefresh()
+
+
+# A sheet-level field changed: repaint the frame and tell the host the DOCUMENT changed.
+# 图纸级字段发生变化：重绘图框，并告知宿主**文档**已变。
+#
+# The sheet model knows nothing about views, so this is where its signal becomes a repaint plus a dirty
+# mark. The host half is a single call, so the dirty flag, the app-bus broadcast and the repaint stay
+# one decision (GPCanvas2D.gpOnSheetDataChanged) instead of three that could drift.
+# 图纸模型对视图一无所知，故此处正是其信号变成「一次重绘 + 一次标脏」的地方。宿主那一半只有一次调用，
+# 使脏标记、应用总线广播与重绘保持为**一个**判断（GPCanvas2D.gpOnSheetDataChanged），
+# 而不是三个可能分家的判断。
+func _gpOnSheetChanged() -> void:
+	if gpHost != null:
+		gpHost.gpOnSheetDataChanged()
+	else:
+		gpRefreshFrame()
 
 
 # One-shot fit of the sheet into the viewport, run as soon as a usable size exists.
@@ -95,7 +122,8 @@ func gpFitIfReady(gpSize: Vector2) -> void:
 	if gpSize.x <= 1.0 or gpSize.y <= 1.0:
 		return
 	if gpSheet != null:
-		gpHost.gpViewController.gpFitSheet(gpSheet.gpWidthMM, gpSheet.gpHeightMM)
+		gpHost.gpViewController.gpFitSheet(gpSheet.gpWidthMM, gpSheet.gpHeightMM, 0.94,
+			gpSheet.gpPaperOrigin)
 	else:
 		gpHost.gpViewController.gpResetCamera()
 	_gpNeedFit = false
@@ -108,6 +136,17 @@ func gpFitIfReady(gpSize: Vector2) -> void:
 
 # Repaint the frame after a camera change (text inside the title block is rasterised per scale).
 # 相机变化后重绘图框（标题栏内的文字按缩放光栅化）。
+#
+# ⚠️ IT ALSO REPAINTS THE TRACING UNDERLAY (Rev.3 stage 0d) / ⚠️ 它同时重绘追踪底图（Rev.3 阶段 0d）：
+# the underlay is stretched over the PAPER, so it is one more thing the sheet PLACES — and since stage
+# 0d the paper itself can move. Refreshing only the frame would leave the reference image behind on a
+# moved sheet, which is exactly the failure this call prevents. It is one queue_redraw on a Node2D, so
+# the per-mouse-move margin drag pays nothing noticeable for it.
+# 底图铺在**纸面**上，故它同样是**由图纸摆放**之物 —— 而自阶段 0d 起纸面本身可以移动。只刷新图框会让
+# 参考图被留在被移动过的图纸原处，而这正是本次调用所防止的失效。它只是一次 Node2D 的 queue_redraw，
+# 故逐次鼠标移动的边距拖拽为之付出的代价可忽略。
 func gpRefreshFrame() -> void:
 	if gpFrame != null:
 		gpFrame.gpRefresh()
+	if gpBackground != null:
+		gpBackground.gpRefresh()

@@ -112,6 +112,33 @@ func gpCancelActiveTool() -> bool:
 	if gpHost.gpPortOps != null and gpHost.gpPortOps.gpIsDragging():
 		gpHost.gpPortOps.gpCancelDrag()
 		return true
+	# Drawing-frame drag (Rev.3 stage 0c): ESC must abandon it like every other drag. Checked before the
+	# generic tool port because GPSelectTool.gpCancel() only knows about the node group drag — without
+	# this branch ESC would leave the frame's live margins committed to the model with no undo step.
+	# 图框拖拽（Rev.3 阶段 0c）：ESC 必须像其它拖拽一样能放弃它。放在通用工具端口**之前**，因为
+	# GPSelectTool.gpCancel() 只知道节点整组拖拽 —— 缺此分支，ESC 会把图框的实时边距留在模型上，
+	# 且没有撤销步。
+	# Title-block drag (Rev.3 stage 1): ESC must abandon it like every other drag. Placed with the frame's
+	# branch and BEFORE the generic tool port, for the same reason — GPSelectTool.gpCancel() only knows
+	# about the node group drag, so without this branch ESC would leave the block's live docking pair
+	# written on the model with no undo step to take it back.
+	# 图签拖拽（Rev.3 阶段 1）：ESC 必须像其它拖拽一样能放弃它。与图框分支放在一起、且在通用工具端口
+	# **之前**，理由相同 —— GPSelectTool.gpCancel() 只知道节点整组拖拽 —— 缺此分支，ESC 会把图签的实时
+	# 停靠对留在模型上，且没有撤销步可以收回。
+	if gpHost.gpTitleBlockGrips != null and gpHost.gpTitleBlockGrips.gpIsDragging():
+		gpHost.gpTitleBlockGrips.gpCancelDrag()
+		return true
+	# Grid-table column-boundary drag (stage 3 S4): ESC must abandon it like every other
+	# drag — without this branch ESC would leave the drag's live CSV written on the model
+	# with no undo step to take it back.
+	# grid 表格列边界拖拽（阶段 3 S4）：ESC 必须像其它拖拽一样能放弃它 —— 缺此分支，ESC 会把
+	# 拖拽的实时 CSV 留在模型上，且没有撤销步可以收回。
+	if gpHost.gpTableGrips != null and gpHost.gpTableGrips.gpIsDragging():
+		gpHost.gpTableGrips.gpCancelDrag()
+		return true
+	if gpHost.gpFrameGrips != null and gpHost.gpFrameGrips.gpIsDragging():
+		gpHost.gpFrameGrips.gpCancelDrag()
+		return true
 	return gpActiveTool().gpCancel()
 
 
@@ -250,7 +277,11 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
 		if gpMouseEvent.button_index == MOUSE_BUTTON_WHEEL_UP or gpMouseEvent.button_index == MOUSE_BUTTON_WHEEL_DOWN:
  # P3-4: while the in-place tag editor is open, pan/zoom must stay frozen so the
  # field cannot drift off the pipe it labels. / 边位号编辑器打开期间冻结缩放。
+ # Rev.3 stage 1.5: the NODE tag editor freezes zoom the same way.
+ # Rev.3 阶段 1.5：**图元**位号编辑器以同样方式冻结缩放。
 			if gpHost.gpEdgeEditor != null and gpHost.gpEdgeEditor.gpIsEditing():
+				return
+			if gpHost.gpNodeEditor != null and gpHost.gpNodeEditor.gpIsEditing():
 				return
 			if gpMouseEvent.pressed:
 				var gpFactor: float = 1.0 if gpMouseEvent.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0
@@ -261,7 +292,11 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
  # 中键开始/结束平移。
 		if gpMouseEvent.button_index == MOUSE_BUTTON_MIDDLE:
  # P3-4: freeze panning while editing the tag too. / 编辑位号时同样冻结平移。
+ # Rev.3 stage 1.5: the NODE tag editor freezes panning the same way.
+ # Rev.3 阶段 1.5：**图元**位号编辑器以同样方式冻结平移。
 			if gpHost.gpEdgeEditor != null and gpHost.gpEdgeEditor.gpIsEditing():
+				return
+			if gpHost.gpNodeEditor != null and gpHost.gpNodeEditor.gpIsEditing():
 				return
 			if gpMouseEvent.pressed:
 				_gpPanning = true
@@ -371,10 +406,32 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
 		if gpHost.gpEdgeTagGrips != null and gpHost.gpEdgeTagGrips.gpUpdateHoverCursor(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position)):
 			gpHost.accept_event()
 			return
+ # Grid-table column-separator hover cursor (stage 3 S4). A node-specific target, so it is
+ # probed with the specific hover handlers above and BEFORE the sheet furniture below.
+ # grid 表格列分隔线悬停光标（阶段 3 S4）。图元级专属目标，故与上方各具体悬停处理器同列、
+ # 且在下方图纸陈设**之前**探测。
+		if gpHost.gpTableGrips != null and gpHost.gpTableGrips.gpUpdateHoverCursor(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position)):
+			gpHost.accept_event()
+			return
  # Hover highlight for the anchor under the cursor (outside any drag).
  # 光标下锚点的悬停高亮（拖拽之外）。
 		if gpHost.gpPortOps != null:
 			gpHost.gpPortOps.gpUpdateHover(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position))
+ # Drawing-frame grab band / side handles (Rev.3 stage 0c). Placed LAST among the hover probes so the
+ # far more specific targets above (a tag handle, a port anchor) keep their cursors: the frame band runs
+ # the whole perimeter of the sheet and would otherwise win every tie by being tested first.
+ # 图框抓取带 / 侧手柄（Rev.3 阶段 0c）。在悬停探测中放在**最后**，使上方那些具体得多的目标
+ #（位号手柄、端点锚点）保住各自的光标：图框带绕图纸一整圈，若先测就会赢下每一次平局。
+		if gpHost.gpTitleBlockGrips != null and gpHost.gpTitleBlockGrips.gpUpdateHoverCursor(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position)):
+			# No queue_redraw here: the grip ops repaint themselves on the hover STATE EDGE
+			# (enter / leave), not on every motion — per-motion repaints were the flicker.
+			# 此处不再 queue_redraw：grip ops 在 hover 的**状态沿**（进入 / 离开）自行重绘，
+			# 而不是每次移动都重绘 —— 逐次重绘正是闪烁的来源。
+			gpHost.accept_event()
+			return
+		if gpHost.gpFrameGrips != null and gpHost.gpFrameGrips.gpUpdateHoverCursor(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position)):
+			gpHost.accept_event()
+			return
  # Tool-specific rubber band / connect preview (select = connect preview, draw = rubber band).
  # The tool returns true when it consumed the motion (e.g. rubber band) so we accept it.
  # 工具专属橡皮筋 / 连接预览（select=连接预览，draw=橡皮筋）。工具消费了移动事件时返回

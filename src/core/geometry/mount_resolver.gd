@@ -755,6 +755,20 @@ static func gpBodyCandidate(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpWorld:
 	return gpBest
 
 
+# Stage-2 gate (gpMountable, Rev.3 §8): whether a released loose symbol may enter the mount
+# routing AT ALL. A definition that declared itself NOT mountable (tables, multiline text)
+# lands loose even when dropped dead-center on a host — "not pushed" (gpAvoidRouting) and
+# "not mounted" (gpMountable) are orthogonal policies and must stay separate decisions.
+# The decision lives HERE (not inline in the tool) so the tests pin it and every future
+# release path shares one source.
+# 阶段 2 闸（gpMountable，Rev.3 §8）：释放的松散图元**根本**可否进入挂载路由。声明**不可
+# 挂载**的定义（表格、多行文本）即使正落在宿主中央也落为松散图元 —— 「不推挤」
+#（gpAvoidRouting）与「不挂载」（gpMountable）是两条正交策略，必须保持为两个独立判定。
+# 判定住在**这里**（而非内联在工具里），使测试能钉住它，且未来一切释放路径共享同一来源。
+static func gpReleaseMayMount(gpDef: GPSymbolDef) -> bool:
+	return gpDef == null or gpDef.gpMountable
+
+
 # The mount tuple a LOOSE part released at [param gpWorld] should receive, or {} when the release
 # must stay an ordinary move. This closes the gap the place path already covers: dragging an
 # existing loose nozzle onto a vessel used to leave it as a loose, directionless symbol sitting on

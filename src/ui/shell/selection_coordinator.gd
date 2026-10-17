@@ -89,6 +89,47 @@ func gpApplyAttr(gpIds: Array[String], gpKey: String, gpVal: Variant) -> void:
 func gpOnBatchAttrChanged(gpIds: Array[String], gpKey: String, gpVal) -> void:
 	gpApplyAttr(gpIds, gpKey, gpVal)
 
+
+# ---- custom-entry CRUD (Rev.3 stage 1.5, R2 / D7). Instance level only; every path is an
+# undoable command on the edit service, refusals surface through gpLastRefusal exactly like
+# gpApplyAttr. / 自定义条目增删改（Rev.3 阶段 1.5，R2 / D7）。仅实例级；每条路径都是编辑服务上
+# 的可撤销命令，拒绝原因经 gpLastRefusal 上报，与 gpApplyAttr 完全一致。----
+
+# A new custom entry: the service refuses keys that already hold a value and gates on the
+# permission stub. / 新增自定义条目：服务拒绝已有取值的键，并经权限口子闸控。
+func gpOnPropAdd(gpId: String, gpKey: String, gpVal) -> void:
+	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
+	if gpCanvas == null or gpId == "" or gpKey == "":
+		return
+	var gpActs: GPEditService = gpCanvas.gpActions
+	if gpActs.gpAddProperty(gpId, gpKey, gpVal):
+		return
+	if gpActs.gpLastRefusal != "":
+		gpHost.gpSetState(gpActs.gpLastRefusal)
+
+
+# A rename: ONE undo step via GPRenamePropertyCommand (never "write new + erase old").
+# 改名：经 GPRenamePropertyCommand 成为**一个**撤销步（绝非「写新 + 删旧」两步）。
+func gpOnPropRename(gpId: String, gpOldKey: String, gpNewKey: String) -> void:
+	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
+	if gpCanvas == null or gpId == "":
+		return
+	var gpActs: GPEditService = gpCanvas.gpActions
+	if gpActs.gpRenameProperty(gpId, gpOldKey, gpNewKey):
+		return
+	if gpActs.gpLastRefusal != "":
+		gpHost.gpSetState(gpActs.gpLastRefusal)
+
+
+# A delete: setting the value to "" IS the erase semantics (GPSetPropertyCommand), so no new
+# command is needed. / 删除：把取值写为 "" 即擦除语义（GPSetPropertyCommand），无需新命令。
+func gpOnPropDelete(gpId: String, gpKey: String) -> void:
+	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
+	if gpCanvas == null or gpId == "" or gpKey == "":
+		return
+	var gpIds: Array[String] = [gpId]
+	gpApplyAttr(gpIds, gpKey, "")
+
 # React to an attribute edit in the inspector, and to the batched form of the same edit.
 # 响应属性面板中的属性编辑，以及同一次编辑的批量形式。
 # The historical "label" key is still accepted as a tag, so an older panel keeps working.

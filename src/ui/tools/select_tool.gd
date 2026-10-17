@@ -158,6 +158,35 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 	# 先清除鼓包锚点选择；仅当真正抓到锚点时才在下方重新置位。
 	gpCtx.gpEdgeGrips.gpClearBumpSelection()
 	var gpHit: String = gpCv.gpHitTest(gpWorld)
+	# Rev.3 stage 1.5 (R1): a double click on a node's LABEL TEXT edits the tag in place, as
+	# ONE undo step. Tested BEFORE the body branch and NOT gated on gpHit — the label usually
+	# sits OUTSIDE the glyph where gpHitTest() reports a miss (the same M10b fact the tag grip
+	# lives with), so dispatching through gpHit alone would leave the text dead on screen. The
+	# predicate inside gpHitTextAny refuses anything that is not a tag-like single-path label,
+	# so name/prop-derived texts and slot-bearing symbols keep the dialog here.
+	# Rev.3 阶段 1.5（R1）：双击图元的**标签文字**就地改位号，一个撤销步。必须在「本体」分支
+	# **之前**测、且**不以** gpHit 为闸 —— 标签通常位于字形**之外**，那里 gpHitTest() 报未命中
+	#（与位号抓取点同源的 M10b 事实），只经 gpHit 分派会让文字在屏幕上完全是死的。
+	# gpHitTextAny 内部的判据会拒绝一切「非位号型的单路径标签」，故名称 / 属性派生文字与
+	# 带槽图元在此仍走对话框。
+	if gpDouble and gpCtx.gpNodeEditor != null:
+		# Stage 3 S2: a GRID table's double-click edits the CELL under the cursor (before
+		# the label dispatch — the table owns its cells). The cell resolution shares the
+		# generator with the renderer (Rev.2 iron rule) and, like the hit test, treats the
+		# envelope as axis-aligned (v1: rotation/flip ignored for the field overlay).
+		# 阶段 3 S2：grid 表格的双击编辑光标下的**格子**（先于标签分派 —— 表格的格子归它自己
+		# 管）。格子解析与渲染共用同一个生成器（Rev.2 铁律）；与命中测试一样把包络视为
+		# 轴对齐（v1：浮层忽略旋转/翻转）。
+		var gpCellTarget: Dictionary = _gpCellEditTarget(gpCv, gpWorld)
+		if str(gpCellTarget["node"]) != "":
+			gpCtx.gpNodeEditor.gpOpenCell(str(gpCellTarget["node"]),
+				str(gpCellTarget["key"]), gpCellTarget["rect"] as Rect2)
+			return true
+		var gpTextLabel: String = GPNodeTextEditor.gpHitTextAny(gpCv.gpGraph,
+			gpCv.gpDefLookupCallable(), gpWorld)
+		if gpTextLabel != "":
+			gpCtx.gpNodeEditor.gpOpen(gpTextLabel)
+			return true
 	# Double click asks the host to open the symbol editor dialog (seeded with this
 	# symbol's geometry) — the in-place BEDIT editor was removed.
 	# 双击请求宿主打开图元编辑对话框（预填该图元几何）；就地 BEDIT 编辑器已移除。
@@ -254,6 +283,18 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 			gpCv.gpSetSelection(gpCv.gpSelection)
 		elif not gpCv.gpSelection.has(gpHit):
 			gpCv.gpSetSelection([gpHit])
+ # Stage 3 S4: a press on the single-selected grid table's internal COLUMN SEPARATOR starts
+ # a width drag instead of a body move. Tested AFTER the selection write above (a press on an
+ # unselected table selects it first, so the single-selection gate inside gpTryStart sees the
+ # fresh selection), and BEFORE the mounted/body branches (a table is never mounted, and the
+ # separator is a more specific target than the body).
+ # 阶段 3 S4：按在**单选** grid 表格的内部**列分隔线**上时开始列宽拖拽，而非本体搬动。
+ # 在上方的选择写入**之后**测（按在未选中的表格上会先选中它，故 gpTryStart 内的单选闸看到的
+ # 就是新选择）、在挂载 / 本体分支**之前**测（表格永不会被挂载，而分隔线是比本体更具体的目标）。
+		if gpCtx.gpTableGrips != null and gpCtx.gpTableGrips.gpTryStart(gpWorld, gpHit):
+			gpCv.queue_redraw()
+			gpCv.gpEmitStatus()
+			return true
  # A MOUNTED node is dragged by RE-MOUNTING it, not by writing its position: its world placement is
  # derived from the parent chain (see GPMountResolver), so a position drag would move the model and
  # leave the picture exactly where it was. The drag is handed to GPPlaceAttachTool so the kernel,
@@ -390,6 +431,70 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
  # P3-4: clicking empty space also drops any edge selection.
  # 点空白处同样清除边选择。
 			gpCv.gpEdgeSel.clear()
+		# ★ Rev.3 stage 1: the title block, FIRST among the sheet's furniture.
+		# ★ Rev.3 阶段 1：图签，图纸陈设中的**第一**环。
+		#
+		# ⚠️ WHY IT PRECEDES THE FRAME / ⚠️ 为何在图框之前：the two targets OVERLAP — the block hugs the
+		# frame's bottom-right corner, so part of the block's outline runs along the frame's own right and
+		# bottom lines. A press there must mean the block (that is what the user aimed at); the frame's
+		# corner is not lost, it is merely underneath, and moving the block exposes it. Testing the frame
+		# first would leave the block half-draggable — its own bottom and right edges would resize the
+		# frame instead of moving it.
+		# 两个目标**重叠** —— 图签贴住图框右下角，故图签的一部分轮廓就沿着图框自身的右边与下边线。在那里按下
+		# 必须意味着图签（那才是用户瞄准的东西）；图框那个角并未丢失，只是被压在下面，把图签移开即可露出。
+		# 若先测图框，图签就会变成「只有一半能拖」—— 它自己的下边与右边会去改图框尺寸，而不是搬动它。
+		#
+		# Still inside the branch that TODAY only clears the selection and starts a rubber band, so like the
+		# frame's probe below it cannot regress symbol / edge / annotation picking (a property of the
+		# POSITION, not of the code inside the branch).
+		# 它仍在「今天只会清空选择并起橡皮筋」的那个分支内，故与下方的图框探测一样，不可能回归图元 / 边 /
+		# 注释图形的拾取（这是**位置**带来的性质，而不是分支内代码带来的）。
+		# ★ 2026-10-16: a DOUBLE click on the title block opens its dialog (tested BEFORE the drag
+		# arming below). The block has no in-place editor, so the dialog is the only way to change
+		# its 13 fields — and a double click that only armed a no-motion drag felt completely dead
+		# to the user. A plain press here still arms the drag: the two gestures stay distinct.
+		# ★ 2026-10-16：**双击**图签打开其对话框（必须在下方拖拽上膛**之前**测）。图签没有就地编辑器，
+		# 对话框是改它 13 个字段的唯一途径 —— 而只会上膛一次零位移拖拽的双击对用户来说完全是死的。
+		# 普通按下在这里仍然上膛拖拽：两种手势互不干扰。
+		if gpDouble and gpCtx.gpTitleBlockGrips.gpHit(gpWorld):
+			gpCv.gpTitleBlockEditRequested.emit()
+			return true
+		if gpCtx.gpTitleBlockGrips.gpTryStart(gpWorld):
+			gpCv.queue_redraw()
+			gpCv.gpEmitStatus()
+			return true
+		# ★ Rev.3 stage 0c: the drawing frame, LAST before the marquee.
+		# ★ Rev.3 阶段 0c：图框，紧接框选之前的最后一环。
+		#
+		# WHY EXACTLY HERE / 为何恰在此处：this is the branch that TODAY only clears the selection and
+		# starts a rubber band — nothing above it can be reached by a press the frame accepts, so the
+		# change cannot regress symbol / edge / annotation picking. That is a property of the POSITION,
+		# not of the code in the branch.
+		# 这一分支在今天只会清空选择并起橡皮筋 —— 图框接受的按下够不到它上方的任何一级，故本改动不可能
+		# 回归图元 / 边 / 注释图形的拾取。这是**位置**带来的性质，而不是分支内代码带来的。
+		# The band test is cheap (four distance checks on the frame rectangle) and runs on every click that
+		# selected nothing, so it stays a pure geometry query — no node, no marker, no state.
+		# 抓取带检测很便宜（对图框矩形做四次距离比较），且会在每一次「什么也没选中」的点击上运行，
+		# 故它保持为纯几何查询 —— 不建节点、不留标记、不改状态。
+		#
+		# ⚠️ WHY THE ⌥Alt STATE IS READ LIVE HERE / ⚠️ 为何在此**实时**读 ⌥Alt：
+		# the press chain (GPCanvas2D._gpOnLeftDown -> GPInputRouter.gpOnLeftDown -> gpOnPress) carries
+		# Shift and double-click but NOT Alt, and threading a fourth parameter would have to touch all ten
+		# gpOnPress implementations — four of them inside the symbol editor dialog, which owns no frame and
+		# could never use it. Reading it here keeps the change to the one tool that has a frame, and matches
+		# the existing precedent in GPPipeTool._gpIsStraight(), which samples a modifier live for the same
+		# reason — a modifier that only matters at the instant of one event does not deserve a parameter on
+		# a shared interface. The value is handed to GPFrameGripOps as an ARGUMENT, so the gesture decision
+		# itself stays a pure function and remains headless-testable.
+		# 按下链路（GPCanvas2D._gpOnLeftDown -> GPInputRouter.gpOnLeftDown -> gpOnPress）只传 Shift 与双击，
+		# **不传** Alt；而加第四个参数就得改全部十处 gpOnPress 实现 —— 其中四处位于符号编辑器对话框内，
+		# 那里没有图框、永远用不到。就近读取把改动限制在**唯一**拥有图框的工具上，并与 GPPipeTool._gpIsStraight()
+		# 中的既有先例一致（同样出于「只在某一事件瞬间有意义的修饰键，不值得为它在共享接口上加参数」）：
+		# 该值以**实参**交给 GPFrameGripOps，故手势判定本身仍是纯函数、仍可 headless 测试。
+		if gpCtx.gpFrameGrips.gpTryStart(gpWorld, Input.is_key_pressed(KEY_ALT)):
+			gpCv.queue_redraw()
+			gpCv.gpEmitStatus()
+			return true
 		var gpScreen: Vector2 = gpCv.gpScreenFromWorld(gpWorld)
 		_gpMarq.gpBegin(gpScreen, gpShift)
 	gpCv.queue_redraw()
@@ -399,6 +504,33 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 
 func gpOnRelease(gpWorld: Vector2) -> bool:
 	var gpCv := gpCtx.gpCv
+	# Grid-table column-boundary drag (stage 3 S4): commit as ONE undo step. Same three beats
+	# as the title-block / frame drags below — rewind to the drag-start CSV, then let ONE
+	# command re-apply the final one.
+	# grid 表格列边界拖拽（阶段 3 S4）：提交为**一个**撤销步。与下方图签 / 图框拖拽同一三拍
+	# —— 回退到拖拽起始 CSV，再由**一条**命令重新应用最终值。
+	if gpCtx.gpTableGrips != null and gpCtx.gpTableGrips.gpIsDragging():
+		gpCtx.gpTableGrips.gpEndGripDrag()
+		gpCv.gpEmitStatus()
+		return true
+	# Title-block drag (Rev.3 stage 1): commit as ONE undo step. Same three beats as the frame drag below —
+	# rewind to the drag-start docking pair, then let ONE command re-apply the final pair, so a block moved
+	# 30 times during one gesture is ONE undo step and is never applied twice.
+	# 图签拖拽（Rev.3 阶段 1）：提交为**一个**撤销步。与下方图框拖拽同一三拍 —— 回退到拖拽起始停靠对，再交由
+	# **一条**命令重新应用最终对，故一次手势中搬动了 30 次的图签只是**一个**撤销步、且绝不叠加两次。
+	if gpCtx.gpTitleBlockGrips.gpIsDragging():
+		gpCtx.gpTitleBlockGrips.gpEndGripDrag()
+		gpCv.gpEmitStatus()
+		return true
+	# Frame drag (Rev.3 stage 0c): commit as ONE undo step. The grip op rewinds the sheet to its
+	# drag-start margins and lets the command re-apply the final ones, so a frame moved 30 times during
+	# one gesture is ONE undo step — never thirty, and never applied twice.
+	# 图框拖拽（Rev.3 阶段 0c）：提交为**一个**撤销步。抓取操作先把图纸回退到拖拽起始边距，再由命令
+	# 重新应用最终值，故一次手势中移动了 30 次的图框只是**一个**撤销步 —— 不是三十个，也绝不叠加两次。
+	if gpCtx.gpFrameGrips.gpIsDragging():
+		gpCtx.gpFrameGrips.gpEndGripDrag()
+		gpCv.gpEmitStatus()
+		return true
 	# Finish a marquee: gpFinish() reports whether the band was dragged far enough to be a real
 	# marquee; a press/release without movement is a plain click, already handled on press.
 	# gpFinish() 报告选框是否被拖到足以构成真正的框选；未产生位移的按下/释放只是普通单击。
@@ -439,7 +571,18 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 		# the resolver's; this hook only routes the release to a mount command when it applies.
 		# 单个**松散部件**释放在宿主上时**就地挂载**，而不是作为松散图元压在设备上。
 		# 挂载判定（锚点吸附 / 本体兜底 / 朝向侧别）属解析器；此处仅把符合条件的释放路由到挂载命令。
-		if gpIds.size() == 1 and not is_zero_approx(gpDelta.length()):
+		# ⚠️ Stage-2 gate (gpMountable, Rev.3 §8): a definition that declared itself NOT mountable
+		# (tables, multiline text) skips the mount routing entirely and lands loose — dropping a
+		# table on a vessel must never make it a child of the vessel. The gate sits BEFORE the
+		# resolver call: the resolver reasons about parts, and a non-mountable def is not one.
+		# The decision itself is GPMountResolver.gpReleaseMayMount() (single source, pinned).
+		# ⚠️ 阶段 2 闸（gpMountable，Rev.3 §8）：声明**不可挂载**的定义（表格、多行文本）完全
+		# 跳过挂载路由、落为松散图元 —— 把表格拖放到罐上绝不能让它变成罐的子件。闸在解析器
+		# **调用之前**：解析器推理的对象是部件，而不可挂载的定义根本不是部件。
+		# 判定本体是 GPMountResolver.gpReleaseMayMount()（单一来源、已被钉住）。
+		var gpReleaseDef: GPSymbolDef = gpCv.gpDefFor(gpIds[0])
+		if gpIds.size() == 1 and not is_zero_approx(gpDelta.length()) \
+				and GPMountResolver.gpReleaseMayMount(gpReleaseDef):
 			var gpMountTuple: Dictionary = GPMountResolver.gpLooseReleaseAttach(gpCv.gpGraph,
 				gpCv.gpDefFor, gpIds[0], gpWorld, gpCv.gpViewZoom)
 			if not gpMountTuple.is_empty():
@@ -489,6 +632,29 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 
 func gpOnMove(gpWorld: Vector2) -> bool:
 	var gpCv := gpCtx.gpCv
+	# Grid-table column-boundary drag (stage 3 S4). Checked FIRST for the same reason the two
+	# drags below are: a drag here is mutually exclusive with every other drag by construction.
+	# grid 表格列边界拖拽（阶段 3 S4）。**最先**检查，理由与下方两个拖拽相同：此处拖拽按构造
+	# 与其它所有拖拽互斥。
+	if gpCtx.gpTableGrips != null and gpCtx.gpTableGrips.gpIsDragging():
+		gpCtx.gpTableGrips.gpOnGripMove(gpWorld)
+		return true
+	# Title-block drag (Rev.3 stage 1). Checked FIRST for the same reason it is tested first on press: a
+	# drag here is mutually exclusive with every other drag by construction, and the block's grab area
+	# overlaps the frame's band.
+	# 图签拖拽（Rev.3 阶段 1）。**最先**检查，理由与按下时先测它相同：此处拖拽按构造与其它所有拖拽互斥，
+	# 且图签的抓取区与图框抓取带重叠。
+	if gpCtx.gpTitleBlockGrips.gpIsDragging():
+		gpCtx.gpTitleBlockGrips.gpOnGripMove(gpWorld)
+		return true
+	# Frame drag (Rev.3 stage 0c). Checked FIRST because a frame drag is mutually exclusive with every
+	# other drag by construction — it can only start where nothing else was selectable, so no earlier
+	# branch can have set a state that this one would shadow.
+	# 图框拖拽（Rev.3 阶段 0c）。**最先**检查：图框拖拽按构造与其它所有拖拽互斥 —— 它只会在其它什么
+	# 都选不中的地方开始，故不可能有更早的分支设置了会被本分支遮蔽的状态。
+	if gpCtx.gpFrameGrips.gpIsDragging():
+		gpCtx.gpFrameGrips.gpOnGripMove(gpWorld)
+		return true
 	# Live group-drag: the canvas forwards the motion to the active tool now that drag state
 	# 拖拽状态已迁至本工具，画布把移动事件转发到活动工具。返回 true 使画布接受事件而非仅重绘。
 	if gpIsDragging():
@@ -515,6 +681,17 @@ func gpDrawOverlay(gpCv: CanvasItem) -> void:
 	var gpCanvas := gpCtx.gpCv
 	for gpEid in gpCanvas.gpEdgeSel:
 		gpCtx.gpEdgeGrips.gpDrawGrips(gpCv, gpEid)
+	# The drawing frame's side handles (Rev.3 stage 0c). Drawn in SCREEN space, like the edge grips
+	# above, because they are a screen-constant pointing affordance rather than drawing geometry — and
+	# because it keeps them off GPFrameView, which must stay a pure renderer of the sheet.
+	# 图框的侧手柄（Rev.3 阶段 0c）。与上方边抓取点一样在**屏幕空间**绘制：它们是屏幕常量的「指着用」
+	# 可及性区域而非图纸几何 —— 也使它不必进入 GPFrameView，后者必须保持为图纸的纯渲染器。
+	gpCtx.gpFrameGrips.gpDrawGrips(gpCv)
+	# The title block's hover / drag outline (Rev.3 stage 1). Drawn after the frame's handles so the block's
+	# outline wins where the two overlap — matching the press order, where the block is tested first.
+	# 图签的悬停 / 拖拽外框（Rev.3 阶段 1）。在图框手柄之后绘制，使两者重叠处图签的外框压在上面 —— 与按下
+	# 顺序一致（图签先被测试）。
+	gpCtx.gpTitleBlockGrips.gpDrawGrips(gpCv)
 
 
 # ============================ private ============================
@@ -552,3 +729,34 @@ func _gpCommitMarquee() -> void:
 		gpCv.gpSetSelection(gpPicked)
 		gpCv.gpShapeSel = gpShapePicked
 	gpCv.queue_redraw()
+
+
+# The grid-table cell under a world point: {"node": id, "key": cell key, "rect": local mm}.
+# An empty "node" means the double-click target is not a grid table cell. Geometry comes
+# from GPSymbolGeneratorRegistry — the SAME cells the renderer paints (Rev.2 iron rule:
+# rendering and hit testing must never resolve geometry twice).
+# 世界点下的 grid 表格格子：{"node": id, "key": 格键, "rect": 本地 mm}。"node" 为空表示
+# 双击目标不是 grid 表格格子。几何取自 GPSymbolGeneratorRegistry —— 与渲染所画的**同一批**
+# 格子（Rev.2 铁律：渲染与命中绝不做两次几何解析）。
+func _gpCellEditTarget(gpCv: GPCanvas2D, gpWorld: Vector2) -> Dictionary:
+	var gpMiss: Dictionary = {"node": "", "key": "", "rect": Rect2()}
+	if gpCv.gpGraph == null:
+		return gpMiss
+	var gpHit: String = gpCv.gpHitTest(gpWorld)
+	if gpHit == "":
+		return gpMiss
+	var gpN: GPPIDNode = gpCv.gpGraph.gpGetNode(gpHit)
+	if gpN == null:
+		return gpMiss
+	var gpDef: GPSymbolDef = gpCv.gpDefFor(gpN.gpSymbolId)
+	if gpDef == null or GPSymbolGeneratorRegistry.gpGeneratorId(gpDef.gpGeometrySource) != "grid":
+		return gpMiss
+	var gpOrigin: Vector2 = GPPortResolver.gpNodeWorldOrigin(gpCv.gpGraph,
+		gpCv.gpDefLookupCallable(), gpN)
+	var gpKey: String = GPSymbolGeneratorRegistry.gpCellAt(gpDef, gpN, gpWorld - gpOrigin)
+	if gpKey == "":
+		return gpMiss
+	for gpCell in GPSymbolGeneratorRegistry.gpGridCellsOf(gpDef, gpN):
+		if str(gpCell["key"]) == gpKey:
+			return {"node": gpHit, "key": gpKey, "rect": gpCell["rect"] as Rect2}
+	return gpMiss

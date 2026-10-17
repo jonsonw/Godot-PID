@@ -1,36 +1,39 @@
 extends GutTest
-# GUT tests for the exporter stubs (Dev Guide §4.1 / §4.6.2).
-# 导出器桩的 GUT 测试（开发指南 §4.1 / §4.6.2）。
+# GUT smoke tests for the REAL exporters (stage 4 S3/S4).
+# 真导出器的 GUT 冒烟测试（阶段 4 S3/S4）。
 #
 # History / 变更说明：
-#   本文件最初是在 GUT 尚未安装时写下的「桩的桩」——`extends Node` + 内置 assert()，
-#   以便脚本可解析、可独立运行。GUT 9.6.1 安装后按其原始注释要求改造为 `extends GutTest`，
-#   方法名由 gpTest* 改为 GUT 约定的 test_*，断言换用 assert_true / assert_false。
+#   本文件最初钉的是「导出器桩恒返回 false」的桩契约。阶段 4 出图闭环（2026-10-17）
+#   把 DXF / PDF 桩转为真实现 —— API 变为 static gpExportSheet(gpGraph, gpSheet, gpPath, …)，
+#   旧 gpExport 不复存在，旧断言在运行期报 Nonexistent function（GUT 5/3 的 2 个失败）。
+#   本文件随之更新为真契约的**薄冒烟**：真实几何行为由 gp_test_dxf_export.gd /
+#   gp_test_pdf_export.gd 以字节级断言钉死（门 2 权威），此处只钉「API 存在 + 空输入礼貌拒绝」。
 #
 # Contract under test / 被测契约：
-#   GPDxfExporter.gpExport(gpDoc, gpPath) -> bool
-#   GPPdfExporter.gpExport(gpDoc, gpPath) -> bool
+#   GPDxfExporter.gpExportSheet(gpGraph, gpSheet, gpPath, …) -> bool
+#   GPPdfExporter.gpExportSheet(gpGraph, gpSheet, gpPath, …) -> bool
 #   GPListBasic.gpExportLists(gpDoc, gpDir) -> Dictionary
-#   三者当前均为未实现桩（恒返回 false / 空字典）。测试锁定「桩契约」，
-#   待导出器真正落地后需同步更新断言（届时返回值不再为 false）。
+#   两者对 gpSheet == null 一律礼貌返回 false（不崩溃、不落盘）。
 
 
-# DxfExporter must return a bool; the stub returns false until implemented.
-# DxfExporter 必须返回 bool；未实现前桩返回 false。
-func test_dxf_export_returns_bool() -> void:
+# The DXF exporter serves the REAL sheet API and refuses missing input gracefully.
+# DXF 导出器提供**真**图纸 API，且对缺失输入礼貌拒绝。
+func test_dxf_export_sheet_api() -> void:
 	var gpEx: GPDxfExporter = GPDxfExporter.new()
-	var gpResult: bool = gpEx.gpExport(null, "res://test_out.dxf")
-	assert_true(gpResult is bool, "GPDxfExporter.gpExport 应返回 bool")
-	assert_false(gpResult, "DXF 导出尚未实现，桩应返回 false")
+	assert_true(gpEx.has_method("gpExportSheet"), "GPDxfExporter 应提供 gpExportSheet 真实现")
+	var gpResult: GPIOResult = gpEx.gpExportSheet(null, null, "user://test_out.dxf")
+	assert_true(gpResult is GPIOResult, "gpExportSheet 应返回 GPIOResult")
+	assert_false(gpResult.gpIsOk(), "gpSheet 为空时应礼貌拒绝（不落盘）")
 
 
-# PdfExporter must return a bool; the stub returns false until implemented.
-# PdfExporter 必须返回 bool；未实现前桩返回 false。
-func test_pdf_export_returns_bool() -> void:
+# The PDF exporter serves the REAL sheet API and refuses missing input gracefully.
+# PDF 导出器提供**真**图纸 API，且对缺失输入礼貌拒绝。
+func test_pdf_export_sheet_api() -> void:
 	var gpEx: GPPdfExporter = GPPdfExporter.new()
-	var gpResult: bool = gpEx.gpExport(null, "res://test_out.pdf")
-	assert_true(gpResult is bool, "GPPdfExporter.gpExport 应返回 bool")
-	assert_false(gpResult, "PDF 导出尚未实现，桩应返回 false")
+	assert_true(gpEx.has_method("gpExportSheet"), "GPPdfExporter 应提供 gpExportSheet 真实现")
+	var gpResult: GPIOResult = gpEx.gpExportSheet(null, null, "user://test_out.pdf")
+	assert_true(gpResult is GPIOResult, "gpExportSheet 应返回 GPIOResult")
+	assert_false(gpResult.gpIsOk(), "gpSheet 为空时应礼貌拒绝（不落盘）")
 
 
 # ListBasic.export_lists must return a Dictionary; the stub returns an empty one.

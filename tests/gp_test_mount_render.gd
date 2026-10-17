@@ -441,11 +441,17 @@ func gpTestSlotAnchorAndOffsetHonourPerNodeOverride() -> void:
 
 
 func gpTestSlotTierMapsOntoExistingTextTiers() -> void:
-	gpApprox(GPTextRole.gpTierMM(GPLabelSlot.GP_TIER_INLINE, 3.0), GPTextRole.GP_INLINE_TAG_MM,
-		GP_EPS, "the in-line tier maps onto the measured 3.0 mm in-line height")
-	gpApprox(GPTextRole.gpTierMM(GPLabelSlot.GP_TIER_EQUIPMENT, 3.0), GPTextRole.GP_EQUIPMENT_TAG_MM,
-		GP_EPS, "the equipment tier maps onto the measured 4.5 mm equipment height")
-	gpApprox(GPTextRole.gpTierMM("unknown-tier", 3.0), GPTextRole.GP_INLINE_TAG_MM, GP_EPS,
+	# ⚠️ A1 REBASE: the base IS the in-line tier (that is what _gpBaseFontMM feeds in), so it is
+	# derived from the constant, never hard-coded — the tiers' absolute heights doubled with the
+	# symbols; the RATIO assertions below are unchanged.
+	# ⚠️ A1 重定基：base **就是**在管档（_gpBaseFontMM 喂进来的正是它），故从常量推导、绝不硬编码
+	# —— 各档绝对字高随图元翻倍；下方比例断言不变。
+	var gpBase: float = GPTextRole.GP_INLINE_TAG_MM
+	gpApprox(GPTextRole.gpTierMM(GPLabelSlot.GP_TIER_INLINE, gpBase), GPTextRole.GP_INLINE_TAG_MM,
+		GP_EPS, "the in-line tier maps onto the measured in-line height")
+	gpApprox(GPTextRole.gpTierMM(GPLabelSlot.GP_TIER_EQUIPMENT, gpBase), GPTextRole.GP_EQUIPMENT_TAG_MM,
+		GP_EPS, "the equipment tier maps onto the measured equipment height")
+	gpApprox(GPTextRole.gpTierMM("unknown-tier", gpBase), GPTextRole.GP_INLINE_TAG_MM, GP_EPS,
 		"an unknown tier falls back to the in-line height instead of inventing a size")
 	# The ratio the standard fixes must survive an arbitrary user font size.
 	# 标准固定的比例必须在任意用户字号下成立。
@@ -615,3 +621,59 @@ func gpTestNozzleSlotsTurnWithTheMountAxis() -> void:
 	var gpAct: GPSymbolDef = _gpChildDef()
 	gpEq(GPLabelGripOps.gpLabelQuarters(gpGh, gpLook, gpAct, gpGh.gpGetNode("nn")), 0,
 		"an actuator mounted on the same host keeps its own layout, so no valve label tilts")
+
+
+# ---------------------------------------------------------------------------
+# Repaint discipline (flicker fix, 2026-10-16) / 重绘纪律（闪烁修复，2026-10-16）
+# The binder's sync runs on EVERY canvas repaint, so a symbol view must report "nothing
+# changed" when the graph data is unchanged — that is what lets the sync skip the repaint.
+# 绑定器的 sync 在画布每一次重绘时都会跑，故图数据不变时视图必须报告「没变」——
+# 这正是 sync 能跳过重绘的依据。
+# ---------------------------------------------------------------------------
+
+func gpTestTransformSyncReportsChange() -> void:
+	var gpN: GPPIDNode = _gpHost()
+	var gpG: GPPIDGraph = _gpGraphOf(gpN)
+	var gpDef: GPSymbolDef = _gpHostDef()
+	var gpV: GPSymbolView = GPSymbolView.new()
+	gpV.gpInit(gpN, gpDef, gpG, _gpLookup())
+	# gpInit already ran one sync, so an unchanged graph reports NO change.
+	# gpInit 已经跑过一次同步，故图未变时报告**无**变化。
+	gpCheck(gpV.gpUpdateTransform() == false,
+		"an unchanged graph reports no transform change (the sync may skip the repaint)")
+	# Moving the node changes the derived world frame.
+	# 挪动节点即改变推导世界坐标系。
+	gpN.gpPosition = Vector2(180.0, 120.0)
+	gpCheck(gpV.gpUpdateTransform() == true,
+		"moving the node reports a transform change")
+	gpCheck(gpV.gpUpdateTransform() == false,
+		"the same graph data twice in a row is stable (deterministic derivation, exact compare)")
+	# A mounted child's frame rides the host chain.
+	# 挂载子件的坐标系跟随宿主链。
+	var gpC: GPPIDNode = _gpChild()
+	var gpGc: GPPIDGraph = _gpGraphOf(gpN, gpC)
+	var gpVc: GPSymbolView = GPSymbolView.new()
+	gpVc.gpInit(gpC, _gpChildDef(), gpGc, _gpLookup())
+	gpCheck(gpVc.gpUpdateTransform() == false,
+		"an unchanged mounted child also reports no change")
+	gpN.gpPosition = Vector2(60.0, 60.0)
+	gpCheck(gpVc.gpUpdateTransform() == true,
+		"moving the HOST moves the mounted child's derived frame (repaint required)")
+
+
+func gpTestEdgeViewSetViewReportsChange() -> void:
+	var gpV: GPEdgeView = GPEdgeView.new()
+	# GPEdgeView defaults; pick a first push that differs from at least one field.
+	# 取 GPEdgeView 默认值；首推参数至少与一个字段不同。
+	var gpFirst: bool = gpV.gpSetView(2.0, true, false, false)
+	gpCheck(gpFirst, "the first view-state push reports a change")
+	gpCheck(gpV.gpSetView(2.0, true, false, false) == false,
+		"the same view state twice in a row reports no change (the sync may skip the redraw)")
+	gpCheck(gpV.gpSetView(2.5, true, false, false) == true,
+		"a zoom change reports a change (every edge must repaint: line widths ride the zoom)")
+	gpCheck(gpV.gpSetView(2.5, false, false, false) == true,
+		"a selection change reports a change (exactly that edge repaints)")
+	gpCheck(gpV.gpSetView(2.5, false, false, true) == true,
+		"an editing-state change reports a change")
+	gpCheck(gpV.gpSetView(2.5, false, false, true) == false,
+		"repeating the same editing state reports no change")

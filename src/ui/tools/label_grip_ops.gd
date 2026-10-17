@@ -32,49 +32,31 @@ const GP_COL: Color = Color(0.20, 0.50, 1.0)
 
 # ---------------------------------------------------------------- pure
 
-# The text to draw. The template comes from the TYPE layer ({tag} by default); an empty tag
-# falls back to the localized type name so a legacy, un-numbered sheet is not blank.
-# 要绘制的文字。模板取自**类型层**（默认 {tag}）；位号为空时回落本地化类型名，
-# 使未经编号的历史图纸不会是空白。
+# The text to draw. FORWARDED to GPLabelPlacement (core); see that class' header.
+# 要绘制的文字。**转发**至 core 的 GPLabelPlacement；见该类头部。
 static func gpLabelText(gpNode: GPPIDNode, gpDef: GPSymbolDef, gpLocale: String = "zh") -> String:
-	if gpNode == null:
-		return ""
-	var gpName: String = GPPropertyResolver.gpDisplayName(
-		gpNode.gpNames,
-		gpDef.gpDisplayName if gpDef != null else "",
-		gpLocale,
-		gpNode.gpTag)
-	var gpFmt: String = GPPropertyResolver.GP_DEFAULT_LABEL_FORMAT
-	if gpDef != null and gpDef.gpLabelFormat != "":
-		gpFmt = gpDef.gpLabelFormat
-	var gpText: String = GPPropertyResolver.gpLabelText(gpFmt, gpNode.gpTag, gpName)
-	if gpText.strip_edges() == "":
-		return gpName
-	return gpText
+	return GPLabelPlacement.gpLabelText(gpNode, gpDef, gpLocale)
 
 
 # Effective anchor: the instance wins when it set one, otherwise the type layer's default.
+# FORWARDED to GPLabelPlacement (core): the print model must answer "where does the tag sit"
+# with the SAME judgment, and core may never reference ui — so the pure body moved there and
+# this stays as the ui-side name the drag interaction calls.
 # 生效锚点：实例设置过则用实例的，否则用类型层默认。
+# **转发**至 core 的 GPLabelPlacement：打印模型必须以**同一判断**回答「位号在哪」，
+# 而 core 绝不引用 ui —— 故纯函数体迁往彼处，此处保留拖拽交互调用的 ui 侧名字。
 static func gpEffectiveAnchor(gpNode: GPPIDNode, gpDef: GPSymbolDef) -> int:
-	var gpLib: int = gpDef.gpLabelAnchor if gpDef != null else GPLabelAnchor.GPAnchor.GP_BELOW
-	var gpInst: int = GPLabelAnchor.GPAnchor.GP_AUTO
-	if gpNode != null:
-		gpInst = gpNode.gpLabelAnchor
-	return GPPropertyResolver.gpActiveAnchor(gpLib, gpInst)
+	return GPLabelPlacement.gpEffectiveAnchor(gpNode, gpDef)
 
 
-# Effective normalised offset, resolved the same way as the anchor.
-# 生效的归一化偏移，解析方式与锚点相同。
+# Effective normalised offset, resolved the same way as the anchor. FORWARDED; see above.
+# 生效的归一化偏移，解析方式与锚点相同。**转发**；见上。
 static func gpEffectiveOffset(gpNode: GPPIDNode, gpDef: GPSymbolDef) -> Vector2:
-	var gpLib: Vector2 = gpDef.gpLabelOffset if gpDef != null else Vector2.ZERO
-	var gpInst: Vector2 = GPLabelAnchor.GP_OFFSET_UNSET
-	if gpNode != null:
-		gpInst = gpNode.gpLabelOffset
-	return GPPropertyResolver.gpActiveOffset(gpLib, gpInst)
+	return GPLabelPlacement.gpEffectiveOffset(gpNode, gpDef)
 
 
-# The gap actually used for a symbol of this envelope size.
-# 给定包络尺寸下**实际**使用的间距。
+# The gap actually used for a symbol of this envelope size. FORWARDED; see GPLabelPlacement.
+# 给定包络尺寸下**实际**使用的间距。**转发**；见 GPLabelPlacement。
 #
 # WHY NOT A CONSTANT / 为何不能是恒值：
 # 7 mm is right for a 10 mm pump, but a nozzle is 4 x 2 mm — a fixed 7 mm gap put its number 8 mm
@@ -82,23 +64,18 @@ static func gpEffectiveOffset(gpNode: GPPIDNode, gpDef: GPSymbolDef) -> Vector2:
 # away". Small symbols therefore take HALF their shorter side (a 4x2 nozzle -> 1 mm), floored so
 # the text never lands on the glyph; every symbol at least 7 mm on its shorter side keeps the
 # historic 7 mm exactly, so equipment annotations never move.
-# 7mm 对 10mm 的泵合适，但管嘴只有 4x2mm —— 固定 7mm 会把编号推到离中心 8mm 处，即四个管嘴长，这正是
-# 用户报告的「文字离得太远」。故小图元取**短边的一半**（4x2 管嘴 -> 1mm），并设下限使文字绝不压到
-# 字形上；短边 ≥7mm 的图元精确保持历史的 7mm，故设备标注不会有任何位移。
+# 7mm 对 10mm 的泵合适，但管嘴只有 4x2mm —— 固定 7mm 会把编号推到离中心 8mm 处，即四个管嘴长，
+# 这正是用户报告的「文字离得太远」。故小图元取**短边的一半**（4x2 管嘴 -> 1mm），并设下限使文字
+# 绝不压到字形上；短边 ≥7mm 的图元精确保持历史的 7mm，故设备标注不会有任何位移。
 static func gpGapFor(gpSize: Vector2) -> float:
-	var gpSide: float = minf(gpSize.x, gpSize.y)
-	if gpSide >= GP_GAP:
-		return GP_GAP
-	return clampf(gpSide * 0.5, GP_MIN_GAP, GP_GAP)
+	return GPLabelPlacement.gpGapFor(gpSize)
 
 
 # The envelope used for scaling. A missing definition falls back to a sane default so the
-# geometry never divides by zero.
-# 用于缩放的包络。定义缺失时回落到合理默认值，使几何永不会除以零。
+# geometry never divides by zero. FORWARDED; see GPLabelPlacement.
+# 用于缩放的包络。定义缺失时回落到合理默认值，使几何永不会除以零。**转发**；见 GPLabelPlacement。
 static func gpEnvelope(gpDef: GPSymbolDef) -> Vector2:
-	if gpDef != null and gpDef.gpDefaultSize.x > 0.0 and gpDef.gpDefaultSize.y > 0.0:
-		return gpDef.gpDefaultSize
-	return Vector2(64.0, 48.0)
+	return GPLabelPlacement.gpEnvelope(gpDef)
 
 
 # How many quarter turns a MOUNTED part's label layout is turned by, so its slots can follow the
@@ -132,13 +109,12 @@ static func gpLabelQuarters(gpGraph: GPPIDGraph, gpLookup: Callable, gpDef: GPSy
 
 # Symbol-LOCAL offset (before flipping / rotating). This is the value the renderer needs:
 # the node itself carries no rotation, so the rotation is applied by the caller.
+# FORWARDED to GPLabelPlacement (core) — the print model consumes the same function there.
 # 图元**本地**偏移（翻转 / 旋转之前）。这是渲染器需要的值：
 # 节点本身不承载旋转，旋转由调用方施加。
+# **转发**至 core 的 GPLabelPlacement —— 打印模型在彼处消费同一函数。
 static func gpLocalOffset(gpNode: GPPIDNode, gpDef: GPSymbolDef) -> Vector2:
-	var gpAnchor: int = gpEffectiveAnchor(gpNode, gpDef)
-	var gpOff: Vector2 = gpEffectiveOffset(gpNode, gpDef)
-	var gpSz: Vector2 = gpEnvelope(gpDef)
-	return GPLabelAnchor.gpOffsetWorld(gpAnchor, gpOff, gpSz, gpGapFor(gpSz))
+	return GPLabelPlacement.gpLocalOffset(gpNode, gpDef)
 
 
 # ---------------------------------------------------------------- label slots
@@ -410,6 +386,23 @@ var _gpStartOffset: Vector2 = Vector2.ZERO
 # 拖拽过程中应用到节点上的实时预览偏移。
 var _gpLiveOffset: Vector2 = Vector2.ZERO
 
+# True while THIS handler owns the cursor (has set a non-arrow shape and not yet
+# handed it back). The cursor is a SINGLE resource with MANY writers on one motion
+# event (tag grips, title block, frame band, tools); whoever did not claim it must
+# never write per-event, because Godot's mouse_default_cursor_shape setter pushes
+# the shape to the OS IMMEDIATELY on every value change ("Display the new cursor
+# shape instantly") — an unconditional per-motion ARROW reset followed by another
+# writer's MOVE made the OS cursor flip arrow<->move at event rate, i.e. the
+# reported "the cursor jitters over the title block". Hence: claim while hovered /
+# dragging, hand back exactly once on the way out.
+# 本处理器「认领」光标期间为真（已设非箭头形状且尚未归还）。光标是**单一**资源，而同一
+# 移动事件里有**多个**写入者（标签抓取点、图签、图框带、工具）；未认领者绝不可逐事件写入
+# —— Godot 的 mouse_default_cursor_shape setter 在每次值变化时**立即**下发 OS
+# （"Display the new cursor shape instantly"），一条逐移动的 ARROW 重置加上另一写入者的
+# MOVE，曾使 OS 光标以事件频率在箭头↔移动间翻转，即用户报告的「指针在图签上抖动」。
+# 故立规：悬停 / 拖拽期间认领，退出时**恰好一次**归还。
+var _gpCursorClaimed: bool = false
+
 
 func _init(gpCanvas: GPCanvas2D) -> void:
 	gpCv = gpCanvas
@@ -419,6 +412,15 @@ func _init(gpCanvas: GPCanvas2D) -> void:
 # when the caller should consume the motion event (so port hover does not fight it).
 # 悬停反馈：抓取点在光标下时显示移动光标。返回 true 表示调用方应消费该移动事件
 # （使端口悬停不会与之争抢）。
+#
+# ⚠️ CURSOR WRITES ARE CLAIM/RELEASE, NEVER PER-MOTION RESETS / ⚠️ 光标写入是「认领 / 归还」，
+# 绝不逐移动重置：this function runs on EVERY motion event BEFORE the title-block and frame
+# probes, so an unconditional `= CURSOR_ARROW` here flips the shape away from whatever those
+# writers set, and their re-assert flips it back — two immediate OS writes per event. The ARROW
+# below therefore fires ONLY when this handler itself previously claimed the cursor.
+# 本函数在**每个**移动事件里先于图签与图框探测运行，故此处一条无条件 `= CURSOR_ARROW` 会把
+# 形状从其它写入者设定的值上翻走，对方再翻回来 —— 每事件两次立即 OS 写入。因此下方 ARROW
+# 只在本处理器**自己此前认领过**光标时才发出。
 func gpUpdateHoverCursor(gpWorld: Vector2) -> bool:
 	if gpCv == null:
 		return false
@@ -430,21 +432,29 @@ func gpUpdateHoverCursor(gpWorld: Vector2) -> bool:
 	if gpCv.gpPendingDef != null:
 		return false
 	if _gpNodeId != "":
-		gpCv.mouse_default_cursor_shape = Control.CURSOR_MOVE
+		# Drag in flight: claim (idempotent — the setter early-returns on an unchanged value).
+		# 拖拽进行中：认领（幂等 —— 值不变时 setter 直接早退）。
+		if not _gpCursorClaimed:
+			gpCv.mouse_default_cursor_shape = Control.CURSOR_MOVE
+			_gpCursorClaimed = true
 		return true
-	if gpCv.gpGraph == null or gpCv.gpSelection.size() != 1:
-		gpCv.mouse_default_cursor_shape = Control.CURSOR_ARROW
-		return false
-	var gpN: GPPIDNode = gpCv.gpGraph.gpGetNode(gpCv.gpSelection[0])
-	if gpN == null:
-		gpCv.mouse_default_cursor_shape = Control.CURSOR_ARROW
-		return false
-	var gpDef: GPSymbolDef = gpCv.gpDefFor(gpN.gpSymbolId)
-	var gpT: float = 8.0 / maxf(gpCv.gpViewZoom, 0.0001)
-	if gpHitGrip(gpWorld, gpN, gpDef, gpT, gpCv.gpGraph, gpCv.gpDefLookupCallable()):
-		gpCv.mouse_default_cursor_shape = Control.CURSOR_MOVE
+	var gpClaimNow: bool = false
+	if gpCv.gpGraph != null and gpCv.gpSelection.size() == 1:
+		var gpN: GPPIDNode = gpCv.gpGraph.gpGetNode(gpCv.gpSelection[0])
+		if gpN != null:
+			var gpDef: GPSymbolDef = gpCv.gpDefFor(gpN.gpSymbolId)
+			var gpT: float = 8.0 / maxf(gpCv.gpViewZoom, 0.0001)
+			gpClaimNow = gpHitGrip(gpWorld, gpN, gpDef, gpT, gpCv.gpGraph, gpCv.gpDefLookupCallable())
+	if gpClaimNow:
+		if not _gpCursorClaimed:
+			gpCv.mouse_default_cursor_shape = Control.CURSOR_MOVE
+			_gpCursorClaimed = true
 		return true
-	gpCv.mouse_default_cursor_shape = Control.CURSOR_ARROW
+	# Leave edge (or never claimed): hand the cursor back exactly ONCE.
+	# 离开沿（或从未认领）：恰好**一次**归还光标。
+	if _gpCursorClaimed:
+		gpCv.mouse_default_cursor_shape = Control.CURSOR_ARROW
+		_gpCursorClaimed = false
 	return false
 
 

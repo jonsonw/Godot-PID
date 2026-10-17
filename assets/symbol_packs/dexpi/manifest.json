@@ -15,8 +15,8 @@
       "name_en": "Angle Spring-Loaded Safety Valve",
       "type": "valve",
       "size_mm": [
-        3.0,
-        7.0
+        6.0,
+        14.0
       ],
       "ports": [
         {
@@ -58,8 +58,8 @@
       "name_en": "Arrow — Inlet of Essential Substances",
       "type": "general",
       "size_mm": [
-        7.0,
-        7.0
+        14.0,
+        14.0
       ],
       "ports": [],
       "source_shape": "ARROW_FOR_INLET_OF_ESSENTIAL_SUBSTANCES_SHAPE",
@@ -76,8 +76,8 @@
       "name_en": "Arrow — Outlet of Essential Substances",
       "type": "general",
       "size_mm": [
-        7.0,
-        7.0
+        14.0,
+        14.0
       ],
       "ports": [],
       "source_shape": "ARROW_FOR_OUTLET_OF_ESSENTIAL_SUBSTANCES_SHAPE",
@@ -94,8 +94,8 @@
       "name_en": "Ball Valve",
       "type": "valve",
       "size_mm": [
-        4.0,
-        2.0
+        8.0,
+        4.0
       ],
       "ports": [],
       "source_shape": "BALL_VALVE_SHAPE",
@@ -112,8 +112,8 @@
       "name_en": "Blind Cover",
       "type": "general",
       "size_mm": [
-        1.0,
-        2.0
+        2.0,
+        4.0
       ],
       "ports": [
         {
@@ -143,8 +143,8 @@
       "name_en": "Butterfly Valve",
       "type": "valve",
       "size_mm": [
-        4.0,
-        2.0
+        8.0,
+        4.0
       ],
       "ports": [],
       "source_shape": "BUTTERFLY_VALVE_SHAPE",
@@ -161,8 +161,8 @@
       "name_en": "Centrifugal Pump",
       "type": "pump",
       "size_mm": [
-        10.5,
-        10.5
+        21.0,
+        21.0
       ],
       "ports": [],
       "source_shape": "CENTRIFUGAL_PUMP_SHAPE",
@@ -179,8 +179,8 @@
       "name_en": "Controlled Actuator",
       "type": "general",
       "size_mm": [
-        4.05,
-        8.1
+        8.1,
+        16.2
       ],
       "ports": [
         {
@@ -210,8 +210,8 @@
       "name_en": "Direction of Flow (Primary Segment)",
       "type": "general",
       "size_mm": [
-        1.75,
-        3.5
+        3.5,
+        7.0
       ],
       "ports": [],
       "source_shape": "DIRECTION_OF_FLOW_SHAPE_FOR_PRIMARY_SEGMENT",
@@ -228,8 +228,8 @@
       "name_en": "Direction of Flow (Secondary Segment)",
       "type": "general",
       "size_mm": [
-        1.75,
-        3.5
+        3.5,
+        7.0
       ],
       "ports": [],
       "source_shape": "DIRECTION_OF_FLOW_SHAPE_FOR_SECONDARY_SEGMENT",
@@ -246,8 +246,8 @@
       "name_en": "Floating-Head Tube-Bundle Heat Exchanger",
       "type": "heat",
       "size_mm": [
-        24.5,
-        7.0
+        49.0,
+        14.0
       ],
       "ports": [
         {
@@ -289,8 +289,8 @@
       "name_en": "Globe Valve",
       "type": "valve",
       "size_mm": [
-        4.0,
-        2.0
+        8.0,
+        4.0
       ],
       "ports": [],
       "source_shape": "GLOBE_VALVE_SHAPE",
@@ -307,8 +307,8 @@
       "name_en": "Instrumentation Bubble (Central)",
       "type": "instrument",
       "size_mm": [
-        13.5,
-        7.5
+        27.0,
+        15.0
       ],
       "ports": [
         {
@@ -350,8 +350,8 @@
       "name_en": "Instrumentation Bubble (Field)",
       "type": "instrument",
       "size_mm": [
-        13.5,
-        7.5
+        27.0,
+        15.0
       ],
       "ports": [
         {
@@ -393,8 +393,8 @@
       "name_en": "Manhole",
       "type": "general",
       "size_mm": [
-        4.05,
-        10.5
+        8.1,
+        21.0
       ],
       "ports": [],
       "source_shape": "MANHOLE_SHAPE",
@@ -411,8 +411,8 @@
       "name_en": "Nozzle",
       "type": "general",
       "size_mm": [
-        4.0,
-        2.0
+        8.0,
+        4.0
       ],
       "ports": [
         {
@@ -442,8 +442,8 @@
       "name_en": "Insulated Piping",
       "type": "general",
       "size_mm": [
-        8.4,
-        1.4
+        16.8,
+        2.8
       ],
       "ports": [
         {
@@ -485,8 +485,8 @@
       "name_en": "Plate-Type Heat Exchanger",
       "type": "heat",
       "size_mm": [
-        25.5,
-        8.0
+        51.0,
+        16.0
       ],
       "ports": [
         {
@@ -528,8 +528,8 @@
       "name_en": "Reciprocating Pump",
       "type": "pump",
       "size_mm": [
-        10.5,
-        10.5
+        21.0,
+        21.0
       ],
       "ports": [],
       "source_shape": "RECIPROCATING_PUMP_SHAPE",
@@ -546,8 +546,8 @@
       "name_en": "Reducer (General)",
       "type": "general",
       "size_mm": [
-        4.0,
-        2.0
+        8.0,
+        4.0
       ],
       "ports": [
         {
@@ -589,8 +589,8 @@
       "name_en": "Slope",
       "type": "general",
       "size_mm": [
-        3.5,
-        1.0
+        7.0,
+        2.0
       ],
       "ports": [
         {
@@ -632,8 +632,8 @@
       "name_en": "Swing Check Valve",
       "type": "valve",
       "size_mm": [
-        4.5,
-        2.5
+        9.0,
+        5.0
       ],
       "ports": [],
       "source_shape": "SWING_CHECK_VALVE_SHAPE",
@@ -650,8 +650,8 @@
       "name_en": "T-Type Connection",
       "type": "general",
       "size_mm": [
-        8.0,
-        4.0
+        16.0,
+        8.0
       ],
       "ports": [
         {
@@ -705,8 +705,8 @@
       "name_en": "Vessel with Dished Heads",
       "type": "tank",
       "size_mm": [
-        30.0,
-        51.0
+        60.0,
+        102.0
       ],
       "ports": [
         {

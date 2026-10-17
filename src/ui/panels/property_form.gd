@@ -91,13 +91,56 @@ static func gpSections(gpSchema: GPPropertySchema, gpProps: Dictionary) -> Array
 # 实例仍持有、但库中已不再声明的取值（孤儿）。它们**绝不**被丢弃 ——
 # 数据主权意味着「手工录入的值」活得比它的字段更久。
 # Each row: {"key": String, "value": Variant}.
+# Legacy name kept for the existing readers/tests; the SAME set is what the custom-properties
+# section (Rev.3 stage 1.5, R2) edits as user-owned entries — see gpAdhocRows().
+# 旧名保留给既有读者 / 测试；同一集合在自定义属性段（Rev.3 阶段 1.5，R2）中
+# 作为用户自有的条目被编辑 —— 见 gpAdhocRows()。
 static func gpOrphanRows(gpSchema: GPPropertySchema, gpProps: Dictionary) -> Array[Dictionary]:
+	return gpAdhocRows(gpSchema, gpProps)
+
+
+# The CUSTOM property entries of one instance: keys the instance holds although the schema does
+# not declare them (Rev.3 stage 1.5, R2 / D7 — instance-level CRUD only; editing LIBRARY field
+# definitions belongs to the symbol-editor line). Same rows as gpOrphanRows: the "orphan" and
+# the "custom entry" are the same storage (`gpProps` keys outside the schema), read through
+# two different intents — "the library moved on" vs "the user added this".
+# 单个实例的**自定义**属性条目：实例持有、但 schema 未声明的键（Rev.3 阶段 1.5，R2 / D7
+# —— 仅实例级 CRUD；改**库**字段定义属图元编辑器线）。与 gpOrphanRows 同一行集：
+# 「孤儿」与「自定义条目」是同一份存储（schema 之外的 `gpProps` 键），只是两种读取意图 ——
+# 「库已演进」与「用户自己加的」。
+# Each row: {"key": String, "value": Variant}.
+static func gpAdhocRows(gpSchema: GPPropertySchema, gpProps: Dictionary) -> Array[Dictionary]:
 	var gpOut: Array[Dictionary] = []
 	for gpK in GPPropertyResolver.gpOrphanKeys(gpSchema, gpProps):
 		var gpRow: Dictionary = {}
 		gpRow["key"] = gpK
 		gpRow["value"] = gpProps.get(gpK, "")
 		gpOut.append(gpRow)
+	return gpOut
+
+
+# Search the schema-declared fields: rows whose LABEL, KEY or VALUE contain the query,
+# case-insensitively. An empty (or blank) query returns every row, flattened across groups in
+# display order. Row shape == gpSections()' field rows, so the panel can render the hits with
+# the very same row builder.
+# 检索 schema 声明的字段：标签、键或取值包含查询词（不区分大小写）的行。空查询返回全部行，
+# 按显示顺序跨分组摊平。行形状与 gpSections() 的字段行一致，故面板可用同一个行构建器渲染命中项。
+static func gpSearch(gpSchema: GPPropertySchema, gpProps: Dictionary,
+		gpQuery: String) -> Array[Dictionary]:
+	var gpOut: Array[Dictionary] = []
+	if gpSchema == null:
+		return gpOut
+	var gpQ: String = gpQuery.strip_edges().to_lower()
+	for gpSec in gpSections(gpSchema, gpProps):
+		for gpRow in (gpSec["fields"] as Array):
+			if gpQ == "":
+				gpOut.append(gpRow)
+				continue
+			var gpLabel: String = str(gpRow["label"]).to_lower()
+			var gpKey: String = str(gpRow["key"]).to_lower()
+			var gpVal: String = str(gpRow["value"]).to_lower()
+			if gpLabel.contains(gpQ) or gpKey.contains(gpQ) or gpVal.contains(gpQ):
+				gpOut.append(gpRow)
 	return gpOut
 
 

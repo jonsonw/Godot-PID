@@ -114,6 +114,17 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
  # Reuse existing view and rebind ALL authoritative data.
  # 复用已有视图并重绑全部权威数据。
 			gpV = _gpSymbolViews[gpId] as GPSymbolView
+ # Flicker fix: sync runs on EVERY canvas repaint, so repaint only when something actually
+ # changed — the def object was swapped (re-exported symbol), the graph itself was swapped
+ # (open another file), or the derived world transform moved. Reference equality is the right
+ # test: gpRegisterDefs() replaces the def object behind the SAME id, and that is exactly the
+ # case the repaint must catch.
+ # 闪烁修复：sync 在画布**每一次**重绘时都会跑，故仅在真正变化时才重绘 —— 定义对象被替换
+ #（重新导出的图元）、图对象被替换（打开另一文件）、或推导世界变换移动了。引用相等就是正确的
+ # 判据：gpRegisterDefs() 会替换同一 id 背后的定义对象，而这正是重绘必须捕捉的情形。
+			var gpNewDef: GPSymbolDef = gpDefFor(gpN.gpSymbolId)
+			var gpRebound: bool = gpV.gpNode != gpN or gpV.gpDef != gpNewDef \
+				or gpV.gpGraph != gpGraph
 			gpV.gpNode = gpN
 			gpV.gpNodeId = gpId
  # Rebind the definition too. When a symbol is re-exported, gpRegisterDefs()
@@ -124,18 +135,21 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
  # 同时重绑定义。重新导出图元时 gpRegisterDefs() 会替换同一 id 背后的
  # GPSymbolDef 对象，若视图保留旧引用，就会静默地继续绘制过期几何。
  # 这一行正是「覆盖图元 → 所有已放置实例同步刷新」得以生效的关键。
-			gpV.gpDef = gpDefFor(gpN.gpSymbolId)
+			gpV.gpDef = gpNewDef
  # Rebind the mount context BEFORE the transform: a mounted child derives its world frame
  # from the graph's parent chain, so the graph must be in place when gpUpdateTransform() runs.
  # 必须在更新变换**之前**重绑挂载上下文：挂载子件的世界坐标系由图中的父链推导，
  # 故 gpUpdateTransform() 执行时图必须已就位。
 			gpV.gpGraph = gpGraph
 			gpV.gpDefLookupCb = _gpLookupDef
-			gpV.gpUpdateTransform()
+			var gpMoved: bool = gpV.gpUpdateTransform()
  # The definition drives the painted geometry, so a rebind needs a repaint of BOTH
- # layers (label on the view, glyph + ports on the body child).
- # 定义驱动所绘几何，故重绑后必须重绘「两层」（视图上的标签，body 子节点上的字形与端口）。
-			gpV.gpRepaint()
+ # layers (label on the view, glyph + ports on the body child) — but only when something
+ # actually changed, or every idle mouse motion repaints the whole sheet (the flicker).
+ # 定义驱动所绘几何，故重绑需要重绘「两层」（视图上的标签，body 子节点上的字形与端口）
+ # —— 但仅在真正变化时：否则每一次静止的鼠标移动都会把整张图重绘一遍（即闪烁）。
+			if gpRebound or gpMoved:
+				gpV.gpRepaint()
 		else:
  # Create a new view for this node.
  # 为该节点创建新视图。
@@ -247,12 +261,22 @@ func _gpSyncEdgeViews(gpSelection: Array[String], gpEdgeSelection: Array[String]
 		if gpId == "":
 			continue
 		var gpV: GPEdgeView = null
+ # True when the EDGE OBJECT behind this view changed (reuse path only; a fresh view always
+ # paints for the first time). Declared here so both branches share one scope.
+ # 本视图背后的**边对象**变化时为真（仅复用路径；新建视图本就要首绘）。声明在此使两个分支
+ # 共享一个作用域。
+		var gpEdgeChanged: bool = false
 		if _gpEdgeViews.has(gpId):
  # Reuse existing view and update its bound data.
  # 复用已有视图并更新绑定数据。
+ # Flicker fix: only when something CHANGED — the edge object was swapped, or the per-frame view
+ # state (zoom / selection / editing) moved. The sync runs on every canvas repaint; an unguarded
+ # queue_redraw here repainted every pipe on every mouse motion.
+ # 闪烁修复：仅在真正变化时 —— 边对象被替换，或逐帧视图状态（zoom / 选中 / 编辑态）移动了。
+ # sync 在画布每一次重绘时都会跑；此处无守卫的 queue_redraw 会让每次鼠标移动重绘每一条管线。
 			gpV = _gpEdgeViews[gpId] as GPEdgeView
+			gpEdgeChanged = gpV.gpEdge != gpE
 			gpV.gpEdge = gpE
-			gpV.queue_redraw()
 		else:
  # Create a new view for this edge.
  # 为该连线创建新视图。
@@ -269,7 +293,8 @@ func _gpSyncEdgeViews(gpSelection: Array[String], gpEdgeSelection: Array[String]
  # 边 id 存于独立的选择数组（gpEdgeSel），故需同时比对节点集与边集 —— 否则边的光晕永远不亮，
  # 用户只会看到抓取点三角。编辑态在本边正是被拖拽的那条时置真。
 		var gpIsSel: bool = gpSelection.has(gpId) or gpEdgeSelection.has(gpId)
-		gpV.gpSetView(gpZoom, gpIsSel, false, gpId == gpEditingEdgeId)
+		if gpV.gpSetView(gpZoom, gpIsSel, false, gpId == gpEditingEdgeId) or gpEdgeChanged:
+			gpV.queue_redraw()
 		gpFresh[gpId] = gpV
 	# Remove stale edge views.
 	# 删除已不存在的连线视图。

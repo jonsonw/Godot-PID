@@ -338,6 +338,11 @@ func _gpAssembleInspector() -> void:
 	# orphaned values may only be dropped on an explicit request from the panel.
 	# 孤儿值仅在面板明确请求时才可被清除。
 	gpInspector.gpCleanOrphansRequested.connect(gpSymbolLibCoord.gpOnCleanOrphans)
+	# custom-entry CRUD (Rev.3 stage 1.5, R2): add / rename / delete, instance level.
+	# 自定义条目增删改（Rev.3 阶段 1.5，R2）：新增 / 改名 / 删除，仅实例级。
+	gpInspector.gpPropAddRequested.connect(gpSelCoord.gpOnPropAdd)
+	gpInspector.gpPropRenamed.connect(gpSelCoord.gpOnPropRename)
+	gpInspector.gpPropDeleteRequested.connect(gpSelCoord.gpOnPropDelete)
 	gpInspector.gpDefs = gpDefs
 
 
@@ -409,6 +414,7 @@ func _gpAssembleFileDialog() -> void:
 	gpFileDialog.access = FileDialog.ACCESS_FILESYSTEM
 	gpFileDialog.add_filter("*.pid.json", I18n.gpTr("doc.pid_filter"))
 	gpFileDialog.file_selected.connect(gpFileCoord.gpOnFileSelected)
+	gpFileDialog.dir_selected.connect(gpFileCoord.gpOnListDirSelected)
 	add_child(gpFileDialog)
 
 	I18n.gpLocaleChanged.connect(_gpOnLocaleChanged)
@@ -500,6 +506,10 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 	# dialog (seeded with that symbol's geometry) — not in-place editing.
 	# 图元上的双击 / 右键菜单请求宿主打开图元编辑对话框（预填该图元几何），非就地编辑。
 	gpCanvas.gpSymbolEditRequested.connect(gpSymbolLibCoord.gpOnSymbolEditRequested)
+	# Double click on the TITLE BLOCK opens the same frame / title-block dialog the menu uses
+	# (2026-10-16: the block had no editable path on the canvas at all).
+	# **双击图签**打开与菜单相同的图框 / 图签对话框（2026-10-16：此前图签在画布上完全没有可编辑路径）。
+	gpCanvas.gpTitleBlockEditRequested.connect(gpMenuCoord.gpOpenFrameDialog)
 	# Promote selected annotation shapes into a real symbol: open the Make-Symbol dialog.
 	# 把选中的注释图形提升为真正图元：打开「生成图元」对话框。
 	gpCanvas.gpMakeSymbolRequested.connect(gpSymbolLibCoord.gpOnMakeSymbolFromShapes)

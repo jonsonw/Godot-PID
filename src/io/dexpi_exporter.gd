@@ -434,13 +434,38 @@ static func _gpPrimitivesOf(gpDef: GPSymbolDef) -> Array:
 
 # Diagram values in CONCEPTUAL coordinates (Y down). The Y flip happens once, at write time.
 # Diagram 取值使用**概念坐标**（Y 向下）。Y 翻转只在写出时发生一次。
+#
+# ⚠️ THE EXTENT IS THE PAPER RECTANGLE, WHICH IS NOT ALWAYS (0, 0, W, H) (Rev.3 stage 0d) / ⚠️ 范围
+# 就是纸面矩形，而它不总是 (0, 0, W, H)（Rev.3 阶段 0d）：the four values were hard-coded to the world
+# origin until this stage, because the paper WAS the world origin. Since the sheet can be MOVED, the
+# extent has to be read off GPSheet.gpPaperOrigin — otherwise an export of a moved drawing violates the
+# standing rule that every coordinate lies INSIDE the Diagram extent.
+# 这四项在此之前硬写为世界原点，因为纸面**就是**世界原点。由于图纸可被**移动**，范围必须自
+# GPSheet.gpPaperOrigin 读出 —— 否则一张被移动过的图纸导出后，会违反「每个坐标都落在 Diagram 范围
+# **之内**」这条常设规则。
+#
+# Nothing else had to change, and that is the point: the drawing's coordinates are absolute world
+# millimetres that travel WITH the paper, so their positions relative to the paper are untouched, and
+# gpFlipY() is a pure mirror about y = 0 — hence y ∈ [origin.y, origin.y + H] maps into
+# [−(origin.y + H), −origin.y], exactly the MinY / MaxY written below. The extent therefore tracks the
+# geometry instead of drifting away from it.
+# 其余无需改动，而这正是要点：图纸坐标是随纸面**同行**的绝对世界毫米，故它们相对纸面的位置丝毫未变，
+# 而 gpFlipY() 是关于 y = 0 的纯镜像 —— 于是 y ∈ [origin.y, origin.y + H] 映射到 [−(origin.y + H),
+# −origin.y]，正是下方写出的 MinY / MaxY。范围因此跟着几何走，而不是与之分离。
+#
+# The paper's corner is computed here rather than taken from GPFrameGeometry.gpPaperRect() for the same
+# reason _gpUsageScale above copies its one-line formula: io may depend on core, but reaching into the
+# view-math module for a four-value rectangle would be a dependency bought for nothing.
+# 纸角在此就地算出、而不取自 GPFrameGeometry.gpPaperRect()，理由与上方 _gpUsageScale 复制其一行公式
+# 相同：io 虽可依赖 core，但为一个四值矩形去够视图数学模块，是白买一份依赖。
 static func _gpDiagramOf(gpSheet: GPSheet) -> Dictionary:
+	var gpOrigin: Vector2 = gpSheet.gpPaperOrigin
 	return {
 		"name": gpSheet.gpName,
-		"min_x": 0.0,
-		"min_y": 0.0,
-		"max_x": float(gpSheet.gpWidthMM),
-		"max_y": float(gpSheet.gpHeightMM),
+		"min_x": float(gpOrigin.x),
+		"min_y": float(gpOrigin.y),
+		"max_x": float(gpOrigin.x + gpSheet.gpWidthMM),
+		"max_y": float(gpOrigin.y + gpSheet.gpHeightMM),
 		# ASSUMPTION: BackgroundColor is serialised as #rrggbb. The spec types it as Color but
 		# does not fix a textual form; #rrggbb is the conventional one. Flagged for confirmation.
 		# 假设：BackgroundColor 以 #rrggbb 序列化。规范将其类型定为 Color 但未规定文本形式；

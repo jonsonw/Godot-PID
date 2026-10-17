@@ -139,3 +139,48 @@ func gpTestSectionTitleShowsGroupAndCount() -> void:
 	var gpGeneral: String = GPPropertyForm.gpSectionTitle(GPPropertyForm.GP_UNGROUPED, 1)
 	gpCheck(gpGeneral.contains("通用") or gpGeneral.contains("General"),
 		"ungrouped fields are titled with the general bucket")
+
+
+# ---- 6. custom entries & search (Rev.3 stage 1.5, R2) / 自定义条目与检索 ----
+
+# The custom section and the orphan section read the SAME storage with two intents, so their
+# row sets must agree — otherwise the panel would show one set and edit another.
+# 自定义段与孤儿段读同一份存储、只是意图不同，故两者行集必须一致 —— 否则面板会显示一套、
+# 编辑另一套。
+func gpTestAdhocRowsAreTheOrphanSet() -> void:
+	var gpProps: Dictionary = {"legacy_kw": 7.5, "head": 1.0}
+	var gpA: Array[Dictionary] = GPPropertyForm.gpAdhocRows(_gpSchema(), gpProps)
+	var gpO: Array[Dictionary] = GPPropertyForm.gpOrphanRows(_gpSchema(), gpProps)
+	gpEq(gpA.size(), 1, "only the schema-foreign key is a custom entry")
+	gpEq(gpA.size(), gpO.size(), "custom rows and orphan rows are the same size")
+	gpEq(str(gpA[0]["key"]), str(gpO[0]["key"]), "and the same key")
+	gpEq(float(gpA[0]["value"]), 7.5, "the value rides along verbatim")
+
+
+# An empty query returns EVERY declared row flattened; a query matches label, key or value,
+# case-insensitively. The search must never fabricate a row the sections would not show.
+# 空查询返回全部声明行（摊平）；查询按标签 / 键 / 取值匹配、不区分大小写。
+# 检索绝不可捏造分组视图不会显示的行。
+func gpTestSearchEmptyQueryReturnsEverything() -> void:
+	gpEq(GPPropertyForm.gpSearch(_gpSchema(), {}, "").size(), 3,
+		"an empty query returns every declared row")
+	gpEq(GPPropertyForm.gpSearch(_gpSchema(), {}, "   ").size(), 3,
+		"a blank query behaves like an empty one")
+
+
+func gpTestSearchMatchesKeyAndValue() -> void:
+	gpEq(GPPropertyForm.gpSearch(_gpSchema(), {}, "head").size(), 1, "matching by key")
+	gpEq(GPPropertyForm.gpSearch(_gpSchema(), {}, "30").size(), 1, "matching by (default) value")
+	gpEq(GPPropertyForm.gpSearch(_gpSchema(), {"head": 55.0}, "55").size(), 1,
+		"matching by the instance's override value")
+	gpEq(GPPropertyForm.gpSearch(_gpSchema(), {}, "no_such_field").size(), 0,
+		"a miss returns nothing")
+
+
+func gpTestSearchMatchesLabelCaseInsensitively() -> void:
+	var gpSc: GPPropertySchema = GPPropertySchema.new()
+	var gpF: GPPropertyDef = _gpField("power", "", 1, GPPropertyDef.GPKind.GP_STRING, "")
+	gpF.gpLabel = "Power Rating"
+	gpSc.gpFields.append(gpF)
+	gpEq(GPPropertyForm.gpSearch(gpSc, {}, "power RATING").size(), 1,
+		"label match is case-insensitive")

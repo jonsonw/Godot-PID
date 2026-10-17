@@ -134,6 +134,35 @@ func gpRequestReconnectEdge(gpEdgeId: String, gpIsFrom: bool, gpNewRef: Dictiona
 func gpRequestSetEdgeTag(gpEdgeId: String, gpTag: String) -> bool:
 	return gpHost.gpActions.gpSetEdgeTag(gpEdgeId, gpTag)
 
+
+# Rename one node's tag (Rev.3 stage 1.5, R1): the in-place node text editor's commit port.
+# One undo step; a duplicate tag is refused by the service (gpLastRefusal carries the reason).
+# 修改一个图元的位号（Rev.3 阶段 1.5，R1）：图元就地文字编辑器的提交端口。
+# 一个撤销步；重复位号由服务拒绝（gpLastRefusal 携带原因）。
+func gpRequestSetNodeTag(gpNodeId: String, gpTag: String) -> bool:
+	return gpHost.gpActions.gpSetTag(gpNodeId, gpTag)
+
+# Set one property value of one node (stage 2): the in-place editor's commit port for
+# GENERATOR text blocks, whose content lives in gpProps rather than the tag. One undo step
+# (GPEditService.gpSetProperty wraps GPSetPropertyCommand); refusals travel in gpLastRefusal.
+# 设置某节点的一个属性值（阶段 2）：就地编辑器对 GENERATOR 文本块的提交端口 —— 其内容存于
+# gpProps 而非位号。一个撤销步（GPEditService.gpSetProperty 包装 GPSetPropertyCommand）；
+# 拒绝原因经 gpLastRefusal 回传。
+func gpRequestSetNodeProp(gpNodeId: String, gpKey: String, gpValue: Variant) -> bool:
+	return gpHost.gpActions.gpSetProperty(gpNodeId, gpKey, gpValue)
+
+
+# Stage 3 (S3): a grid-table structure operation (insert/delete row/col) as one undo step.
+# 阶段 3（S3）：grid 表格结构操作（插入/删除行/列），一个撤销步。
+func gpRequestTableOp(gpOp: String, gpNodeId: String, gpRow: int, gpCol: int) -> bool:
+	return gpHost.gpActions.gpMutateTable(gpNodeId, gpOp, gpRow, gpCol)
+
+# Stage 3 (S4): commit a grid-table props snapshot pair (the column-width drag's commit).
+# 阶段 3（S4）：提交一对 grid 表格 props 快照（列宽拖拽的提交）。
+func gpRequestTableSnapshot(gpNodeId: String, gpBefore: Dictionary,
+		gpAfter: Dictionary) -> bool:
+	return gpHost.gpActions.gpCommitTableSnapshot(gpNodeId, gpBefore, gpAfter)
+
 # Delete edges by id as one undo step. / 按 id 删除边（一步撤销）。
 func gpRequestDeleteEdges(gpEdgeIds: Array[String]) -> bool:
 	return gpHost.gpActions.gpDeleteEdges(gpEdgeIds)
@@ -148,6 +177,55 @@ func gpRequestConnectEdge(gpFromRef: Dictionary, gpToRef: Dictionary, gpKind: St
 # 移动某节点的位号标签。偏移为归一化值（1.0 = 半个包络）。
 func gpRequestSetLabelOffset(gpNodeId: String, gpOffset: Vector2) -> bool:
 	return gpHost.gpActions.gpSetLabelOffset(gpNodeId, gpOffset)
+
+
+# Set the displayed sheet's frame margins as ONE undo step (Rev.3 stage 0c).
+# 把所显示图纸的图框边距作为**一个**撤销步写入（Rev.3 阶段 0c）。
+#
+# The sheet comes from the HOST, not from the caller: a caller that held its own sheet reference could
+# pass a stale one after a tab switch, and the frame would then move on a sheet that is not on screen.
+# 图纸取自**宿主**而非调用方：调用方若自持图纸引用，切换标签后可能传入陈旧的那张，图框便会动到一张
+# 并不显示在屏幕上的图纸上。
+# The repaint is NOT done here — the command emits GPSheet.gpSheetChanged and the sheet layer turns that
+# into a frame refresh plus a dirty mark, so an undo / redo repaints through exactly the same path.
+# 重绘**不**在此进行 —— 命令发射 GPSheet.gpSheetChanged，由图纸层转成图框刷新与脏标记，故撤销 / 重做
+# 走的是同一条路径重绘。
+func gpRequestSetFrameMargins(gpMargins: Array) -> bool:
+	if gpHost.gpSheet == null:
+		return false
+	return gpHost.gpActions.gpSetFrameMargins(gpHost.gpSheet, gpMargins)
+
+
+# Dock the title block to a corner at an offset, as ONE undo step (Rev.3 stage 1).
+# 把图签停靠到某个角、并带上偏移，作为**一个**撤销步（Rev.3 阶段 1）。
+#
+# The sheet comes from the HOST for exactly the reason the margins do (a caller holding its own sheet
+# reference could pass a stale one after a tab switch). The repaint is NOT done here — the command emits
+# GPSheet.gpSheetChanged and the sheet layer turns that into a frame refresh plus a dirty mark, so an
+# undo / redo repaints through exactly the same path.
+# 图纸取自**宿主**，理由与边距完全相同（调用方若自持图纸引用，切换标签后可能传入陈旧的那张）。重绘**不**在此
+# 进行 —— 命令发射 GPSheet.gpSheetChanged，由图纸层转成图框刷新与脏标记，故撤销 / 重做走的是同一条路径重绘。
+func gpRequestSetTitleBlockPlacement(gpAnchor: int, gpOffset: Vector2) -> bool:
+	if gpHost.gpSheet == null:
+		return false
+	return gpHost.gpActions.gpSetTitleBlockPlacement(gpHost.gpSheet, gpAnchor, gpOffset)
+
+# Move the WHOLE SHEET (paper + frame + every graphic) as ONE undo step (Rev.3 stage 0d).
+# 平移**整张图纸**（纸面 + 图框 + 全部图形）作为**一个**撤销步（Rev.3 阶段 0d）。
+#
+# The sheet comes from the HOST for exactly the reason the margins do (a caller holding its own sheet
+# reference could pass a stale one after a tab switch); the GRAPH is not passed at all — the command
+# takes it from the command context, which is the same one this host already routes its edits through.
+# 图纸取自**宿主**，理由与边距完全相同（调用方若自持图纸引用，切换标签后可能传入陈旧的那张）；**图**根本
+# 不在此传入 —— 命令自命令上下文取它，而宿主本就把编辑路由经同一个上下文。
+# The repaint is NOT done here — the command emits GPSheet.gpSheetChanged and the sheet layer turns that
+# into a frame refresh plus a dirty mark, so an undo / redo repaints through exactly the same path.
+# 重绘**不**在此进行 —— 命令发射 GPSheet.gpSheetChanged，由图纸层转成图框刷新与脏标记，故撤销 / 重做
+# 走的是同一条路径重绘。
+func gpRequestTranslateSheet(gpDelta: Vector2) -> bool:
+	if gpHost.gpSheet == null:
+		return false
+	return gpHost.gpActions.gpTranslateSheet(gpHost.gpSheet, gpDelta)
 
 # Move the line number of one edge . The offset is in WORLD millimetres, added on top of the
 # automatic placement; Vector2.ZERO means "back to the automatic placement".

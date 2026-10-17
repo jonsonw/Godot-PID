@@ -99,24 +99,35 @@ func gpInit(gpN: GPPIDNode, gpD: GPSymbolDef, gpGraphIn: GPPIDGraph = null,
 	gpRepaint()
 
 
-# Update selection highlight state and redraw.
-# 更新选中高亮状态并重绘。
+# Update selection highlight state and redraw — ONLY when it actually changed. The binder's sync
+# runs on EVERY canvas repaint (GPCanvas2D._draw calls gpSyncViews first), so an unguarded
+# assignment here made every mouse motion repaint every symbol: the hover-flicker root cause.
+# 更新选中高亮状态并重绘 —— **仅在真正变化时**。绑定器的 sync 在画布**每一次**重绘时都会跑
+#（GPCanvas2D._draw 先调 gpSyncViews），此处无守卫的赋值使每次鼠标移动都重绘全部图元：
+# 即悬停闪烁的根源。
 func gpSetSelected(gpSel: bool) -> void:
+	if gpSelected == gpSel:
+		return
 	gpSelected = gpSel
 	gpRepaint()
 
 
-# Update "connection source" highlight state and redraw.
-# 更新「连接源」高亮状态并重绘。
+# Update "connection source" highlight state and redraw — same guard as gpSetSelected, for the
+# same reason: the sync runs on every canvas repaint.
+# 更新「连接源」高亮状态并重绘 —— 与 gpSetSelected 同一守卫、同一理由：sync 在每次画布重绘时都会跑。
 func gpSetConnectSource(gpSrc: bool) -> void:
+	if gpConnectSource == gpSrc:
+		return
 	gpConnectSource = gpSrc
 	gpRepaint()
 
 
-# Public wrapper to sync the world position from the graph node.
-# 公开包装：从图节点同步世界坐标位置。
-func gpUpdateTransform() -> void:
-	_gpUpdateTransform()
+# Public wrapper to sync the world position from the graph node. Returns TRUE when the transform
+# actually changed, so the binder can skip the repaint when nothing moved (flicker fix).
+# 公开包装：从图节点同步世界坐标。变换**真正变化**时返回 true，使绑定器能在无位移时跳过重绘
+#（闪烁修复）。
+func gpUpdateTransform() -> bool:
+	return _gpUpdateTransform()
 
 
 # Repaint BOTH layers: this node paints the label, the body child paints the glyph and the
@@ -137,26 +148,41 @@ func gpRepaint() -> void:
 		_gpBody.queue_redraw()
 
 
-# Sync position, flip and rotation from the underlying graph node.
-# 从底层图节点同步位置、翻转与旋转。
-func _gpUpdateTransform() -> void:
+# Sync position, flip and rotation from the underlying graph node. Returns TRUE when anything
+# actually changed — the caller decides whether that is worth a repaint. The comparison is EXACT
+# (not is_equal_approx) on purpose: the mount derivation is deterministic, so the same graph data
+# must produce the very same frame; an approximation here would keep reporting "changed" on
+# floating noise and defeat the guard.
+# 从底层图节点同步位置、翻转与旋转。任何东西**真正变化**时返回 true —— 是否值得重绘由调用方决定。
+# 比较刻意用**精确**相等（不用 is_equal_approx）：挂载推导是确定性的，同一份图数据必须产出同一个
+# 坐标系；若用近似比较，浮点噪声会一直报「变了」、守卫形同虚设。
+func _gpUpdateTransform() -> bool:
 	if gpNode == null:
-		return
+		return false
 	# The world frame comes from GPMountResolver, NOT from the node's own fields. For a MOUNTED
 	# child the node stores no world coordinate (it is derived from the host), so reading
 	# gpPosition here would leave the glyph behind while its pipes followed the host.
 	# 世界坐标系取自 GPMountResolver，而非节点自身字段。挂载子件不存世界坐标（由宿主推导），
 	# 故此处读 gpPosition 会让字形落在原处、而它的管线跟着宿主跑。
 	var gpFrame: Dictionary = GPMountResolver.gpWorldTransform(gpGraph, gpDefLookupCb, gpNode)
-	position = gpFrame["origin"]
+	var gpOrigin: Vector2 = gpFrame["origin"]
+	var gpFlip: bool = bool(gpFrame["flipped"])
+	var gpRot: float = deg_to_rad(float(gpFrame["rot_deg"]))
+	var gpFlipScale: Vector2 = Vector2(-1.0, 1.0) if gpFlip else Vector2.ONE
+	var gpChanged: bool = position != gpOrigin
+	if _gpBody != null:
+		gpChanged = gpChanged or _gpBody.scale != gpFlipScale \
+			or not is_equal_approx(_gpBody.rotation, gpRot)
+	position = gpOrigin
 	if _gpBody == null:
-		return
+		return gpChanged
 	# Mirror first (in the symbol's own frame), then rotate — the SAME order GPPortResolver
 	# uses, otherwise a flipped-and-rotated valve's ports land on the wrong side of the glyph.
 	# 先镜像（在图元自身坐标系内），再旋转 —— 与 GPPortResolver 所用顺序一致，
 	# 否则「先翻转再旋转」的阀门端口会落在字形的错误一侧。
-	_gpBody.scale = Vector2(-1.0, 1.0) if bool(gpFrame["flipped"]) else Vector2.ONE
-	_gpBody.rotation = deg_to_rad(float(gpFrame["rot_deg"]))
+	_gpBody.scale = gpFlipScale
+	_gpBody.rotation = gpRot
+	return gpChanged
 
 
 # Draw the label(s). The glyph and the ports are painted by the body child.
@@ -171,6 +197,15 @@ func _draw() -> void:
 	if gpNode == null:
 		return
 	var gpLocale: String = gpStyle.gpLocale if gpStyle != null else "zh_CN"
+
+	# Stage 2 (D3): a GENERATOR:* definition's rendering is owned ENTIRELY by its generator
+	# (the body paints the spec + text lines). The label paths below would only add noise —
+	# an untagged block resolves its label to the localized type name and paint it AGAIN
+	# under the block.
+	# 阶段 2（D3）：GENERATOR:* 定义的渲染**完全**归其生成器所有（body 负责规格 + 文字行）。
+	# 下方标签路径只会添乱 —— 未编号块的标签会解析为本地化类型名，又一次画在块下方。
+	if gpDef != null and GPSymbolGeneratorRegistry.gpIsGenerator(gpDef.gpGeometrySource):
+		return
 
 	# ---- multi-slot path / 多槽路径 ----
 	if gpDef != null and not gpDef.gpLabelSlots.is_empty():
@@ -355,6 +390,36 @@ func gpDrawBody(gpCv: CanvasItem) -> void:
 
 	# If the definition carries a vector shape spec, render it natively (crisp at any zoom).
 	# 若定义带有矢量形状规格，则原生渲染（任意缩放均清晰）。
+	# Stage 2 (D3): a GENERATOR:* definition asks the REGISTRY for its render inputs instead
+	# of its static shapes — the renderer stays dumb: draw the returned spec, paint the
+	# returned text lines, and draw NOTHING when the spec is empty (explicit no-draw). While
+	# selected / connect-source the envelope still lights up so a pure-text block remains
+	# visible and targetable.
+	# 阶段 2（D3）：GENERATOR:* 定义向**注册表**索要渲染输入而非静态形状 —— 渲染器保持迟钝：
+	# 画返回的规格、绘返回的文字行，规格为空就什么都不画（显式不画）。选中 / 连线源时包络
+	# 仍然点亮，使纯文字块保持可见、可命中。
+	if gpDef != null and GPSymbolGeneratorRegistry.gpIsGenerator(gpDef.gpGeometrySource):
+		var gpGen: Dictionary = GPSymbolGeneratorRegistry.gpGenerate(gpDef, gpNode)
+		var gpSpec: Dictionary = gpGen.get("spec", {}) as Dictionary
+		if not gpSpec.is_empty():
+			GPSymbolPainter.gpDrawShape(gpCv, gpSpec, gpRect, gpFill, gpStroke, gpBorder)
+		elif gpSelected or gpConnectSource:
+			# Pure-text generator: NO FILLED highlight — the filled envelope buried the text
+			# under an opaque yellow block (user feedback 2026-10-17). The cue is an OUTLINE
+			# in the state color only: yellow = selected, green = connect source; the text
+			# itself stays fully readable in every state.
+			# 纯文字生成器：**绝不填充**高亮 —— 填充包络会把文字埋进不透明的黄色方块
+			#（用户实测反馈 2026-10-17）。提示只画**状态色描边**：黄=选中、绿=连线源；
+			# 文字在任何状态下都保持完全可读。
+			gpCv.draw_rect(gpRect, gpFill, false, gpBorder)
+		_gpDrawTextLines(gpCv, gpRect, gpGen.get("text_lines", PackedStringArray()) as PackedStringArray,
+			gpScale)
+		# Stage 3: the grid generator ALSO returns its cell list — the same structure the hit
+		# test and the cell editor consume. Paint each non-empty cell's text inside its rect.
+		# 阶段 3：grid 生成器同时返回格子列表 —— 与命中测试、格子编辑器消费的同一份结构。
+		# 把每个非空格子的文字画进它的格子里。
+		_gpDrawCellTexts(gpCv, gpGen.get("cells", []) as Array, gpScale)
+		return
 	if gpDef != null and not gpDef.gpShapes.is_empty():
 		GPSymbolPainter.gpDrawShape(gpCv, gpDef.gpShapeSpec(), gpRect, gpFill, gpStroke, gpBorder)
 	else:
@@ -404,3 +469,127 @@ func gpDrawBody(gpCv: CanvasItem) -> void:
 # 纯显示让步，刻意不放在此处。
 static func gpPortRadiusFor(gpSize: Vector2) -> float:
 	return clampf(minf(gpSize.x, gpSize.y) * GP_PORT_R_RATIO, GP_PORT_R_MIN, GP_PORT_R_MAX)
+
+
+# Paint the text lines a geometry GENERATOR returned, centred inside the envelope. Runs in the
+# body's own (flipped / rotated) frame, so the block turns with its definition — the same
+# transform semantics every static glyph has.
+# 绘制几何**生成器**返回的文字行，在包络内居中。运行于 body 自身（已翻转 / 已旋转）坐标系，
+# 故文本块随其定义一起转动 —— 与每个静态字形同一套变换语义。
+#
+# The line height follows the label path's design-pixel machinery (GPCanvasText.gpLabelFontFit +
+# gpTextScale + gpDrawPos), so generator text can never go blurry at any zoom — the exact defect
+# that machinery exists to prevent. Empty lines advance the pitch but paint nothing.
+# 行高沿用标签路径的设计像素机制（GPCanvasText.gpLabelFontFit + gpTextScale + gpDrawPos），
+# 故生成器文字在任何缩放下都不会发虚 —— 该机制正是为防这个缺陷而生。空行推进行距但不画。
+func _gpDrawTextLines(gpCv: CanvasItem, gpRect: Rect2, gpLines: PackedStringArray,
+		gpScale: float) -> void:
+	if gpLines.is_empty():
+		return
+	var gpFont: Font = ThemeDB.fallback_font
+	if gpStyle != null and gpStyle.gpSymbolFont != null:
+		gpFont = gpStyle.gpSymbolFont
+	# A1 REBASE (iron rule 89) + user feedback 2026-10-17: the note-block text rides the ×2
+	# rebase like every other drawing-area tier — the user's symbol font size is the IN-LINE
+	# tier (3.0 mm A3-era default), and annotation text renders at TWICE that (6.0 mm on the
+	# rebased sheet). A ratio, not a hard value: the setting stays meaningful.
+	# A1 重定基（铁律 89）+ 用户实测反馈 2026-10-17：备注块文字与其余图面档一起搭 ×2 重定基
+	# —— 用户图元字号是**在管档**（A3 时代默认 3.0mm），注释文字按其**两倍**渲染
+	#（重定基图面上即 6.0mm）。取**比例**而非写死：设置项保持有意义。
+	var gpFontMM: float = _gpBaseFontMM() * GP_ANNOTATE_FONT_SCALE
+	var gpFit: Vector2 = GPCanvasText.gpLabelFontFit(gpFontMM, gpCv)
+	var gpFontSz: int = int(gpFit.x)
+	# Line pitch in world mm: 1.5x the sheet height, the drafting default for stacked notes.
+	# 行距（世界 mm）：图面字高的 1.5 倍 —— 制图上堆叠备注的默认行距。
+	var gpPitch: float = gpFontMM * 1.5
+	var gpTotal: float = gpPitch * gpLines.size()
+	var gpCx: float = gpRect.get_center().x
+	var gpTop: float = gpRect.get_center().y - gpTotal * 0.5
+	var gpAscentMM: float = gpFont.get_ascent(gpFontSz) * gpFit.y / gpScale
+	# NOTE: every draw call here targets gpCv (the body item gpDrawBody paints through), so the
+	# draw transform must be set on gpCv as well — setting it on self would only reroute the
+	# VIEW's own draw queue and leave the text unscaled.
+	# 注意：此处的所有绘制都以 gpCv 为目标（gpDrawBody 经它落笔），故绘制变换也必须设在
+	# gpCv 上 —— 设在 self 上只会改写**视图**自己的绘制队列，文字将不缩放。
+	gpCv.draw_set_transform(Vector2.ZERO, 0.0, GPCanvasText.gpTextScale(gpFit, gpScale))
+	for gpI in range(gpLines.size()):
+		var gpLine: String = gpLines[gpI]
+		# A blank line still consumes its pitch (it is real content) but paints nothing.
+		# 空行仍占其行距（它是真实内容）但不画任何东西。
+		if gpLine.strip_edges() == "":
+			continue
+		var gpWpx: float = gpFont.get_string_size(gpLine, HORIZONTAL_ALIGNMENT_LEFT, -1.0,
+			gpFontSz).x
+		var gpWmm: float = gpWpx * gpFit.y / gpScale
+		var gpCenterY: float = gpTop + gpPitch * (float(gpI) + 0.5)
+		var gpBaseY: float = gpCenterY + gpAscentMM * 0.5
+		var gpAt: Vector2 = GPCanvasText.gpDrawPos(
+			Vector2(gpCx - gpWmm * 0.5, gpBaseY), gpFit, gpScale)
+		gpCv.draw_string(gpFont, gpAt, gpLine, HORIZONTAL_ALIGNMENT_LEFT, -1.0, gpFontSz,
+			Color(0.9, 0.9, 0.9))
+# Restore the identity so the port dots after this call are unaffected.
+# 复位为单位变换，使本次调用之后的端口圆点绘制不受影响。
+	gpCv.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+# Sheet-annotation cell text size cap (world mm): the reference table runs 6.5 mm rows
+# (A1-rebased from the 3.25 mm A3 measurement), where a full-size tag would overflow; the
+# value also clamps DOWN with the row height (0.62 factor keeps ~38% leading). Split out as
+# a const so tests can pin it. A1 REBASE (iron rule 89): 2.2 -> 4.4 with the row heights
+# (user feedback 2026-10-17: the table text was half size, double it).
+# 表格类注释的格子字高上限（世界 mm）：参照表行高 6.5mm（A3 实测 3.25 经 A1 重定基翻倍），
+# 整档位号字高会溢出；该值还随行高向下夹取（0.62 系数保留约 38% 行距）。单列常量便于测试
+# 钉住。A1 重定基（铁律 89）：2.2 -> 4.4 与行高同倍（用户实测反馈 2026-10-17：表格文字只有
+# 一半大，扩大一倍）。
+const GP_CELL_FONT_MM: float = 4.4
+
+# Annotation text-height RATIO over the user's in-line tier: the note-block (GENERATOR
+# multiline) text renders at TWICE the symbol font size — the A1-rebased annotation tier
+# (6.0 mm at the default 3.0 mm setting), matching the doubled tag tiers (iron rule 89).
+# Kept as a ratio so the user's setting stays meaningful. Pinned by the probe + the
+# visual-scale suite.
+# 注释字高相对用户在管档的**比例**：备注块（GENERATOR multiline）文字按图元字号的**两倍**
+# 渲染 —— 即 A1 重定基后的注释档（默认 3.0mm 设置下为 6.0mm），与翻倍后的位号档同口径
+#（铁律 89）。独立成比例常量使设置项保持有意义。
+const GP_ANNOTATE_FONT_SCALE: float = 2.0
+
+# Cell text horizontal padding (world mm) and the ascent fraction for vertical centring.
+# 格子文字的水平内边距（世界 mm）与垂直居中的 ascent 系数。
+const GP_CELL_PAD_MM: float = 1.0
+
+
+# Paint the GRID generator's cell texts. Runs in the body frame like the glyph; each cell
+# is drawn LEFT-aligned with a 1 mm padding, vertically centred on the row, and CLIPPED to
+# the cell width (draw_string's width arg gives the ellipsis for free). Empty cells draw
+# nothing — the grid lines themselves are the empty cell's look.
+# 绘制 grid 生成器的格子文字。与字形一样运行于 body 坐标系；每格**左对齐**、1mm 内边距、
+# 行内垂直居中、**按格宽裁剪**（draw_string 的 width 参数自带省略号）。空格不画 ——
+# 格线本身就是空格子的样子。
+func _gpDrawCellTexts(gpCv: CanvasItem, gpCells: Array, gpScale: float) -> void:
+	if gpCells.is_empty() or gpNode == null:
+		return
+	var gpFont: Font = ThemeDB.fallback_font
+	if gpStyle != null and gpStyle.gpSymbolFont != null:
+		gpFont = gpStyle.gpSymbolFont
+	for gpCell in gpCells:
+		var gpKey: String = str((gpCell as Dictionary)["key"])
+		var gpText: String = str(gpNode.gpProps.get(gpKey, ""))
+		if gpText == "":
+			continue
+		var gpRect: Rect2 = (gpCell as Dictionary)["rect"] as Rect2
+		var gpFontMM: float = minf(GP_CELL_FONT_MM, gpRect.size.y * 0.62)
+		var gpFit: Vector2 = GPCanvasText.gpLabelFontFit(gpFontMM, gpCv)
+		var gpFontSz: int = int(gpFit.x)
+		var gpAscentMM: float = gpFont.get_ascent(gpFontSz) * gpFit.y / gpScale
+		var gpBaseY: float = gpRect.get_center().y + gpAscentMM * 0.5
+		var gpAt: Vector2 = GPCanvasText.gpDrawPos(
+			Vector2(gpRect.position.x + GP_CELL_PAD_MM, gpBaseY), gpFit, gpScale)
+		# Clip width in design px: cell inner width converted through the same residual the
+		# text scale uses (world mm -> design px is * gpScale / gpFit.y).
+		# 设计像素下的裁剪宽：格子内宽经文字缩放同一残差换算（世界 mm -> 设计像素乘
+		# gpScale / gpFit.y）。
+		var gpClipPx: float = (gpRect.size.x - GP_CELL_PAD_MM * 2.0) * gpScale / gpFit.y
+		gpCv.draw_set_transform(Vector2.ZERO, 0.0, GPCanvasText.gpTextScale(gpFit, gpScale))
+		gpCv.draw_string(gpFont, gpAt, gpText, HORIZONTAL_ALIGNMENT_LEFT, gpClipPx, gpFontSz,
+			Color(0.9, 0.9, 0.9))
+		gpCv.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)

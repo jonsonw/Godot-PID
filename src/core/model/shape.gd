@@ -295,6 +295,29 @@ func gpBBox() -> Rect2:
 	return Rect2(Vector2.ZERO, Vector2.ZERO)
 
 
+# ---------------------------------------------------------------------------
+# 整图平移（Rev.3 阶段 0d） / Whole-sheet translation
+# ---------------------------------------------------------------------------
+# Move every ABSOLUTE world coordinate this shape owns by gpDelta. gpPoints is the complete list — for
+# all five kinds the stored points are world positions (a circle stores its CENTRE in points[0], a rect
+# its two opposite corners, an arc its centre + two rim points, a line / polyline its vertices).
+# 把本图元持有的每个**绝对世界坐标**按 gpDelta 平移。`gpPoints` 就是完整清单 —— 五种图型存的点都是
+# 世界位置（圆把**圆心**存在 points[0]、矩形存两个对角点、弧存圆心 + 弧上两点、线 / 折线存顶点）。
+#
+# ⚠️ gpRadius AND gpHandles ARE NOT TOUCHED / ⚠️ gpRadius 与 gpHandles **不动**：
+#   * gpRadius — a circle's size is independent of where it is; translating the centre is the whole move
+#     (a world delta added to a radius would grow the circle by the drag distance).
+#     gpRadius —— 圆的大小与它在哪儿无关；平移圆心即完成整次移动（把世界位移加到半径上，会让圆按拖拽
+#     距离长大）。
+#   * gpHandles — Bézier handles stored as offsets relative to their vertex, so they are
+#     translation-invariant by construction. Adding the delta would bend every curve by twice the drag.
+#     gpHandles —— 贝塞尔手柄以「相对其顶点」的偏移存储，故构造上即与平移无关。加上位移会让每条曲线
+#     按两倍拖拽量变形。
+func gpTranslate(gpDelta: Vector2) -> void:
+	for gpI in range(gpPoints.size()):
+		gpPoints[gpI] = gpPoints[gpI] + gpDelta
+
+
 # Serialize to a dictionary (JSON-friendly).
 # 序列化为字典（JSON 友好）。
 func gpToDict() -> Dictionary:

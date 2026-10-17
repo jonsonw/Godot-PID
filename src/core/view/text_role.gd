@@ -20,8 +20,17 @@ extends RefCounted
 #   3.0  mm  processinstrumentation…label   x4    仪表功能标注  PICSA 4712.02
 #   3.0  mm  failactionlabel                x3    故障安全位    F.C. / F.O.
 #   2.5  mm  label / equipmentbarlabel      x6    标题栏字段    APPROVED BY / DRAWING NO
-#   2.85 mm  (border grid reference)        x40   图框栅格参考号 1..9
+#   2.85 mm  (border grid reference)        x40   图框分区标号 1..12 / A..H
 #   4.0  mm  (drawing title)                x2    图纸标题      DEXPI example PID
+#
+# ⚠️ The border-grid row above used to read "1..9". Re-measured 2026-10-15 over BOTH reference files
+# (`图框及注释/05_输入/图框.svg` and `图元库/svg_full_pid.svg`): each carries 12 column numbers and
+# 8 row letters, twice (top+bottom, left+right) = 40 labels, i.e. an A3 grid of 12 x 8. The "x40"
+# count was right, the "1..9" range was not. Rev.3 stage 0b is the consumer of this constant.
+# ⚠️ 上方「图框栅格」一行原写「1..9」。2026-10-15 对**两份**参照文件重新实测（`图框及注释/05_输入/
+# 图框.svg` 与 `图元库/svg_full_pid.svg`）：各含 12 个列号与 8 个行字母、各出现两次（上下、左右）
+# = 40 个标号，即 A3 的 12×8 格网。「x40」的数目是对的，「1..9」的范围是错的。Rev.3 阶段 0b 即是
+# 本常量的消费方。
 #
 # So the drawing area has exactly TWO tiers — 4.5 for equipment tags, 3.0 for everything drawn
 # in-line — and the title block is its own tier. One global font size cannot express that, which
@@ -40,15 +49,39 @@ extends RefCounted
 
 # The two tiers of the drawing area / 图面区的两档字高。
 # 设备位号：equipmenttagnamelabel，C01 中 H1007 / P4711 / T4750 均取此值。
-const GP_EQUIPMENT_TAG_MM: float = 4.5
+# ⚠️ A1 REBASE (2026-10-16): both drawing-area tiers ride the SYMBOLS, which were rebased ×2 in
+# data (GP_NOMINAL + the pack manifests), so these two constants double with them — the drawing
+# stays proportionally identical. The three title-block/frame tiers below DO NOT ride this rebase;
+# they stay at their A3-era values and are scaled by GPSheet.gpFrameScale() at the consumer.
+# ⚠️ A1 重定基（2026-10-16）：图面区两档随**图元**走，而图元已在数据层 ×2（GP_NOMINAL 与包
+# manifest），故这两档随之翻倍 —— 图面比例不变。下方图签/图框三档**不**搭这次重定基：保持 A3
+# 时代值，由消费方按 GPSheet.gpFrameScale() 缩放。
+const GP_EQUIPMENT_TAG_MM: float = 9.0
 # 在管标注：管线号 / 阀门 / 管口 / 仪表 / 联锁位，C01 中统一取此值。
-const GP_INLINE_TAG_MM: float = 3.0
+const GP_INLINE_TAG_MM: float = 6.0
 
 # Title block, drawing title and frame grid reference, per the measurement above.
-# 标题栏字段、图纸标题与图框栅格参考号，依上述实测。
+# 标题栏字段、图纸标题与图框分区标号，依上述实测。
 const GP_TITLE_FIELD_MM: float = 2.5
 const GP_DRAWING_TITLE_MM: float = 4.0
+# Consumed by GPFrameView.gpDrawZoneGrid through GPFrameGeometry.gpZoneLabels (Rev.3 stage 0b). It sat
+# pinned-but-unused for a while, which is exactly why a measured value with no consumer should be
+# treated as an unfinished feature rather than as dead weight.
+# 经 GPFrameGeometry.gpZoneLabels 由 GPFrameView.gpDrawZoneGrid 消费（Rev.3 阶段 0b）。它曾有一段
+# 时间「被钉住却无人使用」—— 这正是「有实测值、无消费方」应当被当作未完成的功能、而非死重的原因。
 const GP_FRAME_GRID_MM: float = 2.85
+
+# Annotation-block tiers, mirrored from GPSymbolView (render layer). Core may not reference
+# render, so the print model reads THESE and a test pins the pairs equal — the same
+# single-source-by-test device GPFrameView's constants use.
+# 注释块档位，自 GPSymbolView（render 层）镜像。core 不能引用 render，故打印模型读取
+# **此处**，由测试钉住两两相等 —— 与 GPFrameView 常量所用的「测试维持单一来源」同一手法。
+# GP_ANNOTATE_SCALE = the note-block multiplier over the in-line tier (×2 after the A1 rebase).
+# GP_CELL_TEXT_MM   = the grid-table cell text cap, clamped down by row height at the consumer.
+# GP_ANNOTATE_SCALE = 备注块相对在管档的倍率（A1 重定基后 ×2）。
+# GP_CELL_TEXT_MM   = 表格格子字高上限，消费方再按行高向下钳制。
+const GP_ANNOTATE_SCALE: float = 2.0
+const GP_CELL_TEXT_MM: float = 4.4
 
 # Categories whose tag is an EQUIPMENT tag, i.e. the 4.5 mm tier.
 # 其位号属于**设备位号**（4.5mm 档）的类别。

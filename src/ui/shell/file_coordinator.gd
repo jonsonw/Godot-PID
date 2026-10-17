@@ -40,6 +40,12 @@ var gpAutoSaveTimer: Timer = null
 # 护栏必须能兑现「丢弃」这一选择。
 var _gpExitPromptOpen: bool = false
 
+# True while the list-export directory picker is open. A separate flag from
+# gpPendingFileAction because the dir_selected signal has no action payload.
+# 清单导出目录选择器打开期间为真。与 gpPendingFileAction 分开，
+# 因为 dir_selected 信号不携带动作负载。
+var _gpPickingListDir: bool = false
+
 
 # ============================ autosave (ADR-9) ============================
 # ============================ 自动保存（ADR-9） ============================
@@ -272,6 +278,47 @@ func gpPickExportPath(gpKind: String) -> void:
 	# 以当前工程名预填，使默认名已带**正确**的扩展名 —— 保存对话框从不会自动补扩展名。
 	gpHost.gpFileDialog.current_file = _gpSuggestedExportName(gpKind)
 	gpHost.gpFileDialog.popup_centered()
+
+
+# Pick the FOLDER that receives the equipment lists. GPListBasic writes ONE CSV PER
+# CATEGORY into a directory — a deliverable shaped like "one file per discipline" — so
+# the natural picker is a directory picker, not a save-file picker. A separate flag (not
+# gpPendingFileAction) guards the dir_selected handler: that signal fires for any future
+# directory-mode use of the shared dialog, and an unguarded handler would export lists
+# on a stranger's directory pick.
+# 选择接收设备清单的**目录**。GPListBasic 向一个目录写入「一类别一 CSV」——
+# 交付物天然是「一专业一文件」的形态，故用目录选择器而非保存文件选择器。
+# 用独立标志（而非 gpPendingFileAction）守卫 dir_selected 处理器：共享对话框将来
+# 还会有别的目录模式用法，不带守卫的处理器会在别人选目录时顺手导出清单。
+func gpPickListExportDir() -> void:
+	_gpPickingListDir = true
+	gpHost.gpFileDialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	_gpApplyDialogFilters("")
+	# Open in the project's own folder when there is one, so the default is already
+	# close to where the user keeps their deliverables.
+	# 有当前工程时打开其所在目录，使默认位置已贴近用户存放交付物的地方。
+	var gpDir: String = gpHost.gpCurrentPath.get_base_dir()
+	if gpDir != "":
+		gpHost.gpFileDialog.current_dir = gpDir
+	gpHost.gpFileDialog.popup_centered()
+
+
+# Handle the directory pick. Only meaningful while the list-export picker is open; any
+# other use of directory mode arrives here too and must fall through silently.
+# 处理目录选择。仅当清单导出选择器打开时有意义；目录模式的其它用法也会到达此处，
+# 必须静默穿过。
+func gpOnListDirSelected(gpDir: String) -> void:
+	if not _gpPickingListDir:
+		return
+	_gpPickingListDir = false
+	var gpOut: Dictionary = GPListBasic.gpExportLists(gpHost.gpActiveGraph(), gpDir,
+		gpHost.gpDefs)
+	if gpOut.is_empty():
+		# An empty graph yields no categories — say so instead of a success line with 0.
+		# 空图产出不了类别 —— 明说，而非报一条带 0 的成功。
+		gpHost.gpSetState("status.export_empty")
+		return
+	gpHost.gpSetState("status.list_exported", [gpOut.size(), gpDir])
 
 
 # Point the shared dialog's filters at the right format before EVERY popup. Without this the

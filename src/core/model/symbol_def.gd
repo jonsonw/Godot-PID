@@ -34,6 +34,59 @@ enum GPSymbolCategory { GP_EQUIPMENT, GP_VALVE, GP_PIPE, GP_FITTING, GP_INSULATI
 # 它是「类别」属性而非单个字形属性，因此同族图元以同一尺寸渲染。
 @export var gpDefaultSize: Vector2 = Vector2(64, 64)
 
+# ---------------------------------------------------------------------------
+# 参与策略字段（阶段 2「标注类图元通则」，2026-10-16；D2/D3）。
+# Participation policy fields (stage 2, "annotation-symbol general rules").
+# 全部默认值 == 今天的行为 ⇒ 既有图元包逐字节不变；定义层字段走 gpFromDict 的全量
+# .get(key, default)，**不进**节点持久化白名单。语义正交（不推挤 ≠ 不挂载），禁合并，
+# 也不再拆更细（YAGNI）。消费点：normalizer（尺寸）、node_collision / edge_auto_route
+# （避让）、canvas_hit_test（拾取）、tag 通路（编号）、place_tool（锚定）、
+# select_tool 释放路径（挂载）、symbol_view + 生成器注册表（几何来源）。
+# Every default equals today's behaviour, so existing packs stay byte-identical; the
+# fields live on the DEFINITION layer (gpFromDict's .get(key, default)) and never enter
+# the node persistence whitelist. The seven concerns are orthogonal — do not merge them,
+# do not split them further.
+# ---------------------------------------------------------------------------
+const GP_SIZE_MODE_CATEGORY: String = "CATEGORY"
+const GP_SIZE_MODE_EXPLICIT: String = "EXPLICIT"
+const GP_GEOMETRY_STATIC: String = "STATIC"
+const GP_GEOMETRY_GENERATOR_PREFIX: String = "GENERATOR:"
+const GP_PICK_FULL: String = "FULL"
+const GP_PICK_BORDER: String = "BORDER"
+const GP_PICK_NONE: String = "NONE"
+const GP_PLACE_FREE: String = "FREE"
+const GP_PLACE_SHEET_ANCHOR_PREFIX: String = "SHEET_ANCHOR:"
+
+# 标称尺寸来源：CATEGORY = 取类别包络（归一化器覆写）；EXPLICIT = 保留作者尺寸（尺寸豁免）。
+# Nominal-size source: CATEGORY = the category envelope (normalizer overwrites); EXPLICIT =
+# keep the authored size (the size exemption).
+@export var gpSizeMode: String = GP_SIZE_MODE_CATEGORY
+
+# 几何来源：STATIC = gpShapes；"GENERATOR:<id>" = 生成器注册表按 id 产出形状（+ 可选文字行）。
+# Geometry source: STATIC = gpShapes; "GENERATOR:<id>" = the registry produces shapes
+# (plus optional text lines) by id.
+@export var gpGeometrySource: String = GP_GEOMETRY_STATIC
+
+# 拾取模式：FULL = 整包络；BORDER = 仅边框带；NONE = 不可拾取。
+# Pick mode: FULL = whole envelope; BORDER = border band only; NONE = unpickable.
+@export var gpPickMode: String = GP_PICK_FULL
+
+# 自动避让参与：false ⇒ 碰撞松弛与布线障碍都跳过本图元（表格 / 文本与邻件互不推挤）。
+# Avoid participation: false ⇒ both collision relaxation and routing obstacles skip it.
+@export var gpAvoidRouting: bool = true
+
+# 可编号：false ⇒ 放置不铸位号、重排候选集显式排除（绝不靠空前缀碰运气）。
+# Taggable: false ⇒ placement mints no tag and renumbering excludes it explicitly.
+@export var gpTaggable: bool = true
+
+# 放置策略：FREE = 指哪放哪；"SHEET_ANCHOR:<BR|BL|TR|TL>" = 落点吸附到图框内角。
+# Place policy: FREE = as clicked; "SHEET_ANCHOR:<...>" = the drop snaps to an inner corner.
+@export var gpPlacePolicy: String = GP_PLACE_FREE
+
+# 可挂载：false ⇒ 释放到宿主上**不**就地挂载（落为松散图元）—— Rev.3 §8 新增的第 7 字段。
+# Mountable: false ⇒ releasing onto a host does NOT mount (stays loose) — the 7th field, Rev.3 §8.
+@export var gpMountable: bool = true
+
 # Vector shape primitives for native rendering, in a 100x100 UNIT BOX.
 # 用于原生渲染的矢量形状原语，位于 100x100 单位框内。
 # UNIFIED MODEL : the symbol editor and the main canvas now share this single
@@ -324,6 +377,24 @@ func gpToDict() -> Dictionary:
 		gpOut["part_tag_key"] = gpPartTagKey
 	if gpPartTagPrefix != "":
 		gpOut["part_tag_prefix"] = gpPartTagPrefix
+	# Policy fields: written ONLY when non-default, so every definition that does not opt
+	# in keeps its previous bytes (same archive-stability rule as the mount keys above).
+	# 策略字段：仅在非默认时写出，故未 opting-in 的定义保持原有字节（与上方挂载键同一
+	# 存档稳定性规则）。
+	if gpSizeMode != GP_SIZE_MODE_CATEGORY:
+		gpOut["size_mode"] = gpSizeMode
+	if gpGeometrySource != GP_GEOMETRY_STATIC:
+		gpOut["geometry_source"] = gpGeometrySource
+	if gpPickMode != GP_PICK_FULL:
+		gpOut["pick_mode"] = gpPickMode
+	if not gpAvoidRouting:
+		gpOut["avoid_routing"] = false
+	if not gpTaggable:
+		gpOut["taggable"] = false
+	if gpPlacePolicy != GP_PLACE_FREE:
+		gpOut["place_policy"] = gpPlacePolicy
+	if not gpMountable:
+		gpOut["mountable"] = false
 	return gpOut
 
 
@@ -399,3 +470,14 @@ func gpFromDict(gpD: Dictionary) -> void:
 	gpLabelFollowsMount = bool(gpD.get("label_follows_mount", false))
 	gpPartTagKey = str(gpD.get("part_tag_key", ""))
 	gpPartTagPrefix = str(gpD.get("part_tag_prefix", ""))
+	# Policy fields: full .get(key, default) reads, so packs written before stage 2 load
+	# with today's behaviour unchanged (the definition-layer safety the plan relies on).
+	# 策略字段：全量 .get(key, default) 读取，故阶段 2 之前写出的图元包载入后行为不变
+	# （方案所依赖的定义层安全性）。
+	gpSizeMode = str(gpD.get("size_mode", GP_SIZE_MODE_CATEGORY))
+	gpGeometrySource = str(gpD.get("geometry_source", GP_GEOMETRY_STATIC))
+	gpPickMode = str(gpD.get("pick_mode", GP_PICK_FULL))
+	gpAvoidRouting = bool(gpD.get("avoid_routing", true))
+	gpTaggable = bool(gpD.get("taggable", true))
+	gpPlacePolicy = str(gpD.get("place_policy", GP_PLACE_FREE))
+	gpMountable = bool(gpD.get("mountable", true))

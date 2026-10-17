@@ -148,6 +148,75 @@ func gpSetLabelOffset(gpNodeId: String, gpOffset: Vector2) -> bool:
 	return gpStack.gpDo(gpCmd, gpCtx)
 
 
+# Set a sheet's frame margins as ONE undo step (Rev.3 stage 0c).
+# 把某张图纸的图框边距作为**一个**撤销步写入（Rev.3 阶段 0c）。
+#
+# This is the ONLY user-reachable way to change a sheet-level field, which is what makes D10's
+# "dragging the frame must be undoable" true: the drag commits through here, and so will the dialog's
+# numeric margin fields when they land. Passing the SHEET (rather than plumbing it through
+# GPCommandContext) is deliberate — see GPMutateSheetCommand's header.
+# 这是用户可触及的**唯一**图纸级字段写入口，正是它使 D10 的「拖动图框必须可撤销」成立：拖拽经此提交，
+# 将来的对话框数值输入亦然。**传图纸**（而非把它灌进 GPCommandContext）是刻意的 —— 见
+# GPMutateSheetCommand 的文件头。
+# [param gpSheet] the sheet to change; null refuses / 待改的图纸；为 null 时拒绝
+# [param gpMargins] desired [left, top, right, bottom] in mm; clamped on the way in
+#                   期望的 [左, 上, 右, 下]（mm）；写入前会被钳制
+func gpSetFrameMargins(gpSheet: GPSheet, gpMargins: Array) -> bool:
+	if gpSheet == null:
+		return false
+	var gpCmd: GPMutateSheetCommand = GPMutateSheetCommand.new(gpSheet,
+		{GPMutateSheetCommand.GP_FIELD_MARGINS: gpMargins})
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Dock the title block to a corner at an offset, as ONE undo step (Rev.3 stage 1).
+# 把图签停靠到某个角、并带上偏移，作为**一个**撤销步（Rev.3 阶段 1）。
+#
+# ⚠️ ONE COMMAND FOR TWO FIELDS, AND THAT IS THE POINT / ⚠️ 两个字段一条命令，这正是要点：a drag decides
+# the corner and the distance from it in the SAME motion, so committing them separately would put a
+# half-way state in the undo stack — a state the user never saw and cannot recognise. Two keys in one
+# request, hence one step (see GPMutateSheetCommand.GP_FIELDS).
+# 一次拖拽在**同一个动作**里决定贴哪个角与离它多远，故分两次提交会把一个中间状态放进撤销栈 —— 那是用户从未
+# 见过、也认不出来的状态。一个请求里两个键，故为一个撤销步（见 GPMutateSheetCommand.GP_FIELDS）。
+# The repaint is NOT done here — the command emits GPSheet.gpSheetChanged and the sheet layer turns that
+# into a frame refresh plus a dirty mark, so an undo / redo repaints through exactly the same path.
+# 重绘**不**在此进行 —— 命令发射 GPSheet.gpSheetChanged，由图纸层转成图框刷新与脏标记，故撤销 / 重做走的是
+# 同一条路径重绘。
+# [param gpSheet] the sheet to change; null refuses / 待改的图纸；为 null 时拒绝
+# [param gpAnchor] the corner to hug, a GPSheet.GP_TB_ANCHOR_* code / 所贴之角，GPSheet.GP_TB_ANCHOR_* 编码
+# [param gpOffset] distance from that corner into the frame, in mm / 自该角**向框内**的距离（mm）
+func gpSetTitleBlockPlacement(gpSheet: GPSheet, gpAnchor: int, gpOffset: Vector2) -> bool:
+	if gpSheet == null:
+		return false
+	var gpCmd: GPMutateSheetCommand = GPMutateSheetCommand.new(gpSheet, {
+		GPMutateSheetCommand.GP_FIELD_TB_ANCHOR: gpAnchor,
+		GPMutateSheetCommand.GP_FIELD_TB_OFFSET: gpOffset,
+	}, "移动图签")
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Move the WHOLE SHEET (paper + frame + every graphic) as ONE undo step (Rev.3 stage 0d).
+# 平移**整张图纸**（纸面 + 图框 + 全部图形）作为**一个**撤销步（Rev.3 阶段 0d）。
+#
+# ⚠️ THIS IS NOT A SHEET-FIELD WRITE, WHICH IS WHY IT IS NOT A GPMutateSheetCommand KEY / ⚠️ 这不是一次
+# 图纸字段写入，故它不是 GPMutateSheetCommand 的一个键：the move transforms four families of absolute
+# world coordinates — nodes, edges, annotation shapes (all three on the GRAPH) and the paper origin (on
+# the sheet). That pairing cannot be expressed by a field whitelist, nor by a graph-shaped command; see
+# GPTranslateSheetCommand's header. The GRAPH is NOT passed here — the command takes it from gpCtx,
+# which is the context this service already owns.
+# 这次平移变换四族绝对世界坐标 —— 图元、边、注释图形（三族在**图**上）与纸面原点（在图纸上）。该配对
+# 无法用字段白名单表达、也无法用图形态的命令表达；见 GPTranslateSheetCommand 的文件头。**图不**在此传入
+# —— 命令自 gpCtx 取它，而 gpCtx 正是本服务已持有的上下文。
+# [param gpSheet] the sheet to move; null refuses / 待平移的图纸；为 null 时拒绝
+# [param gpDelta] net translation in world millimetres; zero refuses (no phantom undo step)
+#                 净位移（世界毫米）；为零时拒绝（不产生幽灵撤销步）
+func gpTranslateSheet(gpSheet: GPSheet, gpDelta: Vector2) -> bool:
+	if gpSheet == null:
+		return false
+	var gpCmd: GPTranslateSheetCommand = GPTranslateSheetCommand.new(gpSheet, gpDelta)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
 # Move one edge's line number off its automatic placement . One undo step per drag.
 # 把一条边的管线号移离其自动落位处。每次拖拽一个撤销步。
 # A zero offset is legal and means "back to the automatic placement" — the command's model
@@ -219,6 +288,95 @@ func gpSetProperty(gpNodeId: String, gpKey: String, gpValue: Variant) -> bool:
 		return false
 	var gpCmd: GPSetPropertyCommand = GPSetPropertyCommand.new(gpNodeId, gpKey, gpValue)
 	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Stage 3 (S3): a grid-table STRUCTURE operation (insert/delete row/col) as ONE undo step.
+# The pure before→after transform lives in GPSymbolGeneratorRegistry.gpMutatedProps; this
+# method only guards (unknown op / structure guards / no-op) and pushes the snapshot-swap
+# command. Refusals surface as an i18n key in gpLastRefusal, same convention as the tag path.
+# 阶段 3（S3）：grid 表格**结构**操作（插入/删除行/列），一个撤销步。before→after 的纯变换
+# 在 GPSymbolGeneratorRegistry.gpMutatedProps；本方法只做守卫（未知操作 / 结构守卫 / 无变化）
+# 并压入快照交换命令。拒绝以 i18n 键写入 gpLastRefusal，与位号路径同一惯例。
+func gpMutateTable(gpNodeId: String, gpOp: String, gpRow: int, gpCol: int) -> bool:
+	gpLastRefusal = ""
+	if gpNodeId == "" or gpOp == "":
+		return false
+	if gpCtx.gpGraph == null:
+		return false
+	var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(gpNodeId)
+	if gpN == null:
+		return false
+	var gpRes: Dictionary = GPSymbolGeneratorRegistry.gpMutatedProps(gpN.gpProps, gpOp, gpRow, gpCol)
+	if not bool(gpRes.get("ok", false)):
+		gpLastRefusal = "table.err_structure"
+		return false
+	var gpAfter: Dictionary = gpRes["props"] as Dictionary
+	if gpAfter == gpN.gpProps:
+		return false
+	var gpCmd: GPTableMutateCommand = GPTableMutateCommand.new(gpNodeId, gpN.gpProps, gpAfter)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Stage 3 (S4): commit a grid-table props SNAPSHOT pair (the column-width drag's three-beat
+# commit: the grip op already rewound the node to "before"; this method lets ONE command
+# re-apply "after", so a drag that moved 30 times is ONE undo step). A no-op pair is refused
+# (no phantom undo step), same convention as gpMutateTable.
+# 阶段 3（S4）：提交一对 grid 表格 props **快照**（列宽拖拽的三拍提交：抓取层已把节点回退到
+# before；本方法让**一条**命令重新应用 after，故一次搬动了 30 次的拖拽只是**一个**撤销步）。
+# 无变化的快照对被拒绝（不留幽灵撤销步），与 gpMutateTable 同一惯例。
+func gpCommitTableSnapshot(gpNodeId: String, gpBefore: Dictionary, gpAfter: Dictionary) -> bool:
+	gpLastRefusal = ""
+	if gpNodeId == "" or gpCtx.gpGraph == null:
+		return false
+	var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(gpNodeId)
+	if gpN == null:
+		return false
+	if gpAfter == gpBefore:
+		return false
+	var gpCmd: GPTableMutateCommand = GPTableMutateCommand.new(gpNodeId, gpBefore, gpAfter)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Add ONE custom (instance-level) property entry as ONE undo step (Rev.3 stage 1.5, R2 / D7).
+# The key must be free (an existing key is refused rather than silently overwritten); the value
+# MAY be empty — a custom key has no library default to fall back to. Gated by the permission
+# stub: when GPPermissions denies, the refusal says so.
+# 一步撤销地新增**一条**自定义（实例级）属性条目（Rev.3 阶段 1.5，R2 / D7）。
+# 键必须空闲（已存在的键被拒绝而非静默覆盖）；取值**可以**为空 —— 自定义键没有可回落的
+# 库默认值。经权限口子闸控：GPPermissions 拒绝时，拒绝原因如实上报。
+func gpAddProperty(gpNodeId: String, gpKey: String, gpValue: Variant) -> bool:
+	gpLastRefusal = ""
+	if gpNodeId == "" or gpKey == "":
+		return false
+	if not GPPermissions.gpCanEditProps():
+		gpLastRefusal = "perm.err_props"
+		return false
+	if gpCtx.gpGraph != null:
+		var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(gpNodeId)
+		if gpN != null and gpN.gpProps.has(gpKey):
+			gpLastRefusal = "adhoc.err_exists"
+			return false
+	var gpCmd: GPSetPropertyCommand = GPSetPropertyCommand.new(gpNodeId, gpKey, gpValue, true)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Rename one instance's custom property key as ONE undo step (Rev.3 stage 1.5, R2 / D7).
+# Gated by the permission stub; the command's own refusals (missing old key / taken new key)
+# travel back in gpLastRefusal.
+# 一步撤销地重命名某个实例的自定义属性键（Rev.3 阶段 1.5，R2 / D7）。
+# 经权限口子闸控；命令自身的拒绝原因（旧键缺失 / 新键已被占用）经 gpLastRefusal 回传。
+func gpRenameProperty(gpNodeId: String, gpOldKey: String, gpNewKey: String) -> bool:
+	gpLastRefusal = ""
+	if gpNodeId == "" or gpOldKey == "" or gpNewKey == "":
+		return false
+	if not GPPermissions.gpCanEditProps():
+		gpLastRefusal = "perm.err_props"
+		return false
+	var gpCmd: GPRenamePropertyCommand = GPRenamePropertyCommand.new(gpNodeId, gpOldKey, gpNewKey)
+	if not gpStack.gpDo(gpCmd, gpCtx):
+		gpLastRefusal = gpCmd.gpRefusal
+		return false
+	return true
 
 
 # Set the coarse label anchor (GPLabelAnchor.GPAnchor.* or GPPropertyResolver.GP_ANCHOR_UNSET).

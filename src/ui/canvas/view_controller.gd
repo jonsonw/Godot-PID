@@ -34,7 +34,13 @@ var gpHost: GPCanvas2D = null
 # 为何适配而非 100%：世界单位为 1mm（计划 Phase 0），故 100% 时 A3 图幅（420×297mm）仅
 # 420×297 屏幕点 —— 只有画布的三分之一，且 3mm 位号文字仅以 3px 光栅化、无法阅读。首次布局即
 # 适配图幅，正是让图纸（连同图框）无需滚轮即可看清的原因。
-func gpFitSheet(gpW: float, gpH: float, gpFill: float = 0.94) -> void:
+# [param gpOrigin] the paper's own top-left corner in world mm (Rev.3 stage 0d). A moved sheet is
+#        centred on ITSELF rather than on the world origin; the default keeps every pre-existing
+#        caller bit-identical, since a sheet that was never moved sits at the origin.
+#                 纸面自身的左上角（世界毫米，Rev.3 阶段 0d）。被移动过的图纸以**自身**为中心对齐，
+#                 而不是以世界原点；默认值使每个既有调用方逐位不变，因为从未移动过的图纸就处在原点。
+func gpFitSheet(gpW: float, gpH: float, gpFill: float = 0.94,
+		gpOrigin: Vector2 = Vector2.ZERO) -> void:
 	if gpW <= 1.0 or gpH <= 1.0:
 		return
 	var gpAvail: Vector2 = gpHost.size
@@ -44,10 +50,13 @@ func gpFitSheet(gpW: float, gpH: float, gpFill: float = 0.94) -> void:
 	gpZoom = clampf(gpZoom, GPCanvasCamera.GP_ZOOM_MIN, GPCanvasCamera.GP_ZOOM_MAX)
 	gpHost.gpState.gpCam.gpZoom = gpZoom
 	# Centre the sheet: gpScreenFromWorld(w) = w * zoom + offset, so placing the sheet's own
-	# (0,0) at the leftover margin centres the whole rect.
-	# 使图幅居中：gpScreenFromWorld(w) = w * zoom + offset，故把图幅自身的 (0,0) 放在剩余边距处
-	# 即可让整个矩形居中。
-	gpHost.gpState.gpCam.gpOffset = (gpAvail - Vector2(gpW, gpH) * gpZoom) * 0.5
+	# top-left corner at the leftover margin centres the whole rect. That corner is the PAPER's
+	# (gpOrigin), not the world origin — otherwise a moved sheet would be fitted by the amount it
+	# had been moved, and 适应窗口 would land off-screen.
+	# 使图幅居中：gpScreenFromWorld(w) = w * zoom + offset，故把图幅自身的左上角放在剩余边距处
+	# 即可让整个矩形居中。那个角是**纸面**的（gpOrigin）、并非世界原点 —— 否则被移动过的图纸会按其
+	# 已移动的距离去适配，而「适应窗口」就落到屏外了。
+	gpHost.gpState.gpCam.gpOffset = (gpAvail - Vector2(gpW, gpH) * gpZoom) * 0.5 - gpOrigin * gpZoom
 	gpApplyCamera()
 	gpHost.gpOnCameraChanged()
 
@@ -60,7 +69,7 @@ func gpResetView() -> void:
 	# headless 画布）回退到纯 100% 重置。
 	var gpS: GPSheet = gpHost.gpSheet
 	if gpS != null:
-		gpFitSheet(gpS.gpWidthMM, gpS.gpHeightMM)
+		gpFitSheet(gpS.gpWidthMM, gpS.gpHeightMM, 0.94, gpS.gpPaperOrigin)
 	else:
 		gpResetCamera()
 	# Both branches already repainted the scale-dependent text (see gpOnCameraChanged).

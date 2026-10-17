@@ -69,6 +69,12 @@ static func gpObstacles(gpGraph: GPPIDGraph, gpDefLookup: Callable,
 		var gpDef: GPSymbolDef = null
 		if gpDefLookup.is_valid():
 			gpDef = gpDefLookup.call(gpN.gpSymbolId) as GPSymbolDef
+		# Stage 2: a definition that opted out of avoidance (gpAvoidRouting=false — tables,
+		# multiline text) is never a routing obstacle, so pipes may legally cross it.
+		# 阶段 2：声明退出避让的定义（gpAvoidRouting=false —— 表格、多行文本）**不构成**
+		# 布线障碍，管线可以合法横穿。
+		if gpDef != null and not gpDef.gpAvoidRouting:
+			continue
 		var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef != null else Vector2(64.0, 48.0)
 		var gpOrigin: Vector2 = GPPortResolver.gpNodeWorldOrigin(gpGraph, gpDefLookup, gpN)
 		gpOut.append(Rect2(gpOrigin - gpSz / 2.0, gpSz))
