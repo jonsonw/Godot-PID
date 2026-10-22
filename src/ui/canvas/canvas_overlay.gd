@@ -39,8 +39,12 @@ func _init(gpCanvas: CanvasItem) -> void:
 # 绘制整片背景覆盖层：底色填充、网格、图形（含选择与抓取点）、框选、连线预览。
 # 图↔视图同步由画布持有，且恰在本方法之前运行。
 func gpDraw() -> void:
-	gpCv.draw_rect(Rect2(Vector2.ZERO, gpCv.size), Color(0.13, 0.14, 0.18))
-	_gpDrawGrid()
+	# The background is a canvas-owned field (A9), not a literal: the user can pick it, and the
+	# overlay is the only place that fills the viewport.
+	# 底色是画布自有字段（A9），不再是字面量：用户可改，而覆盖层是唯一填充视口的地方。
+	gpCv.draw_rect(Rect2(Vector2.ZERO, gpCv.size), gpCv.gpCanvasBg)
+	if gpCv.gpShowGrid:
+		_gpDrawGrid()
 	_gpDrawShapes()
 	_gpDrawMarquee()
 	_gpDrawConnectPreview()
@@ -59,6 +63,24 @@ func _gpDrawMarquee() -> void:
 	var gpCol: Color = gpCv.gpMarq.gpColor()
 	gpCv.draw_rect(gpRect, Color(gpCol.r, gpCol.g, gpCol.b, 0.15), true)
 	gpCv.draw_rect(gpRect, gpCol, false, 1.0)
+
+
+# Parse a "rrggbb" (or "#rrggbb") colour, falling back when the string is unusable.
+# 解析 "rrggbb"（或 "#rrggbb"）颜色，字符串不可用时回落。
+# WHY a helper and not Color(str) inline: a hand-edited or legacy settings file may hold "" — and
+# Color("") is an ERROR in Godot, not a silent black. Validating here turns a corrupt preference
+# into the documented default instead of a red engine log on every paint.
+# 为何抽出函数而非内联 Color(str)：手改或历史设置文件里可能是空串 —— 而 Color("") 在 Godot 里是
+# **错误**，不是静默黑。在此校验，可把损坏的偏好变成文档化的默认值，而不是每帧一条红色引擎日志。
+static func gpParseBg(gpHex: String, gpFallback: Color) -> Color:
+	var gpS: String = gpHex.strip_edges()
+	if gpS.begins_with("#"):
+		gpS = gpS.substr(1)
+	if gpS.length() != 6:
+		return gpFallback
+	if not gpS.is_valid_hex_number(false):
+		return gpFallback
+	return Color(gpS)
 
 
 # Draw the background grid aligned to the world coordinate system: a fine MINOR grid,
@@ -191,6 +213,22 @@ func _gpDrawOneShape(gpS: GPShape, gpInk: Color) -> void:
 				gpV.append(gpV[0])
 			if gpV.size() >= 2:
 				gpCv.draw_polyline(gpV, gpInk, 2.0)
+		GPShape.GPKind.GP_TEXT:
+			# Drawn through the theme's default font at a world-space size, so the note scales
+			# with zoom exactly like the geometry beside it (drawing practice: text height is a
+			# real dimension, not a screen constant).
+			# 经主题默认字体按**世界字号**绘制，故注记随缩放与旁边的几何一起变化
+			#（制图惯例：字高是真实尺寸，不是屏幕常量）。
+			if gpS.gpPoints.size() >= 1:
+				var gpFont: Font = gpCv.get_theme_default_font()
+				if gpFont != null:
+					var gpScreenSize: float = gpS.gpTextSize * gpCv.gpViewZoom
+					var gpLineStep: float = gpScreenSize * 1.4
+					var gpOrigin: Vector2 = gpCv.gpScreenFromWorld(gpS.gpPoints[0])
+					var gpLines: PackedStringArray = gpS.gpText.split("\n")
+					for gpI in range(gpLines.size()):
+						gpCv.draw_string(gpFont, gpOrigin + Vector2(0.0, gpScreenSize + gpLineStep * gpI),
+							gpLines[gpI], HORIZONTAL_ALIGNMENT_LEFT, -1, int(maxf(1.0, gpScreenSize)), gpInk)
 		GPShape.GPKind.GP_ARC:
  # Sample the arc through the shared renderer (gpArcSample()) so it matches the painter.
  # 经共享渲染器（gpArcSample()）采样圆弧，使主画布与符号绘制器表现一致。

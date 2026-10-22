@@ -216,9 +216,16 @@ func _draw() -> void:
 	# A free end is legal but must be visible, otherwise a half-built pipe looks finished.
 	# 悬空端合法但必须可见，否则一条只画了一半的管道看起来像是已完成。
 	if not bool(gpFrom.get("bound", false)):
-		GPEdgePainter.gpDrawDangling(self, gpFrom.get("pos", Vector2.ZERO), GPEdgeStyle.GP_DANGLING, gpZoom)
+		# Only an UNNOTED open end gets the ring. A noted end is a finished opening (TO ATM / VENT):
+		# drawing the "to be connected" ring there reads as a defect marker, which is exactly the
+		# orange circle users complained about. ADR-34 D8: the special ink now means "needs work".
+		# 只有**未注明**的开口端才画圆环。已注明的端是完成态（TO ATM / VENT）：在那里画「待接」圆环
+		# 会被读成缺陷标记 —— 正是用户抱怨的那个橙色圈。ADR-34 D8：特殊墨色今后只表示「待处理」。
+		if gpEdge.gpEndNoteUid(true) == "":
+			GPEdgePainter.gpDrawDangling(self, gpFrom.get("pos", Vector2.ZERO), GPEdgeStyle.GP_DANGLING, gpZoom)
 	if not bool(gpTo.get("bound", false)):
-		GPEdgePainter.gpDrawDangling(self, gpTo.get("pos", Vector2.ZERO), GPEdgeStyle.GP_DANGLING, gpZoom)
+		if gpEdge.gpEndNoteUid(false) == "":
+			GPEdgePainter.gpDrawDangling(self, gpTo.get("pos", Vector2.ZERO), GPEdgeStyle.GP_DANGLING, gpZoom)
 
 	# Flow arrow: pipes only. A dashed signal line already carries direction in its styling and
 	# an arrow on it reads as a process line.

@@ -24,6 +24,17 @@ var gpEditor: GPSymbolEditor = null
 
 var _gpPortName: LineEdit = null
 var _gpPortDir: OptionButton = null
+
+# Purpose dropdown (A12). The four purposes are the model's own constants, so the panel cannot
+# invent a fifth spelling.
+# 用途下拉（A12）。四个用途取模型自身常量，故面板无法自创第五种写法。
+var _gpPortType: OptionButton = null
+
+# The purpose values behind the dropdown, in menu order.
+# 下拉框背后的用途取值，按菜单顺序。
+const GP_PORT_TYPES: Array[String] = [
+	GPPort.GP_NOZZLE, GPPort.GP_ACTUATOR, GPPort.GP_SIGNAL, GPPort.GP_TERMINAL,
+]
 var _gpDelPort: Button = null
 var _gpPortHint: Label = null
 
@@ -71,6 +82,22 @@ func gpBuild(gpEd: GPSymbolEditor) -> void:
 	gpDirRow.add_child(_gpPortDir)
 	gpBox.add_child(gpDirRow)
 
+	# Purpose row (A12) / 用途行（A12）
+	var gpTypeRow: HBoxContainer = HBoxContainer.new()
+	gpTypeRow.add_theme_constant_override("separation", 6)
+	var gpTypeL: Label = Label.new()
+	gpTypeL.text = I18n.gpTr("make_symbol.port_type") + ":"
+	gpTypeL.custom_minimum_size = Vector2(90.0, 0.0)
+	gpTypeRow.add_child(gpTypeL)
+	_gpPortType = OptionButton.new()
+	for gpI in range(GP_PORT_TYPES.size()):
+		_gpPortType.add_item(I18n.gpTr("make_symbol.port_type_" + GP_PORT_TYPES[gpI].to_lower()))
+		_gpPortType.set_item_metadata(gpI, GP_PORT_TYPES[gpI])
+	_gpPortType.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_gpPortType.item_selected.connect(func(gpI: int) -> void: _gpOnPortType(gpI))
+	gpTypeRow.add_child(_gpPortType)
+	gpBox.add_child(gpTypeRow)
+
 	# Delete + hint / 删除 + 提示
 	var gpDelRow: HBoxContainer = HBoxContainer.new()
 	gpDelRow.add_theme_constant_override("separation", 6)
@@ -100,12 +127,16 @@ func gpSync() -> void:
 		_gpPortName.text = gpP.gpName
 		_gpPortName.editable = true
 		_gpPortDir.selected = gpDirIndex(gpP.gpDir)
+		_gpPortType.selected = GP_PORT_TYPES.find(gpP.gpType) if GP_PORT_TYPES.has(gpP.gpType) else 0
+		_gpPortType.disabled = false
 		_gpDelPort.disabled = false
 		_gpPortHint.text = I18n.gpTr("make_symbol.port_selected")
 	else:
 		_gpPortName.text = ""
 		_gpPortName.editable = false
 		_gpPortDir.selected = 0
+		_gpPortType.selected = 0
+		_gpPortType.disabled = true
 		_gpDelPort.disabled = true
 		_gpPortHint.text = I18n.gpTr("make_symbol.no_port_selected")
 
@@ -123,6 +154,20 @@ func _gpOnPortName(gpT: String) -> void:
 	if gpEditor == null:
 		return
 	gpEditor.gpSetPortName(gpT)
+
+
+# Purpose changed (A12): route through the editor's undoable command, then re-sync so the widget
+# matches what the model actually accepted.
+# 用途改变（A12）：经编辑器的可撤销命令提交，再重新同步，使控件与模型实际接受的值一致。
+func _gpOnPortType(gpI: int) -> void:
+	if gpEditor == null:
+		return
+	if gpI < 0 or gpI >= GP_PORT_TYPES.size():
+		return
+	if gpEditor.gpSelPort < 0:
+		return
+	gpEditor.gpSetPortType(gpEditor.gpSelPort, GP_PORT_TYPES[gpI])
+	gpSync()
 
 
 func _gpOnPortDir(gpI: int) -> void:

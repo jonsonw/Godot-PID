@@ -340,6 +340,9 @@ func gpOnGripMove(gpWorld: Vector2) -> void:
 			gpNew[gpI] = gpNew[gpI] + gpD
 	gpE.gpRouting = gpNew
 	_gpGrip["pos"] = _gpSegOrigMid + gpD
+	# LIVE REFRESH: the stroke must follow the grabbed bend this very frame, not on release.
+	# 实时刷新：笔迹必须在**本帧**就跟上被抓的折点，而不是等到松手。
+	gpCv.gpRedrawEdge(gpE.gpInstanceId)
 	gpCv.queue_redraw()
 
 
@@ -357,6 +360,11 @@ func _gpApplyCornerMove(gpWorld: Vector2) -> void:
 		gpNew[_gpBumpIdx] = gpWorld
 		gpE.gpRouting = gpNew
 		_gpGrip["pos"] = gpWorld
+		# The ORANGE (bump) anchor is the handle most users drag, and it took the early-return path
+		# that never refreshed the edge view — the stroke only caught up on release.
+		# **橙色**（鼓包）锚点是用户最常拖的手柄，而它走的是提前 return 的分支，从未刷新边视图 ——
+		# 于是笔迹只在松手时才跟上。
+		gpCv.gpRedrawEdge(gpE.gpInstanceId)
 	gpCv.queue_redraw()
 
 

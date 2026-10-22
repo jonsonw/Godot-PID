@@ -341,6 +341,12 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
 	if gpEvent is InputEventMouseMotion:
 		var gpMotion: InputEventMouseMotion = gpEvent as InputEventMouseMotion
 		gpHost._gpLastMouseWorld = gpHost.gpViewController.gpWorldFromScreen(gpMotion.position)
+		# Dwell trigger FIRST, before any early-returning drag branch: an anchor drag (press on a
+		# nozzle and pull) consumes motion and returns early, so a notice placed later never runs
+		# during exactly the gesture the prompt exists for.
+		# 悬停触发放在**最前**，早于任何会提前返回的拖拽分支：锚点拖拽（按住管嘴拖出）会消费移动并
+		# 提前 return，放在后面的通知在提示真正需要服务的那个手势里永远不会执行。
+		gpHost.gpNoticeCursorMove(gpHost._gpLastMouseWorld, gpMotion.position)
  # Panning in progress.
  # 正在平移。
 		if _gpPanning:
@@ -436,6 +442,6 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
  # The tool returns true when it consumed the motion (e.g. rubber band) so we accept it.
  # 工具专属橡皮筋 / 连接预览（select=连接预览，draw=橡皮筋）。工具消费了移动事件时返回
  # true，画布据此 accept_event。
-		if gpActiveTool().gpOnMove(gpHost.gpViewController.gpWorldFromScreen(gpMotion.position)):
+		if gpActiveTool().gpOnMove(gpHost._gpLastMouseWorld):
 			gpHost.accept_event()
 			return

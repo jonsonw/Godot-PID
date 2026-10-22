@@ -121,6 +121,18 @@ func gpOpenMakeSymbolDialog(gpDraft: Dictionary, gpInitialName: String, gpAllowO
 		return
 	gpDlg.gpMadeSymbol.connect(gpOnSymbolSaved)
 
+# Open the glyph editor with nothing pre-loaded (A14).
+# 以空内容打开图元编辑器（A14）。
+# Separate from gpOnMakeSymbolFromShapes() on purpose: promotion carries a draft and an overwrite
+# policy, creation carries neither — folding them together would make the "is this a new symbol?"
+# question depend on whether a dictionary happens to be empty.
+# 刻意与 gpOnMakeSymbolFromShapes() 分开：提升带草稿与覆盖策略，新建两者都没有 —— 合成一个会让
+# 「这是新建吗」取决于某个字典是否恰好为空。
+func gpOnNewSymbolRequested() -> void:
+	gpHost.gpSetState("status.symbol_editor_blank")
+	gpOpenMakeSymbolDialog({}, "", true)
+
+
 func gpOnMakeSymbolFromShapes(gpDraft: Dictionary) -> void:
 	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
 	if gpCanvas == null or gpHost.gpCenter == null:

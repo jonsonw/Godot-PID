@@ -95,6 +95,10 @@ static func gpEditSpec(gpShapes: Array[GPShape]) -> Dictionary:
 	var gpCircles: Array = []
 	var gpRects: Array = []
 	var gpArcs: Array = []
+	# Text notes (B08) travel as their own list: they are not geometry, so squeezing them into
+	# paths would drop them (a one-point path is rejected by gpFromSpec).
+	# 文字注释（B08）单独成表：它们不是几何，塞进 paths 会被丢弃（gpFromSpec 拒收单点路径）。
+	var gpTexts: Array = []
 	var gpHas: bool = false
 	var gpMin := Vector2(INF, INF)
 	var gpMax := Vector2(-INF, -INF)
@@ -115,6 +119,9 @@ static func gpEditSpec(gpShapes: Array[GPShape]) -> Dictionary:
 					var gpPos: Vector2 = Vector2(minf(gpA.x, gpBp.x), minf(gpA.y, gpBp.y))
 					var gpSz: Vector2 = Vector2(absf(gpBp.x - gpA.x), absf(gpBp.y - gpA.y))
 					gpRects.append({"pos": [gpPos.x, gpPos.y], "size": [gpSz.x, gpSz.y]})
+			GPShape.GPKind.GP_TEXT:
+				gpTexts.append({"pos": [gpS.gpPoints[0].x, gpS.gpPoints[0].y],
+					"text": gpS.gpText, "size": gpS.gpTextSize})
 			GPShape.GPKind.GP_ARC:
 				if gpS.gpPoints.size() >= 3 and gpS.gpRadius > 0.0:
 					var gpAng: Dictionary = gpS.gpArcAngles()
@@ -138,7 +145,8 @@ static func gpEditSpec(gpShapes: Array[GPShape]) -> Dictionary:
 	var gpBox: Array = []
 	if gpHas:
 		gpBox = [gpMin.x, gpMin.y, gpMax.x - gpMin.x, gpMax.y - gpMin.y]
-	return {"paths": gpPaths, "circles": gpCircles, "rects": gpRects, "arcs": gpArcs, "box": gpBox}
+	return {"paths": gpPaths, "circles": gpCircles, "rects": gpRects, "arcs": gpArcs,
+		"texts": gpTexts, "box": gpBox}
 
 
 # Build GPShape primitives from the legacy {paths,circles,rects} spec.
@@ -184,6 +192,11 @@ static func gpFromSpec(gpSpec: Dictionary) -> Array[GPShape]:
 		var gpStart: Vector2 = gpC + Vector2(cos(gpA0), sin(gpA0)) * gpR
 		var gpEnd: Vector2 = gpC + Vector2(cos(gpA1), sin(gpA1)) * gpR
 		gpOut.append(GPShape.gpArc(gpC, gpStart, gpEnd))
+	for gpTd in gpSpec.get("texts", []):
+		var gpT: Dictionary = gpTd as Dictionary
+		var gpTPosArr: Array = gpT.get("pos", [0, 0]) as Array
+		var gpTPos: Vector2 = Vector2(float(gpTPosArr[0]), float(gpTPosArr[1]))
+		gpOut.append(GPShape.gpTextNote(gpTPos, str(gpT.get("text", "")), float(gpT.get("size", 3.5))))
 	return gpOut
 
 

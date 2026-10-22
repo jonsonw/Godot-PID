@@ -237,6 +237,64 @@ static func gpExportLists(gpGraph: GPPIDGraph, gpDir: String,
 	return gpOut
 
 
+# Rows for the OPEN-END sheet (B08 / ADR-34): every dangling end on the sheet that carries a
+# note, so the deliverable lists "this line ends at TO ATM" instead of leaving it implicit.
+# 开口端工作表（B08 / ADR-34）的行：图上每个带注记的悬空端，使交付物写出「这根管子终止于 TO ATM」
+# 而不是让它隐含在图形里。
+#
+# One row per END, not per edge: a pipe may be open at both ends, and each end carries its own
+# note. Rows for UNNOTED ends are present too (with an empty text), because a deliverable that
+# silently hides them would look complete exactly when it is not.
+# **每端一行**而非每边一行：一条管子可能两端都开口，且各带自己的注记。**未注明**的端同样出行
+# （文字为空），因为默默藏起来的交付物会在最不完整的时候看起来最完整。
+static func gpOpenEndRows(gpGraph: GPPIDGraph) -> Array[Dictionary]:
+	var gpRows: Array[Dictionary] = []
+	if gpGraph == null:
+		return gpRows
+	for gpE in gpGraph.gpEdges:
+		if gpE == null:
+			continue
+		for gpIsFrom in [true, false]:
+			if not gpE.gpIsDangling(gpIsFrom):
+				continue
+			var gpNote: String = ""
+			var gpUid: String = gpE.gpEndNoteUid(gpIsFrom)
+			if gpUid != "":
+				for gpS in gpGraph.gpShapes:
+					if gpS != null and gpS.gpUid == gpUid:
+						gpNote = gpS.gpText
+						break
+			var gpP: Vector2 = gpE.gpDanglingPoint(gpIsFrom)
+			gpRows.append({
+				"edge_id": gpE.gpInstanceId,
+				"tag": gpE.gpTag,
+				"side": "from" if gpIsFrom else "to",
+				"note": gpNote,
+				"x": gpP.x,
+				"y": gpP.y,
+			})
+	return gpRows
+
+
+# Write the open-end sheet next to the category lists. Returns its path, or "" when the sheet has
+# no open ends at all (no file is written for an empty sheet — an empty deliverable file is noise).
+# 把开口端工作表写在各类清单旁边。返回其路径；整张图没有开口端时返回空串
+#（空表不写文件 —— 空交付文件只是噪声）。
+static func gpExportOpenEnds(gpGraph: GPPIDGraph, gpDir: String) -> String:
+	if gpGraph == null or gpDir == "":
+		return ""
+	var gpRows: Array[Dictionary] = gpOpenEndRows(gpGraph)
+	if gpRows.is_empty():
+		return ""
+	var gpPath: String = gpDir.path_join("open_ends" + GP_LIST_EXT)
+	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.WRITE)
+	if gpF == null:
+		return ""
+	gpF.store_string(gpListToCsv(gpRows))
+	gpF.close()
+	return gpPath
+
+
 # ==================== re-import (回灌) ====================
 
 # Write imported rows back onto the graph, MATCHED BY TAG. Returns how many nodes changed.

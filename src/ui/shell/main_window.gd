@@ -82,6 +82,20 @@ var gpRightDock: VBoxContainer
 # 中心绘图区：承载多标签页绘图编辑器（每标签页一个画布 + 图）。
 var gpCenter: GPCenterArea
 
+# Hierarchy outline panel (mount tree of the active sheet). Added as the fourth tab of the right
+# dock at runtime, so scenes/main.tscn keeps its exact byte shape.
+# 层级大纲面板（当前图纸的挂载树）。运行时作为右栏第四个标签加入，故 scenes/main.tscn 字节不变。
+var gpOutline: GPOutlinePanel = null
+
+# The symbol backpack popup (A11). Null until assembly; created once and reused, so opening it a
+# hundred times does not rebuild a hundred popups.
+# 图元背包弹窗（A11）。装配前为 null；创建一次并复用，使开一百次也不会建一百个弹窗。
+var gpBackpack: GPSymbolBackpack = null
+
+# The DRC panel (B2): fifth dock tab, created at assembly like the outline.
+# DRC 面板（B2）：第五个停靠页，与大纲一样在装配时创建。
+var gpDrcPanel: GPDRCPanel = null
+
 # Right-side tab container.
 # 右侧标签页容器。
 var gpTabs: TabContainer
@@ -197,6 +211,9 @@ func _ready() -> void:
 	_gpAssembleCenter()
 	_gpAssemblePalette()
 	_gpAssembleInspector()
+	_gpAssembleOutline()
+	_gpAssembleBackpack()
+	_gpAssembleDrc()
 	_gpAssembleMenu()
 	_gpAssembleFileDialog()
 	_gpBindWindowSignals()
@@ -310,7 +327,6 @@ func _gpAssemblePalette() -> void:
 	# 某图块被**拖动**（而非点击）。与点选不同：拖动会在活动画布上给附件手势上膛，
 	# 使用户随后在宿主上的一次点击即把该部件装到那里（规划 §15 模式一）。
 	gpLeftDock.gpSymbolDragStarted.connect(gpRibbonCoord.gpOnSymbolDragStarted)
-	gpLeftDock.gpToolSelected.connect(gpRibbonCoord.gpOnToolSelected)
 	# Tool-block commands (canvas modes / undo / redo / delete / settings) reuse the
 	# old Ribbon action ids and route through the SAME handler that served the Ribbon.
 	# 工具块命令（画布模式 / 撤销 / 重做 / 删除 / 设置）复用旧 Ribbon 动作 id，
@@ -338,6 +354,9 @@ func _gpAssembleInspector() -> void:
 	# orphaned values may only be dropped on an explicit request from the panel.
 	# 孤儿值仅在面板明确请求时才可被清除。
 	gpInspector.gpCleanOrphansRequested.connect(gpSymbolLibCoord.gpOnCleanOrphans)
+	# annotation-shape fields (A2): name / layer edits become one undoable command each.
+	# 注释图形字段（A2）：名称 / 图层编辑各成一条可撤销命令。
+	gpInspector.gpShapePropChanged.connect(gpSelCoord.gpOnShapePropChanged)
 	# custom-entry CRUD (Rev.3 stage 1.5, R2): add / rename / delete, instance level.
 	# 自定义条目增删改（Rev.3 阶段 1.5，R2）：新增 / 改名 / 删除，仅实例级。
 	gpInspector.gpPropAddRequested.connect(gpSelCoord.gpOnPropAdd)
@@ -518,6 +537,10 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 	# A brand-new sheet has an empty undo stack: make the 编辑 menu agree with it right away.
 	# 新建图纸的撤销栈为空：让「编辑」菜单立即与之保持一致。
 	gpMenuCoord.gpRefreshEditMenu()
+	# A brand-new sheet is a new graph: rebind the outline to it (it would otherwise keep showing
+	# the previous sheet's tree).
+	# 新图纸就是新图：把大纲重新绑到它（否则它会继续显示上一张图纸的树）。
+	_gpBindOutline()
 
 
 # The active sheet changed (add / switch / close): refresh the inspector for the
@@ -526,6 +549,7 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 func _gpOnActiveTabChanged() -> void:
 	gpSelCoord.gpRefreshSelection()
 	gpRibbonCoord.gpSyncToolBar()
+	_gpBindOutline()
 
 
 # Fullscreen toggle from the center header: hide/show the side docks so the canvas
@@ -535,6 +559,167 @@ func _gpOnFullscreen(gpOn: bool) -> void:
 	gpLeftDock.visible = not gpOn
 	gpRightDock.visible = not gpOn
 	gpLayoutCoord.gpApplySplits()
+
+# Build the hierarchy outline as a fourth right-dock tab.
+# 把层级大纲构建为右栏第四个标签。
+# Why a right-dock tab and not a new pane: the dock already owns "what is selected" (inspector)
+# and "what this sheet is" (info / doc). Which symbol sits on which is the same family of
+# question, and adding a fourth pane would eat canvas width on every screen size.
+# 为何是右栏标签而不是新开一栏：右栏已经承担「选中了什么」（属性）与「这张图是什么」
+#（信息 / 说明）。「谁装在谁身上」属同一类问题，而新开第四栏会在任何屏宽下都吃掉画布宽度。
+func _gpAssembleOutline() -> void:
+	gpOutline = GPOutlinePanel.new()
+	gpOutline.name = "OutlineTab"
+	gpTabs.add_child(gpOutline)
+	gpOutline.gpBuild()
+	gpOutline.gpRefreshText()
+	gpTabs.set_tab_title(gpTabs.get_tab_count() - 1, I18n.gpTr("outline.title"))
+	_gpBindOutline()
+
+
+# Point the outline at the active canvas and rebuild it.
+# 把大纲指向活动画布并重建。
+# Kept as one helper because THREE entry points need it (first assembly, new sheet, tab switch)
+# and each of them can legitimately arrive with no canvas at all.
+# 收成一个辅助函数，因为**三条**入口都需要它（首次装配、新建图纸、切换标签），
+# 而其中任何一条都可能理直气壮地没有任何画布。
+func _gpBindOutline() -> void:
+	if gpOutline == null:
+		return
+	var gpCv: GPCanvas2D = gpActiveCanvas()
+	if gpCv != null:
+		gpOutline.gpBindCanvas(gpCv)
+	_gpBindDrc()
+
+
+# Build the backpack popup and wire the two ways it places a symbol.
+# 构建背包弹窗，并接好它放置图元的两种方式。
+func _gpAssembleBackpack() -> void:
+	gpBackpack = GPSymbolBackpack.new()
+	gpBackpack.name = "SymbolBackpack"
+	add_child(gpBackpack)
+	gpBackpack.gpBuild()
+	# Click chooses: place at the centre of the ACTIVE view, which is where the user is looking.
+	# 单击选中：放到**当前**视图中心，也就是用户正在看的地方。
+	gpBackpack.gpSymbolChosen.connect(_gpOnBackpackChosen)
+
+
+# Open / close the backpack (B key). Refreshes the pools each time so a symbol created a minute
+# ago is already in it.
+# 打开 / 关闭背包（B 键）。每次刷新两个池，使一分钟前刚建的图元也已在其中。
+func gpToggleBackpack() -> void:
+	if gpBackpack == null:
+		return
+	if gpBackpack.visible:
+		gpBackpack.hide()
+		return
+	var gpSettings: Object = get_node_or_null("/root/Settings")
+	var gpFav: Array[String] = []
+	var gpRecent: Array[String] = []
+	if gpSettings != null:
+		gpFav = (gpSettings.gpBagFavorites as Array[String]).duplicate()
+		gpRecent = (gpSettings.gpBagRecents as Array[String]).duplicate()
+	gpBackpack.gpSetSymbols(gpDefs, gpFav, gpRecent)
+	gpBackpack.gpOpen()
+
+
+# Place the chosen symbol under the view centre and remember it as recently used.
+# 把选中的图元放到视图中心下方，并记为最近使用。
+func _gpOnBackpackChosen(gpSymbolId: String) -> void:
+	var gpCv: GPCanvas2D = gpActiveCanvas()
+	if gpCv == null:
+		return
+	# The centre of the VIEWPORT, converted to world space: the point the user is aiming at.
+	# **视口**中心换算到世界坐标：正是用户瞄准的那一点。
+	var gpWorld: Vector2 = gpCv.gpWorldFromScreen(gpCv.size * 0.5)
+	gpCv.gpRequestPlaceNode(gpSymbolId, gpWorld)
+	# Recents are persisted here (not inside the popup) so a later session starts with them.
+	# 最近列表在此持久化（而非弹窗内部），使下次会话一开始就有它们。
+	var gpSettings: Object = get_node_or_null("/root/Settings")
+	if gpSettings != null:
+		gpSettings.gpBagRecents = GPSymbolBackpack.gpPushRecent(
+			gpSettings.gpBagRecents as Array[String], gpSymbolId)
+		gpSettings.gpSave()
+	gpSetState("status.bag_placed", [gpSymbolId])
+
+
+# B toggles the backpack anywhere in the window EXCEPT while typing: an unhandled-key handler
+# never sees a keystroke a focused LineEdit consumed, which is exactly the guard we want.
+# B 在窗口内任意处切换背包，**输入时除外**：未处理按键只在聚焦控件未消费按键时到达，正是所要的护栏。
+func _unhandled_key_input(gpEvent: InputEvent) -> void:
+	if not (gpEvent is InputEventKey):
+		return
+	var gpKey: InputEventKey = gpEvent as InputEventKey
+	if not gpKey.pressed or gpKey.echo:
+		return
+	if gpKey.ctrl_pressed or gpKey.meta_pressed or gpKey.alt_pressed:
+		return
+	if gpKey.keycode == KEY_B:
+		gpToggleBackpack()
+		get_viewport().set_input_as_handled()
+
+
+# Build the DRC panel tab (B2).
+# 构建 DRC 面板页（B2）。
+func _gpAssembleDrc() -> void:
+	gpDrcPanel = GPDRCPanel.new()
+	gpDrcPanel.name = "DrcTab"
+	gpTabs.add_child(gpDrcPanel)
+	gpDrcPanel.gpBuild()
+	gpTabs.set_tab_title(gpTabs.get_tab_count() - 1, I18n.gpTr("drc.panel_title"))
+	gpDrcPanel.gpFindingActivated.connect(_gpOnDrcJump)
+	_gpBindDrc()
+
+
+# Bind the DRC panel to the active canvas (called wherever the outline is bound, too).
+# 把 DRC 面板指向活动画布（与大纲绑定的每个入口一起调用）。
+func _gpBindDrc() -> void:
+	if gpDrcPanel == null:
+		return
+	var gpCv: GPCanvas2D = gpActiveCanvas()
+	if gpCv != null:
+		gpDrcPanel.gpBindCanvas(gpCv)
+
+
+# Run the health check on the active sheet and expose the counts in the status bar.
+# 对当前图纸跑体检，并把计数显示到状态栏。
+#
+# Public because the menu dispatcher calls it; keeping the tab-focusing here means every entry
+# (menu, future shortcut) lands on the same visible surface instead of a silent background run.
+# 设为公开供菜单分发调用；把「切到该页」放在这里，使每个入口（菜单、将来的快捷键）都落在同一个
+# 可见界面上，而不是静默跑一次。
+func gpRunDrc() -> void:
+	if gpDrcPanel == null:
+		return
+	_gpBindDrc()
+	gpDrcPanel.gpRun()
+	# Bring the tab forward: a check whose result the user cannot see is not a check.
+	# 把该页切到前面：用户看不见结果的体检不算体检。
+	for gpI in range(gpTabs.get_tab_count()):
+		if gpTabs.get_tab_control(gpI) == gpDrcPanel:
+			gpTabs.current_tab = gpI
+			break
+	var gpFound: Array[GPFinding] = gpDrcPanel.gpFindings()
+	gpSetState("status.drc_done", [
+		GPRulePack.gpCount(gpFound, GPFinding.GP_ERROR),
+		GPRulePack.gpCount(gpFound, GPFinding.GP_WARNING),
+		GPRulePack.gpCount(gpFound, GPFinding.GP_INFO),
+	])
+
+
+# Centre the view on a finding (B2). Vector2.INF means "no location" and is ignored.
+# 把视图对准某条发现（B2）。Vector2.INF 表示「无位置」，忽略。
+func _gpOnDrcJump(gpWorld: Vector2) -> void:
+	if gpWorld == Vector2.INF:
+		return
+	var gpCv: GPCanvas2D = gpActiveCanvas()
+	if gpCv == null:
+		return
+	# Screen = world * zoom + offset, so offset = screenCentre - world * zoom.
+	# 屏幕 = 世界 × 缩放 + 偏移，故 偏移 = 屏幕中心 − 世界 × 缩放。
+	gpCv.gpViewOffset = gpCv.size * 0.5 - gpWorld * gpCv.gpViewZoom
+	gpCv.queue_redraw()
+
 
 # ============================ localization refresh ============================
 # ============================ 本地化刷新 ============================
@@ -552,12 +737,21 @@ func _gpRefreshStaticText() -> void:
 	gpTabs.set_tab_title(0, I18n.gpTr("prop.title"))
 	gpTabs.set_tab_title(1, I18n.gpTr("prop.info"))
 	gpTabs.set_tab_title(2, I18n.gpTr("prop.doc"))
+	if gpDrcPanel != null:
+		gpTabs.set_tab_title(gpTabs.get_tab_count() - 1, I18n.gpTr("drc.panel_title"))
+	if gpDrcPanel != null:
+		gpDrcPanel.gpRefreshText()
+	if gpOutline != null:
+		gpTabs.set_tab_title(gpTabs.get_tab_count() - 2, I18n.gpTr("outline.title"))
+		gpOutline.gpRefreshText()
 	gpDocLabel.text = I18n.gpTr("doc.info")
 	gpSetState(gpStateKey, gpStateArgs)
 
 
 func _gpOnGraphChanged(_gpGraph: GPPIDGraph = null) -> void:
 	gpSelCoord.gpOnGraphChanged(_gpGraph)
+	if gpOutline != null:
+		gpOutline.gpRefresh()
 
 
 func _gpOnStatus(gpInfo: Dictionary) -> void:
@@ -573,6 +767,11 @@ func _gpOnStatus(gpInfo: Dictionary) -> void:
 # class-private implementation.
 func gpRefreshSelection() -> void:
 	gpSelCoord.gpRefreshSelection()
+	# The tree mirrors the selection; without this, picking a symbol on the canvas leaves the
+	# outline pointing at whatever was selected before.
+	# 树镜像选择；少了这一步，在画布上点选图元后大纲会停在之前选中的行。
+	if gpOutline != null:
+		gpOutline.gpRefreshSelection()
 
 
 func gpSyncInspectorDefs() -> void:

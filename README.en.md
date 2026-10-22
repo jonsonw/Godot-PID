@@ -31,7 +31,7 @@ This project is in **early development** (app version `0.1.0`, Godot 4.7). The t
 | Frame & title block, canvas text roles (single mm↔px source) | ✅ Working / 可用 |
 | Autosave: enabled after the first save (1 min dirty / 5 min clean) | ✅ Working / 可用 |
 | **DEXPI 1.4 export / import** (Proteus XML 4.2.0) | ✅ Working / 可用（概念层 + 图形层 + Extent；菜单：导出子菜单） |
-| DXF / PDF / basic list export | 🚧 Stubs / 接口已定义，实现为空桩 |
+| DXF R12 / PDF 1.4 (vector + subset-embedded CJK font) / classified Excel lists (4 types, per-list templates, write-back) / legacy CSV | ✅ Working / 可用（PDF font source is currently macOS Arial Unicode only; cross-platform font setting pending） |
 | 3D linkage rendering | 🚧 Stub / 空桩 |
 | HAZOP knowledge, compliance checks, unit-op generation | 📋 Planned, delivered via `GPIPIDAddon` in Pro / 规划中，由 Pro 版提供 |
 | Cross-sheet links, off-page connectors | 📋 Planned / 规划中 |
@@ -100,15 +100,20 @@ The core code is released under the **MIT License** — free to use, modify, and
 ### Run the tests / 运行测试
 
 ```bash
-# Home-grown GPGTest: 73 suites / 4,867 assertions (compile-clean, 0 SCRIPT ERROR)
-godot --headless --script res://tests/run_core_tests.gd
+# macOS / Linux: a WRITABLE HOME is mandatory, or user:// cannot be created and the engine dies
+# with SIGSEGV before any test runs (details in CONTRIBUTING.md).
+mkdir -p /tmp/gpidhome
 
-# Required after a fresh clone or whenever a class_name is added,
-# otherwise GUT reports "class_names have not been imported"
-godot --headless --import
+# Home-grown GPGTest: 109 suites / 9,086 assertions (compile-clean, 0 SCRIPT ERROR)
+HOME=/tmp/gpidhome godot --headless --path . --script res://tests/run_core_tests.gd
+
+# Parse check — run this once after adding a class_name (the headless runner resolves classes
+# from the .godot class-name cache, which the editor scan refreshes).
+HOME=/tmp/gpidhome godot --headless --path . --editor --quit
 
 # GUT 9.7.1 (vendored under addons/gut/)
-godot --headless --script res://addons/gut/gut_cmdln.gd -gexit
+HOME=/tmp/gpidhome godot --headless --path . --script res://addons/gut/gut_cmdln.gd \
+  -gdir=res://tests -ginclude_subdirs -gprefix=test_ -gsuffix=.gd -gexit
 ```
 
 CI runs four gates on every push: **import → compile scan → GPGTest → GUT**.
@@ -136,7 +141,7 @@ Godot-PID/                # GitHub repo root (local working folder: Godot-PID-Co
 │   │   └── commands/      # 32 concrete commands (node/shape/edge add-delete-move, path & tag editing, drop restore)
 │   ├── render/            # GPSymbolView / GPEdgeView / frame GPFrameView / backdrop GPBackgroundView / painter
 │   ├── io/                # *.pid.json read/write; DEXPI (Proteus XML) import/export;
-│   │   │                  # DXF / PDF / list export are stubs
+│   │   │                  # DXF R12 / PDF 1.4 / list export
 │   │   ├── dexpi_schema.gd    # version constants / dual RDL domains / reserved Set names
 │   │   ├── xml_text.gd        # single point for XML escaping; gpLang2() two-letter tags
 │   │   ├── dexpi_mapping.gd   # data-driven mapping; gpFlipY() / gpNormRgb() single points

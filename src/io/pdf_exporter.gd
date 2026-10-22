@@ -166,6 +166,17 @@ static func gpBuildPdf(gpEntities: Array[Dictionary], gpSheet: GPSheet,
 	# 先铺白底 —— PDF 页面没有固有背景，转换器/打印设备对透明页的合成不可预期
 	#（实测 sips 会合成成黑底）。
 	var gpCs: String = "1 1 1 rg 0 0 " + _gpNum2(gpW) + " " + _gpNum2(gpH) + " re f 0 g\n"
+	# Rev.3 stage 0d: the sheet is a movable object. The print model emits WORLD millimetres
+	# (frame + content both carry gpPaperOrigin), while a PDF page is PAPER-sized at (0,0).
+	# Translate the whole content stream by -origin once, in PDF points, so a moved sheet
+	# prints exactly like an unmoved one. The white page above is deliberately OUTSIDE this
+	# transform: it must cover the whole page, not the paper rectangle.
+	# Rev.3 阶段 0d：图纸是可移动对象。打印模型输出**世界**毫米（图框与内容都带 gpPaperOrigin），
+	# 而 PDF 页面是 (0,0) 起的**纸面**尺寸。故在 PDF 点坐标里把整条内容流平移 -origin 一次，
+	# 使移动过的图纸与未移动的打印结果一致。上方白底刻意在变换**之外**：它要铺满整页，而非纸面矩形。
+	var gpShift: Vector2 = gpPageShift(gpSheet)
+	if gpShift != Vector2.ZERO:
+		gpCs += "q 1 0 0 1 " + _gpNum2(gpShift.x) + " " + _gpNum2(gpShift.y) + " cm\n"
 	var gpTexts: int = 0
 	for gpE in gpEntities:
 		var gpOp: String = str(gpE["op"])
@@ -182,6 +193,12 @@ static func gpBuildPdf(gpEntities: Array[Dictionary], gpSheet: GPSheet,
 				if not gpChunk.is_empty():
 					gpCs += str(gpChunk["cs"])
 					gpTexts += 1
+	# Close the page transform opened above (only when it was opened). A transform left open
+	# is legal PDF, but closing it keeps the stream balanced and makes the intent explicit.
+	# 关闭上方打开的页面变换（仅在确实打开时）。未关闭的变换在 PDF 中合法，但关闭它使流保持
+	# 平衡、意图明确。
+	if gpShift != Vector2.ZERO:
+		gpCs += "Q\n"
 	# Whitespace-only padding so a zero-length stream never appears.
 	# 仅空白填充，避免出现零长流。
 	if gpCs == "":
@@ -309,8 +326,11 @@ static func _gpCircleOp(gpE: Dictionary, gpH: float, gpS: float) -> String:
 
 # One text run: flip the middle-height reference down to a baseline, centre by the font's
 # own advances, and emit the glyph-id hex string. An empty string emits nothing.
-# 一段文字：把行中高参考点下移为基线，按字体自身步进居中，写出字形 ID 十六进制串。
-# 空字符串不产出。
+# One text run: resolve the horizontal alignment (left / centre / right), convert the model's
+# vertical reference into a PDF baseline (middle = +0.35h, baseline = unchanged), and emit the
+# glyph-id hex string. An empty string emits nothing.
+# 一段文字：解析水平对齐（左 / 中 / 右），把模型的纵向基准换算成 PDF 基线（中高 = +0.35h，
+# 基线 = 不变），再写出字形 ID 十六进制串。空字符串不产出。
 static func _gpTextOp(gpE: Dictionary, gpH: float, gpS: float, gpChars: Dictionary,
 		gpMap: Dictionary, gpUpem: int) -> Dictionary:
 	var gpT: String = str(gpE["s"])
@@ -325,9 +345,15 @@ static func _gpTextOp(gpE: Dictionary, gpH: float, gpS: float, gpChars: Dictiona
 		gpWidth += float(int(gpInfo["adv"])) * gpSz / float(gpUpem)
 		gpHex += "%04X" % int(gpMap.get(int(gpInfo["gid"]), 0))
 	var gpX: float = (gpE["at"] as Vector2).x * gpS
-	if str(gpE["align"]) == "c":
-		gpX -= gpWidth * 0.5
-	var gpBaseY: float = gpH - ((gpE["at"] as Vector2).y + float(gpE["h"]) * 0.35) * gpS
+	match str(gpE.get("align", "l")):
+		"c":
+			gpX -= gpWidth * 0.5
+		"r":
+			gpX -= gpWidth
+	var gpY: float = (gpE["at"] as Vector2).y
+	if str(gpE.get("valign", GPPrintModel.GP_VALIGN_BASELINE)) == GPPrintModel.GP_VALIGN_MIDDLE:
+		gpY += float(gpE["h"]) * 0.35
+	var gpBaseY: float = gpH - gpY * gpS
 	return {"cs": "BT\n/F1 " + _gpNum2(gpSz) + " Tf\n" + \
 		_gpNum2(gpX) + " " + _gpNum2(gpBaseY) + " Td\n<" + gpHex + "> Tj\nET\n"}
 
@@ -335,6 +361,24 @@ static func _gpTextOp(gpE: Dictionary, gpH: float, gpS: float, gpChars: Dictiona
 # ---------------------------------------------------------------------------
 # helpers / 辅助
 # ---------------------------------------------------------------------------
+
+# The page-space translation that cancels the sheet's world position, in PDF points.
+# 抵消图纸世界位置的页面空间平移量（PDF 点）。
+#
+# WHY IT IS A FUNCTION, NOT AN INLINE EXPRESSION / 为何做成函数而非内联表达式：
+# this is the one place where "the paper is at (x,y) in the world" meets "the PDF page starts
+# at (0,0)". Pinning it directly (and using it for the content-stream `cm`) means a sign error
+# cannot hide behind a symmetric fixture; the moved-sheet test asserts the numeric pair.
+# 这是「纸在世界 (x,y)」与「PDF 页面从 (0,0) 起」相遇的唯一一处。直接钉住它（并让内容流的
+# `cm` 使用它）使符号错误无法藏在对称夹具后面；移动图纸测试直接断言这对数值。
+# [param gpSheet] the sheet whose paper origin is cancelled / 待抵消纸面原点的图纸
+# [return] (tx, ty) in PDF points, to be applied as `1 0 0 1 tx ty cm`
+static func gpPageShift(gpSheet: GPSheet) -> Vector2:
+	if gpSheet == null:
+		return Vector2.ZERO
+	return Vector2(-gpSheet.gpPaperOrigin.x * GP_PT_PER_MM,
+		gpSheet.gpPaperOrigin.y * GP_PT_PER_MM)
+
 
 # One model point as "x y" in PDF space (mm -> pt, Y flipped).
 # 一个模型点写成 PDF 空间的 "x y"（mm -> pt，Y 翻转）。

@@ -77,6 +77,14 @@ var gpPipeFontSizeLabel: Label
 # 管线位号字号选择框。
 var gpPipeFontSizeSpin: SpinBox
 
+# Motion (view-layer effects) label + checkbox, added programmatically like the pipe rows.
+# 动效（视图层效果）标签与复选框，与管线行一样动态添加。
+var gpMotionLabel: Label
+
+# Motion checkbox.
+# 动效复选框。
+var gpMotionCheck: CheckBox
+
 # OK button.
 # 确定按钮。
 var gpOk: Button
@@ -177,6 +185,10 @@ func _ready() -> void:
 	# Pipe line-number style rows (added programmatically so the .tscn is untouched).
 	# 管线位号样式两行（动态添加，不改动 .tscn）。
 	_gpBuildPipeTagRows()
+
+	# Motion row (view-layer effects; also programmatic).
+	# 动效行（视图层效果；同样动态添加）。
+	_gpBuildMotionRow()
 
 	gpOk.pressed.connect(queue_free)
 
@@ -312,6 +324,31 @@ func _gpOnPipeFontSizeChanged(gpVal: float) -> void:
 	Settings.gpSave()
 
 
+# Build the motion row (view-layer effects: drop pop / update flash) before the OK button.
+# 在「确定」之前构建动效行（视图层效果：落位回弹 / 更新高亮）。
+func _gpBuildMotionRow() -> void:
+	var gpVBox: VBoxContainer = $Panel/VBox
+	var gpRow: HBoxContainer = HBoxContainer.new()
+	gpMotionLabel = Label.new()
+	gpMotionLabel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	gpMotionCheck = CheckBox.new()
+	gpMotionCheck.button_pressed = Settings.gpMotionEnabled
+	gpMotionCheck.toggled.connect(_gpOnMotionToggled)
+	gpRow.add_child(gpMotionLabel)
+	gpRow.add_child(gpMotionCheck)
+	var gpOkIdx: int = gpVBox.get_children().find(gpOk)
+	gpVBox.add_child(gpRow)
+	gpVBox.move_child(gpRow, gpOkIdx)
+
+
+# Handle the motion toggle: persist it and let every canvas re-push the new value.
+# 处理动效开关：持久化，并让每个画布重新推入新值。
+func _gpOnMotionToggled(gpOn: bool) -> void:
+	Settings.gpMotionEnabled = gpOn
+	Settings.gpApplyMotion()
+	Settings.gpSave()
+
+
 # Select the language dropdown item matching the given locale code.
 # 选中与给定语言代码匹配的语言下拉项。
 func _gpSelectLocale(gpCode: String) -> void:
@@ -333,6 +370,8 @@ func _gpRefreshText(gpLocale: String) -> void:
 	gpAutoScaleLabel.text = I18n.gpTr("settings.auto_scale")
 	gpPipeRotateLabel.text = I18n.gpTr("settings.pipe_tag_rotate")
 	gpPipeFontSizeLabel.text = I18n.gpTr("settings.pipe_tag_font_size")
+	if gpMotionLabel != null:
+		gpMotionLabel.text = I18n.gpTr("settings.motion_enabled")
 	gpOk.text = I18n.gpTr("settings.ok")
 	# Update the language item labels themselves so they match the new locale.
 	# 更新语言下拉项本身的文本，使其与新语言一致。

@@ -151,7 +151,26 @@ func gpTestCentredTextUsesTheAlignmentPoint() -> void:
 	gpCheck(not gpCentred.is_empty(), "the bare sheet has a centred zone label")
 	var gpText: String = GPDxfExporter.gpWriteDxf([gpCentred], gpSheet)
 	gpCheck(gpText.find("72\n1") >= 0, "centred text declares horizontal alignment 1")
+	gpCheck(gpText.find("73\n0") >= 0, "baseline text declares vertical alignment 0")
 	gpCheck(gpText.find("11\n") >= 0, "centred text carries the alignment point")
+
+
+# P0-2: a tag is authored on its MIDDLE line, so DXF must write 73=2; writing only 72/11
+# left the string sitting half a line above where the canvas draws it.
+# P0-2：位号以**行中高**编排，故 DXF 必须写 73=2；旧代码只写 72/11，使文字比画布高半行。
+func gpTestMiddleBaselineTextUsesVerticalAlignment() -> void:
+	var gpSheet := _gpSheet()
+	var gpEntities: Array[Dictionary] = GPPrintModel.gpProject(gpSheet, _gpDefs())
+	var gpTag: Dictionary = {}
+	for gpE in gpEntities:
+		if str(gpE["op"]) == GPPrintModel.GP_OP_TEXT \
+				and str(gpE.get("valign", "")) == GPPrintModel.GP_VALIGN_MIDDLE:
+			gpTag = gpE
+			break
+	gpCheck(not gpTag.is_empty(), "the fixture emits a middle-baseline tag")
+	var gpText: String = GPDxfExporter.gpWriteDxf([gpTag], gpSheet)
+	gpCheck(gpText.find("73\n2") >= 0, "middle-baseline text declares vertical alignment 2")
+	gpCheck(gpText.find("11\n") >= 0, "middle-baseline text carries the alignment point")
 
 
 # ---- refusals / 拒绝 ----

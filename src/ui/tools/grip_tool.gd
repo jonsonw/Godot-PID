@@ -57,7 +57,10 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 	# Finish a whole-shape move.
 	# 结束整枚图形的移动。
 	if gpAnno.gpHasShapeDrag():
-		gpAnno.gpEndShapeDrag()
+		# Pass the release WORLD position: dropping a note ON a nozzle converts it to a connection
+		# (B08 follow-up), and that needs to know where the user let go.
+		# 传入松手处的世界坐标：把注记**拖到**管嘴上会转成连线（B08 续），那需要知道用户在哪松手。
+		gpAnno.gpEndShapeDrag(gpWorld)
 		gpCv.gpGraphChanged.emit()
 		gpCv.gpEmitStatus()
 		return true

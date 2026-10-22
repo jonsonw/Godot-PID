@@ -126,6 +126,34 @@ func gpDanglingPoint(gpIsFrom: bool) -> Vector2:
 	return Vector2(float(gpP[0]), float(gpP[1]))
 
 
+# The uid of the OPEN-END NOTE annotation referenced by one end ("" when none).
+# 某一端所引用**开口端注记**的 uid（无则空串）。
+# The note is a text annotation (GPShape.GPKind.GP_TEXT), not a string on the edge: that is what
+# lets it carry its own uid / layer / properties and appear in the exported lists (ADR-34).
+# 注记是文字注释图元（GPShape.GPKind.GP_TEXT），而不是边上的一段字符串：正因如此它才能拥有自己的
+# uid / 图层 / 属性，并出现在导出的清单里（ADR-34）。
+func gpEndNoteUid(gpIsFrom: bool) -> String:
+	var gpMap: Dictionary = gpAttrs.get("end_notes", {}) as Dictionary
+	return str(gpMap.get("from" if gpIsFrom else "to", ""))
+
+
+# Point one end at an annotation uid ("" detaches it).
+# 令某一端指向某个注释 uid（空串表示解除引用）。
+# The storage is one attrs key with two sides, so a two-ended open pipe can carry two different
+# notes without inventing a second key per side.
+# 存储是**一个** attrs 键两位，故两端都开口的管线可各带一条注记，而无需为每端另造键。
+func gpSetEndNoteUid(gpIsFrom: bool, gpUid: String) -> void:
+	var gpMap: Dictionary = (gpAttrs.get("end_notes", {}) as Dictionary).duplicate()
+	if gpUid == "":
+		gpMap.erase("from" if gpIsFrom else "to")
+	else:
+		gpMap["from" if gpIsFrom else "to"] = gpUid
+	if gpMap.is_empty():
+		gpAttrs.erase("end_notes")
+	else:
+		gpAttrs["end_notes"] = gpMap
+
+
 # Move a dangling end. No-op when the end is bound to a node.
 # 移动悬空端。该端绑定到节点时不做任何事。
 func gpSetDanglingPoint(gpIsFrom: bool, gpPos: Vector2) -> void:

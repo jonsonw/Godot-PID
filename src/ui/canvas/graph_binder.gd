@@ -36,6 +36,13 @@ var gpStyle: GPRenderStyle = null
 var _gpSymbolViews: Dictionary = {}
 var _gpEdgeViews: Dictionary = {}
 
+# Whether newly created symbol views should play the drop animation. FALSE until the first sync
+# has completed: opening a drawing must not pop 500 symbols at once — only symbols the user
+# places (or that arrive later, e.g. pasted / imported ones) are worth announcing.
+# 新建的图元视图是否播放落位动画。首次同步完成前为 false：打开一张图纸不该让 500 个图元同时
+# 弹一下 —— 只有用户放置（或稍后到达，如粘贴 / 导入）的图元值得被「宣布」。
+var _gpSpawnArmed: bool = false
+
 # Find a symbol definition by its id.
 # 按 id 查找图元定义。
 func gpDefFor(gpTypeId: String) -> GPSymbolDef:
@@ -125,6 +132,12 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
 			var gpNewDef: GPSymbolDef = gpDefFor(gpN.gpSymbolId)
 			var gpRebound: bool = gpV.gpNode != gpN or gpV.gpDef != gpNewDef \
 				or gpV.gpGraph != gpGraph
+			# "Same instance, new definition" is the ONLY case worth a flash: it is what a symbol
+			# re-save looks like from here. A swapped graph (another file) or a swapped node object
+			# (reload) merely rebuilds, and flashing the whole sheet on open would be noise.
+			# 「同一实例、定义变了」是唯一值得闪一下的情形：图元重新保存后从这里看就是这样。
+			# 图对象被换（换文件）或节点对象被换（重载）都只是重建，打开时整图闪一遍是噪音。
+			var gpDefSwapped: bool = gpV.gpDef != gpNewDef and gpV.gpNode == gpN
 			gpV.gpNode = gpN
 			gpV.gpNodeId = gpId
  # Rebind the definition too. When a symbol is re-exported, gpRegisterDefs()
@@ -142,6 +155,7 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
  # 故 gpUpdateTransform() 执行时图必须已就位。
 			gpV.gpGraph = gpGraph
 			gpV.gpDefLookupCb = _gpLookupDef
+			gpV.gpSetMotionEnabled(gpStyle == null or gpStyle.gpMotionEnabled)
 			var gpMoved: bool = gpV.gpUpdateTransform()
  # The definition drives the painted geometry, so a rebind needs a repaint of BOTH
  # layers (label on the view, glyph + ports on the body child) — but only when something
@@ -150,6 +164,8 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
  # —— 但仅在真正变化时：否则每一次静止的鼠标移动都会把整张图重绘一遍（即闪烁）。
 			if gpRebound or gpMoved:
 				gpV.gpRepaint()
+			if gpDefSwapped:
+				gpV.gpPlayFlash()
 		else:
  # Create a new view for this node.
  # 为该节点创建新视图。
@@ -157,6 +173,7 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
 			var gpDef: GPSymbolDef = gpDefFor(gpN.gpSymbolId)
 			gpV.gpInit(gpN, gpDef, gpGraph, _gpLookupDef)
 			gpV.gpStyle = gpStyle
+			gpV.gpSetMotionEnabled(gpStyle == null or gpStyle.gpMotionEnabled)
 			# Tags are text: oversample them for the camera scale so an N mm tag is rasterised at
 			# its on-screen size instead of being magnified from N pixels. The property is an ENUM
 			# (`= true` coerces to 1 = DISABLED), hence the constant.
@@ -164,6 +181,10 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
 			# 该属性是**枚举**（写 `= true` 会被强转为 1 = DISABLED），故用常量。
 			gpV.oversampling_with_scale = CanvasItem.OVERSAMPLING_WITH_SCALE_ENABLED
 			gpWorldRoot.add_child(gpV)
+			# AFTER add_child: the pop needs a SceneTree to bind its tween to.
+			# 在 add_child 之后：回弹补间需要一个 SceneTree 才能绑定。
+			if _gpSpawnArmed:
+				gpV.gpPlaySpawn()
  # Multi-select: every id in the selection set lights up, not just the primary one.
  # 多选：选择集中的每个 id 都会高亮，而不只是主选项。
 		gpV.gpSetSelected(gpSelection.has(gpId))
@@ -195,6 +216,9 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
 				gpWorldRoot.move_child(gpView, gpAt)
 			gpAt += 1
 	_gpSymbolViews = gpFresh
+	# From now on, a view the user causes to appear is worth a pop. See _gpSpawnArmed.
+	# 此后由用户行为产生的视图才值得弹一下。见 _gpSpawnArmed。
+	_gpSpawnArmed = true
 
 
 # Symbol ids in paint order: by mount depth ascending (hosts first), ties broken by the graph's own
@@ -331,6 +355,24 @@ func gpRefreshEdges() -> void:
 # Redrawing the whole sheet every frame would work but is wasteful; this touches only the affected
 # edges. Returning the id list lets callers assert / observe exactly which edges were marked.
 # 每帧全图重绘虽可行但浪费，本函数只触碰受影响的边。返回 id 列表便于调用方精确断言 / 观察。
+# Refresh ONE edge view in place: recompute its geometry from the live model and push it to the GPU
+# ink line synchronously. This is the primitive a drag needs — dragging a bend only mutates
+# `gpE.gpRouting`, and without this call the edge view keeps its old stroke until the release
+# triggers a full sync (which is exactly the "the line catches up when I let go" bug).
+# 就地刷新**一条**边视图：从活模型重算几何并同步写入 GPU 墨线。拖拽需要的正是这个原语 ——
+# 拖动折点只改 `gpE.gpRouting`，缺此调用时边视图一直保留旧笔迹，直到松手触发全量同步
+#（正是「松手后线才跟过来」的 bug）。
+func gpRedrawEdge(gpEdgeId: String) -> bool:
+	if gpEdgeId == "":
+		return false
+	var gpV: GPEdgeView = _gpEdgeViews.get(gpEdgeId, null) as GPEdgeView
+	if gpV == null:
+		return false
+	gpV.gpApplyGeometry()
+	gpV.queue_redraw()
+	return true
+
+
 func gpRedrawEdgesForNodes(gpNodeIds: Array[String]) -> Array[String]:
 	var gpOut: Array[String] = []
 	if gpNodeIds.is_empty() or _gpEdgeViews.is_empty():
@@ -367,6 +409,7 @@ func gpApplyStyle(gpNewStyle: GPRenderStyle) -> void:
 		if gpV == null:
 			continue
 		gpV.gpStyle = gpStyle
+		gpV.gpSetMotionEnabled(gpStyle == null or gpStyle.gpMotionEnabled)
 		gpV.gpRepaint()
 	for gpId in _gpEdgeViews.keys():
 		var gpV: GPEdgeView = _gpEdgeViews[gpId] as GPEdgeView

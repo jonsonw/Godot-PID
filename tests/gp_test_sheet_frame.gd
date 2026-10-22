@@ -337,3 +337,198 @@ func gpTestMalformedDockingFallsBackSafely() -> void:
 		"nodes": [], "edges": [], "shapes": [], "tb_anchor": "x", "tb_offset": [1.0]})
 	gpEq(gpS3.gpTbAnchor, GPSheet.GP_TB_ANCHOR_BOTTOM_RIGHT, "非数值锚角应被忽略")
 	gpCheck((gpS3.gpTbOffset as Vector2).is_equal_approx(Vector2.ZERO), "长度不足的偏移应被忽略")
+
+
+# P0-6: every standard paper size gets the margins its zone ruler needs. A0 used to inherit the
+# A3-era 25/5/5/5; at scale 2.83 its 8.07 mm zone text no longer fits a 5 mm band and three of
+# the four rulers silently disappeared.
+# P0-6：每种标准图幅都得到坐标带放得下的边距。A0 过去继承 A3 的 25/5/5/5；在 2.83 倍尺下
+# 8.07mm 的坐标带文字放不进 5mm 带宽，四边标号会静默消失三边。
+func gpTestA0DefaultMarginsKeepZoneLabels() -> void:
+	var gpS: GPSheet = GPSheet.new()
+	gpS.gpWidthMM = 1189.0
+	gpS.gpHeightMM = 841.0
+	gpS.gpSetFrameMargins(GPSheet.gpDefaultMarginsFor(gpS.gpWidthMM, gpS.gpHeightMM))
+	gpEq(gpS.gpFrameMargins, [25.0, 10.0, 10.0, 10.0], "A0 默认边距应为 25/10/10/10")
+	var gpMM: float = GPTextRole.GP_FRAME_GRID_MM * gpS.gpFrameScale()
+	gpEq(GPFrameGeometry.gpZoneLabels(gpS, gpMM).size(), 40, "A0 四边都应有坐标带标号")
+
+
+# P0-6: changing the paper size through the command re-derives the margins when they were the
+# old size's default, rewrites the SIZE cell, and is one undo step.
+# P0-6：经命令改图幅时，边距仍是旧默认则重推、重写「图幅」格，且是一个撤销步。
+func gpTestPaperSizeChangeRedrivesMarginsAndUndoes() -> void:
+	var gpS: GPSheet = GPSheet.new()
+	gpS.gpWidthMM = 420.0
+	gpS.gpHeightMM = 297.0
+	gpS.gpSetFrameMargins(GPSheet.gpDefaultMarginsFor(420.0, 297.0))
+	gpS.gpTitleBlock = GPSheet.gpDefaultTitleBlock()
+	gpS.gpSyncSheetSizeField()
+	var gpCtx: GPCommandContext = GPCommandContext.new(GPPIDGraph.new(), GPIdGen.new())
+	var gpCmd: GPMutateSheetCommand = GPMutateSheetCommand.new(gpS, {
+		GPMutateSheetCommand.GP_FIELD_WIDTH: 841.0,
+		GPMutateSheetCommand.GP_FIELD_HEIGHT: 594.0,
+	})
+	gpCheck(gpCmd.gpExecute(gpCtx), "改图幅命令应执行")
+	gpEq(gpS.gpWidthMM, 841.0, "宽度应变为 A1")
+	gpEq(gpS.gpFrameMargins, [25.0, 10.0, 10.0, 10.0], "A3->A1 应重推为 A1 默认边距")
+	gpEq(gpS.gpTitleValue("sheet_size"), "A1", "图幅格应同步为 A1")
+	var gpLabels: Array = GPFrameGeometry.gpZoneLabels(gpS,
+		GPTextRole.GP_FRAME_GRID_MM * gpS.gpFrameScale())
+	gpEq(gpLabels.size(), 40, "A3->A1 后四边坐标带应完整")
+	gpCmd.gpUndo(gpCtx)
+	gpEq(gpS.gpWidthMM, 420.0, "撤销应恢复 A3 宽度")
+	gpEq(gpS.gpFrameMargins, [25.0, 5.0, 5.0, 5.0], "撤销应恢复 A3 边距")
+	gpEq(gpS.gpTitleValue("sheet_size"), "A3", "撤销应恢复 A3 图幅格")
+	gpCmd.gpRedo(gpCtx)
+	gpEq(gpS.gpWidthMM, 841.0, "重做应再次变为 A1")
+
+
+# P0-4: the title block is one undoable sheet field. A dialog edit must reach the model through
+# the command, not a direct dictionary poke the close guard cannot see.
+# P0-4：图签是一个可撤销的图纸字段。对话框编辑必须经命令进入模型，而不是关闭护栏看不到的
+# 直接字典写入。
+func gpTestTitleBlockFieldCommandUndoes() -> void:
+	var gpS: GPSheet = GPSheet.gpNew("s", "s", 0)
+	var gpCtx: GPCommandContext = GPCommandContext.new(gpS.gpGraph, GPIdGen.new())
+	var gpAfter: Dictionary = gpS.gpTitleBlock.duplicate(true)
+	gpAfter["project"] = {"value": {"zh": "示例项目", "en": "Sample"}}
+	var gpCmd: GPMutateSheetCommand = GPMutateSheetCommand.new(gpS, {
+		GPMutateSheetCommand.GP_FIELD_TITLE_BLOCK: gpAfter,
+	}, "编辑图签")
+	gpCheck(gpCmd.gpExecute(gpCtx), "图签字段命令应执行")
+	gpEq(gpS.gpTitleValue("project"), "示例项目", "图签值应写入")
+	gpCmd.gpUndo(gpCtx)
+	gpEq(gpS.gpTitleValue("project"), "", "撤销应恢复旧图签（默认空值）")
+	gpCheck(gpS.gpTitleBlock.has("company"), "撤销后仍应保留完整标准字段")
+
+
+# P1-9 (folded into P0-4): the title-block offset clamp must use THIS sheet's block size.
+# On A1 the legal max is frame - 270.32, not frame - 135.
+# P1-9（并入 P0-4）：图签偏移钳制必须用**本图纸**的块尺寸。A1 的合法上限是内框减 270.32，
+# 而不是内框减 135。
+func gpTestTitleBlockClampUsesScaledBlock() -> void:
+	var gpS: GPSheet = GPSheet.gpNew("s", "s", 0)
+	var gpCtx: GPCommandContext = GPCommandContext.new(gpS.gpGraph, GPIdGen.new())
+	var gpCmd: GPMutateSheetCommand = GPMutateSheetCommand.new(gpS, {
+		GPMutateSheetCommand.GP_FIELD_TB_OFFSET: Vector2(600.0, 0.0),
+	})
+	gpCheck(gpCmd.gpExecute(gpCtx), "偏移命令应执行")
+	var gpFrame: Rect2 = GPFrameGeometry.gpFrameRect(gpS)
+	var gpWant: float = gpFrame.size.x - gpS.gpTbBlockSize().x
+	gpApprox(gpS.gpTbOffset.x, gpWant, 0.01, "A1 偏移上限应按 270.32mm 块宽钳制")
+
+
+# P0-6: a user who hand-tuned the margins keeps them across a paper-size change. Only the
+# OLD SIZE'S DEFAULT is re-derived; a deliberate 30 mm margin is a decision, not a default.
+# P0-6：手工调过边距的用户在改图幅后保留其数值。只有**旧纸幅的默认值**才重推；30mm 是
+# 决定、不是默认。
+func gpTestSheetSizePreservesCustomMargins() -> void:
+	var gpS: GPSheet = GPSheet.new()
+	gpS.gpWidthMM = 420.0
+	gpS.gpHeightMM = 297.0
+	gpS.gpSetFrameMargins([30.0, 6.0, 7.0, 8.0])
+	var gpCtx: GPCommandContext = GPCommandContext.new(GPPIDGraph.new(), GPIdGen.new())
+	var gpCmd: GPMutateSheetCommand = GPMutateSheetCommand.new(gpS, {
+		GPMutateSheetCommand.GP_FIELD_WIDTH: 841.0,
+		GPMutateSheetCommand.GP_FIELD_HEIGHT: 594.0,
+	})
+	gpCheck(gpCmd.gpExecute(gpCtx), "改图幅命令应执行")
+	gpEq(gpS.gpFrameMargins, [30.0, 6.0, 7.0, 8.0], "手工边距不得被新图幅默认值覆盖")
+
+
+# P0-4: the independent sheet fields (frame switch / drawing language / underlay) are one
+# undoable command too — the dialog used to write them directly.
+# P0-4：独立图纸字段（图框开关 / 图面语言 / 底图）也是一个可撤销命令 —— 对话框过去直接写。
+func gpTestIndependentSheetFieldsUndo() -> void:
+	var gpS: GPSheet = GPSheet.gpNew("s", "s", 0)
+	var gpCtx: GPCommandContext = GPCommandContext.new(gpS.gpGraph, GPIdGen.new())
+	var gpCmd: GPMutateSheetCommand = GPMutateSheetCommand.new(gpS, {
+		GPMutateSheetCommand.GP_FIELD_FRAME_ON: false,
+		GPMutateSheetCommand.GP_FIELD_LABEL_MODE: GPSheet.GP_LABEL_EN,
+		GPMutateSheetCommand.GP_FIELD_BG_PATH: "user://trace.png",
+		GPMutateSheetCommand.GP_FIELD_BG_ALPHA: 0.55,
+	}, "图纸字段")
+	gpCheck(gpCmd.gpExecute(gpCtx), "独立图纸字段命令应执行")
+	gpCheck(not gpS.gpFrameOn, "图框开关应写入")
+	gpEq(gpS.gpLabelMode, GPSheet.GP_LABEL_EN, "图面语言应写入")
+	gpEq(gpS.gpBackgroundPath, "user://trace.png", "底图路径应写入")
+	gpApprox(gpS.gpBackgroundAlpha, 0.55, 0.0001, "底图透明度应写入")
+	gpCmd.gpUndo(gpCtx)
+	gpCheck(gpS.gpFrameOn, "撤销应恢复图框显示")
+	gpEq(gpS.gpLabelMode, GPSheet.GP_LABEL_BOTH, "撤销应恢复默认语言")
+	gpEq(gpS.gpBackgroundPath, "", "撤销应清空底图路径")
+	gpApprox(gpS.gpBackgroundAlpha, 0.35, 0.0001, "撤销应恢复默认透明度")
+
+
+# P0-5: a pre-A1 archive carries A3-era symbol data but no per-node size. It must be inferred
+# as 0.5 (the A1 rebase doubled the DATA), and that decision must survive a re-save.
+# P0-5：A1 之前的存档是 A3 时代图元数据、且无逐节点尺寸。必须推断为 0.5（A1 重定基把
+# **数据**翻倍），且该决定必须在重存后存活。
+func gpTestLegacyArchiveGetsHalfSymbolScale() -> void:
+	var gpOld: Dictionary = {"id": "s", "name": "旧图", "index": 0,
+		"width_mm": 420.0, "height_mm": 297.0,
+		"meta": {"version": "1.2"}, "nodes": [], "edges": [], "shapes": []}
+	var gpS: GPSheet = GPSheet.gpFromDict(gpOld)
+	gpApprox(gpS.gpSymbolScale, 0.5, 0.0001, "无 symbol_scale 的非 A1 旧档应推断为 0.5")
+	var gpD: Dictionary = gpS.gpToDict()
+	gpApprox(float(gpD.get("symbol_scale", 0.0)), 0.5, 0.0001,
+		"旧档重存应显式写出 0.5")
+	var gpBack: GPSheet = GPSheet.gpFromDict(gpD)
+	gpApprox(gpBack.gpSymbolScale, 0.5, 0.0001, "0.5 应随存档往返")
+
+
+# A1 is the rebased default: an A1 archive without a marker is full-scale, not legacy.
+# A1 是重定基后的默认图幅：无标记的 A1 存档按全尺度，而不是旧档。
+func gpTestA1ArchiveIsFullScaleWithoutMarker() -> void:
+	var gpS: GPSheet = GPSheet.gpFromDict({"id": "s", "name": "x", "index": 0,
+		"width_mm": 841.0, "height_mm": 594.0, "meta": {"version": "1.2"},
+		"nodes": [], "edges": [], "shapes": []})
+	gpApprox(gpS.gpSymbolScale, 1.0, 0.0001, "A1 无标记应按 1.0")
+	gpCheck(not gpS.gpToDict().has("symbol_scale"), "1.0 不应写出 symbol_scale")
+
+
+# A NEW A3 drawing writes meta.symbol_scale=1.0, so it is not mistaken for a legacy A3 on
+# reopen. Without this, the round trip would silently shrink it to 0.5.
+# 新建 A3 图写出 meta.symbol_scale=1.0，使重开时不会被误判为旧 A3。缺此标记，往返会把它
+# 静默缩到 0.5。
+func gpTestNewA3StaysFullScale() -> void:
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	gpG.gpMeta["symbol_scale"] = 1.0
+	var gpS: GPSheet = GPSheet.gpFromDict({"id": "s", "name": "x", "index": 0,
+		"width_mm": 420.0, "height_mm": 297.0, "meta": gpG.gpMeta,
+		"nodes": [], "edges": [], "shapes": []})
+	gpApprox(gpS.gpSymbolScale, 1.0, 0.0001, "带 1.0 标记的新 A3 应按全尺度")
+
+
+# The library applies the active document's scale to the SHARED defs, so every consumer sees
+# the legacy footprint without touching 40+ gpDefaultSize call sites. Reset afterwards so the
+# global cache does not leak into other suites.
+# 图元库把活动文档尺度施加到**共享** def，使每个消费方看到旧档包络，而无需改 40 余处调用点。
+# 测试末尾复位，避免全局缓存泄漏到其它套件。
+func gpTestLibraryAppliesDocumentScale() -> void:
+	var gpDefs: Array[GPSymbolDef] = GPSymbolLibrary.gpDefaultDefs()
+	var gpBase: Vector2 = gpDefs[0].gpDefaultSize
+	GPSymbolLibrary.gpSetDocSizeScale(0.5)
+	var gpHalf: Vector2 = gpDefs[0].gpDefaultSize
+	GPSymbolLibrary.gpSetDocSizeScale(1.0)
+	var gpFull: Vector2 = gpDefs[0].gpDefaultSize
+	gpApprox(gpHalf.x, gpBase.x * 0.5, 0.0001, "0.5 尺度应把包络减半")
+	gpApprox(gpHalf.y, gpBase.y * 0.5, 0.0001, "0.5 尺度应把包络减半（y）")
+	gpApprox(gpFull.x, gpBase.x, 0.0001, "复位 1.0 应恢复基准包络")
+	gpApprox(gpFull.y, gpBase.y, 0.0001, "复位 1.0 应恢复基准包络（y）")
+
+
+# A NEW non-A1 sheet writes 1.0 explicitly, because paper size alone cannot distinguish it from
+# a legacy A3 archive. Without the key, the sheet-only round trip would reopen it at 0.5.
+# 新建的非 A1 图纸显式写 1.0，因为单凭纸幅无法把它与旧 A3 区分。缺这个键，图纸级往返会把它
+# 以 0.5 重开。
+func gpTestNewA3SheetKeyRoundTripsFullScale() -> void:
+	var gpS: GPSheet = GPSheet.gpNew("s", "s", 0)
+	gpS.gpWidthMM = 420.0
+	gpS.gpHeightMM = 297.0
+	var gpD: Dictionary = gpS.gpToDict()
+	gpApprox(float(gpD.get("symbol_scale", 0.0)), 1.0, 0.0001,
+		"新建 A3 图纸应显式写出 1.0")
+	var gpBack: GPSheet = GPSheet.gpFromDict(gpD)
+	gpApprox(gpBack.gpSymbolScale, 1.0, 0.0001, "A3 图纸往返后仍为 1.0")

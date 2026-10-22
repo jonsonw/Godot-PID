@@ -26,6 +26,25 @@ static var _gpCacheValid: bool = false
 # 由 gpRegisterDefs() / gpClearRegistered() 原地修补（无需重载图元包）。
 static var _gpBuiltinCount: int = 0
 
+# P0-5: per-document symbol scale. The A1 rebase doubled the DATA (GP_NOMINAL + pack
+# manifests). A pre-A1 archive has no per-node size, so it must render its symbols at the
+# A3-era scale (0.5 of the new data) or every old drawing opens with everything twice as
+# large. The scale is applied to the SHARED def objects, so every consumer (canvas, hit
+# test, mount resolver, print model, exporters) sees the right footprint without touching
+# the 40+ gpDefaultSize call sites. One document is active at a time; the active sheet
+# supplies the scale.
+# P0-5：每文档图元尺度。A1 重定基把**数据**翻倍（GP_NOMINAL + 包 manifest）。A1 之前的
+# 存档没有逐节点尺寸，故必须按 A3 时代尺度（新数据的 0.5）渲染，否则旧图一打开就全部
+# 放大一倍。尺度施加在**共享**的 def 对象上，使画布/命中/挂载/打印/导出全都看到正确
+# 包络，而无需改 40 余处 gpDefaultSize 调用点。同一时刻只有一个活动文档，尺度由活动图纸给出。
+static var gpDocSizeScale: float = 1.0
+
+# Unscaled base envelope per def id, captured when the cache is built / a def is registered.
+# The scale is ALWAYS applied as base * gpDocSizeScale, never compounded.
+# 每个 def id 的**未缩放**基准包络，在缓存构建 / def 注册时捕获。尺度恒按 base * scale
+# 施加，绝不复利。
+static var _gpBaseSizes: Dictionary = {}
+
 # Directory where user-authored symbol packs are persisted across sessions.
 # 用户自建图元包的跨会话持久化目录（由符号编辑器导出时写入）。
 const GP_USER_PACKS_DIR: String = "user://symbol_packs"
@@ -49,6 +68,23 @@ static func gpDefaultDefs() -> Array[GPSymbolDef]:
 	return _gpCachedDefs
 
 
+# Apply the active document's symbol scale to every cached def (P0-5). 1.0 = A1-rebased
+# data; 0.5 = a pre-A1 archive whose symbols were authored against the A3-era envelopes.
+# Idempotent: each write is base * scale, never current * factor.
+# 把活动文档的图元尺度施加到每个缓存 def（P0-5）。1.0 = A1 重定基数据；0.5 = A1 之前、
+# 图元按 A3 时代包络绘制的存档。幂等：每次写 base * scale，绝不写 current * factor。
+static func gpSetDocSizeScale(gpScale: float) -> void:
+	gpDocSizeScale = clampf(gpScale, 0.1, 10.0)
+	if not _gpCacheValid:
+		_gpRebuildCache()
+	for gpD in _gpCachedDefs:
+		if gpD == null:
+			continue
+		var gpBase: Variant = _gpBaseSizes.get(gpD.gpId, null)
+		if gpBase is Vector2:
+			gpD.gpDefaultSize = (gpBase as Vector2) * gpDocSizeScale
+
+
 # Rebuild the cached defs array in place, preserving its identity.
 # 原地重建缓存定义数组，保持其身份不变。
 # Built-ins first, then user-authored defs, so custom symbols are easy to spot.
@@ -66,7 +102,26 @@ static func _gpRebuildCache() -> void:
 	_gpCachedDefs.append_array(gpBuiltin)
 	_gpBuiltinCount = _gpCachedDefs.size()
 	_gpCachedDefs.append_array(_gpExtraDefs)
+	# Capture the authored (unscaled) envelope BEFORE applying the document scale, so
+	# switching documents never compounds.
+	# 在施加文档尺度**之前**捕获作者（未缩放）包络，使切换文档不会复利。
+	_gpBaseSizes.clear()
+	for gpD in _gpCachedDefs:
+		if gpD != null:
+			_gpBaseSizes[gpD.gpId] = gpD.gpDefaultSize
+	_gpApplyCacheScale()
 	_gpCacheValid = true
+
+
+# Apply gpDocSizeScale to the cache without rebuilding it.
+# 不重建缓存，仅施加 gpDocSizeScale。
+static func _gpApplyCacheScale() -> void:
+	for gpD in _gpCachedDefs:
+		if gpD == null:
+			continue
+		var gpBase: Variant = _gpBaseSizes.get(gpD.gpId, null)
+		if gpBase is Vector2:
+			gpD.gpDefaultSize = (gpBase as Vector2) * gpDocSizeScale
 
 
 # Load all symbol packs from src/core/symbol_packs/.
@@ -108,6 +163,17 @@ static func gpRegisterDefs(gpDefs: Array[GPSymbolDef]) -> void:
 	if not _gpCacheValid:
 		_gpRebuildCache()
 	for gpD in gpDefs:
+		if gpD == null:
+			continue
+		# A runtime-registered def arrives in DOCUMENT space: the symbol editor / archive
+		# already sees (and writes) the active document's scale. Capture the unscaled base by
+		# dividing it back out, then leave the def at its authored apparent size — applying
+		# the scale again here is what would double-shrink a legacy project's user packs.
+		# 运行期注册的 def 是**文档空间**：图元编辑器 / 存档已经看到（并写出）活动文档的
+		# 尺度。用除法还原基准包络，然后让 def 保持它被作者给定的观感尺寸 —— 在此再乘一次
+		# 尺度，正是旧档用户包被二次缩小的原因。
+		var gpScale: float = maxf(gpDocSizeScale, 0.0001)
+		_gpBaseSizes[gpD.gpId] = (gpD.gpDefaultSize as Vector2) / gpScale
 		var gpIdx: int = _gpIndexOfId(gpD.gpId)
 		if gpIdx >= 0:
  # Replace in BOTH the extra slot and the cached array (same identity), so
@@ -129,6 +195,13 @@ static func gpRegisterDefs(gpDefs: Array[GPSymbolDef]) -> void:
 # Drop all runtime-registered definitions (used by tests and "reset library" actions).
 # 清空所有运行期注册的定义（供测试与「重置图元库」使用）。
 static func gpClearRegistered() -> void:
+	# Drop the base-size entries for the runtime segment before truncating it, so a later
+	# cache rebuild cannot resurrect a stale envelope for an id that is gone.
+	# 在截断运行期段之前清掉其基准尺寸，使后续缓存重建不会为已消失的 id 复活旧包络。
+	for gpI in range(_gpBuiltinCount, _gpCachedDefs.size()):
+		var gpD: GPSymbolDef = _gpCachedDefs[gpI]
+		if gpD != null:
+			_gpBaseSizes.erase(gpD.gpId)
 	_gpExtraDefs.clear()
 	# Keep only the built-in segment of the cached array (same identity), so holders
 	# observe the reset without a full pack reload.

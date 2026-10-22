@@ -86,6 +86,12 @@ func gpSetSheet(gpValue: GPSheet) -> void:
 	if gpSheet != null and gpSheet.gpSheetChanged.is_connected(_gpOnSheetChanged):
 		gpSheet.gpSheetChanged.disconnect(_gpOnSheetChanged)
 	gpSheet = gpValue
+	# P0-5: the active sheet supplies the document-wide symbol scale (1.0 = A1-rebased data,
+	# 0.5 = a pre-A1 archive). Applying it here means every consumer of the shared library —
+	# renderer, hit-test, mount resolver, print model, exporters — sees the right envelope.
+	# P0-5：活动图纸给出全文档图元尺度（1.0 = A1 重定基数据，0.5 = A1 之前存档）。在此施加
+	# 使共享图元库的每个消费方 —— 渲染、命中、挂载、打印、导出 —— 看到正确包络。
+	GPSymbolLibrary.gpSetDocSizeScale(gpValue.gpSymbolScale if gpValue != null else 1.0)
 	if gpSheet != null and not gpSheet.gpSheetChanged.is_connected(_gpOnSheetChanged):
 		gpSheet.gpSheetChanged.connect(_gpOnSheetChanged)
 	if gpFrame != null:

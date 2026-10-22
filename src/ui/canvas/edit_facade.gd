@@ -210,6 +210,41 @@ func gpRequestSetTitleBlockPlacement(gpAnchor: int, gpOffset: Vector2) -> bool:
 		return false
 	return gpHost.gpActions.gpSetTitleBlockPlacement(gpHost.gpSheet, gpAnchor, gpOffset)
 
+
+# Apply one or more SHEET-level fields as ONE undo step (P0-4). The sheet comes from the HOST,
+# for the same stale-reference reason as the margins: a dialog holding its own sheet could pass
+# last tab's after a switch. Repaint/dirty are the command's signal, not a second code path here.
+# 把一处或多处**图纸级**字段作为**一个**撤销步（P0-4）。图纸取自**宿主**，理由与边距一样：
+# 对话框若自持图纸引用，切换标签后可能传入上一张。重绘/标脏由命令信号承担，此处不另开路径。
+func gpRequestSetSheetFields(gpValues: Dictionary, gpLabel: String = "调整图纸") -> bool:
+	if gpHost.gpSheet == null:
+		return false
+	return gpHost.gpActions.gpSetSheetFields(gpHost.gpSheet, gpValues, gpLabel)
+
+
+# Convenience: commit the whole title block as one undo step.
+# 便利入口：把整份图签提交为一个撤销步。
+func gpRequestSetTitleBlock(gpTitleBlock: Dictionary) -> bool:
+	if gpHost.gpSheet == null:
+		return false
+	return gpHost.gpActions.gpSetTitleBlock(gpHost.gpSheet, gpTitleBlock)
+
+
+# Convenience: change the paper size (margins re-derived when they were the old default).
+# 便利入口：改图幅（边距仍是旧默认时按新纸幅重推）。
+func gpRequestSetSheetSize(gpWidth: float, gpHeight: float) -> bool:
+	if gpHost.gpSheet == null:
+		return false
+	return gpHost.gpActions.gpSetSheetSize(gpHost.gpSheet, gpWidth, gpHeight)
+
+
+# Convenience: one independent sheet field (frame on/off, label mode, underlay path/alpha).
+# 便利入口：单个独立图纸字段（图框开关 / 图面语言 / 底图路径或透明度）。
+func gpRequestSetSheetField(gpKey: String, gpValue: Variant, gpLabel: String = "调整图纸") -> bool:
+	if gpHost.gpSheet == null:
+		return false
+	return gpHost.gpActions.gpSetSheetField(gpHost.gpSheet, gpKey, gpValue, gpLabel)
+
 # Move the WHOLE SHEET (paper + frame + every graphic) as ONE undo step (Rev.3 stage 0d).
 # 平移**整张图纸**（纸面 + 图框 + 全部图形）作为**一个**撤销步（Rev.3 阶段 0d）。
 #
@@ -250,6 +285,162 @@ func gpRequestSetNodePositions(gpTargets: Dictionary) -> bool:
 # 提交一枚绘制完成的注释图形。返回它在 gpShapes() 中的下标，失败返回 -1。
 func gpRequestAddShape(gpShape: GPShape) -> int:
 	return gpHost.gpActions.gpAddShape(gpShape)
+
+
+# Align / distribute the current node selection (A7). Returns false when fewer than two nodes are
+# selected, so the menu entry can be disabled honestly and no undo step is recorded for a no-op.
+# 对齐 / 分布当前节点选择（A7）。选中少于两个节点时返回 false，使菜单项可被诚实地禁用，
+# 且空操作不产生撤销步。
+#
+# The maths lives in GPAlignOps (pure, headless-tested); this function only does the two things
+# that need context: look up each symbol's envelope, and hand the result to the position command.
+# 数学在 GPAlignOps（纯函数、headless 已测）；本函数只做两件需要上下文的事：
+# 查每个图元的包络，把结果交给位置命令。
+func gpRequestAlign(gpMode: int) -> bool:
+	if gpHost.gpGraph == null or gpHost.gpSelection.size() < GPAlignOps.gpNeedsTwo():
+		return false
+	var gpRects: Array[Rect2] = []
+	var gpIds: Array[String] = []
+	for gpId in gpHost.gpSelection:
+		var gpN: GPPIDNode = gpHost.gpGraph.gpGetNode(gpId)
+		if gpN == null:
+			continue
+		var gpDef: GPSymbolDef = gpHost.gpDefFor(gpN.gpSymbolId)
+		var gpSize: Vector2 = gpDef.gpDefaultSize if gpDef != null else Vector2.ZERO
+		gpRects.append(Rect2(gpN.gpPosition - gpSize * 0.5, gpSize))
+		gpIds.append(gpId)
+	if gpRects.size() < 2:
+		return false
+	var gpOrigins: Array[Vector2] = GPAlignOps.gpTargets(gpRects, gpMode)
+	var gpTargets: Dictionary = {}
+	for gpI in range(gpIds.size()):
+		# gpTargets wants the CENTRE, GPAlignOps works in top-left origins.
+		# gpTargets 要的是**中心**，GPAlignOps 以左上角原点工作。
+		gpTargets[gpIds[gpI]] = gpOrigins[gpI] + gpRects[gpI].size * 0.5
+	return gpRequestSetNodePositions(gpTargets)
+
+
+# Nudge the current node selection by a world-space delta (A8). One undo step per press.
+# 把当前节点选择按世界位移微调（A8）。每按一次一步撤销。
+# Zero delta / empty selection are refused so a held key at a boundary cannot flood the stack.
+# 零位移 / 空选择一律拒绝，使在边界上按住不放不会灌满撤销栈。
+func gpRequestNudgeSelection(gpDelta: Vector2) -> bool:
+	if gpHost.gpGraph == null or gpHost.gpSelection.is_empty():
+		return false
+	if is_zero_approx(gpDelta.x) and is_zero_approx(gpDelta.y):
+		return false
+	var gpTargets: Dictionary = {}
+	for gpId in gpHost.gpSelection:
+		var gpN: GPPIDNode = gpHost.gpGraph.gpGetNode(gpId)
+		if gpN == null:
+			continue
+		# A MOUNTED child derives its position from its host: nudging it would be silently
+		# discarded by the resolver, so it is left out rather than pretending to move.
+		# 挂载子件的位置由宿主推导：微调它会被解析器静默丢弃，故直接排除，而不是假装移动。
+		if gpN.gpParentUid != "":
+			continue
+		gpTargets[gpId] = gpN.gpPosition + gpDelta
+	if gpTargets.is_empty():
+		return false
+	return gpRequestSetNodePositions(gpTargets)
+
+
+# Finish the pending line at an open end with its note, one undo step (B08 follow-up).
+# 把待完成的线以开口端结束并带注记，一步撤销（B08 续）。
+func gpRequestFinishOpenEnd(gpFromRef: Dictionary, gpToRef: Dictionary, gpKind: String,
+		gpSignalType: String, gpText: String, gpNoteOnFrom: bool,
+		gpOrtho: bool = true, gpExistingNoteUid: String = "") -> String:
+	if gpHost.gpGraph == null:
+		return ""
+	var gpId: String = gpHost.gpActions.gpFinishOpenEnd(gpFromRef, gpToRef, gpKind,
+		gpSignalType, gpText, gpNoteOnFrom, gpOrtho, gpExistingNoteUid)
+	if gpId != "":
+		gpHost.queue_redraw()
+	return gpId
+
+
+# Convert a note into a port connection (B08 follow-up).
+# 把注记转成端口连接（B08 续）。
+func gpRequestConvertNoteToPort(gpNoteUid: String, gpPortRef: Dictionary) -> bool:
+	if gpHost.gpGraph == null:
+		return false
+	if not gpHost.gpActions.gpConvertNoteToPort(gpNoteUid, gpPortRef):
+		return false
+	gpHost.queue_redraw()
+	return true
+
+
+# Set / clear the open-end note of one edge end (B08). Routes to the command layer, so writing
+# the note is one undo step whether it creates or edits the annotation.
+# 设置 / 清除某边某端的开口端注记（B08）。走命令层，故无论创建还是改写注释都只是一步撤销。
+func gpRequestSetEndNote(gpEdgeId: String, gpIsFrom: bool, gpText: String) -> bool:
+	if gpHost.gpGraph == null:
+		return false
+	if not gpHost.gpActions.gpSetEndNote(gpEdgeId, gpIsFrom, gpText):
+		return false
+	gpHost.queue_redraw()
+	return true
+
+
+# Copy the current selection (nodes + shapes) to the app-wide clipboard (A6).
+# 把当前选择（节点 + 图形）复制到应用级剪贴板（A6）。
+# Returns the number of captured objects so the status bar can say what happened instead of
+# silently doing nothing on an empty selection.
+# 返回捕获的对象数，使状态栏能说明发生了什么，而不是在空选择上静默无事。
+func gpRequestCopySelected() -> int:
+	if gpHost.gpGraph == null:
+		return 0
+	return gpHost.gpActions.gpCopySelection(gpHost.gpSelection.duplicate(),
+		gpHost.gpShapeSel.duplicate())
+
+
+# Paste the clipboard into the active sheet and select the pasted nodes (A6).
+# 把剪贴板粘贴到活动图纸，并选中粘贴出的节点（A6）。
+func gpRequestPasteClipboard() -> bool:
+	if gpHost.gpGraph == null:
+		return false
+	var gpIds: Array[String] = gpHost.gpActions.gpPasteClipboard()
+	if gpIds.is_empty():
+		return false
+	gpSetSelection(gpIds)
+	gpHost.queue_redraw()
+	return true
+
+
+# Rotate the current node selection by a delta (A4). "" / 0 are silently inert rather than
+# creating an undo step, so the shortcut can be pressed freely.
+# 把当前节点选择旋转一个增量（A4）。空选择 / 零增量静默无效且不产生撤销步，使快捷键可随手按。
+func gpRequestRotateSelected(gpDeltaDeg: float) -> bool:
+	if gpHost.gpGraph == null or gpHost.gpSelection.is_empty():
+		return false
+	if not gpHost.gpActions.gpRotateNodes(gpHost.gpSelection.duplicate(), gpDeltaDeg):
+		return false
+	gpHost.queue_redraw()
+	return true
+
+
+# Mirror the current node selection (A4).
+# 镜像当前节点选择（A4）。
+func gpRequestMirrorSelected() -> bool:
+	if gpHost.gpGraph == null or gpHost.gpSelection.is_empty():
+		return false
+	if not gpHost.gpActions.gpMirrorNodes(gpHost.gpSelection.duplicate()):
+		return false
+	gpHost.queue_redraw()
+	return true
+
+
+# Edit one annotation shape's fields through the command layer (A2). The panel hands over a
+# field->value subset so a single keystroke is one undo step, not one per field.
+# 经命令层改一个注释图形的字段（A2）。面板交出「字段→值」子集，使一次录入是一步撤销，
+# 而不是每个字段一步。
+func gpRequestSetShapeProps(gpIdx: int, gpValues: Dictionary) -> bool:
+	if gpHost.gpGraph == null:
+		return false
+	var gpOk: bool = gpHost.gpActions.gpSetShapeProps(gpIdx, gpValues)
+	if gpOk:
+		gpHost.queue_redraw()
+	return gpOk
 
 # Connect two nodes with an edge. Returns false for a self-connection or a missing graph.
 # 在两个节点之间连线。自连接或缺图时返回 false。

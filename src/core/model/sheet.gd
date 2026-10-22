@@ -133,17 +133,66 @@ const GP_FRAME_MARGINS_DEFAULT: Array = [25.0, 5.0, 5.0, 5.0]
 
 # The margins a NEW sheet of the given paper size starts with, as [left, top, right, bottom] in mm.
 # 给定纸幅的**新**图纸的初始边距，形如 [左, 上, 右, 下]（mm）。
-# A1 landscape (841 x 594, ±0.5 mm) takes the ISO 5457 / GB/T 14689 A1 filing format: a 25 mm
-# filing edge on the left and 10 mm on the other three sides. Anything else — including the A3
-# default and every custom size — keeps the historical A3 values, so reopening an old drawing
-# and asking it to re-derive its own default reproduces exactly what it shipped with.
-# A1 横向（841×594，±0.5mm）取 ISO 5457 / GB/T 14689 的 A1 装订幅面：左边 25mm 装订边、
-# 其余三边 10mm。其余一切 —— 包括 A3 默认与每种自定尺寸 —— 都保留历史 A3 值，故重新打开一张
-# 旧图并让它重推自身默认值时，得到的就是它出厂时的那组数。
+# GB/T 14689 filing format: the two large formats (A0/A1) take a 25 mm filing edge and 10 mm on
+# the other three sides; A2/A3/A4 keep 25 mm on the filing edge and 5 mm elsewhere. (ISO 5457
+# differs — 20 mm for A0-A3 and 10 mm all round for A4 — this project follows GB/T 14689.)
+# The A3-era values remain the fallback for every custom size, so a pre-A1 archive that never
+# wrote frame_margins still re-derives exactly what it was drawn with.
+# GB/T 14689 装订幅面：A0/A1 两种大幅面取 25mm 装订边、其余三边 10mm；A2/A3/A4 保持装订边
+# 25mm、其余 5mm。（ISO 5457 不同 —— A0-A3 为 20mm、A4 四边 10mm —— 本项目采用 GB/T 14689。）
+# 自定尺寸仍回落到 A3 时代值，使未写出 frame_margins 的 A1 之前存档仍精确重推它被绘制时的那组数。
 static func gpDefaultMarginsFor(gpW: float, gpH: float) -> Array:
-	if absf(gpW - 841.0) < 0.5 and absf(gpH - 594.0) < 0.5:
+	if _gpPaperIs(gpW, gpH, 1189.0, 841.0) or _gpPaperIs(gpW, gpH, 841.0, 594.0):
 		return [25.0, 10.0, 10.0, 10.0]
 	return GP_FRAME_MARGINS_DEFAULT.duplicate()
+
+
+# Whether a paper size matches a preset within the printing tolerance.
+# 纸幅是否在印刷容差内匹配某预设。
+static func _gpPaperIs(gpW: float, gpH: float, gpPW: float, gpPH: float) -> bool:
+	return absf(gpW - gpPW) < 0.5 and absf(gpH - gpPH) < 0.5
+
+
+# Infer the symbol scale from a RAW sheet dictionary (before gpFromDict builds the object).
+# 由**原始**图纸字典推断图元尺度（在 gpFromDict 建对象之前）。
+#
+# Exposed so the project reader can set the shared library's scale BEFORE rebuilding sheets:
+# otherwise a user pack would be registered while the PREVIOUS document's scale is still
+# active, and legacy packs would be base-scaled twice.
+# 公开给工程读取方，使它在重建图纸**之前**设置共享图库尺度：否则用户包会在**上一份**
+# 文档的尺度仍生效时注册，旧档用户包会被二次缩放。
+static func gpScaleForSheetDict(gpD: Dictionary) -> float:
+	var gpSS: Variant = gpD.get("symbol_scale", null)
+	if gpSS is float or gpSS is int:
+		return clampf(float(gpSS), 0.1, 10.0)
+	return _gpScaleFromMeta(gpD.get("meta", {}),
+		float(gpD.get("width_mm", 420.0)), float(gpD.get("height_mm", 297.0)))
+
+
+# Infer the symbol scale for an archive that carries no per-sheet key (P0-5).
+# 为没有逐图纸键的存档推断图元尺度（P0-5）。
+#
+# Precedence / 优先级：
+#   1. meta.symbol_scale — the explicit project-era marker written by every new save;
+#   2. A1 paper — the rebased default, so treated as full-scale even without a marker;
+#   3. anything else — a pre-A1 archive, i.e. 0.5.
+#   1. meta.symbol_scale —— 每次新保存都写出的工程世代显式标记；
+#   2. A1 纸幅 —— 重定基后的默认图幅，无标记也按全尺度；
+#   3. 其余 —— A1 之前存档，即 0.5。
+# ⚠️ The only ambiguous window is an A3/A2/A0 archive saved by the 2-day A1-rebase build
+# BEFORE this marker existed; it is treated as legacy. A1 archives (the rebased default)
+# are not affected.
+# ⚠️ 唯一模糊窗口：在本标记出现**之前**、由 A1 重定基那两天的构建保存的 A3/A2/A0 存档；
+# 它会被当作旧档。A1 存档（重定基默认）不受影响。
+static func _gpScaleFromMeta(gpMetaV: Variant, gpW: float, gpH: float) -> float:
+	if gpMetaV is Dictionary:
+		var gpMeta: Dictionary = gpMetaV as Dictionary
+		var gpV: Variant = gpMeta.get("symbol_scale", null)
+		if gpV is float or gpV is int:
+			return clampf(float(gpV), 0.1, 10.0)
+	if _gpPaperIs(gpW, gpH, 841.0, 594.0):
+		return 1.0
+	return 0.5
 
 # Smallest inner rectangle the frame may be reduced to, along either axis, in mm — the ONLY
 # constraint the margins carry (Rev.3 amendment, 2026-10-16).
@@ -218,6 +267,23 @@ var gpFrameMargins: Array = GP_FRAME_MARGINS_DEFAULT.duplicate()
 # 故任何世界坐标的消费方都无需认识本字段）。把图元改成以原点为基准会同时改动每个渲染器、每次命中判定与
 # DEXPI 导出；「谁负责让它们保持同步」唯一一处在 GPTranslateSheetCommand。
 var gpPaperOrigin: Vector2 = Vector2.ZERO
+
+# ---------------------------------------------------------------------------
+# 图元尺度兼容（P0-5） / Symbol-scale compatibility
+# ---------------------------------------------------------------------------
+# 1.0 = the A1-rebased data (GP_NOMINAL + pack manifests are ×2). 0.5 = a pre-A1 archive,
+# whose symbols were authored against the A3-era envelopes and which stores no per-node size.
+# The value is inferred from the project meta on load (`symbol_scale`, else legacy 0.5) and
+# applied to the shared library by GPSheetLayer; it is NOT a per-node field.
+# 1.0 = A1 重定基后的数据（GP_NOMINAL 与包 manifest 均为 ×2）。0.5 = A1 之前的存档：其图元
+# 按 A3 时代包络绘制，且不存逐节点尺寸。载入时由工程 meta 推断（`symbol_scale`，缺失即
+# 旧档 0.5），并由 GPSheetLayer 施加到共享图元库；它**不是**逐节点字段。
+# Persisted when != 1.0, and ALSO when == 1.0 on a non-A1 sheet (an explicit "new era" marker,
+# because the paper size alone cannot distinguish a new A3 from a legacy A3). A new A1 archive
+# gains no key.
+# 在 != 1.0 时写出；非 A1 图纸即使 == 1.0 也写出（显式「新世代」标记，因为单凭纸幅无法
+# 区分新 A3 与旧 A3）。新 A1 存档不多键。
+var gpSymbolScale: float = 1.0
 
 # ---------------------------------------------------------------------------
 # 图纸文字语言模式 / Drawing-text language mode (v0.1 Phase 2)
@@ -435,6 +501,17 @@ func gpToDict() -> Dictionary:
 	# 图纸原点（Rev.3 阶段 0d）：仅在图纸确实被移动过时写出，使本键出现之前的存档重新保存后逐字节一致。
 	if not gpPaperOriginIsDefault():
 		gpOut["paper_origin"] = [gpPaperOrigin.x, gpPaperOrigin.y]
+	# P0-5: a legacy A3-era sheet carries its 0.5 scale explicitly once saved, so the
+	# compatibility decision survives even if the project meta is rewritten later. A NEW
+	# non-A1 sheet also writes 1.0 explicitly: its paper size alone cannot distinguish it
+	# from a legacy A3 archive, and the key is what keeps it from reopening at 0.5.
+	# P0-5：旧 A3 时代图纸一经保存就显式携带 0.5 尺度，使该兼容决定在工程 meta 日后被
+	# 重写时也不会丢失。**新建的非 A1** 图纸也显式写 1.0：单凭纸幅无法把它与旧 A3 存档
+	# 区分开，而这个键正是它不会以 0.5 重开的保证。
+	var gpWriteScale: bool = absf(gpSymbolScale - 1.0) > 0.0001 \
+		or not _gpPaperIs(gpWidthMM, gpHeightMM, 841.0, 594.0)
+	if gpWriteScale:
+		gpOut["symbol_scale"] = gpSymbolScale
 	# Title-block docking (Rev.3 stage 1): written only when the block has actually been moved off its
 	# historical corner, so an archive from before these two keys existed stays byte-identical on re-save.
 	# 图签停靠（Rev.3 阶段 1）：仅在图签确实离开了它的历史角落时写出，使这两个键出现之前的存档重新保存后
@@ -457,6 +534,14 @@ static func gpFromDict(gpD: Dictionary) -> GPSheet:
 	# ⚠️ 缺键回落保持 420/297（A3 时代），**不是**新默认：老到缺这两个键的存档按定义就是 A3 时代的图纸。
 	gpS.gpWidthMM = float(gpD.get("width_mm", 420.0))
 	gpS.gpHeightMM = float(gpD.get("height_mm", 297.0))
+	# P0-5: the sheet's own key wins; otherwise the project meta carries the era marker;
+	# otherwise infer from the paper size. A1 is the rebased default, so an A1 archive is
+	# treated as full-scale even if it predates the marker (a pre-A1 A1 drawing is rare);
+	# every other size without a marker is a pre-A1 archive (A3-era symbols) and gets 0.5.
+	# P0-5：图纸自身的键优先；否则看工程 meta 的世代标记；再否则按纸幅推断。A1 是重定基
+	# 后的默认图幅，故无标记的 A1 存档按全尺度处理（A1 之前的 A1 图很少）；其余尺寸无标记
+	# 即 A1 之前存档（A3 时代图元），取 0.5。
+	gpS.gpSymbolScale = gpScaleForSheetDict(gpD)
 	gpS.gpFrameOn = bool(gpD.get("frame_on", true))
 	# Margins go through the setter, never straight into the field, so the ONE invariant they carry
 	# (a non-inside-out inner rectangle) cannot be bypassed by a hand-edited archive.

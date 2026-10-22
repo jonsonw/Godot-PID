@@ -109,6 +109,31 @@ var gpAutoScale: bool = true
 # 屏幕空间下限（GPEdgeStyle.GP_MIN_PX）保护可读性。
 var gpScreenConstantWidth: bool = false
 
+# View-layer motion (symbol drop pop / update flash / DRC alert pulse). Purely cosmetic:
+# it never touches the document, the command stack or any export, so turning it off can
+# only change what the screen looks like — see GPRenderStyle.gpMotionEnabled.
+# 视图层动效（图元落位回弹 / 更新高亮 / DRC 告警脉冲）。纯装饰：绝不触碰文档、命令栈或任何
+# 导出，故关掉它只改变屏幕观感 —— 见 GPRenderStyle.gpMotionEnabled。
+var gpMotionEnabled: bool = true
+
+# Draw the background grid? (A9) Persistent, because a reference grid that comes back after every
+# restart is not a preference — it is a decision the user already made.
+# 是否绘制背景网格？（A9）持久化：每次重启都自己回来的网格不算偏好，那是用户已经做过的决定。
+var gpShowGrid: bool = true
+
+# Backpack favorites / recents (A11). Stored as "a,b,c" because ConfigFile is happiest with
+# plain strings, and the lists are tiny.
+# 背包收藏 / 最近（A11）。以 "a,b,c" 存储：ConfigFile 最擅长纯字符串，而这两个列表都很小。
+var gpBagFavorites: Array[String] = []
+
+# Recently used symbol ids, most recent first.
+# 最近使用的图元 id，最新的在前。
+var gpBagRecents: Array[String] = []
+
+# Canvas background colour, stored as "rrggbb" (no "#") so ConfigFile stays a plain string.
+# 画布底色，以 "rrggbb"（不带 #）存储，使 ConfigFile 保持纯字符串。
+var gpCanvasBg: String = "212830"
+
 # Palette visibility map: symbol id -> true when the user unticked it from the
 # left palette via a category's gear menu. Persisted so the choice survives restarts.
 # 图元库可见性表：符号 id -> true 表示用户经类目齿轮菜单取消勾选。持久化以在重启后保留。
@@ -131,6 +156,18 @@ signal gpPipeTagStyleChanged
 # controls can re-apply explicit font size overrides.
 # 界面字体或字号变化时发出，供工具栏及其他动态控件重新应用显式字号覆盖。
 signal gpUIFontChanged
+
+# Emitted when the motion preference flips, so every canvas rebuilds its render-style
+# snapshot and re-pushes it (which also kills any tween still running on a symbol).
+# 动效偏好翻转时发出，使每个画布重建渲染样式快照并重新推入（同时会停掉图元上仍在跑的补间）。
+signal gpMotionChanged
+
+# Emitted when a canvas APPEARANCE preference changes (grid visibility / background colour), so
+# every canvas repaints with the new values. Separate from gpMotionChanged because motion is a
+# render-style snapshot concern while these two are canvas-owned fields.
+# 画布**外观**偏好（网格可见性 / 底色）变化时发出，使每个画布用新值重绘。与 gpMotionChanged 分开：
+# 动效属渲染样式快照，而这两项是画布自有字段。
+signal gpCanvasStyleChanged
 
 
 # Load settings from disk and apply them.
@@ -235,6 +272,11 @@ func gpLoad() -> void:
 	gpPipeTagRotate = gpCfg.get_value("pipe", "tag_rotate", true)
 	gpPipeTagFontSize = gpCfg.get_value("pipe", "tag_font_size", 0)
 	gpScreenConstantWidth = gpCfg.get_value("ui", "screen_constant_width", false)
+	gpMotionEnabled = bool(gpCfg.get_value("ui", "motion_enabled", true))
+	gpShowGrid = bool(gpCfg.get_value("ui", "show_grid", true))
+	gpCanvasBg = str(gpCfg.get_value("ui", "canvas_bg", "212830"))
+	gpBagFavorites = _gpSplitList(str(gpCfg.get_value("ui", "bag_favorites", "")))
+	gpBagRecents = _gpSplitList(str(gpCfg.get_value("ui", "bag_recents", "")))
 	gpPaletteHidden = gpCfg.get_value("ui", "palette_hidden", {})
 
 
@@ -267,6 +309,11 @@ func gpSave() -> void:
 	gpCfg.set_value("ui", "font", gpFontKey)
 	gpCfg.set_value("ui", "auto_scale", gpAutoScale)
 	gpCfg.set_value("ui", "screen_constant_width", gpScreenConstantWidth)
+	gpCfg.set_value("ui", "motion_enabled", gpMotionEnabled)
+	gpCfg.set_value("ui", "show_grid", gpShowGrid)
+	gpCfg.set_value("ui", "canvas_bg", gpCanvasBg)
+	gpCfg.set_value("ui", "bag_favorites", ",".join(gpBagFavorites))
+	gpCfg.set_value("ui", "bag_recents", ",".join(gpBagRecents))
 	gpCfg.set_value("ui", "palette_hidden", gpPaletteHidden)
 	gpCfg.set_value("symbol", "font_size", gpSymbolFontSize)
 	gpCfg.set_value("symbol", "font", gpSymbolFontKey)
@@ -326,6 +373,31 @@ func gpApplySymbolStyle() -> void:
 # 通知画布管线位号样式（旋转/字号）已变。
 func gpApplyPipeTagStyle() -> void:
 	gpPipeTagStyleChanged.emit()
+
+
+# Apply the motion preference: canvases rebuild their style snapshot, which re-pushes
+# gpMotionEnabled into every symbol view and stops any tween that is still running.
+# 应用动效偏好：画布重建样式快照，把 gpMotionEnabled 重新推入每个图元视图，并停掉仍在跑的补间。
+func gpApplyMotion() -> void:
+	gpMotionChanged.emit()
+
+
+# Apply a canvas-appearance change (grid / background): canvases repaint with the new values.
+# 应用画布外观变化（网格 / 底色）：画布用新值重绘。
+# Split a persisted "a,b,c" list, dropping blanks (an empty setting yields an empty array, not
+# [""], which would otherwise become a "favorite" nobody can see).
+# 拆分持久化的 "a,b,c" 列表并丢弃空项（空设置得到空数组而非 [""]，否则会变成一个谁也看不见的「收藏」）。
+func _gpSplitList(gpS: String) -> Array[String]:
+	var gpOut: Array[String] = []
+	for gpPart in gpS.split(",", false):
+		var gpP: String = gpPart.strip_edges()
+		if gpP != "":
+			gpOut.append(gpP)
+	return gpOut
+
+
+func gpApplyCanvasStyle() -> void:
+	gpCanvasStyleChanged.emit()
 
 
 # Apply all settings at once.

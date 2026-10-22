@@ -52,7 +52,7 @@ This project is in **early development** (app version `0.1.0`, Godot 4.7). The t
 | 图框与标题栏、画布文字档位（mm↔px 单一换算源） | ✅ 可用 / Working |
 | 自动保存：首次保存后启用（脏 1 min / 净 5 min） | ✅ 可用 / Working |
 | **DEXPI 1.4 导出 / 导入**（Proteus XML 4.2.0） | ✅ 可用 / Working（概念层 + 图形层 + Extent；导出入口：导出子菜单） |
-| DXF / PDF / 基础清单导出 | 🚧 接口已定义，实现为空桩 / Stubs |
+| DXF R12 / PDF 1.4（矢量直写 + TTF 子集内嵌中文） / 分类清单 Excel（四类、每类模板、属性回写）/ 旧 CSV | ✅ 可用 / Working（PDF 字体源目前仅 macOS Arial Unicode；跨平台字体设置待补） |
 | 3D 联动渲染 | 🚧 空桩 / Stub |
 | HAZOP 知识沉淀、合规校验、单元操作生成 | 📋 规划中，经 `GPIPIDAddon` 由 Pro 版提供 / Planned via Pro |
 | 跨图连接、off-page 连接符 | 📋 规划中 / Planned |
@@ -106,14 +106,18 @@ The core code is released under the **MIT License** — free to use, modify, and
 ### 运行测试 / Run the tests
 
 ```bash
-# 自研 GPGTest：73 套 / 4,867 断言（编译 0 错 · SCRIPT ERROR 0）
-godot --headless --script res://tests/run_core_tests.gd
+# macOS / Linux 必须给引擎可写 HOME，否则 user:// 建不出来会直接 SIGSEGV（详见 CONTRIBUTING）
+mkdir -p /tmp/gpidhome
 
-# 首次克隆或新增 class_name 后必须先 import，否则 GUT 报 "class_names have not been imported"
-godot --headless --import
+# 自研 GPGTest：109 套 / 9,086 断言（编译 0 错 · SCRIPT ERROR 0）
+HOME=/tmp/gpidhome godot --headless --path . --script res://tests/run_core_tests.gd
+
+# 解析检查：新增 class_name 后先跑这条（headless runner 从 .godot 的类名缓存解析类）
+HOME=/tmp/gpidhome godot --headless --path . --editor --quit
 
 # GUT 9.7.1（已 vendored 至 addons/gut/）
-godot --headless --script res://addons/gut/gut_cmdln.gd -gexit
+HOME=/tmp/gpidhome godot --headless --path . --script res://addons/gut/gut_cmdln.gd \
+  -gdir=res://tests -ginclude_subdirs -gprefix=test_ -gsuffix=.gd -gexit
 ```
 
 CI 对每次 push 执行四道门禁：**import → 编译扫描 → GPGTest → GUT**。
@@ -140,7 +144,7 @@ Godot-PID/                # GitHub 仓库根（本地工作目录为 Godot-PID-C
 │   ├── app/               # 应用服务层：命令、撤销栈、事件总线、文档管理
 │   │   └── commands/      # 32 条具体命令（增删移图元/图形/连线、路径与标签编辑、落点恢复）
 │   ├── render/            # GPSymbolView / GPEdgeView / 图框 GPFrameView / 背景 GPBackgroundView / 绘制器
-│   ├── io/                # *.pid.json 读写；DEXPI（Proteus XML）导入导出；DXF / PDF / 清单导出为桩
+│   ├── io/                # *.pid.json 读写；DEXPI（Proteus XML）导入导出；DXF R12 / PDF 1.4 / 清单导出
 │   │   ├── dexpi_schema.gd    # 版本常量 / RDL 双域 / 保留 Set 名 / 版本能力表
 │   │   ├── xml_text.gd        # XML 转义与缩进单点；gpLang2() 语言标签两字母
 │   │   ├── dexpi_mapping.gd   # 数据驱动映射表；gpFlipY() / gpNormRgb() 唯一实现

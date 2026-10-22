@@ -65,6 +65,24 @@ func gpOpenFrameDialog() -> void:
 	gpDlg.gpPopupOverHost()
 
 
+func gpOpenExportLists() -> void:
+	# Deliberately untyped/lazy for the same reason as the frame/settings dialogs: the
+	# export dialog's class must not enter the startup dependency graph.
+	# 同图框/设置对话框：刻意不标注、延迟加载，避免导出对话框类进入启动依赖图。
+	var gpDlg = (load("res://src/ui/dialogs/export_lists_dialog.gd") as GDScript).new()
+	gpDlg.gpConfigure(gpHost.gpCenter.gpToSheets(), gpHost.gpDefs, I18n.gpLocale)
+	gpHost.add_child(gpDlg)
+	gpDlg.gpPopupOverHost()
+
+
+func gpOpenImportLists() -> void:
+	var gpDlg = (load("res://src/ui/dialogs/import_lists_dialog.gd") as GDScript).new()
+	gpDlg.gpConfigure(gpHost.gpCenter.gpToSheets(), gpHost.gpDefs, gpHost.gpCenter,
+		I18n.gpLocale)
+	gpHost.add_child(gpDlg)
+	gpDlg.gpPopupOverHost()
+
+
 func gpOpenSettings() -> void:
 	# 刻意不写类型标注：一旦标注，编译器会在启动期解析该类并把它拉进启动依赖图，延迟加载便失效。
 	# Deliberately UNTYPED: annotating it would make the compiler resolve the class at startup,
@@ -140,6 +158,23 @@ func gpRefreshEditMenu() -> void:
 		gpHost.gpQuickBar.gpSetActionEnabled("edit_undo", gpCanUndo)
 		gpHost.gpQuickBar.gpSetActionEnabled("edit_redo", gpCanRedo)
 
+# A minimal About box. Deliberately an AcceptDialog built here and freed on close: it has no
+# state worth persisting and no business in the scene file.
+# 极简「关于」框。刻意在此构建、关闭即释放的 AcceptDialog：它没有值得持久化的状态，
+# 也不该占用场景文件。
+func gpShowAbout() -> void:
+	var gpDlg: AcceptDialog = AcceptDialog.new()
+	gpDlg.title = I18n.gpTr("menu.help_about")
+	var gpVer: String = str(ProjectSettings.get_setting("application/config/version", "0.1.0"))
+	gpDlg.dialog_text = "G-PID %s\n%s\n%s %s" % [
+		gpVer, I18n.gpTr("about.product"), I18n.gpTr("about.license"),
+		I18n.gpTr("about.godot_prefix")]
+	gpHost.add_child(gpDlg)
+	gpDlg.popup_centered()
+	gpDlg.confirmed.connect(gpDlg.queue_free)
+	gpDlg.canceled.connect(gpDlg.queue_free)
+
+
 func gpOnMenuOpening(gpTitleKey: String) -> void:
 	if gpTitleKey != "menu.edit":
 		return
@@ -167,6 +202,30 @@ func gpOnMenu(gpAction: String) -> void:
 			gpHost.gpFileCoord.gpImportProject()
 		"import_dexpi":
 			gpHost.gpFileCoord.gpPickImportDexpiPath()
+		"import_lists_xlsx":
+			gpOpenImportLists()
+		"file_print":
+			# A10: was a dead item. Now a real hand-off (see gpPrintSheet).
+			# A10：此前是死项。现在是真正的交接（见 gpPrintSheet）。
+			gpHost.gpFileCoord.gpPrintSheet()
+		"help_about":
+			# A10: was a dead item. A minimal, honest About box: name, version, licence.
+			# A10：此前是死项。极简而诚实的「关于」：名称、版本、许可。
+			gpShowAbout()
+		"tool_drc":
+			# B2: the one-click health check. It runs on the ACTIVE sheet and shows the list in
+			# the dock, because DRC is a fix/re-run loop, not a one-shot dialog.
+			# B2：一键体检。对**当前**图纸运行，并让列表停在右侧停靠页 ——
+			# 因为 DRC 是「改 → 再跑」的循环，不是一次性对话框。
+			gpHost.gpRunDrc()
+		"insert_symbol":
+			# A14: open the glyph editor with an EMPTY draft (no canvas detour).
+			# A14：以**空白**草稿打开图元编辑器（不绕画布）。
+			gpHost.gpSymbolLibCoord.gpOnNewSymbolRequested()
+		"insert_frame":
+			# A10: was a dead item; inserting a frame IS the frame dialog's job.
+			# A10：此前是死项；插入图框本就是图框对话框的职责。
+			gpOpenFrameDialog()
 		"file_quit":
  # Route through the SAME close guard as the OS window-close button so the
  # unsaved-changes dialog behaves identically whether the user clicks the red X
@@ -189,6 +248,8 @@ func gpOnMenu(gpAction: String) -> void:
 			gpHost.gpFileCoord.gpPickExportPath("pdf")
 		"project_export_list":
 			gpHost.gpFileCoord.gpPickListExportDir()
+		"export_lists_xlsx":
+			gpOpenExportLists()
 		"view_zoom_in":
 			gpHost.gpActiveCanvas().gpZoomStep(1.0)
 		"view_zoom_out":
@@ -207,6 +268,29 @@ func gpOnMenu(gpAction: String) -> void:
 			gpOpenFrameDialog()
 		"tool_settings":
 			gpOpenSettings()
+		"view_grid":
+			# A9: a REAL toggle with persisted state. Before this, the menu item produced
+			# "feature pending" and the grid simply always drew.
+			# A9：带持久状态的真开关。此前该菜单只弹「功能待接入」，而网格永远在画。
+			var gpSetObj: Object = gpHost.get_node_or_null("/root/Settings")
+			if gpSetObj != null:
+				gpSetObj.gpShowGrid = not bool(gpSetObj.gpShowGrid)
+				gpSetObj.gpApplyCanvasStyle()
+				gpSetObj.gpSave()
+				gpHost.gpSetState("status.grid_on" if bool(gpSetObj.gpShowGrid) else "status.grid_off")
+		"format_bg":
+			# A9: cycle the three built-in backgrounds. Persisted, so the choice survives restarts.
+			# A9：在三个内置底色间循环。持久化，故重启后保持。
+			var gpBgObj: Object = gpHost.get_node_or_null("/root/Settings")
+			if gpBgObj != null:
+				# The cycle itself is a pure static on the canvas, so the menu and its test share
+				# one definition of "next".
+				# 循环本身是画布上的纯静态函数，故菜单与它的测试共用同一份「下一个」定义。
+				var gpNext: String = GPCanvas2D.gpNextBgPreset(str(gpBgObj.gpCanvasBg))
+				gpBgObj.gpCanvasBg = gpNext
+				gpBgObj.gpApplyCanvasStyle()
+				gpBgObj.gpSave()
+				gpHost.gpSetState("status.bg_changed", [gpNext])
 		"project_tag_rules":
 			gpHost.gpTagCoord.gpOpenTagRuleDialog()
 		_:

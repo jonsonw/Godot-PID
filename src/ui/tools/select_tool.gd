@@ -108,7 +108,29 @@ func gpOnDragMove(gpScreen: Vector2) -> void:
 	# 重绘所有触碰被移动节点的管线，使其端点在拖拽过程中实时跟随图元，
 	# 而非等到释放时才突跳到位。拖拽反馈必须包含相连管线，而不只是字形本体。
 	if not gpMoved.is_empty():
-		gpCv.gpBinder.gpRedrawEdgesForNodes(gpMoved)
+		# EXPAND TO THE MOUNTED SUBTREE. A vessel's pipes connect to its NOZZLES, which are child
+		# nodes whose world position is DERIVED from the parent — moving the vessel changes them
+		# without touching their own gpPosition, so refreshing only the dragged ids left every
+		# nozzle-connected pipe behind until the release did a full sync.
+		# 扩展到**挂载子树**。设备的管线接在**管口**上，而管口是子件、其世界位置由父链**推导** ——
+		# 拖动设备会改变它们，却不动它们自己的 gpPosition，故只刷新被拖 id 时，所有接管口的线
+		# 都被留在原处，直到松手做全量同步。
+		var gpAffected: Array[String] = []
+		for gpId in gpMoved:
+			for gpUid in GPMountResolver.gpSubtree(gpCv.gpGraph, gpId):
+				if not gpAffected.has(gpUid):
+					gpAffected.append(gpUid)
+		for gpId in gpAffected:
+			var gpV: GPSymbolView = gpCv.gpBinder.gpGetSymbolView(gpId)
+			if gpV != null:
+				gpV.gpUpdateTransform()
+		var gpTouched: Array[String] = gpCv.gpBinder.gpRedrawEdgesForNodes(gpAffected)
+		# Belt and braces: the helper reports which edges it touched, but an edge missing from the
+		# view cache (e.g. created moments ago) would still be skipped — refresh by id as well.
+		# 双保险：助手会报告它刷新了哪些边，但不在视图缓存里的边（例如刚创建的）仍会被跳过 ——
+		# 故再按 id 刷新一次。
+		for gpEid in gpTouched:
+			gpCv.gpRedrawEdge(gpEid)
  # Also request a full canvas-frame repaint every drag frame. This keeps the background
  # overlay, the selection highlight and EVERY edge view in sync through the proven
  # _draw()/gpSync() path (which recomputes each pipe body from the live node position),
@@ -412,9 +434,13 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 					gpCv.gpShapeSel.erase(gpSh)
 				else:
 					gpCv.gpShapeSel.append(gpSh)
+				# A shift toggle changes WHICH shapes are selected without touching the node
+				# selection, so nothing would have re-emitted the status snapshot.
+				# shift 增删改变的是「哪些图形被选中」，却不触碰节点选择，故没有任何东西会重发快照。
+				gpCv.gpAnnounceShapeSelection()
 			elif not gpCv.gpShapeSel.has(gpSh):
 				gpCv.gpShapeSel = [gpSh]
-				gpCv.gpSetSelection([])
+				gpCv.gpAnnounceShapeSelection()
 			gpCv.queue_redraw()
  # Begin a whole-shape move, replaying rigidly from the start snapshot.
  # 从此图形开始整体移动，由起始快照无漂移重放。

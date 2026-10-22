@@ -51,7 +51,7 @@ const GP_CODE_NO_SHEET: String = "dexpi.no_sheet"
 const GP_CODE_BAD_EXTENT: String = "dexpi.bad_extent"
 const GP_CODE_NO_SHEET_NAME: String = "dexpi.no_sheet_name"
 const GP_CODE_MISSING_UID: String = "dexpi.missing_uid"
-const GP_CODE_SIGNAL_UNSUPPORTED: String = "dexpi.signal_unsupported"
+const GP_CODE_SIGNAL_AS_SEGMENT: String = "dexpi.signal_as_segment"
 const GP_CODE_ANNOTATION_SKIPPED: String = "dexpi.annotation_skipped"
 const GP_CODE_UNKNOWN_SYMBOL: String = "dexpi.unknown_symbol"
 const GP_CODE_CUSTOM_ATTRIBUTE: String = "dexpi.custom_attribute"
@@ -165,16 +165,20 @@ static func gpPreflight(gpGraph: GPPIDGraph, gpSheet: GPSheet) -> GPImportReport
 			gpReport.gpAddInfo(GP_CODE_MOUNT_NOT_NESTED,
 				gpNM.gpInstanceId + ": mount kind '" + gpKindM + "' is " + gpContainment
 				+ ", so it is not nested (" + str(gpRelM.get("note", "")) + ")")
-	# Signal lines belong to the Instrumentation package, whose classes carry URIs we have not
-	# verified. Inventing them would be worse than saying so.
-	# 信号线属于 Instrumentation 包，其类的 URI 尚未核实。臆造比明说更糟。
+	# Signal lines are exported as PipingNetworkSegments MARKED as signals, because DEXPI has no
+	# first-class signal-line class whose URI we can verify. The marking is a declared DEVIATION
+	# (two GPID attributes on the segment), not an invented element — and it is what makes the
+	# round trip possible instead of silently losing every instrument connection on export.
+	# 信号线以「**标记为信号**的 PipingNetworkSegment」导出，因为 DEXPI 没有一个我们能核实 URI 的
+	# 信号线一等类。这个标记是**已声明的偏离**（管段上两条 GPID 属性），不是臆造元素 ——
+	# 也正是它让往返成为可能，而不是一导出就静默丢掉所有仪表连线。
 	for gpEdge in gpGraph.gpEdges:
 		var gpE: GPPIDEdge = gpEdge as GPPIDEdge
 		if gpE == null:
 			continue
 		if gpE.gpKind == GPPIDEdge.GP_SIGNAL:
-			gpReport.gpAddWarning(GP_CODE_SIGNAL_UNSUPPORTED,
-				"edge " + gpE.gpInstanceId + " is a signal line; Phase 1 exports process lines only")
+			gpReport.gpAddWarning(GP_CODE_SIGNAL_AS_SEGMENT,
+				"edge " + gpE.gpInstanceId + " is a signal line; exported as a marked PipingNetworkSegment (declared deviation)")
 	return gpReport
 
 
@@ -294,10 +298,11 @@ static func gpFromGraph(gpGraph: GPPIDGraph, gpSheet: GPSheet) -> Dictionary:
 		var gpE: GPPIDEdge = gpEdge as GPPIDEdge
 		if gpE == null:
 			continue
-		if gpE.gpKind == GPPIDEdge.GP_SIGNAL:
-			(gpOut[GP_KEY_SKIPPED] as Array).append(
-				{"id": gpE.gpInstanceId, "symbol": "", "reason": "signal_unsupported"})
-			continue
+		# A signal line travels as a segment carrying its intent in two attributes (see the
+		# preflight note above). Process lines stay byte-identical to before, because the marker
+		# keys are only emitted when present.
+		# 信号线以管段形式随行，其语义放在两条属性里（见上方预检注释）。工艺线的字节与从前完全
+		# 一致，因为标记键只在存在时才写出。
 		var gpGeo: Dictionary = _gpPointsOf(gpGraph, gpE, gpLookup)
 		(gpOut[GP_KEY_SEGMENTS] as Array).append({
 			# ASSUMPTION (extends §9 待确认): GPPIDEdge has NO stable uid field, so the
@@ -317,6 +322,8 @@ static func gpFromGraph(gpGraph: GPPIDGraph, gpSheet: GPSheet) -> Dictionary:
 			"why_to": str(gpGeo.get("why_to", "")),
 			"attrs": gpE.gpAttrs.duplicate(true),
 			"tag": gpE.gpTag,
+			"line_kind": "SIGNAL" if gpE.gpKind == GPPIDEdge.GP_SIGNAL else "",
+			"signal_type": gpE.gpSignalType if gpE.gpKind == GPPIDEdge.GP_SIGNAL else "",
 		})
 	_gpCollectGraphics(gpGraph, gpOut)
 	return gpOut
@@ -824,6 +831,14 @@ static func _gpSegmentLines(gpSeg: Dictionary) -> Array[String]:
 	if not str(gpSeg.get("tag", "")).is_empty():
 		gpAttribs.append(_gpGenericAttribute("TagNameAssignmentClass", "", gpSeg.get("tag"),
 			"string", "", "", "", 3))
+	# The signal marker rides on the segment only when the edge actually is a signal line; a
+	# process file therefore keeps its previous byte shape.
+	# 信号标记仅在边确实是信号线时随管段写出；工艺文件因此保持原有字节形态。
+	if str(gpSeg.get("line_kind", "")) != "":
+		gpAttribs.append(_gpGenericAttribute("LineKindAssignmentClass", "",
+			str(gpSeg.get("line_kind", "")), "string", "", "", "", 3))
+		gpAttribs.append(_gpGenericAttribute("SignalTypeAssignmentClass", "",
+			str(gpSeg.get("signal_type", "")), "string", "", "", "", 3))
 	var gpAttrs: Dictionary = gpSeg.get("attrs", {}) as Dictionary
 	for gpKey in gpAttrs.keys():
 		gpAttribs.append_array(_gpPropertyLines(str(gpKey), gpAttrs.get(gpKey), 3))

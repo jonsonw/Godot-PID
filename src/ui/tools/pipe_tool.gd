@@ -122,6 +122,46 @@ func gpOnKey(_gpKey: InputEventKey) -> bool:
 	return false
 
 
+# Whether a start point is anchored and the line is waiting for its second end.
+# 起点是否已锚定、正等第二端。
+# Public so the canvas can offer "finish as an open end" without reaching into _gpStart.
+# 设为公开，使画布能提供「作为开口端结束」而无需触碰 _gpStart。
+func gpIsPending() -> bool:
+	return _gpActive
+
+
+# Finish the pending line at gpWorld as an OPEN END carrying gpText, as ONE undo step.
+# 把待完成的线以 gpWorld 处的**开口端**结束、并带上 gpText，作为一步撤销。
+# Returns the new edge id, or "" when nothing was pending or the command refused.
+# 返回新边 id；没有待完成状态或命令被拒时返回空串。
+#
+# The draft is only reset on SUCCESS: a refused commit (e.g. both ends dangling) leaves the user's
+# half-drawn line exactly where it was, which is the difference between "try again" and "start over".
+# 仅在**成功**时重置草稿：被拒的提交（如两端皆空）会把用户的半成品原样留着 ——
+# 这正是「再试一次」与「从头再来」的区别。
+func gpFinishOpenEnd(gpWorld: Vector2, gpText: String,
+		gpExistingNoteUid: String = "") -> String:
+	if not _gpActive:
+		return ""
+	var gpTo: Dictionary = {"node_id": "", "port_id": "", "point": [gpWorld.x, gpWorld.y]}
+	# Which side is dangling depends on which side the user anchored: a pipe may be drawn from a
+	# port OUT to the opening, or (rarely) from the opening back to a port.
+	# 哪一端悬空取决于用户锚定的是哪一端：管子可以「从端口画到开口」，也可以（少见）「从开口画到端口」。
+	var gpFromBound: bool = str(_gpStart.get("node_id", "")) != ""
+	# The tool reaches the canvas through its CONTEXT (gpCtx.gpCv); there is no bare gpCv here —
+	# tools are constructed before any canvas exists, so the handle must stay on the context.
+	# 工具经**上下文**（gpCtx.gpCv）访问画布；此处没有裸 gpCv —— 工具先于任何画布构造，
+	# 故句柄必须留在上下文里。
+	var gpEdgeId: String = gpCtx.gpCv.gpRequestFinishOpenEnd(_gpRefFrom(_gpStart), gpTo,
+		_gpKind(), _gpDefaultSignalType(), gpText, not gpFromBound, true, gpExistingNoteUid)
+	if gpEdgeId != "":
+		gpRefusal = ""
+		_gpReset()
+		gpCtx.gpCv.queue_redraw()
+		gpCtx.gpCv.gpEmitStatus()
+	return gpEdgeId
+
+
 func gpCancel() -> bool:
 	if not _gpActive:
 		return false

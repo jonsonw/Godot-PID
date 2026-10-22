@@ -313,6 +313,11 @@ func gpOnListDirSelected(gpDir: String) -> void:
 	_gpPickingListDir = false
 	var gpOut: Dictionary = GPListBasic.gpExportLists(gpHost.gpActiveGraph(), gpDir,
 		gpHost.gpDefs)
+	# B08: the open-end sheet rides along with the category lists (ADR-34 D6). Written even when
+	# gpOut is empty, because a sheet with only open ends (no equipment) must still export them.
+	# B08：开口端工作表随各类清单一起写出（ADR-34 D6）。即使 gpOut 为空也写 ——
+	# 一张只有开口端（没有设备）的图纸仍须把它们导出来。
+	GPListBasic.gpExportOpenEnds(gpHost.gpActiveGraph(), gpDir)
 	if gpOut.is_empty():
 		# An empty graph yields no categories — say so instead of a success line with 0.
 		# 空图产出不了类别 —— 明说，而非报一条带 0 的成功。
@@ -424,6 +429,13 @@ func gpWriteProject(gpPath: String, gpIsAuto: bool = false) -> void:
 		var gpFirst: GPSheet = gpSheets[0] as GPSheet
 		if gpFirst != null and gpFirst.gpName != "":
 			(gpFirst.gpGraph if gpFirst.gpGraph != null else gpHost.gpActiveGraph()).gpMeta["title"] = gpFirst.gpName
+		# P0-5: a single-sheet v2 archive has no sheets[] section, so the per-sheet
+		# symbol_scale would be lost. Stamp it into meta (0.5 legacy / 1.0 new) so the
+		# compatibility decision survives a v2 round trip.
+		# P0-5：单图纸 v2 存档没有 sheets[] 段，逐图纸 symbol_scale 会丢失。把它盖进 meta
+		# （旧档 0.5 / 新档 1.0），使兼容决定在 v2 往返后仍存活。
+		if gpFirst != null:
+			(gpFirst.gpGraph if gpFirst.gpGraph != null else gpHost.gpActiveGraph()).gpMeta["symbol_scale"] = gpFirst.gpSymbolScale
 		gpWriteResult = GPProjectIO.gpWriteProjectResult(gpHost.gpActiveGraph(), gpFilePath)
 	if not gpWriteResult.gpIsOk():
 		gpHost.gpSetState("status.save_fail", [gpFilePath])
@@ -485,6 +497,12 @@ func gpReadProject(gpPath: String) -> void:
 	# swap the active document in the manager (resets dirty, announces the change on the bus).
 	# 在管理器中切换当前文档（重置脏标记并总线通告变更）。
 	gpHost.gpDocManager.gpSetGraph(gpNewGraph)
+	# P0-5: the project's era drives the shared library's symbol scale. Do it BEFORE handing
+	# the defs to the palette / inspector / canvas, so nothing renders one frame at the wrong
+	# footprint.
+	# P0-5：工程世代决定共享图元库的尺度。在把 defs 交给图元库 / 检查器 / 画布**之前**
+	# 设置，避免任何东西先按错误包络渲染一帧。
+	GPSymbolLibrary.gpSetDocSizeScale((gpSheets[0] as GPSheet).gpSymbolScale)
 	gpHost.gpDefs = GPSymbolLibrary.gpDefaultDefs()
 	gpHost.gpSyncInspectorDefs()
 	# the library may have moved on since this file was saved. Migrate renamed fields
@@ -593,6 +611,43 @@ func gpDoImportDexpi(gpPath: String) -> void:
 	gpHost.gpSetState("status.imported", [gpPath, gpErr, gpWarn])
 	if gpErr > 0 and gpReport != null:
 		print("G-PID DEXPI import report: ", gpReport.gpSummary())
+
+
+# "Print" on a desktop = produce a print-ready PDF and hand it to the operating system, which
+# owns the printer list, paper selection and driver quirks. Godot exposes no print API, so
+# pretending to print in-engine would be the one thing worse than not printing at all.
+# 「打印」在桌面上的正确实现 = 生成可打印的 PDF 并交给操作系统 —— 打印机列表、纸张选择与驱动细节
+# 都归它。Godot 没有打印 API，因此在引擎内假装打印，比不打印更糟。
+#
+# Two honest limitations, stated where the user can see them:
+#   * the file lands in user://print/ and is opened with the default viewer, so the OS preview is
+#     the print dialog's front door (that is how most viewers print);
+#   * a failure to hand off still leaves a valid PDF on disk, and the status says where.
+# 两处诚实限制，写在用户看得到的地方：文件落在 user://print/ 并用默认查看器打开（系统预览正是
+# 打印对话框的前门 —— 多数查看器就是这么打印的）；交接失败时磁盘上仍留有有效 PDF，状态栏会给出位置。
+func gpPrintSheet() -> void:
+	var gpSheet: GPSheet = _gpActiveSheet()
+	if gpSheet == null:
+		gpHost.gpSetState("status.export_empty")
+		return
+	var gpDir: String = "user://print"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(gpDir))
+	var gpStamp: String = Time.get_datetime_string_from_system().replace(":", "-")
+	var gpName: String = gpHost.gpCurrentPath.get_file().get_basename()
+	if gpName == "":
+		gpName = "G-PID"
+	var gpPath: String = "%s/%s-%s.pdf" % [gpDir, gpName, gpStamp]
+	var gpOut: GPIOResult = GPExporterRegistry.gpExport("pdf", gpPath,
+		gpHost.gpActiveGraph(), GPSymbolLibrary.gpUserPacks(), gpSheet)
+	if not gpOut.gpIsOk():
+		gpHost.gpSetState(gpOut.gpMessageKey, [gpPath])
+		return
+	var gpAbs: String = ProjectSettings.globalize_path(gpPath)
+	# Best-effort hand-off: a headless or locked-down environment has no viewer, and that must
+	# not look like a failed export — the PDF exists and the status says where.
+	# 尽力交接：无界面或被锁死的环境没有查看器，这不该看起来像导出失败 —— PDF 已存在，状态栏给出位置。
+	OS.shell_open(gpAbs)
+	gpHost.gpSetState("status.print_handoff", [gpAbs])
 
 
 # Write one export container, whichever the registry says gpKind maps to.

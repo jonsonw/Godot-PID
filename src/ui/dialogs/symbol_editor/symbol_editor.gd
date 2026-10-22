@@ -199,6 +199,18 @@ func _gpOnRelease(gpLocal: Vector2) -> void:
 
 
 func _gpOnKey(gpK: InputEventKey) -> void:
+	# Undo / redo first: they are the one shortcut a drawing surface must honour even while a tool
+	# is mid-gesture, and they were unreachable from the dialog before A13.
+	# 撤销 / 重做优先：这是绘图面即使在工具进行中也必须响应的唯一快捷键，而在 A13 之前它从对话框里
+	# 完全不可达。
+	var gpCtrl: bool = gpK.ctrl_pressed or gpK.meta_pressed
+	if gpCtrl and gpK.keycode == KEY_Z:
+		if gpK.shift_pressed:
+			gpRedo()
+		else:
+			gpUndo()
+		gpChanged.emit()
+		return
 	# Delete works in ANY tool when something is selected (matches the old dialog behaviour).
 	# 任意工具下，只要选中有内容即删除（与旧对话框行为一致）。
 	if gpK.keycode == KEY_DELETE or gpK.keycode == KEY_BACKSPACE:
@@ -292,6 +304,19 @@ func gpMoveShape(gpIdx: int, gpBefore: PackedVector2Array, gpBeforeR: float, gpA
 	var gpCmd: GPSymbolMoveShapeCommand = GPSymbolMoveShapeCommand.new(gpShapes, gpIdx, gpBefore, gpBeforeR, gpAfter, gpAfterR)
 	_gpStack.gpDo(gpCmd, _gpCtxCmd)
 	gpChanged.emit()
+
+
+# Change a port's PURPOSE (A12): nozzle / actuator / signal / generic terminal.
+# 改变端口的**用途**（A12）：工艺管口 / 执行机构 / 信号 / 通用端点。
+# Undoable like every other mutation here, and the ONLY way a user-authored symbol can host a
+# signal port — the signal-line tool refuses process nozzles by design.
+# 与其它修改一样可撤销，也是用户自建图元承载信号端口的**唯一**途径 —— 信号线工具按设计拒绝工艺管口。
+func gpSetPortType(gpIdx: int, gpType: String) -> void:
+	if gpIdx < 0 or gpIdx >= gpPorts.size():
+		return
+	var gpCmd: GPSymbolSetPortTypeCommand = GPSymbolSetPortTypeCommand.new(gpPorts, gpIdx, gpType)
+	if _gpStack.gpDo(gpCmd, _gpCtxCmd):
+		gpChanged.emit()
 
 
 func gpMovePort(gpIdx: int, gpBefore: Vector2, gpAfter: Vector2) -> void:

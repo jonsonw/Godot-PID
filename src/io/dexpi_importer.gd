@@ -284,16 +284,33 @@ static func _gpFillEdges(gpMid: Dictionary, gpOut: Array, gpDefLookup: Callable,
 				gpPts[0] as Vector2, gpDefLookup)
 			gpToPort = _gpNearestPortId(gpNodeByUid.get(gpToUid, {}) as Dictionary,
 				gpPts[gpPts.size() - 1] as Vector2, gpDefLookup)
+		# Signal lines come back through the DECLARED marker (ADR-16 third bucket): a segment
+		# that carries LineKind=SIGNAL is a signal line, and its signal type travels beside it.
+		# A file without the marker (any foreign DEXPI file) keeps the historical default.
+		# 信号线通过**已声明的标记**回来（ADR-16 第三桶）：带 LineKind=SIGNAL 的管段就是信号线，
+		# 信号类型随行。没有标记的文件（任何外部 DEXPI）保持历史默认值。
+		var gpSegAttrs: Dictionary = (gpS.get("attrs", {}) as Dictionary).duplicate(true)
+		var gpKind: String = GP_KIND_PROCESS
+		var gpSignalType: String = ""
+		if str(gpSegAttrs.get("line_kind", "")) == "SIGNAL":
+			gpKind = GPPIDEdge.GP_SIGNAL
+			gpSignalType = str(gpSegAttrs.get("signal_type", ""))
+		# The two marker keys are DEXPI-side transport, not user attributes: leaving them in
+		# gpAttrs would show up in the inspector as phantom property rows on every signal line.
+		# 两个标记键属 DEXPI 侧传输，不是用户属性：留在 gpAttrs 里会让每条信号线在属性面板多出
+		# 两行幽灵属性。
+		gpSegAttrs.erase("line_kind")
+		gpSegAttrs.erase("signal_type")
 		gpOut.append({
 			"instance_id": str(gpS.get("id", "")),
 			"from_ref": {"node_id": gpFromUid, "port_id": gpFromPort},
 			"to_ref": {"node_id": gpToUid, "port_id": gpToPort},
-			"kind": GP_KIND_PROCESS,
-			"signal_type": "",
+			"kind": gpKind,
+			"signal_type": gpSignalType,
 			"ortho": true,
 			"routing": gpBends,
 			"tag": str(gpS.get("tag", "")),
-			"attrs": (gpS.get("attrs", {}) as Dictionary).duplicate(true),
+			"attrs": gpSegAttrs,
 		})
 
 

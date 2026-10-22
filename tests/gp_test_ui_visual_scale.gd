@@ -905,3 +905,74 @@ func gpTestFontCacheKeepsOneInstancePerKey() -> void:
 	var gpC: Font = gpS.gpLoadFont("pingfang")
 	gpCheck(gpC != null and gpC != gpA, "不同键必须返回不同实例")
 	gpS.free()
+
+
+# Palette thumbnail kinds (user feedback 2026-10-17: multiline text and the table both read
+# as the same filled square). The CLASSIFIER is the pin target — kinds per def family, plus
+# the grid thumbnail's single-source guarantee (bare-node generator spec is non-empty).
+# 图元库缩略图种类（用户反馈 2026-10-17：多行文本与表格都是同一个填充方块）。钉的对象是
+# **分类器** —— 每族定义的种类，外加表格缩略图的单一来源保证（裸节点的生成器 spec 非空）。
+func gpTestPaletteThumbKinds() -> void:
+	var gpTable: GPSymbolDef = null
+	var gpText: GPSymbolDef = null
+	var gpPump: GPSymbolDef = null
+	for gpD in GPSymbolLibrary.gpDefaultDefs():
+		if gpD.gpId == "TABLE:device_param":
+			gpTable = gpD
+		elif gpD.gpId == "TEXT:multiline":
+			gpText = gpD
+		elif gpD.gpId == "DPUMP001":
+			gpPump = gpD
+	gpCheck(gpTable != null and gpText != null and gpPump != null,
+		"探针：默认库应含表格/多行文本/离心泵定义")
+	gpEq(GPSymbolPaletteItem.gpThumbKind(gpTable), "grid",
+		"表格定义 → grid 缩略图（真生成器 spec）/ table def → grid thumb")
+	gpEq(GPSymbolPaletteItem.gpThumbKind(gpText), "multiline",
+		"多行文本定义 → multiline 缩略图（长方形+123）/ text def → multiline thumb")
+	gpEq(GPSymbolPaletteItem.gpThumbKind(gpPump), "shapes",
+		"带静态形状的图元仍走矢量绘制 / defs with shapes keep vector rendering")
+	gpEq(GPSymbolPaletteItem.gpThumbKind(null), "none", "null 定义 → none / null def → none")
+	# Unknown generator keeps the plain-rect fallback (degradation, never blank).
+	# 未知生成器保持普通矩形兜底（退化，绝不空白）。
+	var gpUnknown: GPSymbolDef = GPSymbolDef.new()
+	gpUnknown.gpId = "TEST:no_such_gen"
+	gpUnknown.gpGeometrySource = "GENERATOR:no_such_gen"
+	gpEq(GPSymbolPaletteItem.gpThumbKind(gpUnknown), "fallback",
+		"未知生成器 → 普通矩形兜底 / unknown generator → plain-rect fallback")
+	# Single source: the grid thumbnail derives from the REAL generator against a bare
+	# node — the spec must be non-empty and carry border + separators (>= 2 paths).
+	# 单一来源：表格缩略图取自**真**生成器对裸节点的输出 —— spec 必须非空且含
+	# 外框 + 分隔线（>= 2 条折线）。
+	var gpBare: GPPIDNode = GPPIDNode.new()
+	var gpSpec: Dictionary = GPSymbolGeneratorRegistry.gpGenerate(gpTable, gpBare).get("spec", {}) as Dictionary
+	gpCheck(not gpSpec.is_empty(), "裸节点的格网 spec 必须非空（缩略图单一来源）/ bare-node grid spec non-empty")
+	var gpPaths: Array = gpSpec.get("paths", []) as Array
+	gpCheck(gpPaths.size() >= 2,
+		"格网 spec 至少含外框 + 一条分隔线 / grid spec carries border + separators")
+
+
+# Contrast ink for filled thumbnails (user feedback 2026-10-17: the "123" digits shared
+# the fill's colour family and vanished against it; the table lines also sat on no
+# backing). Pin: dark ink on light fills, near-white ink on dark fills, and the ink is
+# NEVER equal to the fill it sits on — for the two shipped def families themselves.
+# 填充缩略图的对比墨色（用户反馈 2026-10-17：「123」曾与底色同色系、贴着底色看不清；
+# 表格线也曾无底色衬托）。钉住：浅底配深墨、深底配近白墨，且墨色**绝不等于**其所在
+# 填充色 —— 对两个内置 def 族本身亦然。
+func gpTestPaletteThumbContrastInk() -> void:
+	var gpDark: Color = GPSymbolPaletteItem.gpContrastOn(Color(0.95, 0.9, 0.4))
+	gpCheck(gpDark.get_luminance() < 0.3, "浅底应配深墨 / light fill takes dark ink")
+	var gpLight: Color = GPSymbolPaletteItem.gpContrastOn(Color(0.15, 0.2, 0.45))
+	gpCheck(gpLight.get_luminance() > 0.7, "深底应配近白墨 / dark fill takes near-white ink")
+	var gpTable: GPSymbolDef = null
+	var gpText: GPSymbolDef = null
+	for gpD in GPSymbolLibrary.gpDefaultDefs():
+		if gpD.gpId == "TABLE:device_param":
+			gpTable = gpD
+		elif gpD.gpId == "TEXT:multiline":
+			gpText = gpD
+	gpCheck(gpTable != null and gpText != null, "探针：默认库应含表格/多行文本定义")
+	for gpD in [gpTable, gpText]:
+		var gpFill: Color = GPSymbolPainter.gpCategoryColor(gpD.gpCategory)
+		var gpInk: Color = GPSymbolPaletteItem.gpContrastOn(gpFill)
+		gpCheck(gpInk != gpFill,
+			gpD.gpId + " 的墨色必须区别于底色 / ink must differ from its fill")

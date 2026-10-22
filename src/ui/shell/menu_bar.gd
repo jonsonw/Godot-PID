@@ -45,7 +45,11 @@ const GP_MENUS: Dictionary = {
 		null,
 		["menu.file_import", "file_import"],
 		["menu.import_dexpi", "import_dexpi"],
+		["menu.import_lists_xlsx", "import_lists_xlsx"],
 		{"title": "menu.export", "items": [
+			["menu.export_lists_xlsx", "export_lists_xlsx"],
+			["menu.project_export_list", "project_export_list"],
+			null,
 			["menu.export_project", "export_project"],
 			["menu.export_library", "export_library"],
 			["menu.export_config", "export_config"],
@@ -74,17 +78,26 @@ const GP_MENUS: Dictionary = {
 	],
 	"menu.project": [
 		["menu.project_tag_rules", "project_tag_rules"],
-		["menu.project_export_list", "project_export_list"],
 	],
 	"menu.insert": [
+		# A14: the ONE entry that was missing from the whole product — creating a symbol from
+		# scratch. Before it, the only way in was "draw random shapes on the sheet, then promote
+		# them", which is a detour for something the editor can do directly.
+		# A14：整个产品缺失的那一个入口 —— 从零新建图元。此前唯一路径是「先在图纸上乱画几个图形
+		# 再提升」，对编辑器本就能直接做的事而言，那是一段绕路。
+		["menu.insert_symbol", "insert_symbol"],
 		["menu.insert_frame", "insert_frame"],
 		["menu.insert_frame_style", "insert_frame_style"],
 	],
 	"menu.format": [
 		["menu.format_bg", "format_bg"],
 	],
+	# The AI unit-operation entry is deliberately ABSENT until stage C exists: shipping a menu item
+	# that can only say "not available yet" is the very "the UI is lying" pattern A10 removes.
+	# AI 单元操作条目在阶段 C 落地前**刻意缺席**：发布一个只会说「暂不可用」的菜单项，
+	# 正是 A10 要清除的「界面撒谎」模式。
 	"menu.tools": [
-		["menu.tool_ai_unitop", "tool_ai_unitop"],
+		["menu.tool_drc", "tool_drc"],
 		["menu.tool_settings", "tool_settings"],
 	],
 	"menu.help": [

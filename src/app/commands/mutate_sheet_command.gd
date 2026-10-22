@@ -41,6 +41,21 @@ const GP_FIELD_TB_ANCHOR: String = "tb_anchor"
 # 图签停靠偏移的字段键（Vector2，mm，向框内）。Rev.3 阶段 1。
 const GP_FIELD_TB_OFFSET: String = "tb_offset"
 
+# Stage 1.5 / P0-4: every user-editable SHEET field travels through this command, so "edit the
+# title block / paper size / frame switch / drawing language / underlay" is ONE undo step and
+# dirties the document exactly like a graph edit. Without these keys the dialog wrote the sheet
+# directly and the close guard saw a clean document (silent data loss).
+# 阶段 1.5 / P0-4：每个用户可编辑的**图纸**字段都经本命令，使「改图签 / 图幅 / 图框开关 /
+# 图面语言 / 底图」成为一个撤销步，并像图编辑一样标脏。缺这些键时对话框直接写图纸，关闭
+# 护栏看到的是「干净文档」（静默丢失）。
+const GP_FIELD_WIDTH: String = "width_mm"
+const GP_FIELD_HEIGHT: String = "height_mm"
+const GP_FIELD_FRAME_ON: String = "frame_on"
+const GP_FIELD_LABEL_MODE: String = "label_mode"
+const GP_FIELD_BG_PATH: String = "background_path"
+const GP_FIELD_BG_ALPHA: String = "background_alpha"
+const GP_FIELD_TITLE_BLOCK: String = "title_block"
+
 # The keys this command may write. A WHITELIST, in the spirit of the archive migration's node-key
 # whitelist: an unknown key is REFUSED (the whole command does nothing) rather than ignored, because a
 # silently dropped write is indistinguishable from "the drag did not work" — the person then drags
@@ -55,7 +70,9 @@ const GP_FIELD_TB_OFFSET: String = "tb_offset"
 # than a single field.
 # 一次拖拽同时产出「贴哪个角」与「离它多远」，把它记成两个撤销步会让 Ctrl+Z 把图签退回到一个用户从未见过的
 # 中间状态。两个键、一条命令、一个撤销步 —— 这正是本命令收**字典**而不是单个字段的原因。
-const GP_FIELDS: Array = [GP_FIELD_MARGINS, GP_FIELD_TB_ANCHOR, GP_FIELD_TB_OFFSET]
+const GP_FIELDS: Array = [GP_FIELD_MARGINS, GP_FIELD_TB_ANCHOR, GP_FIELD_TB_OFFSET,
+	GP_FIELD_WIDTH, GP_FIELD_HEIGHT, GP_FIELD_FRAME_ON, GP_FIELD_LABEL_MODE,
+	GP_FIELD_BG_PATH, GP_FIELD_BG_ALPHA, GP_FIELD_TITLE_BLOCK]
 
 # The sheet this command operates on. Captured at construction; never looked up later.
 # 本命令操作的图纸。构造时捕获，此后永不回查。
@@ -90,16 +107,25 @@ func gpExecute(_gpCtx: GPCommandContext) -> bool:
 	for gpKey in _gpNew.keys():
 		if not GP_FIELDS.has(str(gpKey)):
 			return false
+	_gpDeriveSizeMargins()
 	_gpOld = {}
 	for gpKey in _gpNew.keys():
 		_gpOld[gpKey] = _gpRead(str(gpKey))
-	_gpWriteAll(_gpNew)
+	# A size change also rewrites the title block's SIZE cell (derived data). Capture the old
+	# block so undo restores it too; otherwise Ctrl+Z would leave a stale "A1" cell on an A3
+	# sheet — the exact "one question, two answers" failure the mirror comment warns about.
+	# 改图幅还会重写图签的「图幅」格（派生数据）。捕获旧图签，使撤销也能还原它；否则
+	# Ctrl+Z 会在 A3 图纸上留下过期的「A1」格 —— 正是镜像注释所警告的「同一问题两个答案」。
+	if (_gpNew.has(GP_FIELD_WIDTH) or _gpNew.has(GP_FIELD_HEIGHT)) \
+			and not _gpOld.has(GP_FIELD_TITLE_BLOCK):
+		_gpOld[GP_FIELD_TITLE_BLOCK] = _gpRead(GP_FIELD_TITLE_BLOCK)
+	_gpWriteAll(_gpNew, true)
 	# "Did anything change?" is answered by re-reading the model, NOT by comparing the request to the
-	# captured old value: the write path CLAMPS (a request of -3 mm becomes 1 mm), so a request that
-	# differs from the old value can still leave the sheet untouched, and comparing requests would
-	# record an undo step that does nothing.
-	# 「有没有变」由**重读模型**回答，而不是拿请求与捕获的旧值比较：写入路径会**钳制**（请求 −3mm 会变成
-	# 1mm），故与旧值不同的请求仍可能什么都没改，而比较请求就会记下一个什么也不做的撤销步。
+	# captured old value: the write path CLAMPS (an inside-out margin pair is scaled back), so a
+	# request that differs from the old value can still leave the sheet untouched, and comparing
+	# requests would record an undo step that does nothing.
+	# 「有没有变」由**重读模型**回答，而不是拿请求与捕获的旧值比较：写入路径会**钳制**（内翻的
+	# 边距对会被回缩），故与旧值不同的请求仍可能什么都没改，而比较请求就会记下一个什么也不做的撤销步。
 	var gpChanged: bool = false
 	for gpKey in _gpOld.keys():
 		if not _gpSame(str(gpKey), _gpOld[gpKey], _gpRead(str(gpKey))):
@@ -111,11 +137,15 @@ func gpExecute(_gpCtx: GPCommandContext) -> bool:
 	return true
 
 
-# Restore every captured value. / 恢复每个捕获的旧值。
+# Restore every captured value. A size restore must NOT re-derive the SIZE cell: the captured
+# title block already holds the old cell, and syncing again would overwrite it with the very value
+# we are undoing.
+# 恢复每个捕获的旧值。图幅回退**不得**再推导「图幅」格：捕获的旧图签已带旧格，再同步会把
+# 它覆盖成我们正在撤销的那个值。
 func gpUndo(_gpCtx: GPCommandContext) -> void:
 	if _gpSheet == null or _gpOld.is_empty():
 		return
-	_gpWriteAll(_gpOld)
+	_gpWriteAll(_gpOld, false)
 	_gpSheet.gpSheetChanged.emit()
 
 
@@ -127,17 +157,39 @@ func gpUndo(_gpCtx: GPCommandContext) -> void:
 func gpRedo(_gpCtx: GPCommandContext) -> void:
 	if _gpSheet == null or _gpNew.is_empty():
 		return
-	_gpWriteAll(_gpNew)
+	_gpWriteAll(_gpNew, true)
 	_gpSheet.gpSheetChanged.emit()
 
 
 # ============================ private ============================
 
-# Read one whitelisted field off the sheet. A duplicate is returned for arrays so the command owns its
-# snapshot: handing out the live array would let a later write mutate the captured "old" value in
-# place, and the undo would then restore the new state under the old name.
-# 读取图纸上的某个白名单字段。数组返回副本，使命令拥有自己的快照：交出活数组会让后续写入就地改写
-# 已捕获的「旧值」，于是撤销会在「旧值」的名义下恢复新状态。
+# If the request changes the paper size and does NOT carry explicit margins, re-derive the
+# margins from the NEW paper size — but only when the current margins are still the OLD size's
+# default. A user who hand-tuned the margins keeps them (their numbers are a decision, not a
+# default), while a stock A3 sheet promoted to A1 gains A1's 25/10/10/10 and keeps its zone
+# labels. Without this, the 5 mm A3 right/top/bottom margins survive on A1 and the 5.7 mm zone
+# text no longer fits, so three of the four rulers silently disappear.
+# 若请求改纸幅、且未显式带边距，则按**新**纸幅重推边距 —— 但仅当当前边距仍是**旧**纸幅的
+# 默认值时。手工调过边距的用户保留其数值（那是决定、不是默认），而标准 A3 升 A1 会得到
+# A1 的 25/10/10/10 并保住坐标带标号。没有这一步，A3 的 5mm 上/右/下边距会留在 A1 上，
+# 5.7mm 的坐标带文字再也放不下，四边标号会静默消失三边。
+func _gpDeriveSizeMargins() -> void:
+	if not (_gpNew.has(GP_FIELD_WIDTH) or _gpNew.has(GP_FIELD_HEIGHT)):
+		return
+	if _gpNew.has(GP_FIELD_MARGINS):
+		return
+	var gpNewW: float = float(_gpNew.get(GP_FIELD_WIDTH, _gpSheet.gpWidthMM))
+	var gpNewH: float = float(_gpNew.get(GP_FIELD_HEIGHT, _gpSheet.gpHeightMM))
+	var gpOldDefault: Array = GPSheet.gpDefaultMarginsFor(_gpSheet.gpWidthMM, _gpSheet.gpHeightMM)
+	if GPFrameGeometry.gpSameMargins(_gpSheet.gpFrameMargins, gpOldDefault):
+		_gpNew[GP_FIELD_MARGINS] = GPSheet.gpDefaultMarginsFor(gpNewW, gpNewH)
+
+
+# Read one whitelisted field off the sheet. A duplicate is returned for arrays / dictionaries so
+# the command owns its snapshot: handing out the live object would let a later write mutate the
+# captured "old" value in place, and the undo would then restore the new state under the old name.
+# 读取图纸上的某个白名单字段。数组 / 字典返回副本，使命令拥有自己的快照：交出活对象会让后续写入
+# 就地改写已捕获的「旧值」，于是撤销会在「旧值」的名义下恢复新状态。
 func _gpRead(gpKey: String) -> Variant:
 	match gpKey:
 		GP_FIELD_MARGINS:
@@ -146,6 +198,20 @@ func _gpRead(gpKey: String) -> Variant:
 			return _gpSheet.gpTbAnchor
 		GP_FIELD_TB_OFFSET:
 			return _gpSheet.gpTbOffset
+		GP_FIELD_WIDTH:
+			return _gpSheet.gpWidthMM
+		GP_FIELD_HEIGHT:
+			return _gpSheet.gpHeightMM
+		GP_FIELD_FRAME_ON:
+			return _gpSheet.gpFrameOn
+		GP_FIELD_LABEL_MODE:
+			return _gpSheet.gpLabelMode
+		GP_FIELD_BG_PATH:
+			return _gpSheet.gpBackgroundPath
+		GP_FIELD_BG_ALPHA:
+			return _gpSheet.gpBackgroundAlpha
+		GP_FIELD_TITLE_BLOCK:
+			return _gpSheet.gpTitleBlock.duplicate(true)
 	return null
 
 
@@ -164,23 +230,48 @@ func _gpRead(gpKey: String) -> Variant:
 # 用户可触及的改动都会经过的写入路径 —— 对话框与拖拽都到这里 —— 故在这唯一的接缝上钳制，正是「非法偏移
 # 从一开始就进不了模型」的保证。GPFrameGeometry.gpTitleBlockPlaced() 在读取时仍会再折一次，故手工改过的
 # 存档同样产不出非法图签；该折算幂等，故第二次遍历不花代价、也不改变任何值。
-func _gpWriteAll(gpValues: Dictionary) -> void:
-	for gpKey in gpValues.keys():
-		match str(gpKey):
-			GP_FIELD_MARGINS:
-				var gpV: Variant = gpValues[gpKey]
-				if gpV is Array:
-					_gpSheet.gpSetFrameMargins(gpV as Array)
-			GP_FIELD_TB_ANCHOR:
-				_gpSheet.gpSetTbAnchor(int(gpValues[gpKey]))
-			GP_FIELD_TB_OFFSET:
-				var gpOff: Variant = gpValues[gpKey]
-				if gpOff is Vector2:
-					_gpSheet.gpSetTbOffset(_gpClampTbOffset(gpValues, gpOff as Vector2))
+#
+# ⚠️ WRITE ORDER IS LOAD-BEARING / ⚠️ 写入顺序是承重的：paper size first, then margins (their
+# clamp needs the new span), then the title block (which may be re-synced to the new size), then
+# the independent fields. A dictionary iteration order would let margins clamp against the OLD
+# paper and the size cell lag behind the new one.
+# 先纸幅、再边距（其钳制需要新跨度）、再图签（可能按新图幅重同步）、最后独立字段。若按字典
+# 遍历顺序写，边距会按**旧**纸面钳制、图幅格会滞后于新纸面。
+func _gpWriteAll(gpValues: Dictionary, gpSyncSheetSize: bool) -> void:
+	if gpValues.has(GP_FIELD_WIDTH):
+		_gpSheet.gpWidthMM = float(gpValues[GP_FIELD_WIDTH])
+	if gpValues.has(GP_FIELD_HEIGHT):
+		_gpSheet.gpHeightMM = float(gpValues[GP_FIELD_HEIGHT])
+	if gpValues.has(GP_FIELD_MARGINS):
+		var gpV: Variant = gpValues[GP_FIELD_MARGINS]
+		if gpV is Array:
+			_gpSheet.gpSetFrameMargins(gpV as Array)
+	if gpValues.has(GP_FIELD_TB_ANCHOR):
+		_gpSheet.gpSetTbAnchor(int(gpValues[GP_FIELD_TB_ANCHOR]))
+	if gpValues.has(GP_FIELD_TB_OFFSET):
+		var gpOff: Variant = gpValues[GP_FIELD_TB_OFFSET]
+		if gpOff is Vector2:
+			_gpSheet.gpSetTbOffset(_gpClampTbOffset(gpValues, gpOff as Vector2))
+	if gpValues.has(GP_FIELD_FRAME_ON):
+		_gpSheet.gpFrameOn = bool(gpValues[GP_FIELD_FRAME_ON])
+	if gpValues.has(GP_FIELD_LABEL_MODE):
+		_gpSheet.gpLabelMode = int(gpValues[GP_FIELD_LABEL_MODE])
+	if gpValues.has(GP_FIELD_BG_PATH):
+		_gpSheet.gpBackgroundPath = str(gpValues[GP_FIELD_BG_PATH])
+	if gpValues.has(GP_FIELD_BG_ALPHA):
+		_gpSheet.gpBackgroundAlpha = clampf(float(gpValues[GP_FIELD_BG_ALPHA]), 0.0, 1.0)
+	if gpValues.has(GP_FIELD_TITLE_BLOCK):
+		var gpTB: Variant = gpValues[GP_FIELD_TITLE_BLOCK]
+		if gpTB is Dictionary:
+			_gpSheet.gpTitleBlock = (gpTB as Dictionary).duplicate(true)
+	if gpSyncSheetSize and (gpValues.has(GP_FIELD_WIDTH) or gpValues.has(GP_FIELD_HEIGHT)):
+		_gpSheet.gpSyncSheetSizeField()
 
 
-# Fold a docking offset into its legal set FOR THE ANCHOR THIS WRITE WILL LEAVE BEHIND.
-# 针对**本次写入将留下的**锚角，把停靠偏移收进合法域。
+# Fold a docking offset into its legal set FOR THE ANCHOR THIS WRITE WILL LEAVE BEHIND, and for
+# the block size THIS SHEET actually draws (A1+ blocks are 270x100, not the A3-era 135x50).
+# 针对**本次写入将留下的**锚角、以及**本图纸实际绘制的**图签尺寸（A1+ 为 270×100，而非
+# A3 时代的 135×50），把停靠偏移收进合法域。
 #
 # ⚠️ THE ANCHOR IS READ FROM THE REQUEST FIRST, NOT FROM THE SHEET / ⚠️ 锚角**先**从请求里读，而不是从图纸：
 # a drag changes both fields at once, and a dictionary's iteration order is not something this function
@@ -191,7 +282,8 @@ func _gpWriteAll(gpValues: Dictionary) -> void:
 # 已被写入都正确。回落到图纸上的值覆盖单键情形（对话框只改偏移），那时图纸的锚角就是意图中的锚角。
 func _gpClampTbOffset(gpValues: Dictionary, gpOffset: Vector2) -> Vector2:
 	var gpAnchor: int = int(gpValues.get(GP_FIELD_TB_ANCHOR, _gpSheet.gpTbAnchor))
-	return GPFrameGeometry.gpClampTitleBlock(GPFrameGeometry.gpFrameRect(_gpSheet), gpAnchor, gpOffset)
+	return GPFrameGeometry.gpClampTitleBlock(GPFrameGeometry.gpFrameRect(_gpSheet), gpAnchor,
+		gpOffset, _gpSheet.gpTbBlockSize())
 
 
 # Value equality per field type. Marshalled through one function so adding a field cannot forget its
@@ -209,4 +301,36 @@ func _gpSame(gpKey: String, gpA: Variant, gpB: Variant) -> bool:
 			if not (gpA is Vector2) or not (gpB is Vector2):
 				return false
 			return (gpA as Vector2).is_equal_approx(gpB as Vector2)
+		GP_FIELD_WIDTH, GP_FIELD_HEIGHT, GP_FIELD_BG_ALPHA:
+			return absf(float(gpA) - float(gpB)) < 0.0001
+		GP_FIELD_FRAME_ON:
+			return bool(gpA) == bool(gpB)
+		GP_FIELD_LABEL_MODE:
+			return int(gpA) == int(gpB)
+		GP_FIELD_BG_PATH:
+			return str(gpA) == str(gpB)
+		GP_FIELD_TITLE_BLOCK:
+			if not (gpA is Dictionary) or not (gpB is Dictionary):
+				return false
+			return _gpDictEqual(gpA as Dictionary, gpB as Dictionary)
 	return gpA == gpB
+
+
+# Deep equality for the title block's nested {"value": {"zh", "en"}} shape. Dictionary's `==` is
+# already recursive in Godot 4, but stating it here keeps the command independent of that detail.
+# 图签嵌套 {"value": {"zh","en"}} 形状的深比较。Godot 4 的字典 `==` 本就是递归的，在此写明
+# 使命令不依赖该细节。
+func _gpDictEqual(gpA: Dictionary, gpB: Dictionary) -> bool:
+	if gpA.size() != gpB.size():
+		return false
+	for gpK in gpA.keys():
+		if not gpB.has(gpK):
+			return false
+		var gpVA: Variant = gpA[gpK]
+		var gpVB: Variant = gpB[gpK]
+		if gpVA is Dictionary and gpVB is Dictionary:
+			if not _gpDictEqual(gpVA as Dictionary, gpVB as Dictionary):
+				return false
+		elif gpVA != gpVB:
+			return false
+	return true

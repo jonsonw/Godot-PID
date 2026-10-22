@@ -80,6 +80,10 @@ func gpOnToolBarPressed(gpAction: String) -> void:
 			gpCanvas.gpPendingDef = null
 			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_POLYLINE)
 			gpHost.gpSetState("status.mode_polyline")
+		"arc":
+			gpCanvas.gpPendingDef = null
+			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_DRAW_ARC)
+			gpHost.gpSetState("status.mode_arc")
 		"pipe":
 			gpCanvas.gpPendingDef = null
 			gpCanvas.gpSetMode(GPCanvas2D.GPMode.GP_PIPE)
@@ -153,18 +157,6 @@ func gpStyleChrome() -> void:
 
 # A tool button was pressed: select / connect / custom.
 # 工具按钮被按下：选择 / 连线 / 自定义。
-func gpOnToolSelected(gpType: String) -> void:
-	if gpType == "select":
-		gpHost.gpActiveCanvas().gpSetMode(GPCanvas2D.GPMode.GP_SELECT)
-		gpHost.gpActiveCanvas().gpConnectFrom = ""
-		gpHost.gpSetState("status.mode_select")
-	elif gpType == "connect":
-		gpHost.gpActiveCanvas().gpSetMode(GPCanvas2D.GPMode.GP_CONNECT)
-		gpHost.gpSetState("status.mode_connect")
-	elif gpType == "custom":
-		gpHost.gpSetState("status.custom_pending")
-
-
 # A symbol was requested for deletion from the left library. The symbol may be placed on
 # ANY sheet, so scan every canvas: if it is in use, ask for confirmation and cascade-remove
 # the placed instances; otherwise delete it from the library directly.

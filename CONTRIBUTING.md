@@ -24,7 +24,46 @@ All source comments are **bilingual**: an English line immediately followed by i
 - Code identifiers stay in English; Chinese appears only in comments.
 
 ### Running tests
-- Install the GUT plugin, then run `tests/` from the Godot editor (Project → Tools → GUT).
+
+> Godot 4.7 is required. The `GODOT` variable below points at the engine binary — set it to your
+> own path (a bare `godot` works when the binary is on `PATH`).
+
+Three commands, run from the repo root (the folder holding `project.godot`). All three must be green
+before a PR is reviewable.
+
+```bash
+# macOS/Linux: give the engine a WRITABLE HOME. Without it, `user://` (which lives under
+# ~/Library/Application Support on macOS) cannot be created inside a sandbox and the process dies
+# with SIGSEGV + a MoltenVK backtrace before any test runs. Windows: point APPDATA at a writable dir.
+mkdir -p /tmp/gpidhome
+GODOT="/path/to/Godot"   # macOS app bundle: .../Godot.app/Contents/MacOS/Godot; PATH install: godot
+
+# 1) Core suite — the home-grown GPGTest suites (tests/gp_test_*.gd, aggregated by run_core_tests.gd)
+HOME=/tmp/gpidhome "$GODOT" --headless --path . --script res://tests/run_core_tests.gd
+# expect the last line:  TOTAL  passed=<N> failed=0
+
+# 2) GUT bridge — the editor-facing suites, including the suite-count pin
+HOME=/tmp/gpidhome "$GODOT" --headless --path . --script res://addons/gut/gut_cmdln.gd \
+  -gdir=res://tests -ginclude_subdirs -gprefix=test_ -gsuffix=.gd -gexit
+# expect:  Passing Tests 5   Failing Tests 0
+
+# 3) Parse check — every script must compile (autoloads ARE available here)
+HOME=/tmp/gpidhome "$GODOT" --headless --path . --editor --quit
+# expect: no "SCRIPT ERROR" / "Parse Error" / "Compile Error" lines
+```
+
+Two traps worth knowing:
+
+- **Do not use `--check-only --script <file>` as a gate.** That mode does not register autoloads, so
+  every UI script reports false `Identifier not found: I18n / Settings / SnapState`. Use gate 3.
+- **After a fresh clone (or any new `class_name`), run gate 3 before the other two.** Without the
+  import/scan GUT fails with `class_names have not been imported`, and the headless runner silently
+  cannot resolve the new class.
+- **Adding a `tests/gp_test_*.gd` requires bumping `GP_EXPECTED_SUITES`** in
+  `tests/gut/test_gp_suites.gd`, or gate 2 fails on the count assertion (that pin exists so a suite
+  cannot be silently skipped). Also run gate 3 once before gate 1 after adding a new `class_name`:
+  the headless runner resolves classes from `.godot/global_script_class_cache.cfg`, which the editor
+  scan refreshes.
 
 ### Naming convention（强制 / mandatory）
 To avoid collisions with Godot's native classes and third-party plugins in the global `class_name` registry — and to reserve a namespace for the future Open-Core split — **every G-PID-owned identifier carries a prefix**:
@@ -77,7 +116,42 @@ authoritative definition, guarded by `tests/gp_test_symbol_naming.gd`.
 - 代码标识符一律英文，中文只出现在注释里。
 
 ### 运行测试
-- 安装 GUT 插件，在 Godot 编辑器内运行 `tests/`（Project → Tools → GUT）。
+
+> 需要 Godot 4.7。下面的 `GODOT` 变量指向引擎可执行文件 —— 填你自己的路径（已在 PATH 上时直接写 `godot`）。
+
+在仓库根目录（含 `project.godot` 的那一层）执行下列三条命令。PR 可评审前，三条必须全绿。
+
+```bash
+# macOS / Linux：必须给引擎一个**可写 HOME**。否则 `user://`（macOS 下位于
+# ~/Library/Application Support）在沙箱内建不出来，进程会以 SIGSEGV + MoltenVK backtrace 崩溃，
+# 根本跑不到测试。Windows 上把 APPDATA 指到可写目录即可。
+mkdir -p /tmp/gpidhome
+GODOT="/path/to/Godot"   # macOS 应用包：.../Godot.app/Contents/MacOS/Godot；已在 PATH 上则填 godot
+
+# 1) 核心套件 —— 自研 GPGTest（tests/gp_test_*.gd，由 run_core_tests.gd 聚合）
+HOME=/tmp/gpidhome "$GODOT" --headless --path . --script res://tests/run_core_tests.gd
+# 期望最后一行：TOTAL  passed=<N> failed=0
+
+# 2) GUT 桥 —— 面向编辑器的套件，含套件数钉子
+HOME=/tmp/gpidhome "$GODOT" --headless --path . --script res://addons/gut/gut_cmdln.gd \
+  -gdir=res://tests -ginclude_subdirs -gprefix=test_ -gsuffix=.gd -gexit
+# 期望：Passing Tests 5   Failing Tests 0
+
+# 3) 解析检查 —— 每个脚本都必须编译通过（此模式下 autoload 可用）
+HOME=/tmp/gpidhome "$GODOT" --headless --path . --editor --quit
+# 期望：没有任何 "SCRIPT ERROR" / "Parse Error" / "Compile Error" 行
+```
+
+两个必须知道的坑：
+
+- **不要用 `--check-only --script <文件>` 当门禁。** 该模式不注册 autoload，于是每个界面脚本都会
+  报假的 `Identifier not found: I18n / Settings / SnapState`。请用第 3 条。
+- **全新克隆（或任何新增 `class_name`）后，先跑第 3 条再跑前两条。** 没有 import / 扫描，GUT 会报
+  `class_names have not been imported`，而 headless runner 也无法解析新类。
+- **新增 `tests/gp_test_*.gd` 必须同步 `tests/gut/test_gp_suites.gd` 的 `GP_EXPECTED_SUITES`**，
+  否则第 2 条会因套件数断言失败（这个钉子存在的意义就是防止某个套件被悄悄跳过）。另外，新增
+  `class_name` 后先跑一次第 3 条再跑第 1 条：headless runner 从
+  `.godot/global_script_class_cache.cfg` 解析类名，而这份缓存由编辑器扫描刷新。
 
 ### 命名规范（强制）
 为避免在 Godot 全局 `class_name` 注册表中与引擎原生类及第三方插件撞名，并为未来的 Open-Core 双仓预留命名空间，**所有 G-PID 自有标识符统一加前缀**：

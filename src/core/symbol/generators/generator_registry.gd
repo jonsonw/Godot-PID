@@ -78,15 +78,16 @@ static func gpGenerate(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> Dictionary:
 #
 # GENERATOR:grid — a TABLE (the equipment data table). The geometry is a variable grid:
 # column widths + row heights come from gpProps CSVs, cell texts from per-cell props, and
-# the output is BOTH the vector art (unit-space polylines whose box matches the envelope's
-# aspect ratio, so the painter's uniform fit fills it exactly) AND the cell list — the ONE
-# structure the renderer, the hit test and the in-place editor all consume (Rev.2 iron
-# rule: rendering and hit testing must call the SAME generator, or the lines you see and
-# the cells you can click drift apart).
+# the output is BOTH the vector art (ENVELOPE-MM polylines whose box IS the envelope, derived
+# from the same cell rects, so the painter's uniform fit is identity and the drawn grid cannot
+# diverge from the cells) AND the cell list — the ONE structure the renderer, the hit test and
+# the in-place editor all consume (Rev.2 iron rule: rendering and hit testing must call the
+# SAME generator, or the lines you see and the cells you can click drift apart).
 # GENERATOR:grid —— 表格（设备参数表）。几何是**可变格网**：列宽/行高来自 gpProps CSV，
-# 单元格文字来自逐格属性；输出既有矢量图形（单位空间折线，box 与包络同纵横比 ⇒ painter
-# 的均匀适配恰好铺满），也有格子列表 —— 渲染、命中、就地编辑三方消费的**同一份**结构
-#（Rev.2 铁律：渲染与命中必须调同一个生成器，否则「看起来的格线」与「点得到的格子」分家）。
+# 单元格文字来自逐格属性；输出既有矢量图形（**包络毫米**折线，box 即包络，且由同一份格子
+# 矩形派生，故 painter 的均匀适配是恒等变换、画的格线不可能与格子分家），也有格子列表 ——
+# 渲染、命中、就地编辑三方消费的**同一份**结构（Rev.2 铁律：渲染与命中必须调同一个生成器，
+# 否则「看起来的格线」与「点得到的格子」分家）。
 
 # Template-default grid geometry: the REFERENCE drawing measured 90x26 mm (60+15+15 cols,
 # 8 rows of 3.25) at A3 scale; the A1 rebase (iron rule 89: symbol data rides ×2) doubles
@@ -212,10 +213,13 @@ static func gpCellAt(gpDef: GPSymbolDef, gpNode: GPPIDNode, gpLocal: Vector2) ->
 	return ""
 
 
-# The grid GENERATOR output: spec (unit-space border + separators) + cells + empty lines.
-# The box aspect equals the envelope's, so the painter's uniform fit fills it exactly.
-# grid 生成器输出：spec（单位空间外框 + 分隔线）+ cells + 空文字行。box 纵横比与包络一致，
-# painter 的均匀适配恰好铺满。
+# The grid GENERATOR output: spec (ENVELOPE-MM border + separators) + cells + empty lines.
+# The spec is derived from the SAME cell rects the hit test and the editor consume, so the
+# lines you see and the cells you click cannot diverge — not at the default 180x52, and not
+# after a row/col insert changes the total width or height.
+# grid 生成器输出：spec（**包络毫米**外框 + 分隔线）+ cells + 空文字行。spec 由命中测试与
+# 编辑器消费的**同一份**格子矩形推导，故「看到的线」与「点得到的格子」不可能分家 ——
+# 默认 180×52 如此，增删行列改变总宽/总高后也如此。
 static func _gpGenerateGrid(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> Dictionary:
 	var gpCells: Array[Dictionary] = gpGridCellsOf(gpDef, gpNode)
 	if gpCells.is_empty():
@@ -223,41 +227,34 @@ static func _gpGenerateGrid(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> Dictionary
 	var gpDims: Dictionary = _gpGridDims(gpNode)
 	var gpCols: PackedFloat64Array = gpDims["cols"]
 	var gpRows: PackedFloat64Array = gpDims["rows"]
-	var gpW: float = 0.0
-	for gpV in gpCols:
-		gpW += gpV
-	var gpH: float = 0.0
-	for gpV in gpRows:
-		gpH += gpV
 	var gpEnv: Vector2 = gpDef.gpDefaultSize
-	# Unit box matches the envelope aspect so the uniform fit has no letterboxing. In this
-	# space BOTH axes divide by the SAME total (gpW): unit x = cumX/W*100, unit y =
-	# cumY/W*100 (the y span is then 100*H/W, exactly the box height).
-	# 单位 box 与包络同纵横比，均匀适配无留白。该空间中两轴除以**同一个**总量（gpW）：
-	# unit x = cumX/W*100、unit y = cumY/W*100（y 跨度即 100*H/W，恰为 box 高）。
-	var gpUnitH: float = 100.0 * gpH / gpW
+	# Cells are node-local mm with the origin at the ENVELOPE CENTRE; the painter wants a
+	# box whose paths start at 0, so add half the envelope back. Every boundary comes from
+	# the cells themselves — this is the single-source guarantee that the old duplicate
+	# normalisation (cumX/W in unit space vs cumX/W*env.x in cells) did not have.
+	# 格子是节点本地毫米、原点在**包络中心**；painter 需要从 0 起的 box，故加回半个包络。
+	# 每条边界都取自格子本身 —— 这正是旧的重复归一化（单位空间 cumX/W 与格子 cumX/W*env.x）
+	# 所没有的单一来源保证。
 	var gpXs: PackedFloat64Array = PackedFloat64Array([0.0])
-	var gpCumX: float = 0.0
-	for gpV in gpCols:
-		gpCumX += gpV
-		gpXs.append(gpCumX / gpW * 100.0)
+	for gpC in range(gpCols.size()):
+		var gpCellX: Dictionary = gpCells[gpC]
+		gpXs.append((gpCellX["rect"] as Rect2).end.x + gpEnv.x * 0.5)
 	var gpYs: PackedFloat64Array = PackedFloat64Array([0.0])
-	var gpCumY: float = 0.0
-	for gpV in gpRows:
-		gpCumY += gpV
-		gpYs.append(gpCumY / gpW * 100.0)
+	for gpR in range(gpRows.size()):
+		var gpCellY: Dictionary = gpCells[gpR * gpCols.size()]
+		gpYs.append((gpCellY["rect"] as Rect2).end.y + gpEnv.y * 0.5)
 	var gpPaths: Array = []
 	# Outer border as ONE closed polyline. / 外框 = 一条闭合折线。
-	gpPaths.append({"pts": [[0.0, 0.0], [100.0, 0.0], [100.0, gpUnitH], [0.0, gpUnitH],
+	gpPaths.append({"pts": [[0.0, 0.0], [gpEnv.x, 0.0], [gpEnv.x, gpEnv.y], [0.0, gpEnv.y],
 		[0.0, 0.0]]})
 	# Internal horizontal separators (between rows, endpoints excluded). / 行间内分隔线（不含端点）。
 	for gpI in range(1, gpYs.size() - 1):
-		gpPaths.append({"pts": [[0.0, gpYs[gpI]], [100.0, gpYs[gpI]]]})
+		gpPaths.append({"pts": [[0.0, gpYs[gpI]], [gpEnv.x, gpYs[gpI]]]})
 	# Internal vertical separators (between cols). / 列间内分隔线。
 	for gpI in range(1, gpXs.size() - 1):
-		gpPaths.append({"pts": [[gpXs[gpI], 0.0], [gpXs[gpI], gpUnitH]]})
+		gpPaths.append({"pts": [[gpXs[gpI], 0.0], [gpXs[gpI], gpEnv.y]]})
 	return {
-		"spec": {"paths": gpPaths, "box": [0.0, 0.0, 100.0, gpUnitH]},
+		"spec": {"paths": gpPaths, "box": [0.0, 0.0, gpEnv.x, gpEnv.y]},
 		"text_lines": PackedStringArray(),
 		"cells": gpCells,
 	}

@@ -30,6 +30,12 @@ var _gpGrip: Dictionary = {}
 # 正被整体移动的注释图形下标（-1 表示无）。
 var _gpShapeIdx: int = -1
 
+# Snapshot of every edge end that referenced the dragged TEXT note, taken at drag start so the
+# release can either commit the follow or restore-then-convert with a correct undo image.
+# 拖拽**文字**注记起始时，对每个引用它的边端拍快照：松手时或提交跟随，或先回退再转换 ——
+# 两种做法都要有正确的撤销镜像。
+var _gpNoteEdgeBefore: Array[Dictionary] = []
+
 # World position where the whole-shape move started (to measure the drag delta).
 # 整体移动开始时的世界坐标（用于测量拖拽位移）。
 var _gpShapeStart: Vector2 = Vector2.ZERO
@@ -92,6 +98,23 @@ func gpStartGripDrag(gpGrip: Dictionary) -> void:
 # [param gpShapeIdx] index into gpGraph.gpShapes() / gpGraph.gpShapes() 中的下标。
 # [param gpWorld] world position of the press, used to measure the delta / 按下处的世界坐标，用于测量位移。
 func gpStartShapeDrag(gpShapeIdx: int, gpWorld: Vector2) -> void:
+	# Snapshot the referencing ends BEFORE anything moves (only for text notes).
+	# 在一切移动**之前**拍下引用端（仅文字注记）。
+	_gpNoteEdgeBefore.clear()
+	if gpCv.gpGraph != null and gpShapeIdx >= 0 and gpShapeIdx < gpCv.gpGraph.gpShapes.size():
+		var gpS0: GPShape = gpCv.gpGraph.gpShapes[gpShapeIdx]
+		if gpS0 != null and gpS0.gpKind == GPShape.GPKind.GP_TEXT and gpS0.gpUid != "":
+			for gpE0 in gpCv.gpGraph.gpEdges:
+				if gpE0 == null:
+					continue
+				for gpIsFrom0 in [true, false]:
+					if gpE0.gpEndNoteUid(gpIsFrom0) == gpS0.gpUid:
+						_gpNoteEdgeBefore.append({
+							"edge_id": gpE0.gpInstanceId,
+							"is_from": gpIsFrom0,
+							"ref_from": gpE0.gpFromRef.duplicate(true),
+							"ref_to": gpE0.gpToRef.duplicate(true),
+						})
 	gpEndDrag()
 	if gpShapeIdx < 0 or gpShapeIdx >= gpCv.gpGraph.gpShapes.size():
 		return
@@ -105,7 +128,110 @@ func gpEndGripDrag() -> void:
 	_gpGrip = {}
 
 
-func gpEndShapeDrag() -> void:
+# The port a dropped note should convert to: the closest anchor under EITHER the cursor or the
+# note's own glyph, within a generous radius.
+# 被丢下的注记该转成哪个端口：光标处**或**注记字形处最近的锚点，且用较宽松的半径。
+# WHY not just the cursor point / 为何不只看光标点：
+# the user drops the TEXT onto a nozzle, so the cursor often sits at the middle of the word while the
+# nozzle is at its corner. Testing only the cursor made a visually-correct drop silently fail — the
+# text stayed and the line never connected, which is exactly the reported bug.
+# 用户是把**文字**丢到管嘴上的，光标常停在词中间而管嘴在它的角上。只测光标会让一次「看起来对」的
+# 放下静默失败 —— 文字留下、线没接上，正是被报告的这个 bug。
+func _gpPortUnderNote(gpS: GPShape, gpWorld: Vector2) -> Dictionary:
+	if gpCv.gpGraph == null:
+		return {}
+	var gpAnchors: Array[Dictionary] = GPPortAnchor.gpAnchors(gpCv.gpGraph,
+		gpCv.gpDefLookupCallable(), [])
+	if gpAnchors.is_empty():
+		return {}
+	# Candidate points: where the user let go, the note's anchor, and the middle of its glyph.
+	# 候选点：松手处、注记锚点、字形中心。
+	var gpPts: Array[Vector2] = [gpWorld]
+	if gpS.gpPoints.size() >= 1:
+		gpPts.append(gpS.gpPoints[0])
+		gpPts.append(gpS.gpBBox().get_center())
+	# Generous radius: 18 screen pixels, so a drop that LOOKS on the nozzle counts.
+	# 宽松半径：18 屏幕像素，使「看起来压住了管嘴」的放下也算。
+	var gpR: float = 18.0 / maxf(gpCv.gpViewZoom, 0.01)
+	var gpBest: Dictionary = {}
+	var gpBestD: float = gpR
+	for gpA in gpAnchors:
+		var gpPos: Vector2 = gpA.get("pos", Vector2.ZERO)
+		for gpP in gpPts:
+			var gpD: float = gpPos.distance_to(gpP)
+			if gpD < gpBestD:
+				gpBestD = gpD
+				gpBest = gpA
+	return gpBest
+
+
+# Move every referencing edge end onto the note's current anchor (live, during the drag).
+# 把每个引用该注记的边端移到注记当前锚点上（拖拽期间实时）。
+func _gpSyncNoteEdges(gpS: GPShape) -> void:
+	if gpCv.gpGraph == null or gpS.gpPoints.is_empty():
+		return
+	var gpAnchor: Vector2 = gpS.gpPoints[0]
+	var gpChanged: bool = false
+	for gpE in gpCv.gpGraph.gpEdges:
+		if gpE == null:
+			continue
+		for gpIsFrom in [true, false]:
+			if gpE.gpEndNoteUid(gpIsFrom) != gpS.gpUid:
+				continue
+			if not gpE.gpIsDangling(gpIsFrom):
+				continue
+			gpE.gpSetDanglingPoint(gpIsFrom, gpAnchor)
+			gpChanged = true
+	if gpChanged:
+		# THE REPAINT. Mutating the ref dictionary changes the MODEL, but the edge VIEW re-syncs on
+		# this signal — without it the line stays behind while the text moves.
+		# **重绘信号**。改引用字典只改**模型**，而边的**视图**在这个信号上重新同步 ——
+		# 缺了它，文字在动、线不动。
+		gpCv.gpGraph.gpGraphChanged.emit()
+
+
+# Restore the note position and the referencing ends from the drag-start snapshot.
+# 从拖拽起始快照恢复注记位置与各引用端。
+func _gpRestoreNoteDrag(gpS: GPShape) -> void:
+	for gpT in _gpNoteEdgeBefore:
+		var gpE: GPPIDEdge = gpCv.gpGraph.gpGetEdge(str(gpT.get("edge_id", "")))
+		if gpE == null:
+			continue
+		gpE.gpFromRef = (gpT.get("ref_from", {}) as Dictionary).duplicate(true)
+		gpE.gpToRef = (gpT.get("ref_to", {}) as Dictionary).duplicate(true)
+	if gpS != null and not _gpShapeOrigPts.is_empty():
+		gpS.gpPoints = _gpShapeOrigPts.duplicate()
+	_gpNoteEdgeBefore.clear()
+
+
+# Finish a whole-shape move. gpWorld is where the user released (Vector2.INF when unknown).
+# 结束整图形移动。gpWorld 是用户松手处的世界坐标（未知时为 Vector2.INF）。
+# A TEXT note dropped onto a nozzle is CONVERTED to a connection: that gesture means "this open end
+# is now wired", so the line and the note must change together (see GPConvertNoteToPortCommand).
+# 落到管嘴上的**文字**注记会被**转换**为连线：该手势的意思是「这个开口端现在接上了」，
+# 故线与注记必须一起变（见 GPConvertNoteToPortCommand）。
+func gpEndShapeDrag(gpWorld: Vector2 = Vector2.INF) -> void:
+	var gpIdx: int = _gpShapeIdx
+	if gpIdx >= 0 and gpIdx < gpCv.gpGraph.gpShapes.size():
+		var gpS: GPShape = gpCv.gpGraph.gpShapes[gpIdx]
+		if gpS != null and gpS.gpKind == GPShape.GPKind.GP_TEXT and gpS.gpUid != "":
+			var gpPort: Dictionary = {}
+			if gpWorld != Vector2.INF:
+				gpPort = _gpPortUnderNote(gpS, gpWorld)
+			if not gpPort.is_empty():
+				# Conversion must record the ORIGINAL end refs for undo, so rewind the live drag
+				# first and let ONE command own the whole gesture.
+				# 转换要为撤销记录**原始**端引用，故先把实时拖拽回退，再由**一条**命令接管整个手势。
+				_gpRestoreNoteDrag(gpS)
+				gpCv.gpRequestConvertNoteToPort(gpS.gpUid, gpPort)
+			else:
+				# No port under the release: the note stays, and the line stays with it.
+				# 松手处没有端口：注记留下，连线也跟着留下。
+				_gpNoteEdgeBefore.clear()
+	# The drag is over: the hover ring must not linger.
+	# 拖拽结束：悬停环不得残留。
+	gpCv.gpHoverPort = {}
+	gpCv.queue_redraw()
 	_gpShapeIdx = -1
 	_gpShapeOrigPts = PackedVector2Array()
 
@@ -134,6 +260,17 @@ func gpOnShapeMove(gpWorld: Vector2) -> void:
 	var gpDelta: Vector2 = gpWorld - _gpShapeStart
 	var gpS: GPShape = gpCv.gpGraph.gpShapes[_gpShapeIdx]
 	gpS.gpPoints = GPGeometry.gpShiftPoints(_gpShapeOrigPts, gpDelta)
+	# A text note's line FOLLOWS the text: the edge end that referenced the note tracks its anchor,
+	# otherwise dragging the text would leave the pipe pointing at nothing (the tooltip says "this
+	# end is TO ATM" while the end sits somewhere else).
+	# 文字注记的连线**跟随**文字：引用该注记的边端跟踪它的锚点，否则拖动文字会留下一条指着虚无的管线
+	#（注记写着「此端 TO ATM」，而端头却在别处）。
+	if gpS.gpKind == GPShape.GPKind.GP_TEXT and gpS.gpUid != "":
+		_gpSyncNoteEdges(gpS)
+		# HIGHLIGHT the port the note is over, so "it will connect here" is visible before release.
+		# **高亮**注记正压着的端口，使「松手就接这里」在松手前可见。
+		gpCv.gpHoverPort = _gpPortUnderNote(gpS, gpS.gpPoints[0])
+		gpCv.queue_redraw()
 	# Circle radius is independent of translation (stored separately in gpRadius).
 	# 圆的半径与平移无关（单独存于 gpRadius）。
 	gpCv.queue_redraw()
@@ -281,6 +418,12 @@ func gpShapesToDraft(gpShapes: Array[GPShape]) -> Dictionary:
 	var gpPaths: Array = []
 	var gpCircles: Array = []
 	var gpRects: Array = []
+	# A15: arcs used to be DROPPED here without a word — the user selected three primitives, got
+	# two, and nothing said why. They now travel as center + radius + sweep, the same keys
+	# GPShapeSpec.gpEditSpec() emits, so the dialog rehydrates them losslessly.
+	# A15：圆弧此前在此被**无声丢弃** —— 用户选中三个基元却只过去两个，且无人解释。现在它们以
+	# 圆心 + 半径 + 扫掠角随行，键与 GPShapeSpec.gpEditSpec() 完全一致，故对话框能无损还原。
+	var gpArcs: Array = []
 	for gpS in gpShapes:
 		match gpS.gpKind:
 			GPShape.GPKind.GP_LINE:
@@ -312,7 +455,22 @@ func gpShapesToDraft(gpShapes: Array[GPShape]) -> Dictionary:
 				if gpS.gpPoints.size() >= 2:
 					var gpR: Rect2 = Rect2(gpS.gpPoints[0], (gpS.gpPoints[1] - gpS.gpPoints[0]).abs())
 					gpRects.append({"pos": [gpR.position.x - gpMin.x, gpR.position.y - gpMin.y], "size": [gpR.size.x, gpR.size.y]})
-	return {"paths": gpPaths, "circles": gpCircles, "rects": gpRects}
+			GPShape.GPKind.GP_ARC:
+				if gpS.gpPoints.size() >= 3 and gpS.gpRadius > 0.0:
+					var gpAng: Dictionary = gpS.gpArcAngles()
+					var gpC: Vector2 = gpS.gpArcCenter()
+					gpArcs.append({
+						"c": [gpC.x - gpMin.x, gpC.y - gpMin.y],
+						"r": gpS.gpRadius,
+						"a0": gpAng["a0"],
+						"a1": gpAng["a1"],
+					})
+			_:
+				# A kind this builder does not know: SAY SO instead of silently shrinking the
+				# selection. A silent drop is indistinguishable from a bug in the user's eyes.
+				# 本构建器不认识的种类：**说出来**，而不是静默缩小选区。静默丢弃在用户眼里与 bug 无异。
+				push_warning("gpShapesToDraft: unsupported shape kind %d skipped" % gpS.gpKind)
+	return {"paths": gpPaths, "circles": gpCircles, "rects": gpRects, "arcs": gpArcs}
 
 
 # Promote the selected annotation shapes into a real symbol: emit the geometry dict so the

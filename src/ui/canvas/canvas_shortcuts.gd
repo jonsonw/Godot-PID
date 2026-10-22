@@ -68,6 +68,55 @@ func gpHandleKey(gpKey: InputEventKey) -> bool:
  # Windows/Linux muscle memory for redo. / Windows / Linux 上重做的习惯键。
 				gpCv.gpRedo()
 				return true
+		KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN:
+			# Arrow keys nudge the selection (A8). Shift = ten steps, so a coarse move needs no
+			# menu; a mounted child is skipped by the intent (its position is derived).
+			# 方向键微调选择（A8）。Shift = 十步，使粗调不必开菜单；挂载子件由意图排除（位置是推导的）。
+			if gpCtrl:
+				return false
+			var gpStep: float = 10.0 if gpKey.shift_pressed else 1.0
+			var gpDelta: Vector2 = Vector2.ZERO
+			match gpKey.keycode:
+				KEY_LEFT:
+					gpDelta = Vector2(-gpStep, 0.0)
+				KEY_RIGHT:
+					gpDelta = Vector2(gpStep, 0.0)
+				KEY_UP:
+					gpDelta = Vector2(0.0, -gpStep)
+				KEY_DOWN:
+					gpDelta = Vector2(0.0, gpStep)
+			gpCv.gpRequestNudgeSelection(gpDelta)
+			return true
+		KEY_C:
+			# Ctrl/Cmd+C copies the current selection into the app-wide clipboard, which survives a
+			# SHEET SWITCH — that is the entire point of A6.
+			# Ctrl/Cmd+C 把当前选择复制进应用级剪贴板，它跨**图纸切换**存活 —— 这正是 A6 的全部意义。
+			if gpCtrl:
+				gpCv.gpRequestCopySelected()
+				return true
+		KEY_V:
+			# Ctrl/Cmd+V pastes into the ACTIVE sheet as one undo step, then selects the result so
+			# the very next drag places it where the user wants.
+			# Ctrl/Cmd+V 粘贴到**活动**图纸（一步撤销），随后选中结果，使用户接下来一拖就能摆到位。
+			if gpCtrl:
+				gpCv.gpRequestPasteClipboard()
+				return true
+		KEY_R:
+			# R rotates clockwise by a quarter turn (the drafting convention); Shift+R turns the
+			# other way, so a shape never needs four presses to come back.
+			# R 顺时针转四分之一圈（制图惯例）；Shift+R 反向，使图形不必按四次才能转回来。
+			if gpCtrl:
+				return false
+			gpCv.gpRequestRotateSelected(-90.0 if gpKey.shift_pressed else 90.0)
+			return true
+		KEY_M:
+			# M mirrors horizontally; pressing it again is a real (undoable) edit that puts the
+			# symbol back, which is why the intent toggles instead of setting.
+			# M 水平镜像；再按一次是真实（可撤销）的编辑、把图元放回，故该意图是**开关**而非置位。
+			if gpCtrl:
+				return false
+			gpCv.gpRequestMirrorSelected()
+			return true
 		KEY_ESCAPE:
 			gpOnEscape()
 			return true

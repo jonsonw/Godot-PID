@@ -163,18 +163,28 @@ static func _gpCircle(gpE: Dictionary, gpH: float) -> String:
 		+ _gpPair(40, _gpNum(float(gpE["r"])))
 
 
-# A centred ("c") text uses DXF's alignment-point form (72=1): the reader then positions the
-# string ON gpAt; a left text uses the plain insertion point.
-# 居中（"c"）文字用 DXF 的对齐点形式（72=1）：读取器把字符串落在 gpAt 上；
-# 左对齐文字用普通插入点。
+# A text with a non-default horizontal or vertical alignment uses DXF's alignment-point form:
+# 72 (0=left, 1=centre, 2=right) and 73 (0=baseline, 1=bottom, 2=middle, 3=top), with the
+# alignment point in 11/21/31. A plain left-baseline text keeps the historic insertion point.
+# 非默认水平/纵向对齐的文字用 DXF 的对齐点形式：72（0=左、1=中、2=右）与 73（0=基线、
+# 1=底、2=中、3=顶），对齐点写在 11/21/31。左对齐+基线仍用历史插入点。
 static func _gpText(gpE: Dictionary, gpH: float) -> String:
 	var gpAt: Vector2 = gpFlipY(gpE["at"], gpH)
+	var gpHCode: int = 0
+	match str(gpE.get("align", "l")):
+		"c":
+			gpHCode = 1
+		"r":
+			gpHCode = 2
+	var gpVCode: int = 0
+	if str(gpE.get("valign", GPPrintModel.GP_VALIGN_BASELINE)) == GPPrintModel.GP_VALIGN_MIDDLE:
+		gpVCode = 2
 	var gpOut: String = _gpPair(0, "TEXT") + _gpPair(8, str(gpE["layer"])) \
 		+ _gpPair(10, _gpNum(gpAt.x)) + _gpPair(20, _gpNum(gpAt.y)) + _gpPair(30, "0.0") \
 		+ _gpPair(40, _gpNum(float(gpE["h"]))) \
 		+ _gpPair(1, gpDxfText(str(gpE["s"])))
-	if str(gpE["align"]) == "c":
-		gpOut += _gpPair(72, "1") \
+	if gpHCode != 0 or gpVCode != 0:
+		gpOut += _gpPair(72, str(gpHCode)) + _gpPair(73, str(gpVCode)) \
 			+ _gpPair(11, _gpNum(gpAt.x)) + _gpPair(21, _gpNum(gpAt.y)) + _gpPair(31, "0.0")
 	return gpOut
 

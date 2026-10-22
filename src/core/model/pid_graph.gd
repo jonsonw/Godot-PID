@@ -34,6 +34,12 @@ var gpMeta: Dictionary = {
 	"version": GP_META_VERSION,
 	"title": "",
 	"sheets": 1,
+	# P0-5: every NEW project is written with the A1-rebased symbol scale. A pre-A1 archive
+	# has no key and is inferred as 0.5 by GPSheet.gpFromDict(); writing 1.0 explicitly keeps
+	# a new A3/A2/A0 drawing from being mistaken for a legacy one on reopen.
+	# P0-5：每个**新**工程都写出 A1 重定基的图元尺度。A1 之前的存档没有该键，由
+	# GPSheet.gpFromDict() 推断为 0.5；显式写 1.0 使新建的 A3/A2/A0 图在重开时不会被误判为旧档。
+	"symbol_scale": 1.0,
 }
 
 # All symbol instances (nodes) in this sheet — strongly typed.

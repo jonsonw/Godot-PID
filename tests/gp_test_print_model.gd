@@ -228,7 +228,50 @@ func gpTestTagPlacementMatchesCanvasMath() -> void:
 			# 泵属设备类别 -> 9mm 档。
 			gpEq(float(gpT["h"]), GPTextRole.gpTagMM("pump", GPTextRole.GP_INLINE_TAG_MM),
 				"equipment tag rides the equipment tier")
+			# P0-2: the anchor is the text BOX CENTRE, not its left end; the tag must be
+			# emitted centred + middle-baseline or every printed tag shifts right.
+			# P0-2：锚点是文字**盒中心**、不是左端；位号必须按居中 + 行中高发出，否则每个
+			# 打印位号都右移。
+			gpEq(str(gpT["align"]), "c", "居中锚点的位号应水平居中")
+			gpEq(str(gpT["valign"]), GPPrintModel.GP_VALIGN_MIDDLE, "位号应以行中高为基准")
 	gpCheck(gpFound, "the tag sits exactly where the canvas formula puts it")
+
+
+# P0-2: a LEFT tag hangs left (right-aligned), a RIGHT tag starts at its right edge (left-aligned);
+# both stay middle-baseline. The old "always l" projection shifted them by half/full width.
+# P0-2：LEFT 位号向左悬挂（右对齐）、RIGHT 位号从右缘起排（左对齐）；两者都保持行中高。
+# 旧的「永远 l」投影让它们右移半个/一个整字宽。
+func gpTestTagAlignmentFollowsAnchor() -> void:
+	for gpCase in [[GPLabelAnchor.GPAnchor.GP_LEFT, "r"], [GPLabelAnchor.GPAnchor.GP_RIGHT, "l"]]:
+		var gpDef := _gpGlyphDef("GPUMP002", "pump")
+		gpDef.gpLabelAnchor = int(gpCase[0])
+		var gpGraph := GPPIDGraph.new()
+		_gpNodeIn(gpGraph, "n1", "P-2001", "GPUMP002", Vector2(200.0, 300.0))
+		var gpOut: Array[Dictionary] = GPPrintModel.gpProject(_gpBareSheet(gpGraph), [gpDef])
+		var gpFound := false
+		for gpT in _gpTexts(gpOut):
+			if str(gpT["s"]) == "P-2001":
+				gpFound = true
+				gpEq(str(gpT["align"]), str(gpCase[1]), "位号对齐应随锚点变化")
+				gpEq(str(gpT["valign"]), GPPrintModel.GP_VALIGN_MIDDLE, "位号纵向仍为行中高")
+		gpCheck(gpFound, "anchor case should still emit the tag")
+
+
+# P0-2: FRAME text is authored on its baseline. It must say so, or the PDF writer adds the
+# middle->baseline offset a second time and every zone label / title-block value sinks by 0.35h.
+# P0-2：图框文字以**基线**编排。若不声明，PDF 写出器会再次施加「中高→基线」偏移，使每个
+# 坐标带标号 / 图签值下沉 0.35h。
+func gpTestFrameTextDeclaresBaseline() -> void:
+	var gpSheet := GPSheet.new()
+	gpSheet.gpGraph = GPPIDGraph.new()
+	var gpOut: Array[Dictionary] = GPPrintModel.gpProject(gpSheet, [])
+	var gpFound := false
+	for gpT in _gpTexts(gpOut):
+		if str(gpT["layer"]) == GPPrintModel.GP_LAYER_FRAME:
+			gpFound = true
+			gpEq(str(gpT["valign"]), GPPrintModel.GP_VALIGN_BASELINE,
+				"图框文字应以基线为参考")
+	gpCheck(gpFound, "the bare sheet still emits frame text")
 
 
 # ---- 6. pipes recompute the route / 管线重算布线 ----

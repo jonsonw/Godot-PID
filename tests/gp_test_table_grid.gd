@@ -72,10 +72,11 @@ func gpTestGridCellsDefault() -> void:
 	gpEq(gpR40.position, Vector2(-90.0, 0.0), "格 (4,0) 应起于纵向中线（无缝累加）")
 
 
-# The spec: unit-space polylines with a box matching the envelope aspect (100 x 100*H/W);
-# path count = 1 border + (rows-1) + (cols-1) separators = 1+7+2 = 10.
-# 规格：单位空间折线，box 与包络同纵横比（100 × 100*H/W）；路径数 = 1 外框 + 7 行分隔
-# + 2 列分隔 = 10。
+# The spec: ENVELOPE-MM polylines with a box equal to the envelope; path count = 1 border +
+# (rows-1) + (cols-1) separators = 1+7+2 = 10. The old unit-space box (100 x 100*H/W) only
+# matched the cells at the default 180x52 and letterboxed after any row/col mutation.
+# 规格：**包络毫米**折线，box 等于包络；路径数 = 1 外框 + 7 行分隔 + 2 列分隔 = 10。
+# 旧的单位空间 box（100 × 100*H/W）只在默认 180×52 与格子一致，任何增删行列后都会留白。
 func gpTestGridGenerateSpec() -> void:
 	var gpDef: GPSymbolDef = _gpGridDef()
 	var gpN: GPPIDNode = _gpTableNode({})
@@ -85,10 +86,51 @@ func gpTestGridGenerateSpec() -> void:
 	var gpPaths: Array = gpSpec.get("paths", []) as Array
 	gpEq(gpPaths.size(), 10, "规格应含 1 外框 + 7 行分隔 + 2 列分隔")
 	var gpBox: Array = gpSpec.get("box", []) as Array
-	gpApprox(float(gpBox[3]), 100.0 * 52.0 / 180.0, 0.001, "box 高应为 100*H/W（同纵横比；52/180 == 26/90，重定基不改变比例）")
-	gpEq(int(gpBox[2]), 100, "box 宽应为 100")
+	gpEq(float(gpBox[2]), 180.0, "box 宽应为包络宽 180mm")
+	gpEq(float(gpBox[3]), 52.0, "box 高应为包络高 52mm")
 	var gpCells: Array = gpGen.get("cells", []) as Array
 	gpEq(gpCells.size(), 24, "生成器应同时返回 24 格（渲染命中同源）")
+	var gpBorder: Array = (gpPaths[0] as Dictionary).get("pts", []) as Array
+	gpEq(gpBorder.size(), 5, "外框应为闭合折线（5 点）")
+	gpEq(gpBorder[1], [180.0, 0.0], "外框右上角应为包络宽")
+	gpEq(gpBorder[2], [180.0, 52.0], "外框右下角应为包络右下角")
+
+
+# The invariant the old spec violated: after ANY row/col mutation, the drawn box (spec through
+# the painter's uniform fit) must equal the union of the clickable cell rects.
+# 旧 spec 违反的不变量：任何增删行列后，绘制盒（spec 经 painter 均匀适配）必须等于可点格子的并集。
+func gpTestGridSpecMatchesCellsAfterMutation() -> void:
+	var gpDef: GPSymbolDef = _gpGridDef()
+	for gpCase in [
+		[GPSymbolGeneratorRegistry.GP_OP_INSERT_ROW, 8, 0],
+		[GPSymbolGeneratorRegistry.GP_OP_DELETE_ROW, 0, 0],
+		[GPSymbolGeneratorRegistry.GP_OP_INSERT_COL, 0, 3],
+		[GPSymbolGeneratorRegistry.GP_OP_DELETE_COL, 0, 0],
+	]:
+		var gpN: GPPIDNode = _gpTableNode({})
+		var gpMut: Dictionary = GPSymbolGeneratorRegistry.gpMutatedProps(gpN.gpProps,
+			str(gpCase[0]), int(gpCase[1]), int(gpCase[2]))
+		gpCheck(bool(gpMut["ok"]), "mutation should succeed: " + str(gpCase[0]))
+		gpN.gpProps = gpMut["props"] as Dictionary
+		var gpGen: Dictionary = GPSymbolGeneratorRegistry.gpGenerate(gpDef, gpN)
+		var gpSpec: Dictionary = gpGen.get("spec", {}) as Dictionary
+		var gpCells: Array = gpGen.get("cells", []) as Array
+		gpCheck(not gpSpec.is_empty() and not gpCells.is_empty(), "mutation should keep geometry")
+		var gpBox: Rect2 = GPSymbolPainter.gpUnitBox(gpSpec)
+		var gpFit: float = GPSymbolPainter.gpFitScale(gpBox, gpDef.gpDefaultSize)
+		# gpDrawShape centres the fitted box on the body origin, so the drawn rect is
+		# box.size*fit around (0,0). The cells' union is the first top-left to the last
+		# bottom-right (row-major).
+		# gpDrawShape 把适配后的 box 居中于 body 原点，故绘制矩形是绕 (0,0) 的 box.size*fit。
+		# 格子的并集即首格左上到末格右下（行优先）。
+		var gpDrawn: Rect2 = Rect2(-gpBox.size * gpFit * 0.5, gpBox.size * gpFit)
+		var gpFirst: Rect2 = gpCells[0]["rect"] as Rect2
+		var gpLast: Rect2 = gpCells[gpCells.size() - 1]["rect"] as Rect2
+		var gpUnion: Rect2 = Rect2(gpFirst.position, gpLast.end - gpFirst.position)
+		gpApprox(gpDrawn.position.x, gpUnion.position.x, 0.01, "绘制盒左边界 = 格子并集")
+		gpApprox(gpDrawn.position.y, gpUnion.position.y, 0.01, "绘制盒上边界 = 格子并集")
+		gpApprox(gpDrawn.size.x, gpUnion.size.x, 0.01, "绘制盒宽 = 格子并集宽")
+		gpApprox(gpDrawn.size.y, gpUnion.size.y, 0.01, "绘制盒高 = 格子并集高")
 
 
 # gpCellAt: the point (0,0) sits in cell (4,0) (rows 0..3 end exactly at y=0); an outside

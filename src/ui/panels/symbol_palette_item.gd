@@ -270,6 +270,27 @@ func _gpOnContext(gpId: int) -> void:
 		gpDeleteRequested.emit(gpDef.gpId)
 
 
+# Which thumbnail should this definition render as? Pure classifier so tests can pin the
+# branching without a scene tree. Kinds: "none" (no def) / "shapes" (static vector art) /
+# "grid" (GENERATOR:grid table — real generator spec) / "multiline" (GENERATOR:multiline
+# text block — landscape rect + "123") / "fallback" (anything else without shapes).
+# 该定义应渲染成哪种缩略图？纯分类函数使测试无需场景树即可钉住分支。取值："none"（无定义）/
+# "shapes"（静态矢量图形）/ "grid"（GENERATOR:grid 表格 —— 真生成器 spec）/
+# "multiline"（GENERATOR:multiline 文本块 —— 横向长方形 +「123」）/ "fallback"（其余无形状者）。
+static func gpThumbKind(gpDef: GPSymbolDef) -> String:
+	if gpDef == null:
+		return "none"
+	if not gpDef.gpShapes.is_empty():
+		return "shapes"
+	match GPSymbolGeneratorRegistry.gpGeneratorId(gpDef.gpGeometrySource):
+		"grid":
+			return "grid"
+		"multiline":
+			return "multiline"
+		_:
+			return "fallback"
+
+
 # Draw the background and the symbol thumbnail, centered in the cell.
 # 绘制背景与图元缩略图，在单元格内居中。
 func _draw() -> void:
@@ -296,10 +317,77 @@ func _draw() -> void:
 	var gpStroke: Color = gpFill.lightened(0.25)
 	var gpBorder: float = 1.5
 
-	# Fallback rectangle for symbols that do not yet have a vector shape.
-	# 对尚无矢量形状的图元，用矩形兜底。
-	if gpDef.gpShapes.is_empty():
-		draw_rect(gpThumbRect, gpFill, true)
-		draw_rect(gpThumbRect, gpStroke, false, gpBorder)
-	else:
-		GPSymbolPainter.gpDrawShape(self, gpDef.gpShapeSpec(), gpThumbRect, gpFill, gpStroke, gpBorder)
+	# Dispatch by thumbnail kind (gpThumbKind). Generator symbols have NO static shapes, so
+	# they used to hit the bare-rectangle fallback — multiline text and the table both read
+	# as the same filled square (user feedback 2026-10-17). Each shipped generator now gets
+	# a distinctive thumbnail; unknown generators keep the plain rect.
+	# 按缩略图种类分派（gpThumbKind）。生成器图元没有静态形状，旧逻辑直接落到「裸矩形兜底」
+	# —— 多行文本与表格看起来是同一个填充方块（用户反馈 2026-10-17）。现给每个内置生成器
+	# 一个可辨识的缩略图；未知生成器保持普通矩形。
+	match gpThumbKind(gpDef):
+		"shapes":
+			GPSymbolPainter.gpDrawShape(self, gpDef.gpShapeSpec(), gpThumbRect, gpFill, gpStroke, gpBorder)
+		"grid":
+			_gpDrawGridThumb(gpThumbRect, gpFill, gpStroke, gpBorder)
+		"multiline":
+			_gpDrawMultilineThumb(gpThumbRect, gpFill, gpStroke)
+		_:
+			draw_rect(gpThumbRect, gpFill, true)
+			draw_rect(gpThumbRect, gpStroke, false, gpBorder)
+
+
+# Ink that stays legible ON a filled area of the given colour: dark ink on light fills,
+# near-white ink on dark fills. Pure so the palette-tests can pin both branches.
+# 在给定颜色的填充面上保持可读的「墨色」：浅底配深墨，深底配近白墨。纯函数，
+# 便于图元库测试钉住两个分支。
+static func gpContrastOn(gpBg: Color) -> Color:
+	if gpBg.get_luminance() > 0.5:
+		return Color(0.12, 0.13, 0.15)
+	return Color(0.97, 0.97, 0.97)
+
+
+# Table thumbnail: a FILLED colour block first (the category colour — user feedback
+# 2026-10-17: the table must read as a solid tile, not bare lines), then the REAL grid
+# generator's spec (outer border + row/col separators) drawn ON TOP in CONTRAST ink,
+# uniformly fitted — the thumbnail literally shows the lines the placed symbol draws.
+# Landscape by construction: the table envelope is 90x26 mm.
+# 表格缩略图：先铺**填充底色方块**（类目色 —— 用户反馈 2026-10-17：表格要读作一整块
+# 实心色块，而非裸线），再把**真**格网生成器的 spec（外框 + 行/列分隔线）以**对比墨色**
+# 均匀适配画在其上 —— 缩略图画的就是放置后画布上的那些线。构造上天然横向：
+# 表格包络为 90x26mm。
+func _gpDrawGridThumb(gpRect: Rect2, gpFill: Color, gpStroke: Color, gpBorder: float) -> void:
+	var gpBare: GPPIDNode = GPPIDNode.new()
+	var gpSpec: Dictionary = GPSymbolGeneratorRegistry.gpGenerate(gpDef, gpBare).get("spec", {}) as Dictionary
+	if gpSpec.is_empty():
+		# Degraded generator: keep the old fallback so the tile never goes blank.
+		# 生成器退化：保持旧兜底，图块绝不空白。
+		draw_rect(gpRect, gpFill, true)
+		draw_rect(gpRect, gpStroke, false, gpBorder)
+		return
+	# Solid backing block, then the generator lines in contrast ink on top.
+	# 先铺实心底块，再把生成器线以对比墨色画在其上。
+	draw_rect(gpRect, gpFill, true)
+	draw_rect(gpRect, gpStroke, false, gpBorder)
+	GPSymbolPainter.gpDrawShape(self, gpSpec, gpRect, gpFill, gpContrastOn(gpFill), 1.0)
+
+
+# Multiline-text thumbnail: a LANDSCAPE filled rectangle with the literal "123" centered
+# in CONTRAST ink (user feedback 2026-10-17: the digits used to share the fill's colour
+# family and vanished against it) — reads as "several text lines" at a glance and can
+# never be confused with the table thumbnail.
+# 多行文本缩略图：**横向**填充长方形 + 居中字面「123」，文字用**对比墨色**（用户反馈
+# 2026-10-17：数字过去与底色同色系、贴着底色看不清）—— 一眼读作「几行文字」，且与
+# 表格缩略图绝不混淆。
+func _gpDrawMultilineThumb(gpCell: Rect2, gpFill: Color, gpStroke: Color) -> void:
+	var gpH: float = gpCell.size.y * 0.52
+	var gpRect: Rect2 = Rect2(
+		Vector2(gpCell.position.x, gpCell.get_center().y - gpH / 2.0),
+		Vector2(gpCell.size.x, gpH))
+	draw_rect(gpRect, gpFill, true)
+	draw_rect(gpRect, gpStroke, false, 1.5)
+	var gpFont: Font = ThemeDB.fallback_font
+	var gpFs: int = 9
+	# Baseline = rect centre + ~1/3 of the font size so the digits sit optically centred.
+	# 基线 = 长方形中心 + 约 1/3 字号，使数字视觉居中。
+	draw_string(gpFont, Vector2(gpRect.position.x, gpRect.get_center().y + gpFs / 3.0),
+		"123", HORIZONTAL_ALIGNMENT_CENTER, gpRect.size.x, gpFs, gpContrastOn(gpFill))

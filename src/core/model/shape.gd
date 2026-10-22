@@ -17,7 +17,11 @@ extends Resource
 
 # Primitive kind: line / circle / rectangle / polyline / arc.
 # 图元种类：直线 / 圆 / 矩形 / 折线 / 弧线。
-enum GPKind { GP_LINE, GP_CIRCLE, GP_RECT, GP_POLYLINE, GP_ARC }
+# GP_TEXT (B08) is the annotation entity that carries an open-end note: text is a real drawing
+# object with uid / layer / props, so it can be selected, listed and exported on its own.
+# GP_TEXT（B08）是承载开口端注记的注释实体：文字是真正的图面对象，带 uid / 图层 / 属性，
+# 故可单独选中、进清单、独立导出。
+enum GPKind { GP_LINE, GP_CIRCLE, GP_RECT, GP_POLYLINE, GP_ARC, GP_TEXT }
 
 # Primitive kind (see GPKind).
 # 图元种类（见 GPKind）。
@@ -31,6 +35,16 @@ var gpPoints: PackedVector2Array = PackedVector2Array()
 # Radius for the circle kind only (ignored by the others).
 # 仅圆种类使用的半径（其余种类忽略）。
 var gpRadius: float = 0.0
+
+# Text content for the GP_TEXT kind (ignored by the others). Newlines are preserved; wrapping is
+# the renderer's business (B07), not the model's.
+# GP_TEXT 种类的文字内容（其余种类忽略）。换行保留；折行是渲染层的事（B07），不是模型的事。
+var gpText: String = ""
+
+# Cap height of the text in WORLD units (mm). Drawing practice expresses text size in millimetres,
+# so the model does too; the renderer scales it by the view zoom like every other annotation.
+# 文字的世界字号（mm）。制图惯例以毫米表达字高，模型照此；渲染按视图缩放换算，与其它注释一致。
+var gpTextSize: float = 3.5
 
 # Whether a polyline is closed (last point connects back to the first).
 # 折线是否闭合（末点连回首点）。
@@ -273,6 +287,12 @@ func gpBBox() -> Rect2:
 		GPKind.GP_RECT:
 			if gpPoints.size() >= 2:
 				return Rect2(gpPoints[0], gpPoints[1] - gpPoints[0]).abs()
+		GPKind.GP_TEXT:
+ # Anchor = gpPoints[0] (top-left of the first line). Width/height come from the same estimator
+ # the renderer uses, so the selection box and the drawn text never disagree.
+ # 锚点 = gpPoints[0]（首行左上角）。宽高取自渲染器同款估算器，故选框与画出来的文字不会不一致。
+			if gpPoints.size() >= 1:
+				return Rect2(gpPoints[0], gpTextExtent())
 		GPKind.GP_ARC:
  # Sample the arc (the 3 stored points include the center, so a raw point-min/max is wrong).
  # 沿弧采样（三个存储点含圆心，直接取点的包围盒会出错）。
@@ -352,6 +372,11 @@ func gpToDict() -> Dictionary:
 		gpD["layer"] = gpLayer
 	if not gpProps.is_empty():
 		gpD["props"] = gpProps.duplicate(true)
+	# Text travels only for the text kind, so every other shape keeps its previous byte shape.
+	# 文字仅在文字种类时写出，使其它图形的字节形态保持不变。
+	if gpKind == GPKind.GP_TEXT:
+		gpD["text"] = gpText
+		gpD["text_size"] = gpTextSize
 	return gpD
 
 
@@ -370,6 +395,8 @@ func gpFromDict(gpD: Dictionary) -> void:
 	if gpKind == GPKind.GP_ARC and gpRadius <= 0.0 and gpPoints.size() >= 2:
 		gpRadius = gpPoints[0].distance_to(gpPoints[1])
 	gpClosed = bool(gpD.get("closed", false))
+	gpText = str(gpD.get("text", ""))
+	gpTextSize = float(gpD.get("text_size", 3.5))
 	# Restore Bézier handles for polylines / lines (relative offsets, parallel to vertices).
 	# 还原折线 / 直线的贝塞尔手柄（相对偏移，与顶点平行）。
 	# Clear (not re-assign) so the declared typed-array type is preserved.
@@ -392,3 +419,46 @@ func gpFromDict(gpD: Dictionary) -> void:
 	gpLayer = gpD.get("layer", "ANNOTATION")
 	var gpPropsIn: Variant = gpD.get("props", {})
 	gpProps = (gpPropsIn as Dictionary).duplicate(true) if gpPropsIn is Dictionary else {}
+
+
+# Build a text annotation anchored at gpPos (top-left of the first line).
+# 以 gpPos（首行左上角）为锚点构造一个文字注释。
+static func gpTextNote(gpPos: Vector2, gpBody: String, gpSize: float = 3.5) -> GPShape:
+	var gpS: GPShape = GPShape.new()
+	gpS.gpKind = GPKind.GP_TEXT
+	gpS.gpPoints = PackedVector2Array([gpPos])
+	gpS.gpText = gpBody
+	gpS.gpTextSize = gpSize
+	return gpS
+
+# Rendered extent of the text in world units, from the SAME per-character rule the renderer uses.
+# 文字在世界坐标下的渲染外框，规则与渲染器同源（逐字符宽度）。
+# WHY an estimator and not a font query / 为何用估算而非查字体：
+# the model layer may not touch Godot fonts (core is render-free), and a wrapped multi-line block
+# needs a stable width BEFORE it is drawn — an estimator that both sides share keeps the hit box,
+# the selection box and the paint in agreement.
+# 模型层不得触碰 Godot 字体（core 无渲染依赖），而多行块在绘制**之前**就需要稳定宽度 ——
+# 两侧共用同一个估算器，使命中框、选框与笔迹保持一致。
+static func gpTextWidthOf(gpBody: String, gpSize: float) -> float:
+	var gpMax: float = 0.0
+	for gpLine in gpBody.split("\n"):
+		var gpW: float = 0.0
+		for gpI in range(gpLine.length()):
+			gpW += gpCharWidth(gpLine.unicode_at(gpI), gpSize)
+		gpMax = maxf(gpMax, gpW)
+	return gpMax
+
+# Per-character advance: CJK and full-width punctuation take one em, ASCII takes ~0.6 em. Crude
+# on purpose — a proportional-metrics query would need the font in core.
+# 逐字符步进：CJK 与全角标点占一个 em，ASCII 约 0.6 em。刻意粗糙 —— 精确字宽需要字体进 core。
+static func gpCharWidth(gpCode: int, gpSize: float) -> float:
+	if gpCode >= 0x2E80:
+		return gpSize
+	return gpSize * 0.6
+
+# Text extent (width, height) in world units: wrapped lines at 1.4 em leading.
+# 文字外框（宽, 高）：按 1.4 em 行距排列已折行文本。
+func gpTextExtent() -> Vector2:
+	var gpLines: PackedStringArray = gpText.split("\n")
+	var gpH: float = maxf(1.0, float(gpLines.size())) * gpTextSize * 1.4
+	return Vector2(gpTextWidthOf(gpText, gpTextSize), gpH)

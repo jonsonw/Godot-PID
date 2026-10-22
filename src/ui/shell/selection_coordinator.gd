@@ -51,6 +51,21 @@ func gpOnEdgeAttrChanged(gpEdgeId: String, gpKey: String, gpVal) -> void:
 	gpRefreshSelection()
 
 
+# Route an annotation-shape field edit to the command layer (A2).
+# 把注释图形的字段编辑路由到命令层（A2）。
+# One field per call, so one edit is one undo step; the panel's form is NOT rebuilt here (a text
+# field would lose focus mid-typing) — the canvas repaint shows the new value instead.
+# 每次一个字段，故一次编辑一步撤销；此处**不**重建面板表单（文本框会在打字中途丢焦点）——
+# 由画布重绘呈现新值。
+func gpOnShapePropChanged(gpIdx: int, gpField: String, gpValue) -> void:
+	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
+	if gpCanvas == null or gpCanvas.gpGraph == null:
+		return
+	var gpVals: Dictionary = {}
+	gpVals[gpField] = gpValue
+	gpCanvas.gpRequestSetShapeProps(gpIdx, gpVals)
+
+
 # ============================ menu ============================
 # ============================ 菜单 ============================
 # Dispatch menu actions.
@@ -170,6 +185,26 @@ func gpRefreshSelection() -> void:
 					I18n.gpTr("info.id"), gpEdge.gpInstanceId,
 					I18n.gpTr("edge.kind"), gpType]
 				return
+		# An annotation shape is not a node, so it has no id to look up — but it IS selectable and
+		# editable, and leaving the panel empty was half of the A1 "the UI is lying" defect.
+		# 注释图形不是节点，没有 id 可查 —— 但它可选、可编辑，让面板空着正是 A1「界面撒谎」的一半。
+		if gpCanvas.gpShapeSel.size() == 1 and gpCanvas.gpGraph != null:
+			var gpShapeIdx: int = gpCanvas.gpShapeSel[0]
+			if gpShapeIdx >= 0 and gpShapeIdx < gpCanvas.gpGraph.gpShapes.size():
+				var gpShape: GPShape = gpCanvas.gpGraph.gpShapes[gpShapeIdx]
+				gpHost.gpInspector.gpShowShape(gpShape, gpShapeIdx)
+				gpHost.gpInfoLabel.text = "%s：%s\n%s：%d" % [
+					I18n.gpTr("inspector.shape"), I18n.gpTr("inspector.shape_kind"),
+					I18n.gpTr("inspector.shape_points"), gpShape.gpPoints.size()]
+				return
+		if gpCanvas.gpShapeSel.size() > 1:
+			# Multi-shape: no form (a batch shape edit is not a promise A2 makes), but SAY so
+			# instead of showing the pristine "nothing selected" hint.
+			# 多选图形：不出表单（批量改图形不属 A2 的承诺），但要**说出来**，
+			# 而不是显示「未选中任何对象」这句误导性的空提示。
+			gpHost.gpInspector.gpShowShape(null, -1)
+			gpHost.gpInfoLabel.text = I18n.gpTr("inspector.shape_multi") % gpCanvas.gpShapeSel.size()
+			return
 		gpHost.gpInspector.gpShow(null, null)
 		gpHost.gpInfoLabel.text = I18n.gpTr("symbol_lib.no_selection")
 		return
@@ -208,6 +243,32 @@ func gpRefreshSelection() -> void:
 		I18n.gpTr("info.category"), gpCat,
 		I18n.gpTr("info.size"), gpSize]
 
+# Compose the "Selected: …" text from a status snapshot.
+# 由状态快照拼出「选中：…」文案。
+# Static + pure so the three selection families (nodes / edges / shapes) can be pinned headlessly,
+# and so the rule "nodes win, then edges, then shapes" lives in exactly one place instead of being
+# re-derived by every caller.
+# static + 纯函数：三类选择（节点 / 连线 / 图形）可 headless 钉住，且「节点优先，其次连线，最后
+# 图形」这条规则只存在于一处，而不是每个调用方各自重推。
+# The precedence mirrors the canvas' own mutual exclusion (a click sets exactly one family), so the
+# label can never describe two families at once.
+# 优先级与画布自身的互斥一致（一次点击只设置一类），故文案绝不会同时描述两类。
+static func gpSelectionText(gpInfo: Dictionary) -> String:
+	var gpSel: String = str(gpInfo.get("selection", ""))
+	var gpNodes: int = int(gpInfo.get("count", 0))
+	var gpEdges: int = int(gpInfo.get("edges", 0))
+	var gpShapes: int = int(gpInfo.get("shapes", 0))
+	if gpNodes > 1:
+		return I18n.gpTr("status.selected_multi") % gpNodes
+	if gpSel != "":
+		return I18n.gpTr("status.selected") % gpSel
+	if gpEdges > 0:
+		return I18n.gpTr("status.selected_edges") % gpEdges
+	if gpShapes > 0:
+		return I18n.gpTr("status.selected_shapes") % gpShapes
+	return I18n.gpTr("status.selected") % I18n.gpTr("status.none")
+
+
 # Update the status bar from a canvas status snapshot.
 # 根据画布状态快照更新状态栏。
 func gpOnStatus(gpInfo: Dictionary) -> void:
@@ -217,8 +278,7 @@ func gpOnStatus(gpInfo: Dictionary) -> void:
 	if gpHost.gpActiveCanvas() == null:
 		return
 	gpHost.gpLastStatus = gpInfo
-	var gpSel: String = gpInfo.get("selection", "")
-	gpHost.gpSelLabel.text = I18n.gpTr("status.selected") % (gpSel if gpSel != "" else I18n.gpTr("status.none"))
+	gpHost.gpSelLabel.text = gpSelectionText(gpInfo)
 
 	var gpWorld: Vector2 = gpInfo.get("world", Vector2.ZERO)
 	gpHost.gpCoordLabel.text = I18n.gpTr("status.coord") % [int(gpWorld.x), int(gpWorld.y)]

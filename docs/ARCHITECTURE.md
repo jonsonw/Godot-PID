@@ -13,7 +13,7 @@
 | UI | `src/ui` | shell（组合根 `GPMainWindow` + 7 协调者）、canvas（`GPCanvas2D` + **5 实现类**）、tools、panels、dialogs（含 `symbol_editor/`） | 唯一依赖 Godot 控件与 autoload 的层 |
 | App | `src/app` | 用例编排：命令栈 + **29 条命令** + `GPEditService` + `GPAppDocumentManager` + `GPEventBus` + 自动保存服务 | 纯 `RefCounted`，无 UI 引用 |
 | Core | `src/core` | model（`GPPIDGraph` 聚合根）、geometry、symbol、view（画布纯状态 + 画布文字档位）、platform、service、`gp_constants` | **49 个类无一个是 `Node`** → 可 headless 测试 |
-| IO | `src/io` | `*.pid.json` 读写（`GPProjectIO`）+ 原子写 + schema 迁移 + 导入导出 + **DEXPI（Proteus XML）导入导出** | 唯一允许碰 `FileAccess` 的层；DXF / PDF 导出目前为**空桩** |
+| IO | `src/io` | `*.pid.json` 读写（`GPProjectIO`）+ 原子写 + schema 迁移 + 导入导出 + **DEXPI（Proteus XML）导入导出** + **DXF R12 / PDF 1.4 导出** | 唯一允许碰 `FileAccess` 的层；DXF/PDF 消费 `GPPrintModel`，自身不做几何 |
 
 **DEXPI 子模块（第二个外部方言适配器，与 `*.pid.json` 平级）**：`GPDexpiSchema`（常量/版本能力表）、
 `GPXmlText`（转义单点）、`GPDexpiMapping`（映射表 + `gpFlipY`/`gpNormRgb` 单点）、
@@ -50,9 +50,13 @@ meta / sheets[] / library / config
 - `GPEventBus` —— 领域事件总线；UI 与插件据此订阅 `gpGraphChanged` 等事件，发布者无需知道订阅者。
 - `GPCanvasToolRegistry` —— 新增画布交互 = 新增一个文件 + 注册表加一行，画布主体不改。
 - `gen_symbol_packs.py` —— 图元数据驱动：声明几何与端口即可生成图元，无需为每个图元写类。
-- `GPIPIDAddon` —— 商业化插件契约：`_gpGetName` / `_gpGetTools` / `_gpGetPanels` / `_gpOnGraphChanged` /
-  `_gpRegisterExporters` / `_gpRegisterSymbolPacks` / `_gpOnLoad` / `_gpOnSync`。
-  **当前仅契约、无加载器**（Open-Core 的隔离边界，Pro 代码不进本仓）。
+- `GPIPIDAddon` + `GPAddonLoader` —— 商业化插件契约**与加载器**：扫描目录 → 实例化 → 每条候选一条诊断 →
+  隔离坏插件 → 按类返回要注入的工具 / 面板 / 导出器 / 图元包（Pro 代码不进本仓，核心只认契约）。
+  契约 v2 另有三处挂载点：`_gpGetChatPanel()`（对话面板场景路径）、`_gpGetToolDefs()`（与 MCP 共用的
+  `{id, description, args, handler}`，`handler` 是方法名）、`_gpGetValidationHooks()`（追加校验规则，
+  严重度限 error / warning / info）。三者默认空实现，v1 插件零改动可用。
+- `GPRulePack` + `GPFinding`（`src/core/validation/`）—— 七条 DRC 纯规则与发现值对象：不碰 Node、
+  不碰 autoload，故 GUI 面板、headless 测试与将来的 CLI 门禁共用同一份实现。
 
 ## Testing & CI · 测试与持续集成
 
@@ -60,7 +64,7 @@ meta / sheets[] / library / config
 
 | 轨 | 位置 | 规模 | 运行命令 |
 |---|---|---|---|
-| 自研 `GPGTest` | `tests/gp_test_*.gd` | **61 套 / 2,901 条断言** | `godot --headless --script res://tests/run_core_tests.gd` |
+| 自研 `GPGTest` | `tests/gp_test_*.gd` | **109 套 / 9,086 条断言** | `godot --headless --script res://tests/run_core_tests.gd` |
 | `GUT 9.7.1` | `addons/gut`（vendored，MIT） | 桥接 + 原生用例 | `godot --headless --script res://addons/gut/gut_cmdln.gd -gexit` |
 
 桥接脚本 `tests/gut/test_gp_suites.gd` 让 GUT 反射驱动既有 GPGTest 套件，

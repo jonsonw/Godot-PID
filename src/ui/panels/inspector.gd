@@ -62,6 +62,13 @@ signal gpPropRenamed(gpNodeId: String, gpOldKey: String, gpNewKey: String)
 # 一条自定义条目被删除：节点 id、键（取值被擦除）。
 signal gpPropDeleteRequested(gpNodeId: String, gpKey: String)
 
+# An annotation-shape field was edited (A2). The shape has no id, so the INDEX is the handle —
+# the same reason GPDeleteShapesCommand takes indices. The shell routes this to the command
+# layer, which is what makes a layer edit undoable.
+# 注释图形的某个字段被编辑（A2）。图形没有 id，故以**下标**为句柄 —— 理由同
+# GPDeleteShapesCommand。外壳把它路由到命令层，这正是「改图层可撤销」的来源。
+signal gpShapePropChanged(gpShapeIdx: int, gpField: String, gpValue)
+
 # Key prefix for a multi-language name edit (e.g. "name:zh_CN").
 # 多语言名称编辑的键前缀（如 "name:zh_CN"）。
 const GP_NAME_PREFIX: String = "name:"
@@ -120,6 +127,15 @@ var _gpHeadCount: int = 0
 # 属性检索框内容（Rev.3 阶段 1.5，R2）。**新**选中时重置（gpShow / gpShowMulti），
 # 表单内部重建时保留，使「应用检索」不会抹掉自己。
 var _gpSearchQuery: String = ""
+
+# Shape currently shown (A2). Null for the node / edge forms, so one panel never edits two
+# kinds of object at once.
+# 当前显示的图形（A2）。节点 / 边表单时为 null，使同一面板绝不会同时编辑两类对象。
+var gpCurrentShape: GPShape = null
+
+# Index of gpCurrentShape inside the graph's shape list.
+# gpCurrentShape 在图图形列表中的下标。
+var gpCurrentShapeIdx: int = -1
 
 # Inline note label under the add-entry row (refusals surface here, in place).
 # 「新增条目」行下方的就地提示标签（拒绝原因就地显示于此）。
@@ -704,11 +720,104 @@ func _gpAddNumberField(gpLabel: String, gpInitial: Variant, gpMin: float, gpMax:
 
 # Remove every child of the form root. / 清空表单根的全部子节点。
 func _gpClearForm() -> void:
+	# Every non-shape form clears the shape handle: otherwise a stale index could be edited by a
+	# later keystroke that the user aimed at a NODE (silent wrong-object edit).
+	# 所有非图形表单都清掉图形句柄：否则用户明明是冲着**节点**敲的键，却可能改到过期的下标上
+	#（静默改错对象）。
+	gpCurrentShape = null
+	gpCurrentShapeIdx = -1
 	_gpHeadCount = 0
 	_gpAdhocNote = null
 	for gpC in gpFormRoot.get_children():
 		gpFormRoot.remove_child(gpC)
 		gpC.queue_free()
+
+
+# ============================ shape form / 图形表单 ============================
+
+# Show the form for ONE selected annotation shape. Pass null / -1 to clear.
+# 显示单个选中注释图形的表单。传 null / -1 清空。
+#
+# Why the shape panel is small / 为何图形面板很小：
+# A shape is a primitive, not a symbol instance: it has no library definition, no port and no
+# property schema, so the only user-editable facts are its name, its layer bucket and its ink.
+# Anything more would have to invent a schema (which is a symbol feature) or edit geometry
+# numerically (which the viewport grips already do better).
+# 图形是图元基元而非符号实例：没有库定义、没有端口、没有属性 schema，故用户可编辑的事实只有
+# 名称、图层桶与墨色。再多就得自造 schema（那是符号的特性）或用数值改几何（视口手柄已做得更好）。
+func gpShowShape(gpShape: GPShape, gpShapeIdx: int) -> void:
+	gpCurrentDef = null
+	gpCurrentNode = null
+	gpCurrentEdge = null
+	_gpBatchIds = []
+	_gpBatchNodes = []
+	_gpClearForm()
+	gpCurrentShape = gpShape
+	gpCurrentShapeIdx = gpShapeIdx
+	if gpShape == null:
+		_gpShowEmpty()
+		return
+	_gpAddHead(I18n.gpTr("inspector.shape"))
+	_gpAddNote("%s：%s" % [I18n.gpTr("inspector.shape_kind"),
+		I18n.gpTr(gpShapeKindKey(gpShape.gpKind))])
+	_gpAddNote("%s：%d" % [I18n.gpTr("inspector.shape_points"), gpShape.gpPoints.size()])
+	_gpAddShapeText(I18n.gpTr("inspector.shape_name"), gpShape.gpName, "gpName")
+	_gpAddShapeLayer(gpShape.gpLayer)
+
+
+# Localized key for a shape kind. Pure + static so the mapping can be pinned headlessly.
+# 图形种类的本地化键。纯函数 + static，故映射可被 headless 钉住。
+static func gpShapeKindKey(gpKind: int) -> String:
+	match gpKind:
+		GPShape.GPKind.GP_LINE:
+			return "shape.kind_line"
+		GPShape.GPKind.GP_CIRCLE:
+			return "shape.kind_circle"
+		GPShape.GPKind.GP_RECT:
+			return "shape.kind_rect"
+		GPShape.GPKind.GP_POLYLINE:
+			return "shape.kind_polyline"
+		GPShape.GPKind.GP_ARC:
+			return "shape.kind_arc"
+		_:
+			return "shape.kind_line"
+
+
+# The four layer buckets a shape may live in, in menu order.
+# 图形可处的四个图层桶，按菜单顺序。
+const GP_SHAPE_LAYERS: Array[String] = ["ANNOTATION", "BORDER", "DIMENSION", "HATCH"]
+
+
+# One-line text row bound to a shape field.
+# 绑定到图形字段的单行文本行。
+func _gpAddShapeText(gpLabel: String, gpInitial: String, gpField: String) -> void:
+	var gpRow: HBoxContainer = _gpFieldRow(gpLabel)
+	var gpEdit: LineEdit = LineEdit.new()
+	gpEdit.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpEdit.text = gpInitial
+	gpEdit.text_submitted.connect(func(gpV: String) -> void:
+		if gpCurrentShapeIdx >= 0:
+			gpShapePropChanged.emit(gpCurrentShapeIdx, gpField, gpV))
+	gpRow.add_child(gpEdit)
+
+
+# Layer dropdown: the stored value is the raw bucket name, the visible text is localized.
+# 图层下拉：存的是原始桶名，显示的是本地化文字。
+func _gpAddShapeLayer(gpCurrent: String) -> void:
+	var gpRow: HBoxContainer = _gpFieldRow(I18n.gpTr("inspector.shape_layer"))
+	var gpOpt: OptionButton = OptionButton.new()
+	gpOpt.size_flags_horizontal = SIZE_EXPAND_FILL
+	for gpI in range(GP_SHAPE_LAYERS.size()):
+		gpOpt.add_item(I18n.gpTr("shape.layer_" + GP_SHAPE_LAYERS[gpI].to_lower()))
+		gpOpt.set_item_metadata(gpI, GP_SHAPE_LAYERS[gpI])
+		if GP_SHAPE_LAYERS[gpI] == gpCurrent:
+			gpOpt.select(gpI)
+	gpOpt.item_selected.connect(func(gpI: int) -> void:
+		if gpCurrentShapeIdx < 0:
+			return
+		var gpLayer: String = str(gpOpt.get_item_metadata(gpI))
+		gpShapePropChanged.emit(gpCurrentShapeIdx, "gpLayer", gpLayer))
+	gpRow.add_child(gpOpt)
 
 
 # ============================ edge form / 边表单 ============================

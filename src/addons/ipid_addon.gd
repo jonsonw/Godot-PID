@@ -43,6 +43,46 @@ func _gpRegisterSymbolPacks() -> Array:
 	return []
 
 
+# Contract version this addon was written against (2 = chat panel + tool defs + validation hooks).
+# 本插件编写时所对的契约版本（2 = 对话面板 + 工具定义 + 校验钩子）。
+# The loader never refuses an addon for an OLD version — every v1 hook has a default — and never
+# pretends to support a NEWER one silently; it reports the mismatch instead.
+# 加载器不会因插件版本**旧**而拒绝它（v1 的钩子都有默认实现），也不会默默假装支持**更新**的版本；
+# 它会把不匹配报告出来。
+const GP_CONTRACT_VERSION: int = 2
+
+
+# Chat-panel mount point (v2): a scene path the shell may dock, or "" for none.
+# 对话面板挂载点（v2）：外壳可停靠的场景路径，无则空串。
+# WHY A PATH AND NOT A NODE / 为何给路径而非节点：
+# an addon must not hand the shell a live node it still owns; the shell instantiates, owns and
+# frees the scene, so one addon cannot keep a handle on a window that has been closed.
+# 插件不得把自己仍然持有的活节点交给外壳；由外壳实例化、持有并释放该场景，
+# 这样一个插件就无法继续握着一个已经关闭的窗口。
+func _gpGetChatPanel() -> String:
+	return ""
+
+
+# Tool definitions (v2), shared verbatim with the MCP / local tool list: each entry is
+# {id, description, args, handler}. `handler` is a METHOD NAME on the tool dispatcher, never a
+# Callable — a Callable cannot be serialised, reviewed or diffed, and this contract must be
+# readable as data.
+# 工具定义（v2），与 MCP / 本地工具清单**逐字共用**：每条为 {id, description, args, handler}。
+# `handler` 是工具分发器上的**方法名**，绝不是 Callable —— Callable 无法序列化、评审或 diff，
+# 而本契约必须能以数据形式被读懂。
+func _gpGetToolDefs() -> Array:
+	return []
+
+
+# Validation hooks (v2): rule descriptors the DRC pack may run after the built-in seven.
+# 校验钩子（v2）：DRC 规则包在内置七条之后可运行的规则描述。
+# Entries are {id, description, severity, handler} with the same shape rules everywhere, so a
+# plugin rule cannot be a special case in the report.
+# 条目为 {id, description, severity, handler}，与其它规则同形，使插件规则在报告里不成为特例。
+func _gpGetValidationHooks() -> Array:
+	return []
+
+
 # Auth / permission init hook (collaboration · Pro) — see Dev Guide §4.11.
 # 鉴权 / 权限初始化钩子（协同·Pro 实现），见开发指南 §4.11。
 func _gpOnLoad(gpCtx: Dictionary) -> void:

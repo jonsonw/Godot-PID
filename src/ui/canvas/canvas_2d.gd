@@ -459,6 +459,11 @@ func _init() -> void:
 	gpSymbolLayer.gpHost = self
 	gpSheetLayer = GPCanvasSheetLayer.new()
 	gpSheetLayer.gpHost = self
+	# Dwell trigger (B08): wired here, not in _ready(), for the same headless reason as the rest.
+	# 悬停触发（B08）：在此接线而非 _ready()，理由与其余实现类一致（headless 可用）。
+	_gpDwell = GPDwellPrompt.new()
+	_gpDwell.gpShow.connect(_gpOnDwellShow)
+	_gpDwell.gpHide.connect(_gpOnDwellHide)
 
 
 # Initialize the canvas: create world root and connect global signals.
@@ -562,6 +567,10 @@ func _gpBuildBinder() -> void:
 	# 语言 / 字号 / 位号样式变化会重建并显式重推（见 _gpSubscribeAutoloads()）。
 	gpRenderStyle = gpBuildRenderStyle()
 	gpBinder.gpStyle = gpRenderStyle
+	# A9: adopt the persisted appearance (grid on/off, background colour) before the first paint,
+	# or a user's saved background would only appear after they touched the menu again.
+	# A9：首帧前采用已持久化的外观（网格开关、底色），否则用户保存的底色要等他们再动一次菜单才出现。
+	gpApplyCanvasStyle()
 
 
 # Editing delegates. They own their own transient state, which is why the canvas stays thin.
@@ -635,6 +644,15 @@ func _gpSubscribeAutoloads() -> void:
 		_gpSettings.gpSymbolStyleChanged.connect(_gpOnSymbolStyleChanged)
 	if _gpSettings != null and _gpSettings.has_signal("gpPipeTagStyleChanged"):
 		_gpSettings.gpPipeTagStyleChanged.connect(_gpOnTagStyleChanged)
+	# Motion preference: same path as the other style changes — rebuild the snapshot and re-push
+	# it, which also stops any tween still running on a symbol.
+	# 动效偏好：与其他样式变化同一条路径 —— 重建快照并重新推入，同时停掉图元上仍在跑的补间。
+	if _gpSettings != null and _gpSettings.has_signal("gpMotionChanged"):
+		_gpSettings.gpMotionChanged.connect(_gpOnMotionChanged)
+	# Canvas appearance (A9): grid visibility + background colour.
+	# 画布外观（A9）：网格可见性 + 底色。
+	if _gpSettings != null and _gpSettings.has_signal("gpCanvasStyleChanged"):
+		_gpSettings.gpCanvasStyleChanged.connect(gpApplyCanvasStyle)
 
 
 # Funnel the core graph's raw signal onto the document bus; the graph itself does not emit it.
@@ -773,6 +791,14 @@ func _gpOnTagStyleChanged() -> void:
 	_gpRebuildRenderStyle()
 
 
+# React to the motion preference: rebuild + re-push. The re-push calls gpSetMotionEnabled() on
+# every view, so switching it OFF also kills the tween of a symbol that happens to be animating.
+# 响应动效偏好：重建并重新推入。重推会对每个视图调用 gpSetMotionEnabled()，
+# 故关闭开关时正在播放的图元补间也会被停掉。
+func _gpOnMotionChanged() -> void:
+	_gpRebuildRenderStyle()
+
+
 # 由 Settings / I18n 重建渲染样式快照，写回 gpRenderStyle 并显式重推给绑定器。
 # 所有视图的 style 字段随之更新，旧视图不再残留旧字号 / 旧文字 —— 该行为由
 # tests/gp_test_render_style_injection.gd 钉住（切换 locale 后所有视图 style 已更新）。
@@ -822,9 +848,18 @@ static func gpResolveAutoload(gpHost: Node, gpName: String) -> Object:
 # Build and emit a status snapshot for the status bar.
 # 构造并发送状态栏快照。
 func gpEmitStatus() -> void:
+	# The snapshot must describe EVERY kind of selection, not just nodes. It used to carry only
+	# "selection"/"count", so selecting an annotation shape (which is not a node) produced a
+	# snapshot that said nothing was selected — the status bar then printed "—" while the canvas
+	# was drawing a blue box around the shape. That is the "the UI is lying" defect of A1.
+	# 快照必须描述**每一种**选择，而不只是节点。此前它只带 "selection"/"count"，故选中一个注释
+	# 图形（它不是节点）时快照等于说「什么都没选中」—— 状态栏于是打出「—」，而画布正给那个图形
+	# 画着蓝框。这正是 A1 要消灭的「界面撒谎」。
 	var gpInfo: Dictionary = {
 		"selection": gpSelectedId,
 		"count": gpSelection.size(),
+		"shapes": gpShapeSel.size(),
+		"edges": gpEdgeSel.size(),
 		"zoom": gpViewZoom,
 		"world": _gpLastMouseWorld,
 	}
@@ -968,6 +1003,142 @@ func _gpOnLeftDown(gpScreen: Vector2, gpShift: bool, gpDouble: bool) -> void:
 func _gpActiveTool() -> GPCanvasTool:
 	return gpInputRouter.gpActiveTool()
 
+
+# Public read-only view of the mounted interaction tool (B08: the context menu asks whether a
+# line is half-drawn). Read-only on purpose — mounting a tool is the router's job.
+# 当前挂载的交互工具（只读）。（B08：右键菜单需要知道是否有一条线画到一半。）
+# 刻意只读 —— 挂载工具是路由器的职责。
+func gpActiveTool() -> GPCanvasTool:
+	return gpInputRouter.gpActiveTool()
+
+
+# Refresh one edge view in place (live drags). Thin port so tools stay off the binder.
+# 就地刷新一条边视图（实时拖拽）。薄端口，使工具不必触碰绑定器。
+func gpRedrawEdge(gpEdgeId: String) -> bool:
+	# The binder is a _ready() delegate: a canvas driven headlessly may not have one, and a drag
+	# test in that state must not crash — it simply has no view to refresh.
+	# 绑定器是 _ready() 委托：headless 驱动的画布可能没有它，那种状态下的拖拽测试不得崩 ——
+	# 它只是没有可刷新的视图。
+	if gpBinder == null:
+		return false
+	return gpBinder.gpRedrawEdge(gpEdgeId)
+
+
+# Report a cursor position (from the input router). Drives the dwell trigger.
+# 报告一次光标位置（来自输入路由）。驱动悬停触发。
+func gpNoticeCursorMove(gpWorld: Vector2, gpScreen: Vector2) -> void:
+	if _gpDwell == null:
+		return
+	_gpDwell.gpNoticeCursor(gpWorld, gpScreen, Time.get_ticks_msec())
+
+
+# Advance the dwell trigger. Called from _process so a cursor that simply STOPS still triggers the
+# prompt (no event arrives while the mouse is still — that is the whole point of a dwell).
+# 推进悬停触发。由 _process 调用，使「光标单纯停住」也能触发提示
+#（鼠标不动时没有任何事件到来 —— 这正是悬停的意义）。
+func _process(_gpDelta: float) -> void:
+	if _gpDwell == null:
+		return
+	var gpTool: Object = gpActiveTool()
+	var gpPending: bool = gpTool != null and gpTool.has_method("gpIsPending") \
+		and bool(gpTool.gpIsPending())
+	# The OTHER way a line is drawn: dragging from an endpoint anchor (gpPortOps). It is not a
+	# tool, so without this branch the dwell prompt never appeared for the gesture the user
+	# actually performs — "press and drag from the nozzle".
+	# 另一种画线方式：从端点锚点**拖拽**（gpPortOps）。它不是工具，故缺这一分支时，
+	# 用户实际使用的那个手势（「按住管嘴拖出来」）永远不会出现悬停提示。
+	if not gpPending and gpPortOps != null and gpPortOps.gpIsDragging():
+		gpPending = true
+	_gpDwell.gpTick(gpPending, Time.get_ticks_msec())
+
+
+# Build and show the dwell prompt near the cursor.
+# 在光标附近构建并显示悬停提示。
+func _gpOnDwellShow(gpWorld: Vector2) -> void:
+	_gpOnDwellHide()
+	var gpMenu: PopupMenu = PopupMenu.new()
+	gpMenu.add_item(I18n.gpTr("open_end.menu"), 0)
+	# "Connect to an END-POINT note": every note within grabbing distance is offered as a shared
+	# end point (two lines terminating at one open end is a real drawing pattern).
+	# 「接到末端注记」：抓取距离内的每条注记都作为**共用**开口端提供
+	#（两条线终止于同一开口端是真实画法）。
+	var gpNear: Array[GPShape] = _gpNotesNear(gpWorld)
+	for gpI in range(gpNear.size()):
+		var gpS: GPShape = gpNear[gpI]
+		gpMenu.add_item(I18n.gpTr("open_end.dwell_attach") % gpS.gpText, gpI + 1)
+	_gpDwellMenu = gpMenu
+	gpMenu.id_pressed.connect(func(gpId: int) -> void: _gpOnDwellChosen(gpId, gpWorld, gpNear))
+	add_child(gpMenu)
+	GPPopupHelper.gpPopupAtMouse(gpMenu, self)
+	gpMenu.popup_hide.connect(func() -> void:
+		gpMenu.queue_free()
+		if _gpDwellMenu == gpMenu:
+			_gpDwellMenu = null)
+
+
+# Hide (and free) the dwell prompt.
+# 隐藏（并释放）悬停提示。
+func _gpOnDwellHide() -> void:
+	if _gpDwellMenu != null:
+		var gpM: PopupMenu = _gpDwellMenu
+		_gpDwellMenu = null
+		gpM.hide()
+		gpM.queue_free()
+
+
+# Handle a dwell-prompt choice.
+# 处理悬停提示的选择。
+func _gpOnDwellChosen(gpId: int, gpWorld: Vector2, gpNear: Array[GPShape]) -> void:
+	_gpOnDwellHide()
+	if gpId == 0:
+		# Create-and-name path. The dialog is shared; its confirm routes back through
+		# gpFinishDragAsOpenEnd when an anchor drag is in flight.
+		# 新建并命名路径。对话框共用；锚点拖拽进行中时，确认会经 gpFinishDragAsOpenEnd 收尾。
+		if gpPortOps != null and gpPortOps.gpIsDragging():
+			gpOpenPendingEndNoteDialog(gpWorld)
+			return
+		gpOpenPendingEndNoteDialog(gpWorld)
+		return
+	var gpIdx: int = gpId - 1
+	if gpIdx < 0 or gpIdx >= gpNear.size():
+		return
+	# Attach the pending line to the chosen note: the line ends AT that annotated end point.
+	# 把待完成连线接到所选注记上：这条线就结束在**那个已注明的末端**。
+	# Share an EXISTING end-point note. Whichever gesture produced the pending line (tool or
+	# anchor drag), the line must end AT that note.
+	# 共用**已有**末端注记。无论待完成连线来自工具还是锚点拖拽，线都要结束在**那条注记**上。
+	var gpNoteUid: String = gpNear[gpIdx].gpUid
+	if gpPortOps != null and gpPortOps.gpIsDragging():
+		gpPortOps.gpFinishDragAsOpenEnd("", gpNoteUid)
+		return
+	var gpTool: Object = gpActiveTool()
+	if gpTool == null or not gpTool.has_method("gpFinishOpenEnd"):
+		return
+	gpTool.gpFinishOpenEnd(gpWorld, "", gpNoteUid)
+
+
+# End-point notes within grabbing distance of a world point (nearest first).
+# 世界坐标附近抓取距离内的末端注记（最近的在前）。
+func _gpNotesNear(gpWorld: Vector2) -> Array[GPShape]:
+	var gpOut: Array[GPShape] = []
+	if gpGraph == null:
+		return gpOut
+	# 12 mm world radius: roughly "the cursor is on the text", independent of zoom.
+	# 12 mm 世界半径：大致等于「光标压在字上」，与缩放无关。
+	var gpRadius: float = 12.0
+	var gpRows: Array = []
+	for gpS in gpGraph.gpShapes:
+		if gpS == null or gpS.gpKind != GPShape.GPKind.GP_TEXT or gpS.gpText.strip_edges() == "":
+			continue
+		var gpRect: Rect2 = gpS.gpBBox().grow(gpRadius)
+		if gpRect.has_point(gpWorld):
+			gpRows.append({"d": gpS.gpPoints[0].distance_to(gpWorld), "s": gpS})
+	gpRows.sort_custom(func(gpA: Dictionary, gpB: Dictionary) -> bool:
+		return float(gpA["d"]) < float(gpB["d"]))
+	for gpRow in gpRows:
+		gpOut.append((gpRow as Dictionary)["s"] as GPShape)
+	return gpOut
+
 # _gpDrawShapes() / _gpDrawOneShape() moved to GPCanvasOverlay . They are invoked through
 # _gpOverlay.gpDraw() from _draw(), so the canvas no longer paints the overlay itself.
 # _gpDrawShapes() / _gpDrawOneShape() 已移至 GPCanvasOverlay，经 _draw() 中的
@@ -981,12 +1152,263 @@ func gpSetSelection(gpIds: Array[String]) -> void:
 	gpEditFacade.gpSetSelection(gpIds)
 
 
+# Announce a shape-only selection change: drop any node selection (mutual exclusion) AND re-emit
+# the status snapshot. Node selection already announces itself, so only the shape family needed
+# this port — without it a shift-toggle of shapes left the status bar describing the previous
+# click, which is the same "the UI is lying" defect from the other side.
+# 通告一次「只有图形」的选择变化：清掉节点选择（互斥）**并**重发状态快照。节点选择本就会自我
+# 通告，故只有图形这一族需要这个端口 —— 缺了它，shift 增删图形会让状态栏继续描述上一次点击，
+# 即同一个「界面撒谎」缺陷的另一面。
+func gpAnnounceShapeSelection() -> void:
+	gpEditFacade.gpSetSelection([])
+	gpEmitStatus()
+
+
 func gpRequestSelectAll() -> void:
 	gpEditFacade.gpRequestSelectAll()
 
 
 func gpSetEdgeSelection(gpIds: Array[String]) -> void:
 	gpEditFacade.gpSetEdgeSelection(gpIds)
+
+
+# Draw the background grid (A9). A canvas-owned field so the overlay needs no autoload read.
+# 是否绘制背景网格（A9）。画布自有字段，使覆盖层无需读自动加载。
+var gpShowGrid: bool = true
+
+# Canvas background colour (A9).
+# 画布底色（A9）。
+var gpCanvasBg: Color = Color(0.13, 0.14, 0.18)
+
+# The built-in background presets, cycled by the "format_bg" menu action. Kept as hex strings
+# because that is what Settings persists — one representation, no Colour/ConfigFile mismatch.
+# 内置底色预设，由 "format_bg" 菜单循环切换。以十六进制串保存，因为 Settings 持久化的就是这个 ——
+# 单一表示，不会出现 Color 与 ConfigFile 不一致。
+const GP_BG_PRESETS: Array[String] = ["212830", "1A2330", "2A2E38"]
+
+# Open-end note dialog (B08), created lazily on first use.
+# 开口端注记对话框（B08），首次使用时懒创建。
+var _gpNoteDialog: GPEndNoteDialog = null
+
+# Edge + side the dialog is currently editing (set right before showing it).
+# 对话框当前正在编辑的边与端（显示前设置）。
+var _gpNoteEdgeId: String = ""
+
+# Which end the dialog is editing (true = start).
+# 对话框正在编辑哪一端（true = 起点）。
+var _gpNoteIsFrom: bool = false
+
+# Dwell trigger for the open-end prompt (B08 follow-up). Created in _init so a headless canvas can
+# be driven without a tree (the tests call its tick/notice directly).
+# 开口端提示的悬停触发（B08 续）。在 _init 中创建，使无树的 headless 画布也能被驱动
+#（测试直接调它的 tick / notice）。
+var _gpDwell: GPDwellPrompt = null
+
+# The popup the dwell trigger shows (null until first shown).
+# 悬停触发所显示的弹窗（首次显示前为 null）。
+var _gpDwellMenu: PopupMenu = null
+
+# Whether the dialog is finishing a HALF-DRAWN line (pending) rather than editing an existing edge.
+# 对话框是否在**结束一条半成品线**（待完成），而不是编辑已有边。
+var _gpNotePending: bool = false
+
+# Where the pending line should end (world), captured when the dialog opened.
+# 待完成连线的结束点（世界坐标），打开对话框时捕获。
+var _gpNotePendingWorld: Vector2 = Vector2.INF
+
+
+# The preset after the current one, wrapping. Static + pure so the cycle is testable without a
+# canvas — and so the menu cannot drift from the preset list.
+# 当前预设的下一个（循环）。static + 纯函数，使循环可脱离画布测试，且菜单不会与预设表脱节。
+static func gpNextBgPreset(gpCur: String) -> String:
+	for gpI in range(GP_BG_PRESETS.size()):
+		if GP_BG_PRESETS[gpI] == gpCur:
+			return GP_BG_PRESETS[(gpI + 1) % GP_BG_PRESETS.size()]
+	return GP_BG_PRESETS[0]
+
+
+# Read the appearance preferences into this canvas and repaint. Called at assembly and on every
+# gpCanvasStyleChanged, so a changed preference reaches EVERY sheet, not just the active one.
+# 把外观偏好读进本画布并重绘。装配时与每次 gpCanvasStyleChanged 时调用，故偏好变化会到达**每张**
+# 图纸，而不只是活动那张。
+func gpApplyCanvasStyle() -> void:
+	var gpSettings: Object = gpResolveAutoload(self, "Settings")
+	if gpSettings != null:
+		gpShowGrid = bool(gpSettings.gpShowGrid)
+		gpCanvasBg = GPCanvasOverlay.gpParseBg(str(gpSettings.gpCanvasBg), Color(0.13, 0.14, 0.18))
+	queue_redraw()
+
+
+# Drop a symbol from the backpack (A11). The payload DOES NOT build a node itself: it names a
+# symbol id and the same gpRequestPlaceNode() intent that a click uses does the rest, so drag and
+# click can never diverge.
+# 接受背包拖来的图元（A11）。载荷**自己不建节点**：它只给出图元 id，真正的放置由单击同一个
+# gpRequestPlaceNode() 意图完成，故拖拽与单击绝不可能分叉。
+func _can_drop_data(_gpAt: Vector2, gpData: Variant) -> bool:
+	return gpData is Dictionary and (gpData as Dictionary).has("symbol_id")
+
+
+func _drop_data(gpAt: Vector2, gpData: Variant) -> void:
+	if not (gpData is Dictionary):
+		return
+	var gpId: String = str((gpData as Dictionary).get("symbol_id", ""))
+	if gpId == "":
+		return
+	gpRequestPlaceNode(gpId, gpWorldFromScreen(gpAt))
+
+
+# Finish the pending pipe/signal line at an open end with its note (B08 follow-up). Thin port so
+# the drawing tool, the context menu and the dialog share one path.
+# 把待完成的管道 / 信号线以开口端结束并带注记（B08 续）。薄端口，使绘制工具、右键菜单与对话框
+# 共用一条路径。
+func gpRequestFinishOpenEnd(gpFromRef: Dictionary, gpToRef: Dictionary, gpKind: String,
+		gpSignalType: String, gpText: String, gpNoteOnFrom: bool,
+		gpOrtho: bool = true, gpExistingNoteUid: String = "") -> String:
+	return gpEditFacade.gpRequestFinishOpenEnd(gpFromRef, gpToRef, gpKind, gpSignalType,
+		gpText, gpNoteOnFrom, gpOrtho, gpExistingNoteUid)
+
+
+# Convert a note into a port connection (B08 follow-up): the note was dropped on a nozzle.
+# 把注记转成端口连接（B08 续）：注记被拖到了管嘴上。
+func gpRequestConvertNoteToPort(gpNoteUid: String, gpPortRef: Dictionary) -> bool:
+	var gpOk: bool = gpEditFacade.gpRequestConvertNoteToPort(gpNoteUid, gpPortRef)
+	if gpOk:
+		gpShapeSel.clear()
+		queue_redraw()
+	return gpOk
+
+
+# Set / clear an open-end note (B08). Thin port so the context menu and (later) the inspector
+# share one path.
+# 设置 / 清除开口端注记（B08）。薄端口，使右键菜单与（后续的）属性面板共用一条路径。
+func gpRequestSetEndNote(gpEdgeId: String, gpIsFrom: bool, gpText: String) -> bool:
+	return gpEditFacade.gpRequestSetEndNote(gpEdgeId, gpIsFrom, gpText)
+
+
+# The note text currently referenced by one end ("" when there is none). Resolution lives here
+# because it needs the graph; the dialog only ever sees text.
+# 某一端当前引用的注记文字（无则空串）。解析放在此处因为需要图；对话框只见文字。
+func gpEndNoteText(gpEdgeId: String, gpIsFrom: bool) -> String:
+	if gpGraph == null:
+		return ""
+	var gpE: GPPIDEdge = gpGraph.gpGetEdge(gpEdgeId)
+	if gpE == null:
+		return ""
+	var gpUid: String = gpE.gpEndNoteUid(gpIsFrom)
+	if gpUid == "":
+		return ""
+	for gpS in gpGraph.gpShapes:
+		if gpS != null and gpS.gpUid == gpUid:
+			return gpS.gpText
+	return ""
+
+
+# Open the open-end note editor for one edge end (B08). The dialog is created lazily and reused:
+# one instance serves every edge, which is also what keeps the last-used preset honest.
+# 为某边某端打开开口端注记编辑器（B08）。对话框懒创建并复用：一个实例服务所有边，
+# 这也是「上次选的预置」不会说谎的原因。
+func gpOpenEndNoteDialog(gpEdgeId: String, gpIsFrom: bool) -> void:
+	if _gpNoteDialog == null:
+		_gpNoteDialog = GPEndNoteDialog.new()
+		_gpNoteDialog.gpBuild()
+		add_child(_gpNoteDialog)
+		_gpNoteDialog.gpNoteConfirmed.connect(_gpOnEndNoteConfirmed)
+	_gpNoteEdgeId = gpEdgeId
+	_gpNoteIsFrom = gpIsFrom
+	_gpNoteDialog.gpOpenFor(gpEndNoteText(gpEdgeId, gpIsFrom))
+
+
+# Apply the dialog's text through the command layer, then repaint.
+# 经命令层应用对话框文字，再重绘。
+# Two modes share one dialog — finishing a pending line (edge + note in ONE step) and editing an
+# existing end (note only). Splitting them would mean two dialogs that must be kept identical.
+# 同一个对话框服务两种模式 —— 结束待完成连线（边 + 注记**一步**）与编辑既有端（只改注记）。
+# 拆开就意味着两个必须一直保持一致的对话框。
+func _gpOnEndNoteConfirmed(gpText: String) -> void:
+	if _gpNotePending:
+		_gpNotePending = false
+		# Anchor drag (port → empty space) is the gesture most users actually perform; finish it
+		# with the note instead of the tool path.
+		# 锚点拖拽（端口 → 空白）才是多数用户实际做的手势；据此带注记收尾，而不是走工具路径。
+		if gpPortOps != null and gpPortOps.gpIsDragging():
+			gpPortOps.gpFinishDragAsOpenEnd(gpText)
+			queue_redraw()
+			return
+		# Duck-typed for the same reason as the context menu's helper: a static GPPipeTool
+		# reference here would be a class cycle (pipe_tool depends on the canvas).
+		# 鸭子类型，理由同右键菜单里的助手：在此静态引用 GPPipeTool 会形成类循环
+		#（pipe_tool 依赖画布）。
+		var gpTool: Object = gpActiveTool()
+		if gpTool != null and gpTool.has_method("gpFinishOpenEnd"):
+			# No selection afterwards: selecting the fresh edge drew grip handles, which the user
+			# read as a stray orange marker at the open end.
+			# 之后**不选中**新边：选中会画出手柄，用户把它当成了开口端处多余的橙色标记。
+			gpTool.gpFinishOpenEnd(_gpNotePendingWorld, gpText)
+		queue_redraw()
+		return
+	if _gpNoteEdgeId == "":
+		return
+	gpRequestSetEndNote(_gpNoteEdgeId, _gpNoteIsFrom, gpText)
+	queue_redraw()
+
+
+# Open the end-note editor for the line currently being drawn (B08 follow-up).
+# 为正在绘制的连线打开末端注记编辑器（B08 续）。
+# The draft is NOT consumed here: cancelling the dialog leaves the line exactly as it was, so the
+# user can keep drawing or press ESC to drop it deliberately.
+# 此处**不消费**草稿：取消对话框会把线原样留着，用户可继续画，或按 ESC 有意丢弃。
+func gpOpenPendingEndNoteDialog(gpWorld: Vector2) -> void:
+	if _gpNoteDialog == null:
+		_gpNoteDialog = GPEndNoteDialog.new()
+		_gpNoteDialog.gpBuild()
+		add_child(_gpNoteDialog)
+		_gpNoteDialog.gpNoteConfirmed.connect(_gpOnEndNoteConfirmed)
+	_gpNotePending = true
+	_gpNotePendingWorld = gpWorld
+	_gpNoteEdgeId = ""
+	_gpNoteIsFrom = false
+	_gpNoteDialog.gpOpenFor("")
+
+
+# Align / distribute and keyboard nudge (A7 / A8). Both end in the SAME position command, so a
+# layout fix and a one-millimetre nudge are the same kind of undo step.
+# 对齐 / 分布与键盘微调（A7 / A8）。两者最终都走**同一条**位置命令，故「排一次版」与「挪一毫米」
+# 是同一种撤销步。
+func gpRequestAlign(gpMode: int) -> bool:
+	return gpEditFacade.gpRequestAlign(gpMode)
+
+
+func gpRequestNudgeSelection(gpDelta: Vector2) -> bool:
+	return gpEditFacade.gpRequestNudgeSelection(gpDelta)
+
+
+# Copy / paste through the app-wide clipboard (A6). Two ports so the shortcut delegate and any
+# future menu entry share one path.
+# 经应用级剪贴板复制 / 粘贴（A6）。两个端口，使快捷键委托与将来任何菜单项共用一条路径。
+func gpRequestCopySelected() -> int:
+	return gpEditFacade.gpRequestCopySelected()
+
+
+func gpRequestPasteClipboard() -> bool:
+	return gpEditFacade.gpRequestPasteClipboard()
+
+
+# Rotate / mirror the selection (A4). Two thin ports so the shortcut delegate and the context
+# menu share one entry instead of each calling the facade.
+# 旋转 / 镜像当前选择（A4）。两个薄端口，使快捷键委托与右键菜单共用一个入口，而不是各自去调门面。
+func gpRequestRotateSelected(gpDeltaDeg: float) -> bool:
+	return gpEditFacade.gpRequestRotateSelected(gpDeltaDeg)
+
+
+func gpRequestMirrorSelected() -> bool:
+	return gpEditFacade.gpRequestMirrorSelected()
+
+
+# Edit one annotation shape's fields (A2). Public port so the inspector never reaches into
+# the facade or the graph itself.
+# 改一个注释图形的字段（A2）。公开端口，使属性面板无需自己伸手进门面或图里。
+func gpRequestSetShapeProps(gpIdx: int, gpValues: Dictionary) -> bool:
+	return gpEditFacade.gpRequestSetShapeProps(gpIdx, gpValues)
 
 
 func gpRequestDeleteSelected() -> void:
@@ -1163,6 +1585,33 @@ func gpRequestSetFrameMargins(gpMargins: Array) -> bool:
 # 「调整图框」就是谎报），并把两组无关的键绑到同一个入口，使将来加第三组时必须把第一个撑开。
 func gpRequestSetTitleBlockPlacement(gpAnchor: int, gpOffset: Vector2) -> bool:
 	return gpEditFacade.gpRequestSetTitleBlockPlacement(gpAnchor, gpOffset)
+
+
+# Apply one or more SHEET-level fields as ONE undo step (P0-4): title block, paper size, frame
+# switch, drawing language, underlay. The dialog uses this for every write, so its edits reach
+# the same dirty/undo/repaint path as margins and docking.
+# 把一处或多处**图纸级**字段作为**一个**撤销步（P0-4）：图签、图幅、图框开关、图面语言、底图。
+# 对话框的每次写入都经它，故其编辑与边距/停靠走同一条标脏/撤销/重绘路径。
+func gpRequestSetSheetFields(gpValues: Dictionary, gpLabel: String = "调整图纸") -> bool:
+	return gpEditFacade.gpRequestSetSheetFields(gpValues, gpLabel)
+
+
+# Convenience: commit the whole title block as one undo step.
+# 便利入口：把整份图签提交为一个撤销步。
+func gpRequestSetTitleBlock(gpTitleBlock: Dictionary) -> bool:
+	return gpEditFacade.gpRequestSetTitleBlock(gpTitleBlock)
+
+
+# Convenience: change the paper size (margins re-derived when they were the old default).
+# 便利入口：改图幅（边距仍是旧默认时按新纸幅重推）。
+func gpRequestSetSheetSize(gpWidth: float, gpHeight: float) -> bool:
+	return gpEditFacade.gpRequestSetSheetSize(gpWidth, gpHeight)
+
+
+# Convenience: one independent sheet field (frame on/off, label mode, underlay path/alpha).
+# 便利入口：单个独立图纸字段（图框开关 / 图面语言 / 底图路径或透明度）。
+func gpRequestSetSheetField(gpKey: String, gpValue: Variant, gpLabel: String = "调整图纸") -> bool:
+	return gpEditFacade.gpRequestSetSheetField(gpKey, gpValue, gpLabel)
 
 
 # Move the WHOLE SHEET (paper + frame + every graphic) as ONE undo step (Rev.3 stage 0d).

@@ -135,6 +135,12 @@ static func gpShapeHit(gpPt: Vector2, gpS: GPShape, gpTol: float) -> bool:
 		GPShape.GPKind.GP_RECT:
 			if gpS.gpPoints.size() >= 2:
 				return Rect2(gpS.gpPoints[0], (gpS.gpPoints[1] - gpS.gpPoints[0]).abs()).grow(gpTol).has_point(gpPt)
+		GPShape.GPKind.GP_TEXT:
+			# Text is a BLOCK, not a stroke: the whole extent is grabbable, because a user aiming
+			# at a two-character note lands between the glyph strokes far more often than on them.
+			# 文字是**块**不是线：整个外框都可抓取 —— 用户瞄一段两字的注记时，落在字缝里的概率
+			# 远高于正好压在笔画上。
+			return gpS.gpBBox().grow(gpTol).has_point(gpPt)
 		_:
  # Sample first: a curved polyline's raw vertices are only its control nodes, so the
  # distance test must run against the flattened curve, not the vertex polygon.

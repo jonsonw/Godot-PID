@@ -36,6 +36,13 @@ var gpPos: Vector2 = Vector2(0.5, 0.5)
 # 向外法线方向（可选）；默认零向量（无偏好方向）。
 var gpDir: Vector2 = Vector2.ZERO
 
+# Whether an empty port is a DEFECT (DRC rule 2). Default false, because most nozzles are
+# legitimately spare — marking a port required is a deliberate content decision on the symbol,
+# not a guess the checker may make.
+# 空端口是否算缺陷（DRC 规则 2）。默认 false —— 多数管口本就允许空置；把端口标为必需是图元上的
+# 刻意内容决定，不是检查器可以代猜的。
+var gpRequired: bool = false
+
 # Port purpose. Legacy packs and legacy archives carry no "type" key and therefore default
 # to NOZZLE, which reproduces the pre-P1 behaviour exactly.
 # 端口用途。旧图元包与旧存档无 "type" 键，默认 NOZZLE，与 P1 之前的行为完全一致。
@@ -58,12 +65,17 @@ static func gpMake(gpNameIn: String, gpPosIn: Vector2, gpDirIn: Vector2 = Vector
 # Serialize to a dictionary (JSON-friendly), mirroring the legacy port entry.
 # 序列化为字典（JSON 友好），与历史端口条目同构。
 func gpToDict() -> Dictionary:
-	return {
+	var gpD: Dictionary = {
 		"name": gpName,
 		"pos": [gpPos.x, gpPos.y],
 		"dir": [gpDir.x, gpDir.y],
 		"type": gpType,
 	}
+	# Emitted only when true, so every existing pack keeps its previous byte shape.
+	# 仅在为 true 时输出，使既有包保持原有字节形态。
+	if gpRequired:
+		gpD["required"] = true
+	return gpD
 
 
 # Restore from a dictionary (inverse of gpToDict()). Accepts legacy {"name","pos","dir"}.
@@ -75,3 +87,4 @@ func gpFromDict(gpD: Dictionary) -> void:
 	var gpRawDir: Array = gpD.get("dir", [0.0, 0.0])
 	gpDir = Vector2(float(gpRawDir[0]), float(gpRawDir[1]))
 	gpType = str(gpD.get("type", GP_NOZZLE))
+	gpRequired = bool(gpD.get("required", false))

@@ -104,6 +104,10 @@ func _init(gpCanvas: GPCanvas2D) -> void:
 
 # ============================ 状态查询 ============================
 
+# Whether the current gesture has moved far enough to be a LINE rather than a CLICK.
+# 当前手势是否已移动足够远、构成**画线**而不是**单击**。
+var _gpMoved: bool = false
+
 # True while an anchor-to-anchor drag is in flight.
 # 端点对端点拖拽进行中返回真。
 func gpIsDragging() -> bool:
@@ -127,6 +131,10 @@ func gpTryStartDrag(gpWorld: Vector2) -> bool:
 	_gpCursor = gpWorld
 	_gpPressWorld = gpWorld
 	_gpValid = false
+	# A fresh gesture starts "not moved": a pure click must keep toggling the pick list, while a
+	# real drag that ends in empty space is an OPEN END (see gpFinishDrag).
+	# 新手势从「未移动」开始：纯单击仍切换拾取列表，而真正拖到空白的拖拽是**开口端**（见 gpFinishDrag）。
+	_gpMoved = false
 	return true
 
 
@@ -148,6 +156,12 @@ func gpUpdateDrag(gpWorld: Vector2) -> void:
 	if _gpFrom.is_empty():
 		return
 	_gpCursor = gpWorld
+	# Movement threshold: 3 world units ≈ a few pixels. Below it the gesture is still a CLICK
+	# (picking two anchors for auto-connect), above it the user meant to draw a line.
+	# 移动阈值：3 世界单位约等于几个像素。低于它是**单击**（为自动连线拾取两个锚点），
+	# 高于它说明用户是在画线。
+	if gpWorld.distance_to(_gpPressWorld) > 3.0:
+		_gpMoved = true
 	# During a drag EVERY symbol's anchors are candidates: requiring the target to be selected
 	# first would make the gesture useless.
 	# 拖拽期间「每个」图元的锚点都是候选：若要求目标先被选中，该手势就没用了。
@@ -183,11 +197,73 @@ func gpFinishDrag() -> bool:
 		gpCv.gpPortPick.clear()
 		gpCv.queue_redraw()
 		return true
+	# Dropped in EMPTY SPACE after a real drag -> finish the line as an OPEN END. It used to toggle
+	# the pick list instead, which made the line VANISH on release — the gesture looked broken.
+	# 真正拖拽后在**空白处**松开 → 以**开口端**结束这条线。此前会改成「切换拾取」，导致线在松手时
+	# 消失 —— 手势看起来是坏的。
+	if _gpMoved:
+		var gpKindOpen: String = gpKindOfSource(str(gpFrom.get("type", "")))
+		var gpTo: Dictionary = {"node_id": "", "port_id": "", "point": [_gpCursor.x, _gpCursor.y]}
+		var gpId2: String = gpCv.gpRequestConnectEdge(_gpRefOf(gpFrom), gpTo, gpKindOpen)
+		if gpId2 == "":
+			gpCv.gpReportRefusal(gpCv.gpActions.gpLastRefusal)
+			return false
+		# NO selection and NO lingering hover ring: selecting the new edge drew grip handles, and the
+		# hovered nozzle kept its highlight — the user read both as an unwanted "orange circle" at
+		# the open end. Finishing a line should leave a clean drawing.
+		# **不**选中新边、也清掉悬停环：选中会画出手柄、悬停的管嘴还会保留高亮 ——
+		# 用户把这两者都当成了开口端处不该有的「橙色圈」。画完线应当留一张干净的图。
+		gpCv.gpSetEdgeSelection([])
+		gpCv.gpHoverPort = {}
+		gpCv.queue_redraw()
+		# REVERSE direction of "drag a note onto a port": dragging a port OUT to empty space
+		# produces the note text. Opening the editor here is what turns "a line to nowhere" into
+		# "a named open end"; cancelling leaves the line as an unnamed open end (still an error the
+		# DRC reports, which is honest).
+		# 「把注记拖到端口」的**反向**：从端口拖到空白处会产出注记文字。在此打开编辑器，正是把
+		# 「一条通向虚无的线」变成「一个已命名的开口端」的那一步；取消则留下未命名的开口端
+		#（DRC 仍会报它 —— 这是诚实的）。
+		gpCv.gpOpenEndNoteDialog(gpId2, false)
+		return true
 	# Dropped back on itself (a click, not a drag) -> toggle the pick.
 	# 落回自身（是单击而非拖拽）-> 切换拾取状态。
 	gpTogglePick(gpFrom)
 	gpCv.queue_redraw()
 	return false
+
+
+# Finish the drag as an OPEN END carrying a note: ONE undo step (edge + note). Used by the dwell
+# prompt, which is how the user gets from "I stopped here" to "this end is TO ATM".
+# 以带注记的**开口端**结束本次拖拽：一步撤销（边 + 注记）。供悬停提示使用 ——
+# 用户从「我停在这儿」走到「这个端头是 TO ATM」正是经它。
+# gpText empty + gpExistingUid set means "share that already-annotated end point".
+# gpText 为空且 gpExistingUid 非空表示「共用那个已注明的开口端」。
+func gpFinishDragAsOpenEnd(gpText: String, gpExistingUid: String = "") -> String:
+	if _gpFrom.is_empty():
+		return ""
+	var gpFrom: Dictionary = _gpFrom
+	var gpKindOpen: String = gpKindOfSource(str(gpFrom.get("type", "")))
+	var gpSignalType: String = "ELECTRIC" if gpKindOpen == GPPIDEdge.GP_SIGNAL else ""
+	var gpTo: Dictionary = {"node_id": "", "port_id": "", "point": [_gpCursor.x, _gpCursor.y]}
+	var gpId: String = gpCv.gpRequestFinishOpenEnd(_gpRefOf(gpFrom), gpTo, gpKindOpen,
+		gpSignalType, gpText, false, true, gpExistingUid)
+	_gpReset()
+	if gpId != "":
+		# Leave the drawing clean (see the note on the empty-space release above).
+		# 保持画面干净（见上方「空白处松手」处的说明）。
+		gpCv.gpSetEdgeSelection([])
+		gpCv.gpHoverPort = {}
+		gpCv.queue_redraw()
+	return gpId
+
+
+# Line kind implied by the anchor's PORT TYPE: signal anchors make signal lines, everything else
+# makes a process pipe. One rule, used by both finish paths.
+# 由锚点的**端口类型**决定线类型：信号类锚点出信号线，其余出工艺管道。一条规则，两条收尾路径共用。
+func gpKindOfSource(gpPortType: String) -> String:
+	if gpPortType == GPPort.GP_SIGNAL or gpPortType == GPPort.GP_ACTUATOR:
+		return GPPIDEdge.GP_SIGNAL
+	return GPPIDEdge.GP_PROCESS
 
 
 # Abandon the drag (ESC path).
@@ -231,13 +307,21 @@ func gpDrawPorts(gpTarget: CanvasItem) -> void:
  # Anchors are exposed by SELECTED symbols only (plus the picked pair, so an auto-connect
  # selection stays visible even after the symbol is deselected).
  # 锚点仅由「已选中」的图元暴露（外加已拾取的那对，使自动连线的选择在取消选中图元后依然可见）。
-		if gpCv.gpSelection.is_empty() and gpCv.gpPortPick.is_empty():
+		# A hovered port must be drawn even when nothing is selected: during a note drag the selection
+		# is the SHAPE, not a node — without this branch there would be no anchor to highlight.
+		# 即使没有选中节点，悬停的端口也必须画出来：拖注记时选中的是**图形**而非节点 ——
+		# 缺这一分支就没有可高亮的锚点。
+		if gpCv.gpSelection.is_empty() and gpCv.gpPortPick.is_empty() \
+				and gpCv.gpHoverPort.is_empty():
 			return
 		gpNodeIds = gpCv.gpSelection.duplicate()
 		for gpP in gpCv.gpPortPick:
 			var gpNid: String = str(gpP.get("node_id", ""))
 			if gpNid != "" and not gpNodeIds.has(gpNid):
 				gpNodeIds.append(gpNid)
+		var gpHoverNid: String = str(gpCv.gpHoverPort.get("node_id", ""))
+		if gpHoverNid != "" and not gpNodeIds.has(gpHoverNid):
+			gpNodeIds.append(gpHoverNid)
 	var gpAnchors: Array[Dictionary] = GPPortAnchor.gpAnchors(gpCv.gpGraph,
 		gpCv.gpDefLookupCallable(), gpNodeIds)
 	for gpA in gpAnchors:
@@ -263,6 +347,11 @@ func _gpRefOf(gpA: Dictionary) -> Dictionary:
 # Visual state of one anchor in the current interaction context.
 # 当前交互上下文中某个锚点的视觉状态。
 func _gpStateOf(gpA: Dictionary, gpDragging: bool) -> int:
+	# Not dragging, but the cursor (or a dragged note) is over this port → show the hover ring.
+	# 未拖拽，但光标（或被拖动的注记）正压在这个端口上 → 显示悬停环。
+	if not gpDragging and not gpCv.gpHoverPort.is_empty() \
+			and GPPortAnchor.gpSamePort(gpA, gpCv.gpHoverPort):
+		return GP_STATE_HOVER
 	if gpDragging:
 		if GPPortAnchor.gpSamePort(gpA, _gpFrom):
 			return GP_STATE_SOURCE

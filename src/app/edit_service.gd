@@ -217,6 +217,50 @@ func gpTranslateSheet(gpSheet: GPSheet, gpDelta: Vector2) -> bool:
 	return gpStack.gpDo(gpCmd, gpCtx)
 
 
+# Apply one or more SHEET-level fields as ONE undo step (P0-4). The dialog's title-block,
+# paper-size, frame-switch, drawing-language and underlay writes all land here, so they share
+# the margin/docking command's dirty + undo + repaint path instead of writing the model
+# directly (which the close guard could not see).
+# 把一处或多处**图纸级**字段作为**一个**撤销步（P0-4）。对话框的图签、图幅、图框开关、
+# 图面语言与底图写入都到这里，与边距/停靠共用同一条「标脏 + 撤销 + 重绘」路径，而不是直接
+# 写模型（关闭护栏看不到的那种写）。
+# [param gpSheet] the sheet to edit; null refuses / 待编辑的图纸；为 null 时拒绝
+# [param gpValues] field key -> new value, keys from GPMutateSheetCommand.GP_FIELDS
+#                  字段键 -> 新值，键取自 GPMutateSheetCommand.GP_FIELDS
+# [param gpLabel] undo-menu label / 撤销菜单标签
+func gpSetSheetFields(gpSheet: GPSheet, gpValues: Dictionary, gpLabel: String = "调整图纸") -> bool:
+	if gpSheet == null or gpValues.is_empty():
+		return false
+	var gpCmd: GPMutateSheetCommand = GPMutateSheetCommand.new(gpSheet, gpValues, gpLabel)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Set the whole title block as ONE undo step. The dialog edits field-by-field for live preview,
+# then commits the resulting dictionary here on focus loss / close, so the gesture is one step.
+# 把整份图签作为一个撤销步。对话框逐字段编辑以实时预览，在失焦 / 关闭时把结果字典提交到这里，
+# 使整个手势只是一个撤销步。
+func gpSetTitleBlock(gpSheet: GPSheet, gpTitleBlock: Dictionary) -> bool:
+	return gpSetSheetFields(gpSheet, {GPMutateSheetCommand.GP_FIELD_TITLE_BLOCK: gpTitleBlock},
+		"编辑图签")
+
+
+# Change the paper size (and, when the margins were still the old size's default, re-derive
+# them for the new paper) as ONE undo step.
+# 改图幅（若边距仍是旧纸幅的默认值，则按新纸幅重推）作为**一个**撤销步。
+func gpSetSheetSize(gpSheet: GPSheet, gpWidth: float, gpHeight: float) -> bool:
+	return gpSetSheetFields(gpSheet, {
+		GPMutateSheetCommand.GP_FIELD_WIDTH: gpWidth,
+		GPMutateSheetCommand.GP_FIELD_HEIGHT: gpHeight,
+	}, "更改图幅")
+
+
+# Set one sheet-level field (frame on/off, label mode, underlay path/alpha) as ONE undo step.
+# 设置一个图纸级字段（图框开关 / 图面语言 / 底图路径或透明度）作为**一个**撤销步。
+func gpSetSheetField(gpSheet: GPSheet, gpKey: String, gpValue: Variant,
+		gpLabel: String = "调整图纸") -> bool:
+	return gpSetSheetFields(gpSheet, {gpKey: gpValue}, gpLabel)
+
+
 # Move one edge's line number off its automatic placement . One undo step per drag.
 # 把一条边的管线号移离其自动落位处。每次拖拽一个撤销步。
 # A zero offset is legal and means "back to the automatic placement" — the command's model
@@ -646,8 +690,168 @@ func gpAddShape(gpShape: GPShape) -> int:
 	return gpCtx.gpGraph.gpShapes.find(gpShape)
 
 
+# Copy a mixed selection into the app-wide clipboard as VALUE objects (A6). Returns how many
+# objects were captured (0 when nothing was selected), so the shell can report "copied N".
+# 把混合选择集作为**值对象**复制到应用级剪贴板（A6）。返回捕获的对象数（空选择为 0），
+# 使外壳能报告「已复制 N 项」。
+#
+# Only edges with BOTH ends inside the copied node set are captured: an edge to something the user
+# did not copy would be pasted as a line whose other end does not exist. Mounted subtrees come
+# along, because a vessel without its nozzles is not the thing the user pointed at.
+# 只捕获**两端都在**被复制节点集内的连线：连到用户未复制对象的边，粘过去就是一条另一端不存在的线。
+# 挂载子树一并带上，因为一台没有管口的设备并不是用户指的那件东西。
+func gpCopySelection(gpNodeIds: Array[String], gpShapeIdxs: Array[int]) -> int:
+	if gpCtx.gpGraph == null:
+		return 0
+	var gpIds: Array[String] = []
+	for gpId in gpNodeIds:
+		for gpUid in GPMountResolver.gpSubtree(gpCtx.gpGraph, gpId):
+			if not (gpUid in gpIds):
+				gpIds.append(gpUid)
+	var gpNodes: Array = []
+	for gpId in gpIds:
+		var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(gpId)
+		if gpN != null:
+			gpNodes.append(gpN.gpToDict())
+	var gpSeen: Dictionary = {}
+	for gpId in gpIds:
+		gpSeen[gpId] = true
+	var gpEdges: Array = []
+	for gpE in gpCtx.gpGraph.gpEdges:
+		if gpE == null:
+			continue
+		var gpFrom: String = str(gpE.gpFromRef.get("node_id", ""))
+		var gpTo: String = str(gpE.gpToRef.get("node_id", ""))
+		if gpFrom != "" and gpTo != "" and gpSeen.has(gpFrom) and gpSeen.has(gpTo):
+			gpEdges.append(gpE.gpToDict())
+	var gpShapes: Array = []
+	for gpIdx in gpShapeIdxs:
+		if gpIdx >= 0 and gpIdx < gpCtx.gpGraph.gpShapes.size():
+			gpShapes.append(gpCtx.gpGraph.gpShapes[gpIdx].gpToDict())
+	GPClipboard.gpSet(gpNodes, gpEdges, gpShapes)
+	return gpNodes.size() + gpEdges.size() + gpShapes.size()
+
+
+# Paste the clipboard into THIS sheet as one undoable step (A6). Returns the new node ids so the
+# caller can select the paste; empty when nothing could be created.
+# 把剪贴板粘贴到**当前**图纸，作为一步可撤销的编辑（A6）。返回新节点 id 供调用方选中；
+# 什么都建不出来时为空。
+func gpPasteClipboard() -> Array[String]:
+	if gpCtx.gpGraph == null or not GPClipboard.gpHas():
+		return []
+	var gpCmd: GPPasteClipboardCommand = GPPasteClipboardCommand.new(GPClipboard.gpNodes(),
+		GPClipboard.gpEdges(), GPClipboard.gpShapes())
+	if not gpStack.gpDo(gpCmd, gpCtx):
+		return []
+	return gpCmd.gpNewIds.duplicate()
+
+
+# Finish a line at an open end WITH its note in one step (B08 follow-up). Returns the new edge id
+# or "" when the command refused.
+# 把一条线终止于开口端并带注记，一步完成（B08 续）。返回新边 id；命令被拒时为空。
+func gpFinishOpenEnd(gpFromRef: Dictionary, gpToRef: Dictionary, gpKind: String,
+		gpSignalType: String, gpText: String, gpNoteOnFrom: bool,
+		gpOrtho: bool = true, gpExistingNoteUid: String = "") -> String:
+	if gpCtx.gpGraph == null:
+		return ""
+	var gpCmd: GPFinishOpenEndCommand = GPFinishOpenEndCommand.new(gpFromRef, gpToRef, gpKind,
+		gpSignalType, gpText, gpNoteOnFrom, gpOrtho, gpExistingNoteUid)
+	if not gpStack.gpDo(gpCmd, gpCtx):
+		return ""
+	return gpCmd.gpCreatedId
+
+
+# Convert an annotated open end into a real connection (B08 follow-up): the note is dropped onto a
+# port, so every line that ended at it now ends at that port and the note disappears — one step.
+# 把已注明的开口端转成真实连接（B08 续）：注记被拖到端口上，于是原本终止于它的每条线都接到该端口，
+# 注记消失 —— 一步完成。
+func gpConvertNoteToPort(gpNoteUid: String, gpPortRef: Dictionary) -> bool:
+	if gpCtx.gpGraph == null or gpNoteUid == "" or gpPortRef.is_empty():
+		return false
+	var gpCmd: GPConvertNoteToPortCommand = GPConvertNoteToPortCommand.new(gpCtx.gpGraph,
+		gpNoteUid, gpPortRef)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Set / clear the OPEN-END NOTE of one edge end, creating the text annotation on first use (B08).
+# 设置 / 清除某边某端的**开口端注记**，首次使用时创建文字注释（B08）。
+func gpSetEndNote(gpEdgeId: String, gpIsFrom: bool, gpText: String) -> bool:
+	if gpCtx.gpGraph == null or gpEdgeId == "":
+		return false
+	var gpCmd: GPSetEndNoteCommand = GPSetEndNoteCommand.new(gpCtx.gpGraph, gpEdgeId, gpIsFrom, gpText)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Rotate every given node by a delta (degrees), as ONE undoable step. Returns false on an empty
+# selection or a zero delta, so a stray R press records nothing.
+# 把每个给定节点旋转一个角度增量（度），作为**一步**可撤销编辑。空选择或零增量返回 false，
+# 使误按的 R 不产生撤销步。
+#
+# The delta is folded into the CURRENT angle and the RESULT is what the command stores (see the
+# command's header): undo/redo replays targets, never arithmetic.
+# 增量先与**当前**角相加，命令存的是**结果**（见命令文件头）：撤销/重做重放目标值，绝不重算算术。
+func gpRotateNodes(gpNodeIds: Array[String], gpDeltaDeg: float) -> bool:
+	if gpCtx.gpGraph == null or gpNodeIds.is_empty() or is_zero_approx(gpDeltaDeg):
+		return false
+	var gpRots: Array[float] = []
+	var gpFlips: Array[bool] = []
+	for gpId in gpNodeIds:
+		var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(gpId)
+		if gpN == null:
+			continue
+		gpRots.append(GPSetNodeOrientCommand.gpNormalizeDeg(gpN.gpRotationDeg + gpDeltaDeg))
+		gpFlips.append(gpN.gpFlipped)
+	if gpRots.is_empty():
+		return false
+	var gpCmd: GPSetNodeOrientCommand = GPSetNodeOrientCommand.new(gpNodeIds, gpRots, gpFlips)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Mirror every given node (toggle the horizontal flip), as ONE undoable step.
+# 把每个给定节点水平镜像（翻转开关），作为**一步**可撤销编辑。
+# Toggle semantics, not "set to true": pressing M twice returns the symbol to where it was, and
+# the second press is still a real edit (so it is undoable like any other).
+# 采用**开关**语义而非「置为 true」：连按两次 M 回到原样，且第二次仍是真实编辑（因此同样可撤销）。
+func gpMirrorNodes(gpNodeIds: Array[String]) -> bool:
+	if gpCtx.gpGraph == null or gpNodeIds.is_empty():
+		return false
+	var gpRots: Array[float] = []
+	var gpFlips: Array[bool] = []
+	for gpId in gpNodeIds:
+		var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(gpId)
+		if gpN == null:
+			continue
+		gpRots.append(gpN.gpRotationDeg)
+		gpFlips.append(not gpN.gpFlipped)
+	if gpRots.is_empty():
+		return false
+	var gpCmd: GPSetNodeOrientCommand = GPSetNodeOrientCommand.new(gpNodeIds, gpRots, gpFlips)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Edit the editable fields of one annotation shape (name / layer / props / colour) as ONE
+# undoable step. Returns false when the index is stale or nothing changed, so a no-op edit
+# records no undo step.
+# 把一个注释图形的可编辑字段（名称 / 图层 / 属性 / 墨色）作为**一步**可撤销编辑。下标失效或
+# 无变化时返回 false，使空编辑不产生撤销步。
+func gpSetShapeProps(gpIdx: int, gpValues: Dictionary) -> bool:
+	if gpCtx.gpGraph == null or gpValues.is_empty():
+		return false
+	var gpCmd: GPSetShapePropsCommand = GPSetShapePropsCommand.new(gpIdx, gpValues)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
 # ============================ history ============================
 # ============================ 历史 ============================
+
+# Execute a caller-supplied command through this document's undo stack. Used by the
+# classified-list import to group all changes of one sheet into ONE undo step.
+# 通过本文档的撤销栈执行调用方命令。分类清单导入用它把一张图纸的全部变更压成一条撤销步。
+func gpExecuteCommand(gpCmd: GPCommand) -> bool:
+	if gpCmd == null:
+		return false
+	return gpStack.gpDo(gpCmd, gpCtx)
+
 
 # Undo the last command. Returns false when there is nothing to undo.
 # 撤销最近一条命令。无可撤销时返回 false。

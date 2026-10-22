@@ -58,9 +58,19 @@ var gpTbAnchorOption: OptionButton = null
 # 字段键 -> { "zh": 中文输入框, "en": 英文输入框 }。
 var gpEdits: Dictionary = {}
 
+# P0-4 three-beat baselines. The dialog edits the model live (so the frame previews as you
+# type), but commits ONE command on focus loss / close; these snapshots are the "before" that
+# the command must see. They are updated after every successful commit.
+# P0-4 三拍基线。对话框实时改模型（边打字边预览），但只在失焦 / 关闭时提交**一条**命令；
+# 这些快照就是命令必须看到的「before」，每次成功提交后更新。
+var _gpTitleBaseline: Dictionary = {}
+var _gpBgPathBaseline: String = ""
+var _gpBgAlphaBaseline: float = 0.35
+
 # Tracing-underlay controls (v0.1 Phase 5). / 追踪底图控件（v0.1 Phase 5）。
 var gpFileDialog: FileDialog = null
 var gpBgPathEdit: LineEdit = null
+var gpBgAlphaSlider: HSlider = null
 
 
 # Bind the sheet and the canvas to repaint; call before showing.
@@ -82,7 +92,9 @@ func gpPopupOverHost() -> void:
 
 func _ready() -> void:
 	title = I18n.gpTr("frame.title")
-	close_requested.connect(queue_free)
+	# P0-4: closing must COMMIT the pending live preview first, not just free the dialog.
+	# P0-4：关闭必须先**提交**待定的实时预览，而不是直接释放对话框。
+	close_requested.connect(_gpOnClose)
 	var gpHost: Window = null
 	var gpParent: Node = get_parent()
 	if gpParent != null:
@@ -106,6 +118,9 @@ func _gpBuild() -> void:
 	gpRoot.add_child(gpVBox)
 	if gpSheet == null:
 		return
+	_gpTitleBaseline = gpSheet.gpTitleBlock.duplicate(true)
+	_gpBgPathBaseline = gpSheet.gpBackgroundPath
+	_gpBgAlphaBaseline = gpSheet.gpBackgroundAlpha
 	_gpBuildOptions(gpVBox)
 	_gpBuildMargins(gpVBox)
 	_gpBuildDocking(gpVBox)
@@ -122,7 +137,7 @@ func _gpBuild() -> void:
 	_gpBuildFieldRows(gpGrid)
 	var gpOk: Button = Button.new()
 	gpOk.text = I18n.gpTr("dialog.ok")
-	gpOk.pressed.connect(queue_free)
+	gpOk.pressed.connect(_gpOnOk)
 	gpVBox.add_child(gpOk)
 
 
@@ -320,6 +335,8 @@ func _gpBuildBackground(gpVBox: VBoxContainer) -> void:
 	gpBgPathEdit.placeholder_text = I18n.gpTr("frame.bg.path")
 	gpBgPathEdit.text = gpSheet.gpBackgroundPath
 	gpBgPathEdit.text_changed.connect(func(gpT: String) -> void: _gpOnBgPath(gpT))
+	gpBgPathEdit.focus_exited.connect(_gpCommitBackgroundPath)
+	gpBgPathEdit.text_submitted.connect(func(_gpT: String) -> void: _gpCommitBackgroundPath())
 	gpPathRow.add_child(gpBgPathEdit)
 	var gpBrowse: Button = Button.new()
 	gpBrowse.text = I18n.gpTr("frame.bg.browse")
@@ -345,6 +362,11 @@ func _gpBuildBackground(gpVBox: VBoxContainer) -> void:
 	gpAlpha.value = gpSheet.gpBackgroundAlpha
 	gpAlpha.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	gpAlpha.value_changed.connect(func(gpV: float) -> void: _gpOnBgAlpha(gpV))
+	# Commit on release, not on every tick: the drag previews live (like a margin drag), and
+	# one drag becomes one undo step.
+	# 释放时提交、而不是每格都提交：拖拽实时预览（与边距拖拽同构），一次拖拽 = 一个撤销步。
+	gpAlpha.drag_ended.connect(func(_gpChanged: bool) -> void: _gpCommitBackgroundAlpha())
+	gpBgAlphaSlider = gpAlpha
 	gpAlphaRow.add_child(gpAlpha)
 	gpVBox.add_child(gpAlphaRow)
 
@@ -379,12 +401,16 @@ func _gpBuildFieldRows(gpGrid: GridContainer) -> void:
 		gpZh.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		gpZh.text = _gpValueOf(gpKey, "zh")
 		gpZh.text_changed.connect(func(gpT: String) -> void: _gpOnValueChanged(gpKey, "zh", gpT))
+		gpZh.focus_exited.connect(_gpCommitTitleBlock)
+		gpZh.text_submitted.connect(func(_gpT: String) -> void: _gpCommitTitleBlock())
 		gpGrid.add_child(gpZh)
 		var gpEn: LineEdit = LineEdit.new()
 		gpEn.placeholder_text = I18n.gpTr("frame.col_en")
 		gpEn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		gpEn.text = _gpValueOf(gpKey, "en")
 		gpEn.text_changed.connect(func(gpT: String) -> void: _gpOnValueChanged(gpKey, "en", gpT))
+		gpEn.focus_exited.connect(_gpCommitTitleBlock)
+		gpEn.text_submitted.connect(func(_gpT: String) -> void: _gpCommitTitleBlock())
 		gpGrid.add_child(gpEn)
 		gpEdits[gpKey] = {"zh": gpZh, "en": gpEn}
 
@@ -415,28 +441,141 @@ func _gpOnValueChanged(gpKey: String, gpLang: String, gpText: String) -> void:
 
 
 func _gpOnFrameToggled(gpOn: bool) -> void:
-	gpSheet.gpFrameOn = gpOn
+	# P0-4: a sheet field write is an undoable edit, not a direct field poke. The command
+	# emits gpSheetChanged -> sheet layer -> canvas -> dirty + repaint.
+	# P0-4：图纸字段写入是可撤销编辑，不是直接改字段。命令发 gpSheetChanged -> 图纸层 ->
+	# 画布 -> 标脏 + 重绘。
+	if gpTarget != null:
+		gpTarget.gpRequestSetSheetField(GPMutateSheetCommand.GP_FIELD_FRAME_ON, gpOn,
+			"显示/隐藏图框")
+	else:
+		gpSheet.gpFrameOn = gpOn
 	_gpRepaint()
 
 
 func _gpOnSizeSelected(_gpIdx: int) -> void:
 	var gpK: String = str(gpSizeOption.get_selected_metadata())
 	var gpV: Vector2 = GPSheet.GP_SHEET_PRESETS.get(gpK, GPSheet.GP_SHEET_PRESETS["A3"])
-	gpSheet.gpWidthMM = gpV.x
-	gpSheet.gpHeightMM = gpV.y
-	# Keep the SIZE cell honest: it is derived from the real sheet, not typed by hand.
-	# 让「图幅」格保持诚实：它由图幅推导，而非手填。
-	gpSheet.gpSyncSheetSizeField()
-	var gpE: Dictionary = gpEdits.get("sheet_size", {}) as Dictionary
-	if gpE.has("zh"):
-		(gpE["zh"] as LineEdit).text = gpK
-		(gpE["en"] as LineEdit).text = gpK
+	if gpTarget != null:
+		# The command re-derives the margins when they were the old paper's default, and
+		# rewrites the SIZE cell as part of the same undo step.
+		# 命令在边距仍是旧纸幅默认值时重推边距，并在同一个撤销步内重写「图幅」格。
+		gpTarget.gpRequestSetSheetSize(gpV.x, gpV.y)
+	else:
+		var gpNewMargins: Array = gpSheet.gpFrameMargins.duplicate()
+		if gpSheet.gpFrameMarginsAreDefault():
+			gpNewMargins = GPSheet.gpDefaultMarginsFor(gpV.x, gpV.y)
+		gpSheet.gpWidthMM = gpV.x
+		gpSheet.gpHeightMM = gpV.y
+		gpSheet.gpSetFrameMargins(gpNewMargins)
+		gpSheet.gpSyncSheetSizeField()
+	_gpSyncFromModel()
 	_gpRepaint()
 
 
 func _gpOnModeSelected(gpIdx: int) -> void:
-	gpSheet.gpLabelMode = int(gpModeOption.get_item_id(gpIdx))
+	var gpMode: int = int(gpModeOption.get_item_id(gpIdx))
+	if gpTarget != null:
+		gpTarget.gpRequestSetSheetField(GPMutateSheetCommand.GP_FIELD_LABEL_MODE, gpMode,
+			"图面语言")
+	else:
+		gpSheet.gpLabelMode = gpMode
 	_gpRepaint()
+
+
+# Mirror the model back into the controls after a command that may have normalised values
+# (paper size -> derived margins + SIZE cell). Without this the boxes show what was typed
+# while the sheet holds what the command actually kept — one question, two answers.
+# 命令可能规范化取值（图幅 -> 重推边距 + 图幅格）后，把模型回映到控件。否则数值框显示
+# 用户键入的值、而图纸持有命令实际留下的值 —— 同一问题两个答案。
+func _gpSyncFromModel() -> void:
+	var gpK: String = gpKFor(gpSheet.gpWidthMM, gpSheet.gpHeightMM)
+	if gpK != "" and gpSizeOption != null:
+		gpSizeOption.set_block_signals(true)
+		_gpSelectSize(gpK)
+		gpSizeOption.set_block_signals(false)
+	_gpSetSpins(gpSheet.gpFrameMargins)
+	if gpFrameCheck != null:
+		gpFrameCheck.set_pressed_no_signal(gpSheet.gpFrameOn)
+	if gpModeOption != null:
+		gpModeOption.set_block_signals(true)
+		gpModeOption.select(_gpModeIndex(gpSheet.gpLabelMode))
+		gpModeOption.set_block_signals(false)
+	var gpE: Dictionary = gpEdits.get("sheet_size", {}) as Dictionary
+	for gpLang in ["zh", "en"]:
+		if gpE.has(gpLang):
+			var gpEdit: LineEdit = gpE[gpLang] as LineEdit
+			gpEdit.set_block_signals(true)
+			gpEdit.text = _gpValueOf("sheet_size", gpLang)
+			gpEdit.set_block_signals(false)
+	_gpTitleBaseline = gpSheet.gpTitleBlock.duplicate(true)
+
+
+# Commit the live title-block preview as ONE undo step. The dialog writes the model live
+# (preview), so the command must see the PRE-EDIT dictionary: rewind to the baseline first,
+# then let GPMutateSheetCommand write the new one. One focus-loss = one undo step, not one
+# step per keystroke.
+# 把实时预览的图签提交为**一个**撤销步。对话框实时写模型（预览），故命令必须看到**编辑前**
+# 字典：先回退到基线，再让 GPMutateSheetCommand 写入新字典。一次失焦 = 一个撤销步，而非
+# 每敲一个字一个步。
+func _gpCommitTitleBlock() -> void:
+	if gpSheet == null:
+		return
+	var gpNew: Dictionary = gpSheet.gpTitleBlock.duplicate(true)
+	if _gpDictEqual(gpNew, _gpTitleBaseline):
+		return
+	var gpOld: Dictionary = _gpTitleBaseline.duplicate(true)
+	gpSheet.gpTitleBlock = gpOld.duplicate(true)
+	var gpOk: bool = false
+	if gpTarget != null:
+		gpOk = gpTarget.gpRequestSetTitleBlock(gpNew)
+	else:
+		gpSheet.gpTitleBlock = gpNew.duplicate(true)
+		gpOk = true
+	if not gpOk:
+		# The command refused (no canvas / no change). Keep what the user typed so the dialog
+		# never silently discards input; the next commit will try again.
+		# 命令拒绝（无画布 / 无变化）时保留用户输入，绝不静默丢弃；下次提交再试。
+		gpSheet.gpTitleBlock = gpNew.duplicate(true)
+	_gpTitleBaseline = gpNew.duplicate(true)
+	_gpRepaint()
+
+
+# Deep equality, local to the dialog so the commit guard does not depend on Dictionary's
+# recursive `==` implementation.
+# 深比较，放在对话框内，使提交判定不依赖字典递归 `==` 的实现细节。
+func _gpDictEqual(gpA: Dictionary, gpB: Dictionary) -> bool:
+	if gpA.size() != gpB.size():
+		return false
+	for gpK in gpA.keys():
+		if not gpB.has(gpK):
+			return false
+		var gpVA: Variant = gpA[gpK]
+		var gpVB: Variant = gpB[gpK]
+		if gpVA is Dictionary and gpVB is Dictionary:
+			if not _gpDictEqual(gpVA as Dictionary, gpVB as Dictionary):
+				return false
+		elif gpVA != gpVB:
+			return false
+	return true
+
+
+func _gpOnOk() -> void:
+	_gpCommitAll()
+	queue_free()
+
+
+func _gpOnClose() -> void:
+	_gpCommitAll()
+	queue_free()
+
+
+# Flush every live preview before the dialog disappears (window X, OK, or programmatic close).
+# 在对话框消失前提交所有实时预览（窗口 X、OK 或程序化关闭）。
+func _gpCommitAll() -> void:
+	_gpCommitTitleBlock()
+	_gpCommitBackgroundPath()
+	_gpCommitBackgroundAlpha()
 
 
 # One margin box moved: commit all four as ONE undo step — the command takes the whole array, so a
@@ -527,7 +666,10 @@ func _gpOpenBrowse() -> void:
 func _gpOnBgFilePicked(gpPath: String) -> void:
 	gpSheet.gpBackgroundPath = gpPath
 	if gpBgPathEdit != null:
+		gpBgPathEdit.set_block_signals(true)
 		gpBgPathEdit.text = gpPath
+		gpBgPathEdit.set_block_signals(false)
+	_gpCommitBackgroundPath()
 	_gpRepaint()
 
 
@@ -538,6 +680,53 @@ func _gpOnBgPath(gpPath: String) -> void:
 
 func _gpOnBgAlpha(gpV: float) -> void:
 	gpSheet.gpBackgroundAlpha = gpV
+	_gpRepaint()
+
+
+# Commit the underlay path as ONE undo step (rewind the live preview, then command).
+# 把底图路径提交为**一个**撤销步（回退实时预览，再走命令）。
+func _gpCommitBackgroundPath() -> void:
+	if gpSheet == null:
+		return
+	var gpNew: String = gpSheet.gpBackgroundPath
+	if gpNew == _gpBgPathBaseline:
+		return
+	var gpOld: String = _gpBgPathBaseline
+	gpSheet.gpBackgroundPath = gpOld
+	var gpOk: bool = false
+	if gpTarget != null:
+		gpOk = gpTarget.gpRequestSetSheetField(GPMutateSheetCommand.GP_FIELD_BG_PATH, gpNew,
+			"追踪底图")
+	else:
+		gpSheet.gpBackgroundPath = gpNew
+		gpOk = true
+	if not gpOk:
+		gpSheet.gpBackgroundPath = gpNew
+	_gpBgPathBaseline = gpNew
+	_gpRepaint()
+
+
+# Commit the underlay opacity as ONE undo step. A slider drag previews live, so it uses the
+# same rewind-then-command beat as the path and the margins.
+# 把底图透明度提交为**一个**撤销步。滑块实时预览，故与路径、边距同一「回退再命令」三拍。
+func _gpCommitBackgroundAlpha() -> void:
+	if gpSheet == null:
+		return
+	var gpNew: float = gpSheet.gpBackgroundAlpha
+	if absf(gpNew - _gpBgAlphaBaseline) < 0.0001:
+		return
+	var gpOld: float = _gpBgAlphaBaseline
+	gpSheet.gpBackgroundAlpha = gpOld
+	var gpOk: bool = false
+	if gpTarget != null:
+		gpOk = gpTarget.gpRequestSetSheetField(GPMutateSheetCommand.GP_FIELD_BG_ALPHA, gpNew,
+			"底图透明度")
+	else:
+		gpSheet.gpBackgroundAlpha = gpNew
+		gpOk = true
+	if not gpOk:
+		gpSheet.gpBackgroundAlpha = gpNew
+	_gpBgAlphaBaseline = gpNew
 	_gpRepaint()
 
 

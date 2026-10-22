@@ -37,6 +37,19 @@ var gpLocale: String = "zh_CN"
 # 缩放时保持渲染线宽屏幕恒定（width / zoom）。
 var gpScreenConstantWidth: bool = false
 
+# Whether the VIEW layer may animate (drop pop, update flash, DRC alert pulse).
+# 视图层是否允许播放动效（落位回弹、更新高亮、DRC 告警脉冲）。
+# It lives in the style snapshot for the same reason the font and locale do: the render layer
+# must not read the Settings autoload, so a preference the views need has to arrive as data.
+# 它和字体、语言一样放在样式快照里，理由相同：render 层不得读取 Settings 自动加载，
+# 因此视图需要的偏好必须以数据形式送达。
+# Cosmetic only: it never changes geometry, the document or any export. A view that receives
+# false must ALSO stop a tween already running — otherwise switching the preference off would
+# leave symbols frozen mid-fade (see GPSymbolView.gpSetMotionEnabled()).
+# 纯装饰：绝不改变几何、文档或任何导出。收到 false 的视图还必须**停掉**已在跑的补间 ——
+# 否则关掉偏好会把图元冻结在半透明状态（见 GPSymbolView.gpSetMotionEnabled()）。
+var gpMotionEnabled: bool = true
+
 # Pipe-tag font size; overrides gpSymbolFontSize when > 0, else inherits.
 # 管线位号字号；为正时覆盖 gpSymbolFontSize，否则继承。
 var gpPipeTagFontSize: int = 0
@@ -112,4 +125,13 @@ static func gpFromSources(gpSettings: Object, gpI18n: Object) -> GPRenderStyle:
 			gpTagRotate = gpSettings.gpPipeTagRotate
 	if gpI18n != null and gpI18n.get("gpLocale") != null:
 		gpLoc = gpI18n.gpLocale
-	return gpFrom(gpFont, gpFontSize, gpLoc, gpConstWidth, gpTagFontSize, gpTagRotate)
+	var gpStyle: GPRenderStyle = gpFrom(gpFont, gpFontSize, gpLoc, gpConstWidth,
+		gpTagFontSize, gpTagRotate)
+	# Set AFTER the factory rather than as a seventh parameter: gpFrom() is called directly by
+	# tests and by the symbol editor preview, and widening its signature would break every one of
+	# those call sites for a preference none of them care about.
+	# 在工厂之后赋值，而不是加第七个参数：gpFrom() 被测试与图元编辑器预览直接调用，
+	# 为一条它们都不关心的偏好拓宽签名会打断所有那些调用点。
+	if gpSettings != null and gpSettings.get("gpMotionEnabled") != null:
+		gpStyle.gpMotionEnabled = bool(gpSettings.gpMotionEnabled)
+	return gpStyle

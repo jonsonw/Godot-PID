@@ -72,6 +72,20 @@ const GP_CTX_ADD_ANCHOR: int = 31
 # Drop-a-symbol-on-a-line actions: let the pipe go around the new symbol, or split into two that
 # feed through it. Id space kept clear of the edge block above.
 # 图元落到连线上的两个动作：让管线绕开新图元 / 拆成两根穿过它。id 空间与上方边级块错开。
+const GP_CTX_END_NOTE: int = 36
+# While a pipe/signal line is being drawn, right-click means "finish this line" — so it gets its own
+# two-item menu instead of the sheet-wide one (which offered nothing relevant mid-draw).
+# 正在画管道 / 信号线时，右键意味着「结束这条线」—— 故它得到自己的两项菜单，而不是全图纸菜单
+#（后者在画线中途没有任何相关项）。
+const GP_CTX_PENDING_END_NOTE: int = 37
+const GP_CTX_PENDING_CANCEL: int = 38
+const GP_CTX_ROTATE: int = 34
+const GP_CTX_MIRROR: int = 35
+# Align / distribute (A7). IDs 40..47 map to GPAlignOps.Mode in order, so the dispatch is one
+# arithmetic line instead of eight branches.
+# 对齐 / 分布（A7）。id 40..47 按顺序对应 GPAlignOps.Mode，故分发是一行算术而非八个分支。
+const GP_CTX_ALIGN_BASE: int = 40
+
 const GP_CTX_DROP_REROUTE: int = 32
 const GP_CTX_DROP_SPLIT: int = 33
 # Stage 3 grid-table structure ops (only offered when the right-click landed on a CELL of a
@@ -107,6 +121,11 @@ var _gpCtxVertex: int = -1
 var _gpCtxBumpEid: String = ""
 var _gpCtxBumpAi: int = -1
 # Segment world position where right-click landed (so "增加锚点" can create the orange corner there).
+# World position of the right click while a line is half-drawn: the point the pending line would
+# END at if the user confirms an open-end note.
+# 半成品连线状态下右键落点的世界坐标：若用户确认开口端注记，待完成连线将在此处**结束**。
+var _gpCtxPendingWorld: Vector2 = Vector2.INF
+
 # Cleared at the top of gpOnRightDown() so a non-segment right-click never leaves a stale target.
 # 右键落点的线段世界坐标（供「增加锚点」在该处生成橙色角点）。在 gpOnRightDown() 顶部清零，
 # 非线段右键绝不残留旧目标。
@@ -166,6 +185,16 @@ func gpOnRightDown(gpScreen: Vector2) -> void:
 	_gpCtxBumpEid = ""
 	_gpCtxBumpAi = -1
 	_gpCtxBumpWorld = Vector2.ZERO
+	_gpCtxPendingWorld = gpWorld
+	# A HALF-DRAWN LINE OWNS THE RIGHT CLICK. Letting the sheet-wide menu open here was the bug:
+	# it had no "finish as open end" entry, closing it (ESC) cancelled the draft, and the line
+	# looked like it had vanished into nothing.
+	# **半成品连线优先占用右键。** 让全图纸菜单在此打开正是那个 bug：它没有「作为开口端结束」的项，
+	# 而关掉菜单（ESC）会取消草稿，于是这条线看起来凭空消失了。
+	if _gpPendingLine() != null:
+		_gpCtxHit = ""
+		gpShowPendingMenu()
+		return
 	var gpHit: String = gpCv.gpHitTest(gpWorld)
 	if gpHit != "":
 		if not gpCv.gpSelection.has(gpHit):
@@ -280,6 +309,16 @@ func _gpBuildMenuItems(gpMenu: PopupMenu, gpNodeHit: String) -> void:
 	if gpNodeCtx:
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_edit_symbol"), GP_CTX_EDIT)
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_duplicate"), GP_CTX_DUPLICATE)
+		# Orientation (A4): rotation and mirror are per-instance facts, so they sit with the
+		# other node-targeted actions rather than in a sheet-wide submenu.
+		# 朝向（A4）：旋转与镜像是**实例**事实，故与其它面向节点的动作同处，而不进全图纸子菜单。
+		gpMenu.add_item(I18n.gpTr("canvas.ctx_rotate_cw"), GP_CTX_ROTATE)
+		gpMenu.add_item(I18n.gpTr("canvas.ctx_mirror"), GP_CTX_MIRROR)
+		# Align / distribute need TWO objects, so they are only offered when they can act.
+		# 对齐 / 分布需要**两个**对象，故仅在真能生效时提供。
+		if gpCv.gpSelection.size() >= GPAlignOps.gpNeedsTwo():
+			for gpMode in _gpAlignModes():
+				gpMenu.add_item(I18n.gpTr(_gpAlignKey(gpMode)), GP_CTX_ALIGN_BASE + gpMode)
 		# Attach / detach sit with the node-targeted items because both act on the node selection.
 		# 挂载 / 卸载与「作用于节点选择」的条目同处，因为两者都作用于节点选择。
 		_gpBuildAttachSubmenu(gpMenu, gpNodeHit)
@@ -305,6 +344,15 @@ func _gpBuildMenuItems(gpMenu: PopupMenu, gpNodeHit: String) -> void:
 	# 鼓包锚点目标：提供删除。与整条边菜单互斥（下方已压制），避免同时出现「删锚点」与「删连线」。
 	if _gpCtxBumpAi >= 0:
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_delete_bump"), GP_CTX_DELETE_BUMP)
+	# Right-click landed ON an edge that carries an OPEN END → offer the note there. This is the
+	# post-commit path: the line already exists (a pipe may be committed with one dangling end), and
+	# without this item the only way to annotate it would be a menu the user never finds.
+	# 右键落在**带开口端的边**上 → 就地提供注记。这是**提交之后**的路径：线已存在
+	#（管道允许提交时就有一端悬空），没有这一项的话，用户永远找不到给端头写字的入口。
+	var gpEdgeCtxForNote: GPPIDEdge = gpCv.gpGraph.gpGetEdge(_gpCtxEdge) if gpCv.gpGraph != null else null
+	if gpEdgeCtxForNote != null \
+			and (gpEdgeCtxForNote.gpIsDangling(true) or gpEdgeCtxForNote.gpIsDangling(false)):
+		gpMenu.add_item(I18n.gpTr("open_end.menu"), GP_CTX_END_NOTE)
 	# Add-anchor target: right-click landed on an EMPTY segment (not on an existing anchor). Offer
 	# "增加锚点" so creating the orange corner goes through the menu. Shown ABOVE the edge-level items.
 	# 增加锚点目标：右键落在空白线段（非既有锚点）。提供「增加锚点」使橙色角点经菜单创建，位于边级项上方。
@@ -322,6 +370,12 @@ func _gpBuildMenuItems(gpMenu: PopupMenu, gpNodeHit: String) -> void:
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_set_signal"), GP_CTX_SET_SIGNAL)
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_resnap_ends"), GP_CTX_RESNAP_ENDS)
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_clear_vertices"), GP_CTX_CLEAR_VERTICES)
+		# Open-end note (B08): offered only when THIS edge actually has a free end — a note on a
+		# fully connected pipe would describe nothing.
+		# 开口端注记（B08）：仅当该边确实有自由端时提供 —— 两端都接上的管线没有可说明的对象。
+		var gpEdgeForNote: GPPIDEdge = gpCv.gpGraph.gpGetEdge(gpEid) if gpCv.gpGraph != null else null
+		if gpEdgeForNote != null and (gpEdgeForNote.gpIsDangling(true) or gpEdgeForNote.gpIsDangling(false)):
+			gpMenu.add_item(I18n.gpTr("open_end.menu"), GP_CTX_END_NOTE)
 		gpMenu.add_separator()
 	gpMenu.add_item(I18n.gpTr("canvas.ctx_select_all"), GP_CTX_SELECT_ALL)
 	gpMenu.add_item(I18n.gpTr("canvas.ctx_deselect"), GP_CTX_DESELECT)
@@ -335,6 +389,87 @@ func _gpBuildMenuItems(gpMenu: PopupMenu, gpNodeHit: String) -> void:
 	# 用绕开障碍的正交路径，自动连接「两个已拾取的端点」。
 	if gpCv.gpPortPick.size() >= 2:
 		gpMenu.add_item(I18n.gpTr("canvas.ctx_auto_connect"), GP_CTX_AUTO_CONNECT)
+
+
+# The pipe/signal tool whose line is waiting for its second end, or null.
+# 正在等待第二端的管道 / 信号线工具，否则 null。
+# DUCK-TYPED on purpose: naming GPPipeTool here would create the cycle
+# canvas_2d → canvas_context_menu → pipe_tool → canvas_2d, which GDScript cannot resolve.
+# 刻意**鸭子类型**：在此写出 GPPipeTool 会形成 canvas_2d → canvas_context_menu → pipe_tool → canvas_2d
+# 的循环依赖，GDScript 无法解析。
+func _gpPendingLine() -> Object:
+	var gpTool: Object = gpCv.gpActiveTool()
+	if gpTool == null or not gpTool.has_method("gpIsPending"):
+		return null
+	return gpTool if bool(gpTool.gpIsPending()) else null
+
+
+# Two-item menu for a half-drawn line: finish with a note, or drop the draft.
+# 半成品连线的两项菜单：带注记结束，或丢弃草稿。
+func gpShowPendingMenu() -> void:
+	var gpMenu: PopupMenu = PopupMenu.new()
+	gpMenu.add_item(I18n.gpTr("open_end.menu"), GP_CTX_PENDING_END_NOTE)
+	gpMenu.add_item(I18n.gpTr("canvas.ctx_cancel_line"), GP_CTX_PENDING_CANCEL)
+	gpMenu.id_pressed.connect(gpOnContext)
+	gpCv.add_child(gpMenu)
+	GPPopupHelper.gpPopupAtMouse(gpMenu, gpCv)
+	gpMenu.popup_hide.connect(gpMenu.queue_free)
+
+
+# Open the open-end note editor for whichever end of the context edge is dangling (start wins
+# when both are free — the user can switch sides from the same menu afterwards, the dialog just
+# needs a deterministic default).
+# 为上下文边中「悬空的那一端」打开开口端注记编辑器（两端都空时取起点 —— 用户之后可再从同一菜单
+# 切到另一端，对话框只需要一个确定的默认值）。
+func _gpOpenEndNoteForContext() -> void:
+	if gpCv.gpGraph == null:
+		return
+	var gpEid: String = _gpCtxEdge
+	if gpEid == "" and not gpCv.gpEdgeSel.is_empty():
+		gpEid = gpCv.gpEdgeSel[0]
+	var gpE: GPPIDEdge = gpCv.gpGraph.gpGetEdge(gpEid)
+	if gpE == null:
+		return
+	var gpIsFrom: bool = gpE.gpIsDangling(true)
+	if not gpIsFrom and not gpE.gpIsDangling(false):
+		return
+	gpCv.gpOpenEndNoteDialog(gpEid, gpIsFrom)
+
+
+# The eight align / distribute modes, in menu order. Static so the test can walk the same list
+# the menu is built from (a menu and its assertion must never disagree).
+# 八个对齐 / 分布模式，按菜单顺序。static 使测试能遍历与菜单相同的清单
+#（菜单与它的断言绝不能各说一套）。
+static func _gpAlignModes() -> Array[int]:
+	return [
+		GPAlignOps.Mode.GP_LEFT, GPAlignOps.Mode.GP_HCENTER, GPAlignOps.Mode.GP_RIGHT,
+		GPAlignOps.Mode.GP_TOP, GPAlignOps.Mode.GP_VCENTER, GPAlignOps.Mode.GP_BOTTOM,
+		GPAlignOps.Mode.GP_DIST_H, GPAlignOps.Mode.GP_DIST_V,
+	]
+
+
+# i18n key for one align mode.
+# 一个对齐模式的 i18n 键。
+static func _gpAlignKey(gpMode: int) -> String:
+	match gpMode:
+		GPAlignOps.Mode.GP_LEFT:
+			return "canvas.ctx_align_left"
+		GPAlignOps.Mode.GP_HCENTER:
+			return "canvas.ctx_align_hcenter"
+		GPAlignOps.Mode.GP_RIGHT:
+			return "canvas.ctx_align_right"
+		GPAlignOps.Mode.GP_TOP:
+			return "canvas.ctx_align_top"
+		GPAlignOps.Mode.GP_VCENTER:
+			return "canvas.ctx_align_vcenter"
+		GPAlignOps.Mode.GP_BOTTOM:
+			return "canvas.ctx_align_bottom"
+		GPAlignOps.Mode.GP_DIST_H:
+			return "canvas.ctx_dist_h"
+		GPAlignOps.Mode.GP_DIST_V:
+			return "canvas.ctx_dist_v"
+		_:
+			return "canvas.ctx_align_left"
 
 
 # Disable / check the stateful items. Disabling goes through get_item_index (by ID), because
@@ -356,6 +491,14 @@ func _gpApplyMenuStates(gpMenu: PopupMenu, gpNodeHit: String) -> void:
 # Dispatch a context-menu action.
 # 分发右键菜单动作。
 func gpOnContext(gpId: int) -> void:
+	# Align / distribute occupy one contiguous id range (see GP_CTX_ALIGN_BASE), so they are
+	# resolved BEFORE the match instead of adding eight near-identical branches — and a `_`
+	# branch inside the match would swallow the branches that follow it.
+	# 对齐 / 分布占据一段连续 id（见 GP_CTX_ALIGN_BASE），故在 match **之前**解析，
+	# 而不是加八个几乎相同的分支 —— 而在 match 中间插入 `_` 会吞掉它后面的所有分支。
+	if gpId >= GP_CTX_ALIGN_BASE and gpId < GP_CTX_ALIGN_BASE + GPAlignOps.Mode.size():
+		gpCv.gpRequestAlign(gpId - GP_CTX_ALIGN_BASE)
+		return
 	match gpId:
 		GP_CTX_MAKE_SYMBOL:
 			gpCv.gpAnno.gpMakeSymbolFromShapes()
@@ -365,6 +508,16 @@ func gpOnContext(gpId: int) -> void:
 				gpCv.gpSymbolEditRequested.emit(gpN.gpSymbolId)
 		GP_CTX_DUPLICATE:
 			gpCv.gpRequestDuplicateSelected()
+		GP_CTX_END_NOTE:
+			_gpOpenEndNoteForContext()
+		GP_CTX_PENDING_END_NOTE:
+			gpCv.gpOpenPendingEndNoteDialog(_gpCtxPendingWorld)
+		GP_CTX_PENDING_CANCEL:
+			gpCv.gpCancelActiveTool()
+		GP_CTX_ROTATE:
+			gpCv.gpRequestRotateSelected(90.0)
+		GP_CTX_MIRROR:
+			gpCv.gpRequestMirrorSelected()
 		GP_CTX_TABLE_INS_ROW:
 			gpCv.gpRequestTableOp(GPSymbolGeneratorRegistry.GP_OP_INSERT_ROW, _gpCtxHit,
 				_gpCtxCellRow, _gpCtxCellCol)

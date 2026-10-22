@@ -137,10 +137,23 @@ static func gpReadSheets(gpPath: String) -> GPIOResult:
 		return gpRead
 	var gpV3: Dictionary = gpRead.gpPayload as Dictionary
 	if gpV3.is_empty():
+		GPSymbolLibrary.gpSetDocSizeScale(1.0)
 		return GPIOResult.gpSuccessWith([GPSheet.gpNew("sheet-1", "", 0)], "io.loaded", gpPath)
+	# P0-5: set the shared library's symbol scale BEFORE any sheet / user pack is rebuilt.
+	# The previous document may have left a legacy 0.5 active; registering this archive's
+	# packs against the wrong scale would double-shrink (or double-grow) them.
+	# P0-5：在重建任何图纸 / 用户包**之前**设置共享图库尺度。上一份文档可能留下旧档 0.5；
+	# 用错误尺度注册本档用户包会把它二次缩小（或放大）。
+	var gpRawSheets: Array = gpV3.get("sheets", []) as Array
+	if gpRawSheets.is_empty():
+		GPSymbolLibrary.gpSetDocSizeScale(1.0)
+	else:
+		var gpFirstRaw: Dictionary = (gpRawSheets[0] as Dictionary).duplicate(true)
+		gpFirstRaw["meta"] = (gpV3.get("meta", {}) as Dictionary).duplicate(true)
+		GPSymbolLibrary.gpSetDocSizeScale(GPSheet.gpScaleForSheetDict(gpFirstRaw))
 	var gpSheetsOut: Array = []
 	var gpI: int = 0
-	for gpS in (gpV3.get("sheets", []) as Array):
+	for gpS in gpRawSheets:
 		var gpD: Dictionary = (gpS as Dictionary).duplicate(true)
 		gpD["index"] = gpI
  # Project-level data is copied onto every sheet so the graph rebuild can reconcile

@@ -593,3 +593,135 @@ func _gpDrawCellTexts(gpCv: CanvasItem, gpCells: Array, gpScale: float) -> void:
 		gpCv.draw_string(gpFont, gpAt, gpText, HORIZONTAL_ALIGNMENT_LEFT, gpClipPx, gpFontSz,
 			Color(0.9, 0.9, 0.9))
 		gpCv.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+# ---- view-layer motion / 视图层动效 ----
+# Why motion lives in the VIEW and not in the graph / 为何动效放在视图而不放图里：
+# A drop pop or an alert pulse is a property of what the eye sees this second, not of the
+# drawing. Putting it into data would (a) turn every frame into a document change, (b) push
+# cosmetic state into undo steps and DEXPI exports, and (c) break the "same graph -> same bytes"
+# rule the exporters rely on. The animation therefore touches ONLY this node's `scale` and
+# `modulate`, neither of which takes part in gpToDict().
+# 落位回弹或告警脉冲是「此刻眼睛看到什么」的属性，不是图纸的属性。放进数据会：
+# (a) 把每一帧都变成文档变更；(b) 把装饰状态塞进撤销步与 DEXPI 导出；
+# (c) 破坏导出器依赖的「同一张图 → 同一份字节」。故动画只改本节点的 scale 与 modulate，
+# 二者都不参与 gpToDict()。
+# `_gpBody` is NOT animated on purpose: its scale carries the horizontal flip, and the binder
+# rewrites it on every sync, so a tween there would be overwritten mid-flight.
+# 刻意不动画 _gpBody：它的 scale 承载水平翻转，且绑定器每次同步都会重写，补间会被中途覆盖。
+const GP_SPAWN_SEC: float = 0.16
+const GP_SPAWN_FROM: float = 0.92
+const GP_FLASH_IN_SEC: float = 0.10
+const GP_FLASH_OUT_SEC: float = 0.18
+const GP_FLASH_TINT: Color = Color(0.72, 0.88, 1.0, 1.0)
+const GP_ALERT_HALF_SEC: float = 0.5
+const GP_ALERT_ALPHA: float = 0.55
+
+# Whether this view may animate. Pushed from GPRenderStyle.gpMotionEnabled (data, not autoload).
+# 本视图是否允许播放动效。由 GPRenderStyle.gpMotionEnabled 推入（数据，而非读自动加载）。
+var gpMotionEnabled: bool = true
+
+# The one tween this view owns, so a new effect always replaces the old one instead of stacking.
+# 本视图唯一持有的补间，使新效果总是替换旧效果，而不是叠加。
+var _gpMotionTween: Tween = null
+
+# Whether an alert pulse is currently requested (survives a motion on/off toggle).
+# 当前是否被要求告警脉冲（跨动效开关保持）。
+var _gpAlertOn: bool = false
+
+
+# Enable / disable motion. Disabling MUST kill a running tween AND restore the animated
+# channels: otherwise turning the preference off freezes a symbol at the exact frame the tween
+# died on — a half-faded, slightly shrunk glyph that looks like a rendering bug.
+# 启用 / 禁用动效。禁用时**必须**停掉补间并复位动画通道：否则关掉偏好会把图元冻结在补间停止的
+# 那一帧 —— 一个半透明、略微缩小的字形，看起来就像渲染 bug。
+func gpSetMotionEnabled(gpOn: bool) -> void:
+	if gpMotionEnabled == gpOn:
+		return
+	gpMotionEnabled = gpOn
+	if not gpOn:
+		_gpKillMotion()
+	elif _gpAlertOn:
+		_gpStartAlert()
+
+
+# One-shot pop when a symbol first appears. Skipped outside the tree: create_tween() binds to the
+# SceneTree, so calling it on a detached node is an engine error — and the headless suites build
+# views without a canvas.
+# 首次出现时的一次性回弹。不在树内时跳过：create_tween() 绑定 SceneTree，对游离节点调用是
+# 引擎错误 —— 而 headless 套件正是无画布地构造视图。
+func gpPlaySpawn() -> void:
+	if not gpMotionEnabled or gpNode == null or not is_inside_tree():
+		return
+	_gpKillMotion()
+	scale = Vector2(GP_SPAWN_FROM, GP_SPAWN_FROM)
+	modulate = Color(1.0, 1.0, 1.0, 0.0)
+	var gpT: Tween = create_tween()
+	_gpMotionTween = gpT
+	gpT.set_parallel(true)
+	gpT.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	gpT.tween_property(self, "scale", Vector2.ONE, GP_SPAWN_SEC)
+	gpT.tween_property(self, "modulate", Color.WHITE, GP_SPAWN_SEC)
+	gpT.chain().tween_callback(_gpOnMotionSettled)
+
+
+# One-shot flash: "the definition behind this instance just changed". Fires when a symbol is
+# re-saved, so every placed instance says so without a dialog.
+# 一次性闪光：「这个实例背后的定义刚变过」。图元重新保存时触发，使每个已放置实例都能表达这件事，
+# 而不必弹对话框。
+func gpPlayFlash() -> void:
+	if not gpMotionEnabled or gpNode == null or not is_inside_tree() or _gpAlertOn:
+		return
+	_gpKillMotion()
+	var gpT: Tween = create_tween()
+	_gpMotionTween = gpT
+	gpT.tween_property(self, "modulate", GP_FLASH_TINT, GP_FLASH_IN_SEC)
+	gpT.tween_property(self, "modulate", Color.WHITE, GP_FLASH_OUT_SEC)
+	gpT.tween_callback(_gpOnMotionSettled)
+
+
+# Request / clear a repeating alert pulse (1 Hz). Nothing calls this yet by design: the DRC
+# engine (B1) is what will mark failing symbols, and it must not have to know about tweens.
+# 请求 / 清除 1Hz 的重复告警脉冲。目前刻意无人调用：将由 DRC 引擎（B1）标记不合格图元，
+# 而 DRC 不该知道补间的存在。
+func gpSetAlert(gpOn: bool) -> void:
+	if _gpAlertOn == gpOn:
+		return
+	_gpAlertOn = gpOn
+	if gpOn and gpMotionEnabled and is_inside_tree():
+		_gpStartAlert()
+	else:
+		_gpKillMotion()
+
+
+# Start the alert loop. Half-second fade out, half-second back — one full pulse per second, slow
+# enough to read as "attention" rather than "flicker".
+# 启动告警循环。半秒淡出、半秒回位 —— 每秒一次完整脉冲，慢到读作「注意」而非「闪烁」。
+func _gpStartAlert() -> void:
+	_gpKillMotion()
+	var gpT: Tween = create_tween()
+	_gpMotionTween = gpT
+	gpT.set_loops()
+	gpT.tween_property(self, "modulate", Color(1.0, 1.0, 1.0, GP_ALERT_ALPHA), GP_ALERT_HALF_SEC)
+	gpT.tween_property(self, "modulate", Color.WHITE, GP_ALERT_HALF_SEC)
+
+
+# Kill the tween and restore the animated channels, so a stopped effect can never leave the
+# symbol in a state that looks like a defect.
+# 停掉补间并复位动画通道，使停止的效果绝不会让图元停在一个看起来像缺陷的状态上。
+func _gpKillMotion() -> void:
+	if _gpMotionTween != null and _gpMotionTween.is_valid():
+		_gpMotionTween.kill()
+	_gpMotionTween = null
+	scale = Vector2.ONE
+	modulate = Color.WHITE
+
+
+# Called when a one-shot effect finishes: drop the reference, but do NOT reset a loop's tint
+# (there is none to reset — a loop never finishes).
+# 一次性效果结束时调用：释放引用，但**不**复位循环的着色（循环根本不会结束，无需复位）。
+func _gpOnMotionSettled() -> void:
+	_gpMotionTween = null
+	if not _gpAlertOn:
+		scale = Vector2.ONE
+		modulate = Color.WHITE

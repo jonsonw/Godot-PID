@@ -131,6 +131,9 @@ func _gpOpenExportMenu(gpBtn: Button) -> void:
 	if _gpExportPopup == null:
 		_gpExportPopup = PopupMenu.new()
 		_gpFillPopup(_gpExportPopup, [
+			["menu.export_lists_xlsx", "export_lists_xlsx"],
+			["menu.project_export_list", "project_export_list"],
+			null,
 			["menu.export_project", "export_project"],
 			["menu.export_library", "export_library"],
 			["menu.export_config", "export_config"],

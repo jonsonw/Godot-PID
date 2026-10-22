@@ -47,7 +47,17 @@ extends RefCounted
 const GP_OP_LINE: String = "line"        # {"op","a","b","w","layer"}
 const GP_OP_POLY: String = "poly"        # {"op","pts","closed","w","layer"}
 const GP_OP_CIRCLE: String = "circle"    # {"op","c","r","w","layer"}
-const GP_OP_TEXT: String = "text"        # {"op","at","s","h","align","layer"}
+const GP_OP_TEXT: String = "text"        # {"op","at","s","h","align","valign","layer"}
+
+# Text vertical reference. FRAME text (zone labels, title block) is authored on its BASELINE;
+# symbol tags, generator notes and grid cells are authored on their MIDDLE line (the canvas
+# centres the text box on the anchor). The two must not be conflated: the PDF/DXF writers add
+# the middle->baseline conversion only for "middle".
+# 文字纵向基准。图框文字（坐标带、图签）以**基线**编排；位号、生成器备注与表格格子以
+# **行中高**编排（画布把文字盒中心放在锚点上）。二者不可混为一谈：PDF/DXF 写出器只对
+# "middle" 施加「中高 → 基线」的换算。
+const GP_VALIGN_BASELINE: String = "baseline"
+const GP_VALIGN_MIDDLE: String = "middle"
 
 # ---- DXF layer names / DXF 图层名 ----
 const GP_LAYER_FRAME: String = "FRAME"
@@ -243,12 +253,13 @@ static func gpOneSymbol(gpGraph: GPPIDGraph, gpLookup: Callable, gpNode: GPPIDNo
 	gpTagEntity(gpNode, gpDef, gpWT, gpOut)
 
 
-# Map one glyph spec from its unit-space box into the node's frame, then into the world.
-# The mapping algebra is GPSymbolPainter's own (gpUnitBox + gpFitScale + centred scale),
-# only expressed as entities instead of draw calls.
-# 把一份字形规格从其单位空间框映射进节点坐标系，再映射到世界。
-# 映射代数即 GPSymbolPainter 本身的（gpUnitBox + gpFitScale + 居中缩放），
-# 只是表达为实体而非绘制调用。
+# Map one glyph spec from its OWN box into the node's frame, then into the world. Static
+# symbols use a 0..100 unit box; the grid generator emits envelope-mm paths with an
+# envelope-sized box. The painter's algebra is scale-agnostic, so both go through the same
+# gpUnitBox + gpFitScale pair — no per-generator special case.
+# 把一份字形规格从**它自己的** box 映射进节点坐标系，再映射到世界。静态图元用 0..100 单位框；
+# grid 生成器产出包络毫米路径与包络大小的 box。painter 的代数与尺度无关，故两者都走同一对
+# gpUnitBox + gpFitScale —— 没有逐生成器特判。
 static func gpGlyphEntities(gpSpec: Dictionary, gpSize: Vector2, gpWT: Dictionary,
 		gpOut: Array[Dictionary]) -> void:
 	if gpSpec.is_empty():
@@ -314,7 +325,7 @@ static func gpGeneratorTexts(gpGen: Dictionary, gpNode: GPPIDNode, gpSize: Vecto
 			# "at" is the CENTRE of this line's pitch cell, horizontally centred.
 			# "at" 是本行行距单元的**中心**，水平居中。
 			gpPushText(gpOut, _gpToWorld(Vector2(gpCx, gpTop + gpPitch * (float(gpI) + 0.5)), gpWT),
-				gpLine, gpMM, "c", GP_LAYER_ANNOTATION)
+				gpLine, gpMM, "c", GP_LAYER_ANNOTATION, GP_VALIGN_MIDDLE)
 	# Grid cells: the SAME cell rects the hit-test and the editor consume (local mm); the text
 	# lives in the node's props under the CELL KEY (the stage-3 contract), left-aligned with
 	# the 1 mm padding and the row-clamped height.
@@ -328,7 +339,7 @@ static func gpGeneratorTexts(gpGen: Dictionary, gpNode: GPPIDNode, gpSize: Vecto
 			continue
 		var gpMM: float = minf(GPTextRole.GP_CELL_TEXT_MM, gpR.size.y * 0.62)
 		gpPushText(gpOut, _gpToWorld(gpR.position + Vector2(1.0, gpR.size.y * 0.5), gpWT),
-			gpS, gpMM, "l", GP_LAYER_ANNOTATION)
+			gpS, gpMM, "l", GP_LAYER_ANNOTATION, GP_VALIGN_MIDDLE)
 
 
 # The tag: placed by the SAME pure placement the canvas uses, oriented flip-then-rotate
@@ -345,9 +356,29 @@ static func gpTagEntity(gpNode: GPPIDNode, gpDef: GPSymbolDef, gpWT: Dictionary,
 		gpOff.x = -gpOff.x
 	gpOff = gpOff.rotated(deg_to_rad(float(gpWT["rot_deg"])))
 	var gpAt: Vector2 = (gpWT["origin"] as Vector2) + gpOff
+	# The canvas places the text BOX CENTRE on this anchor (gpDrawOrigin + gpTextOrigin), and
+	# hangs a GP_LEFT tag to the left / a GP_RIGHT tag to the right. Reproducing only the anchor
+	# point (the old code) left every tag shifted right by ~half its width. The alignment and the
+	# middle baseline are therefore part of the projection contract, not writer cosmetics.
+	# 画布把这个锚点当作文字**盒中心**（gpDrawOrigin + gpTextOrigin），并让 GP_LEFT 标签向
+	# 左悬挂、GP_RIGHT 向右悬挂。旧代码只复现锚点，导致每个位号整体右移约半个字宽。故对齐
+	# 方式与行中高基线属于投影契约的一部分，而不是写出器的装饰。
 	gpPushText(gpOut, gpAt, gpText,
 		GPTextRole.gpTagMM(gpDef.gpCategory, GPTextRole.GP_INLINE_TAG_MM),
-		"l", GP_LAYER_ANNOTATION)
+		_gpAlignForAnchor(GPLabelPlacement.gpEffectiveAnchor(gpNode, gpDef)),
+		GP_LAYER_ANNOTATION, GP_VALIGN_MIDDLE)
+
+
+# Horizontal alignment for a tag anchor: a LEFT tag hangs off the left edge (right-aligned),
+# a RIGHT tag starts at the right edge (left-aligned), every other anchor is centred.
+# 位号锚点的水平对齐：LEFT 标签向左悬挂（右对齐）、RIGHT 标签从右缘起排（左对齐），其余居中。
+static func _gpAlignForAnchor(gpAnchor: int) -> String:
+	match gpAnchor:
+		GPLabelAnchor.GPAnchor.GP_LEFT:
+			return "r"
+		GPLabelAnchor.GPAnchor.GP_RIGHT:
+			return "l"
+	return "c"
 
 
 # ---------------------------------------------------------------------------
@@ -467,9 +498,13 @@ static func gpPushCircle(gpOut: Array[Dictionary], gpC: Vector2, gpR: float,
 	gpOut.append({"op": GP_OP_CIRCLE, "c": gpC, "r": gpR, "w": gpW, "layer": gpLayer})
 
 
-# align: "l" = gpAt is the LEFT end of a middle-height line; "c" = gpAt is its horizontal CENTRE.
-# align："l" = gpAt 是行中高直线的**左端**；"c" = gpAt 是其水平**中心**。
+# align:  "l"/"c"/"r" = gpAt is the LEFT end / horizontal CENTRE / RIGHT end.
+# valign: "baseline" = gpAt lies ON the baseline (frame text); "middle" = gpAt is the middle
+#         of the line box (tags / generator notes / grid cells).
+# align： "l"/"c"/"r" = gpAt 是**左端 / 水平中心 / 右端**。
+# valign："baseline" = gpAt 落在**基线**上（图框文字）；"middle" = gpAt 是行盒**中高**（位号 /
+#         生成器备注 / 表格格子）。
 static func gpPushText(gpOut: Array[Dictionary], gpAt: Vector2, gpS: String, gpH: float,
-		gpAlign: String, gpLayer: String) -> void:
+		gpAlign: String, gpLayer: String, gpValign: String = GP_VALIGN_BASELINE) -> void:
 	gpOut.append({"op": GP_OP_TEXT, "at": gpAt, "s": gpS, "h": gpH, "align": gpAlign,
-		"layer": gpLayer})
+		"valign": gpValign, "layer": gpLayer})

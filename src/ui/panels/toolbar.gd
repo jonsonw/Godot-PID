@@ -44,7 +44,7 @@ signal gpSymbolDeleteRequested(type: String)
 
 # A tool was selected: "select" / "connect" / "custom".
 # 选中某工具：select（选择）/ connect（连线）/ custom（自定义图元）。
-signal gpToolSelected(type: String)
+
 
 # A generic command from the tool blocks (canvas modes, undo/redo/delete/settings).
 # Reuses the Ribbon action ids, so the host routes it through the existing handler.
@@ -66,6 +66,11 @@ const GP_TOOL_BLOCKS: Array = [
 			{"action": "circle",   "key": "canvas.tool_circle",      "icon": "circle",   "toggle": true, "mode": GPCanvas2D.GPMode.GP_DRAW_CIRCLE},
 			{"action": "rect",     "key": "canvas.tool_rect",        "icon": "rect",     "toggle": true, "mode": GPCanvas2D.GPMode.GP_DRAW_RECT},
 			{"action": "polyline", "key": "canvas.tool_polyline",    "icon": "polyline", "toggle": true, "mode": GPCanvas2D.GPMode.GP_DRAW_POLYLINE},
+			# Arc (A5): the MODE and its two-point drawing logic shipped long ago; only the button
+			# was missing, which is why the tool was unreachable from the UI at all.
+			# 圆弧（A5）：模式与「拖出起止点」的绘制逻辑早已就位，缺的只是按钮 ——
+			# 这正是该工具在界面上完全不可达的原因。
+			{"action": "arc",      "key": "canvas.tool_arc",         "icon": "arc",      "toggle": true, "mode": GPCanvas2D.GPMode.GP_DRAW_ARC},
 			{"action": "pipe",     "key": "symbol_lib.tool_pipe",    "icon": "pipe",     "toggle": true, "mode": GPCanvas2D.GPMode.GP_PIPE},
 			{"action": "signal",   "key": "symbol_lib.tool_signal",  "icon": "signal",   "toggle": true, "mode": GPCanvas2D.GPMode.GP_SIGNAL},
 		]

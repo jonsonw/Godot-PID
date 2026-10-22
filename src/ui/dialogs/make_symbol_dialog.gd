@@ -80,6 +80,15 @@ var _gpOk: Button = null
 var _gpExistingTargetId: String = ""
 # editor widgets / 编辑器控件
 var _gpToolBtns: Array[Button] = []
+
+# Undo / redo buttons of the glyph editor (A13). The editor has owned a full command stack all
+# along; these are the missing steering wheel.
+# 图元编辑器的撤销 / 重做按钮（A13）。编辑器一直持有完整命令栈；此前缺的只是方向盘。
+var _gpUndoBtn: Button = null
+
+# Redo button (A13).
+# 重做按钮（A13）。
+var _gpRedoBtn: Button = null
 # Port editing panel; it owns the name / direction / delete widgets and the direction table.
 # 端点编辑面板；它持有名称 / 朝向 / 删除控件与朝向表。
 var _gpPortPanel: GPPortEditorPanel = null
@@ -357,7 +366,39 @@ func _gpNewToolRow() -> HBoxContainer:
 		gpB.pressed.connect(_gpEditor.gpSetTool.bind(gpI))
 		_gpToolBtns.append(gpB)
 		gpRow.add_child(gpB)
+	# Undo / redo live on the SAME row, after a small gap, because the action the user needs after
+	# "that line was wrong" is right next to the tool that drew it.
+	# 撤销 / 重做放在**同一行**、隔一小段：用户在「这根线画错了」之后要做的动作，就应该挨着画它的工具。
+	var gpGap: Control = Control.new()
+	gpGap.custom_minimum_size = Vector2(10.0, 0.0)
+	gpRow.add_child(gpGap)
+	_gpUndoBtn = Button.new()
+	_gpUndoBtn.name = "UndoBtn"
+	_gpUndoBtn.text = I18n.gpTr("make_symbol.undo")
+	_gpUndoBtn.disabled = true
+	_gpUndoBtn.pressed.connect(func() -> void: _gpEditor.gpUndo())
+	gpRow.add_child(_gpUndoBtn)
+	_gpRedoBtn = Button.new()
+	_gpRedoBtn.name = "RedoBtn"
+	_gpRedoBtn.text = I18n.gpTr("make_symbol.redo")
+	_gpRedoBtn.disabled = true
+	_gpRedoBtn.pressed.connect(func() -> void: _gpEditor.gpRedo())
+	gpRow.add_child(_gpRedoBtn)
 	return gpRow
+
+
+# Keep the undo / redo buttons honest: enabled only when the stack can act, and labelled with the
+# operation they would undo (the editor already answers both questions).
+# 让撤销 / 重做按钮保持诚实：仅当栈真能动作时启用，并标出它们将撤销的操作（编辑器本就能回答这两问）。
+func _gpRefreshUndoButtons() -> void:
+	if _gpUndoBtn == null or _gpRedoBtn == null or _gpEditor == null:
+		return
+	var gpCanUndo: bool = _gpEditor.gpCanUndo()
+	_gpUndoBtn.disabled = not gpCanUndo
+	var gpLabel: String = _gpEditor.gpUndoLabel()
+	_gpUndoBtn.text = I18n.gpTr("make_symbol.undo") if gpLabel == "" else "%s (%s)" % [
+		I18n.gpTr("make_symbol.undo"), gpLabel]
+	_gpRedoBtn.disabled = not _gpEditor.gpCanRedo()
 
 
 # Build the glyph-geometry editing panel (delete selected primitive).
@@ -489,6 +530,7 @@ func _gpOnModeChanged() -> void:
 # Enable OK / show overwrite target / warning based on current inputs.
 # 依据当前输入启用「确定」/ 显示覆盖目标 / 警告。
 func _gpRefreshState() -> void:
+	_gpRefreshUndoButtons()
 	var gpName: String = _gpNameEdit.text.strip_edges()
 	var gpOverwriteMode: bool = _gpModeOver.button_pressed
 

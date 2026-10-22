@@ -86,16 +86,20 @@ func gpTestPreflightRejectsMissingStableUid() -> void:
 	gpCheck(gpReport.gpHasErrors(), "a node without a stable uid is fatal")
 
 
-func gpTestPreflightReportsSignalLinesAsUnsupported() -> void:
+func gpTestPreflightReportsSignalLinesAsDeclaredDeviation() -> void:
+	# B6: signal lines are no longer SKIPPED (that lost every instrument connection on export).
+	# They go out as a marked PipingNetworkSegment, and the marking is declared as a deviation.
+	# B6：信号线不再被**跳过**（那会在导出时丢掉每一条仪表连线）。它们以「带标记的管段」出图，
+	# 而该标记被声明为偏离。
 	var gpGraph: GPPIDGraph = _gpSampleGraph()
 	(gpGraph.gpEdges[0] as GPPIDEdge).gpKind = GPPIDEdge.GP_SIGNAL
 	var gpReport: GPImportReport = GPDexpiExporter.gpPreflight(gpGraph, _gpSampleSheet())
 	gpCheck(not gpReport.gpHasErrors(), "a signal line is not fatal")
 	var gpFound: bool = false
 	for gpE in gpReport.gpEntries:
-		if str((gpE as Dictionary).get("code", "")) == GPDexpiExporter.GP_CODE_SIGNAL_UNSUPPORTED:
+		if str((gpE as Dictionary).get("code", "")) == GPDexpiExporter.GP_CODE_SIGNAL_AS_SEGMENT:
 			gpFound = true
-	gpCheck(gpFound, "the unsupported signal line is reported, not silently dropped")
+	gpCheck(gpFound, "the deviation is reported, not silently dropped")
 
 
 # ---- projection ---------------------------------------------------------
@@ -138,12 +142,18 @@ func gpTestAnnotationsAreSkippedNotExported() -> void:
 	gpEq(str((gpSkipped[0] as Dictionary).get("reason", "")), "annotation", "skip reason is recorded")
 
 
-func gpTestSignalLinesAreSkippedInPhaseOne() -> void:
+func gpTestSignalLineProjectsAsMarkedSegment() -> void:
+	# B6: the signal line projects as a segment that CARRIES its intent, instead of vanishing.
+	# B6：信号线投影为**携带语义**的管段，而不是消失。
 	var gpGraph: GPPIDGraph = _gpSampleGraph()
 	(gpGraph.gpEdges[0] as GPPIDEdge).gpKind = GPPIDEdge.GP_SIGNAL
+	(gpGraph.gpEdges[0] as GPPIDEdge).gpSignalType = "PNEUMATIC"
 	var gpMid: Dictionary = GPDexpiExporter.gpFromGraph(gpGraph, _gpSampleSheet())
-	gpEq((gpMid.get(GPDexpiExporter.GP_KEY_SEGMENTS, []) as Array).size(), 0, "no segment for a signal")
-	gpEq((gpMid.get(GPDexpiExporter.GP_KEY_SKIPPED, []) as Array).size(), 1, "the skip is recorded")
+	var gpSegs: Array = gpMid.get(GPDexpiExporter.GP_KEY_SEGMENTS, []) as Array
+	gpEq(gpSegs.size(), 1, "the signal line produces a segment")
+	var gpSeg: Dictionary = gpSegs[0] as Dictionary
+	gpEq(str(gpSeg.get("line_kind", "")), "SIGNAL", "the segment is marked as a signal line")
+	gpEq(str(gpSeg.get("signal_type", "")), "PNEUMATIC", "the signal type travels with it")
 
 
 # ---- serialisation ------------------------------------------------------
