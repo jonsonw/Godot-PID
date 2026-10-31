@@ -175,8 +175,8 @@ func _gpDrawZoneGrid() -> void:
 		_gpDrawTextCentred(gpFont, gpAt, str(gpLabel["text"]), gpMM, GP_INK)
 
 
-# Draw the 180x50 mm title block wherever the sheet's docking pair (anchor + offset) puts it.
-# 按图纸的停靠对（锚角 + 偏移）绘制那块 180×50mm 标题栏。
+# Draw the 135x50 mm title block wherever the sheet's docking pair (anchor + offset) puts it.
+# 按图纸的停靠对（锚角 + 偏移）绘制那块 135×50mm 标题栏。
 # [param gpFrame] the inner frame rectangle (mm), straight from GPFrameGeometry — the block's place is
 # derived from it, so the frame moving carries the block along with it.
 #                 内框矩形（mm），直接取自 GPFrameGeometry —— 图块的位置由它推导，故图框一移动，图块随之而动。

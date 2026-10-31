@@ -18,6 +18,15 @@ extends RefCounted
 # See 持久化实现方案 §6 (v3 sheets[]) / 见「持久化实现方案」§6。
 # Coding rule: every variable must declare its type explicitly. / 编码规范：变量显式类型。
 
+# Monotonic sheet revision (D02). Sheet-field writes bump it; reads do not.
+# 单调图纸修订号（D02）。图纸字段写入 +1；读操作不变。
+var gpRevision: int = 0
+
+
+func gpBumpRevision() -> void:
+	gpRevision += 1
+
+
 # A SHEET-LEVEL field changed (Rev.3 stage 0c). Today only the frame margins can change, but the
 # signal is deliberately not named after them: stage 1 adds the title block's anchor / offset, and
 # both must reach the canvas through ONE channel so the frame view, the dirty flag and the repaint
@@ -443,7 +452,11 @@ var gpBackgroundAlpha: float = 0.35
 static func gpDefaultTitleBlock() -> Dictionary:
 	var gpOut: Dictionary = {}
 	for gpF in GP_TB_FIELDS:
-		gpOut[str(gpF["key"])] = {"zh": "", "en": ""}
+		# ONE shape: every entry is {value:{zh,en}}. The old flat {zh,en} shape silently
+		# defeated gpTitleValue() (it looked for .value) — a default block opened blank.
+		# 唯一形状：每个条目都是 {value:{zh,en}}。旧扁平 {zh,en} 会让 gpTitleValue()（读 .value）
+		# 静默取空 —— 默认图签打开就是空白。
+		gpOut[str(gpF["key"])] = {"value": {"zh": "", "en": ""}}
 	return gpOut
 
 
@@ -455,9 +468,9 @@ func gpTitleValue(gpKey: String) -> String:
 	if gpEntry == null:
 		return ""
 	var gpVal: Variant = (gpEntry as Dictionary).get("value")
-	if gpVal == null:
-		return ""
-	var gpV: Dictionary = gpVal as Dictionary
+	# Legacy archives may carry the pre-2026-10-31 flat {zh,en} shape. Read it, but never write it.
+	# 旧档可能带 2026-10-31 前的扁平 {zh,en}；读取兼容，但新写永远不用它。
+	var gpV: Dictionary = gpVal as Dictionary if gpVal is Dictionary else (gpEntry as Dictionary)
 	# BOTH renders as two stacked lines; the renderer asks for each line separately, so
 	# here we resolve single-language modes and leave BOTH to the caller.
 	# BOTH 是上下双行，渲染器分别取每行，故此处只解析单语模式。
@@ -712,9 +725,7 @@ func _gpTitleFieldEmpty(gpKey: String) -> bool:
 	if gpEntry == null:
 		return true
 	var gpVal: Variant = (gpEntry as Dictionary).get("value", null)
-	if gpVal == null:
-		return true
-	var gpV: Dictionary = gpVal as Dictionary
+	var gpV: Dictionary = gpVal as Dictionary if gpVal is Dictionary else (gpEntry as Dictionary)
 	return str(gpV.get("zh", "")).strip_edges() == "" \
 		and str(gpV.get("en", "")).strip_edges() == ""
 
@@ -777,6 +788,7 @@ func gpSyncSheetSizeField() -> void:
 #                   期望的 [左, 上, 右, 下]（mm）；**可以**为负（即该条图框线位于纸面之外），写入前会
 #                   被收进合法域 —— 该投影仍强制的那一条不变量见 gpClampMargins
 func gpSetFrameMargins(gpMargins: Array) -> void:
+	gpBumpRevision()
 	gpFrameMargins = gpClampMargins(gpMargins, gpWidthMM, gpHeightMM)
 
 
@@ -819,6 +831,7 @@ func gpFrameMarginsAreDefault() -> bool:
 # Callers own the repaint: this class holds no view and must not reach for one.
 # 重绘由调用方负责：本类不含视图，也不得去取视图。
 func gpSetPaperOrigin(gpValue: Vector2) -> void:
+	gpBumpRevision()
 	gpPaperOrigin = gpValue
 
 
@@ -845,6 +858,7 @@ func gpPaperOriginIsDefault() -> bool:
 # [param gpAnchor] the corner to hug; an out-of-range value is clamped into the four corners
 #                  所贴之角；越界值被收进四个角之内
 func gpSetTbAnchor(gpAnchor: int) -> void:
+	gpBumpRevision()
 	gpTbAnchor = clampi(gpAnchor, GP_TB_ANCHOR_BOTTOM_RIGHT, GP_TB_ANCHOR_TOP_LEFT)
 
 
@@ -852,6 +866,7 @@ func gpSetTbAnchor(gpAnchor: int) -> void:
 #                  this setter deliberately does not clamp)
 #                  自锚角**向框内**的距离（mm）（该 setter 为何刻意不钳制，见字段说明）
 func gpSetTbOffset(gpOffset: Vector2) -> void:
+	gpBumpRevision()
 	gpTbOffset = gpOffset
 
 
@@ -859,6 +874,7 @@ func gpSetTbOffset(gpOffset: Vector2) -> void:
 # ONE undo step rather than two.
 # 同时设置锚角与偏移 —— 拖拽产出的正是这一形式，也是被拖的图签是**一个**撤销步而不是两个的原因。
 func gpSetTbPlacement(gpAnchor: int, gpOffset: Vector2) -> void:
+	gpBumpRevision()
 	gpSetTbAnchor(gpAnchor)
 	gpSetTbOffset(gpOffset)
 

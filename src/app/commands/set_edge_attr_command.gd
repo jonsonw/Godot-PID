@@ -44,7 +44,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		if _gpSame(_gpOldValue, gpValue):
 			return false
 	gpE.gpAttrs[gpKey] = gpValue
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -58,7 +58,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 		gpE.gpAttrs[gpKey] = _gpOldValue
 	else:
 		gpE.gpAttrs.erase(gpKey)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 func gpRedo(gpCtx: GPCommandContext) -> void:

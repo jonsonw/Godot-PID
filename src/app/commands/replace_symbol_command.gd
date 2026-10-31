@@ -74,7 +74,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	gpN.gpSymbolId = _gpNewDef.gpId
 	_gpDowngraded = []
 	_gpDowngradeMissingPorts(gpCtx.gpGraph)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -87,7 +87,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 	gpN.gpSymbolId = _gpOldSymbolId
 	_gpRestoreRefs(gpCtx.gpGraph)
 	_gpDowngraded = []
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 func gpRedo(gpCtx: GPCommandContext) -> void:
@@ -99,7 +99,7 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 	gpN.gpSymbolId = _gpNewDef.gpId
 	_gpDowngraded = []
 	_gpDowngradeMissingPorts(gpCtx.gpGraph)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 # Record the port name on every edge end bound to this node, so undo can restore it exactly.

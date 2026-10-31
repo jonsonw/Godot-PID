@@ -42,7 +42,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	if not _gpHadOld and _gpNewName == "":
 		return false
 	gpN.gpNames[_gpLocale] = _gpNewName
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -56,7 +56,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 		gpN.gpNames[_gpLocale] = _gpOldName
 	else:
 		gpN.gpNames.erase(_gpLocale)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 func gpRedo(gpCtx: GPCommandContext) -> void:
@@ -66,4 +66,4 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 	if gpN == null:
 		return
 	gpN.gpNames[_gpLocale] = _gpNewName
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()

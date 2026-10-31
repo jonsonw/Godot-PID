@@ -63,7 +63,7 @@ Main (Control)              ← 挂 GPMainWindow 脚本
 | 多用 `.tscn` 场景 | 可视化编辑、结构清晰 | 加载期需解析每个场景；跨场景引用易形成隐式依赖 |
 | 少用场景 + 代码构造 | 装配顺序可控、可 headless 测试 | 失去可视化编辑 |
 
-本项目选后者，理由在 §3.8 会讲——**它换来了 9,533 条断言能在无窗口环境跑完**。
+本项目选后者，理由在 §3.8 会讲——**它换来了 9,556 条断言能在无窗口环境跑完**。
 
 ### 1.3 脚本（Script）= 挂在节点上的行为
 
@@ -184,7 +184,7 @@ func _init() -> void:
   <text x="80" y="256" font-size="14.5" font-weight="600" fill="#2c2c2a">core/ · 领域内核 · 47 文件 / 8,213 行</text>
   <text x="80" y="280" font-size="11.5" fill="#2c2c2a">model(16) · geometry(9) · view(8) · service(7) · symbol(4) · platform(2) · constants(1)</text>
   <text x="80" y="303" font-size="11.5" fill="#0f6e56">它知道：图数据、几何算法、位号规则。它一无所知：UI、文件格式、autoload、Node</text>
-  <text x="80" y="326" font-size="11.5" fill="#0f6e56">✓ 77 个类中 0 个是 Node → 可以完全 headless 测试 → 9,533 条断言的基础</text>
+  <text x="80" y="326" font-size="11.5" fill="#0f6e56">✓ 77 个类中 0 个是 Node → 可以完全 headless 测试 → 9,556 条断言的基础</text>
   <text x="80" y="345" font-size="11" fill="#5f5e5a">这是整个系统里最"纯"的一层：换掉 Godot，它几乎能原样搬到别的引擎</text>
 
   <rect x="60" y="366" width="380" height="52" rx="8" fill="#ffffff" stroke="#e2e0da" stroke-width="1.2"/>
@@ -261,7 +261,7 @@ core 不需要运行中的引擎窗口
    ↓
 core 可以在 headless 下实例化
    ↓
-9,533 条断言能跑完（其中绝大多数测的是 core）
+9,556 条断言能跑完（其中绝大多数测的是 core）
 ```
 
 **这是一条因果链，不是巧合。** 如果某天有人为了方便，在 `core/model/pid_node.gd` 里加一句 `I18n.gpTr(...)` 来格式化显示名，这条链就断了——虽然功能上"能跑"，但 `core` 从此再也无法独立测试。
@@ -438,7 +438,7 @@ func gpFromDict(gpD: Dictionary) -> void:
 
 | 因为…… | 所以…… |
 |---|---|
-| `core` 不依赖 UI / autoload | 9,533 条断言在 headless 下跑完（约 6–17 秒） |
+| `core` 不依赖 UI / autoload | 9,556 条断言在 headless 下跑完（约 6–17 秒） |
 | 命令模式可自我求逆 | 每条命令都能测"执行 → 撤销 → 重做"的一致性 |
 | 几何函数全静态无状态 | 给定输入就有确定输出，无需搭建环境 |
 | 门面端口稳定 | UI 测试可以驱动真实 `main.tscn` 而不碰内部结构 |

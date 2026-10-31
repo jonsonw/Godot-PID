@@ -51,7 +51,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		gpE.gpFromRef = gpNewRef.duplicate(true)
 	else:
 		gpE.gpToRef = gpNewRef.duplicate(true)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -65,7 +65,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 		gpE.gpFromRef = _gpOldRef.duplicate(true)
 	else:
 		gpE.gpToRef = _gpOldRef.duplicate(true)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 func gpRedo(gpCtx: GPCommandContext) -> void:

@@ -83,7 +83,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		# leave a node half-applied.
 		# 没有任何移动：仍把（相同的）值写回，避免半成形的重做让节点停在半套状态。
 		return false
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -103,7 +103,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 			continue
 		gpN.gpRotationDeg = float(gpPrev.get("rot", 0.0))
 		gpN.gpFlipped = bool(gpPrev.get("flipped", false))
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 # Target rotation for slot gpI (0 when the caller supplied no value).

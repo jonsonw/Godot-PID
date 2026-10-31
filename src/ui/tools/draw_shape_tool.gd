@@ -63,7 +63,7 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 			gpCv.gpSetSelection([])
 			gpCv.gpSetMode(GPMode.GP_SELECT)
 		gpCv.queue_redraw()
-		gpCv.gpGraphChanged.emit()
+		gpCv.gpEmitGraphChanged(true)
 		gpCv.gpEmitStatus()
 	return true
 
@@ -187,7 +187,7 @@ func _gpFinishPolyline() -> void:
 		gpCv.gpShapeSel = [gpIdx]
 		gpCv.gpSetSelection([])
 		gpCv.gpSetMode(GPMode.GP_SELECT)
-		gpCv.gpGraphChanged.emit()
+		gpCv.gpEmitGraphChanged(true)
 	_gpPolyPts.clear()
 	gpCv.queue_redraw()
 	gpCv.gpEmitStatus()

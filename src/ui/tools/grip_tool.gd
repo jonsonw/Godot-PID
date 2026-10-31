@@ -51,7 +51,7 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 	# 结束锚点（手柄）拖拽——几何已在拖拽过程中实时变更。
 	if gpAnno.gpHasGripDrag():
 		gpAnno.gpEndGripDrag()
-		gpCv.gpGraphChanged.emit()
+		gpCv.gpEmitGraphChanged(true)
 		gpCv.gpEmitStatus()
 		return true
 	# Finish a whole-shape move.
@@ -61,34 +61,34 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 		# (B08 follow-up), and that needs to know where the user let go.
 		# 传入松手处的世界坐标：把注记**拖到**管嘴上会转成连线（B08 续），那需要知道用户在哪松手。
 		gpAnno.gpEndShapeDrag(gpWorld)
-		gpCv.gpGraphChanged.emit()
+		gpCv.gpEmitGraphChanged(true)
 		gpCv.gpEmitStatus()
 		return true
 	# Finish an edge grip drag — commit one undo step (vertex re-route or endpoint reconnect).
 	# 结束边抓取点拖拽——提交一个撤销步（顶点改布线或端点改接）。
 	if gpCtx.gpEdgeGrips.gpIsDragging():
 		gpCtx.gpEdgeGrips.gpEndGripDrag()
-		gpCv.gpGraphChanged.emit()
+		gpCv.gpEmitGraphChanged(true)
 		gpCv.gpEmitStatus()
 		return true
 	# Finish a whole-edge translate — commit one undo step (routing + dangling ends shifted).
 	# 结束整线平移——提交一个撤销步（路由 + 悬空端整体平移）。
 	if gpCtx.gpEdgeGrips.gpIsMoving():
 		gpCtx.gpEdgeGrips.gpEndEdgeMove()
-		gpCv.gpGraphChanged.emit()
+		gpCv.gpEmitGraphChanged(true)
 		gpCv.gpEmitStatus()
 		return true
 	# Finish a tag-label drag — commit one undo step. / 结束位号标签拖拽——提交一个撤销步。
 	if gpCtx.gpLabelGrips.gpIsDragging():
 		gpCtx.gpLabelGrips.gpEndGripDrag()
-		gpCv.gpGraphChanged.emit()
+		gpCv.gpEmitGraphChanged(true)
 		gpCv.gpEmitStatus()
 		return true
 	# Finish an edge line-number drag — commit one undo step.
 	# 结束边管线号拖拽——提交一个撤销步。
 	if gpCtx.gpEdgeTagGrips.gpIsDragging():
 		gpCtx.gpEdgeTagGrips.gpEndGripDrag()
-		gpCv.gpGraphChanged.emit()
+		gpCv.gpEmitGraphChanged(true)
 		gpCv.gpEmitStatus()
 		return true
 	return false

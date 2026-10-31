@@ -169,6 +169,11 @@ signal gpEdgeAdded(gpEdge: GPPIDEdge)
 signal gpEdgeRemoved(gpEdge: GPPIDEdge)
 signal gpGraphChanged()
 
+# Monotonic document revision (D02). Every graph mutation bumps it; read operations do not.
+# It is a refresh token, not an event bus — the signal still carries the event.
+# 单调文档修订号（D02）。每次图变更 +1；读操作不变。它是刷新令牌，不替代事件信号。
+var gpRevision: int = 0
+
 
 # Convenience factory: build a node object from primitive fields.
 # 便捷工厂：用原始字段构造一个节点对象。
@@ -216,10 +221,30 @@ func gpNewEdgeEx(gpId: String, gpFrom: Dictionary, gpTo: Dictionary, gpKind: Str
 
 # Add a node object to the graph.
 # 向图中添加一个节点对象。
+# Bump the document revision. Public so the canvas can mark a non-command mutation; command
+# operations should still result in ONE bump for one user action.
+# 递增文档修订号。公开给画布标记非命令变更；命令操作仍应保证一次用户动作只 +1。
+func gpBumpRevision() -> void:
+	gpRevision += 1
+
+
+# Single mutation notification: revision first, then the signal. Every core mutator uses this.
+# 唯一的变更通知：先 revision，再发信号。所有 core 变更走这里。
+func _gpNotifyChanged() -> void:
+	gpBumpRevision()
+	gpGraphChanged.emit()
+
+
+# Public mutation notifier for app commands / UI edits that mutate the model directly.
+# 供 app 命令 / 界面直接改模型的公共变更通知。
+func gpNotifyChanged() -> void:
+	_gpNotifyChanged()
+
+
 func gpAddNode(gpNode: GPPIDNode) -> void:
 	gpNodes.append(gpNode)
 	gpNodeAdded.emit(gpNode)
-	gpGraphChanged.emit()
+	_gpNotifyChanged()
 
 
 # Add an edge object to the graph.
@@ -227,14 +252,14 @@ func gpAddNode(gpNode: GPPIDNode) -> void:
 func gpAddEdge(gpEdge: GPPIDEdge) -> void:
 	gpEdges.append(gpEdge)
 	gpEdgeAdded.emit(gpEdge)
-	gpGraphChanged.emit()
+	_gpNotifyChanged()
 
 
 # Add a free annotation shape (line / circle / rectangle / polyline) to the sheet's shape layer.
 # 向图纸图形层添加一枚自由注释图形（直线 / 圆 / 矩形 / 折线）。
 func gpAddShape(gpShape: GPShape) -> void:
 	gpShapes.append(gpShape)
-	gpGraphChanged.emit()
+	_gpNotifyChanged()
 
 
 # Find a node by id. Returns null when missing.
@@ -263,7 +288,7 @@ func gpRemoveNode(gpId: String) -> bool:
 			var gpN: GPPIDNode = gpNodes[gpI]
 			gpNodes.remove_at(gpI)
 			gpNodeRemoved.emit(gpN)
-			gpGraphChanged.emit()
+			_gpNotifyChanged()
 			return true
 	return false
 
@@ -279,7 +304,7 @@ func gpRemoveNodeWithEdges(gpId: String) -> void:
 		else:
 			gpKeep.append(gpE)
 	gpEdges = gpKeep
-	gpGraphChanged.emit()
+	_gpNotifyChanged()
 
 
 # Remove a WHOLE SET of nodes plus every edge touching ANY of them, emitting the same per-node /
@@ -318,7 +343,7 @@ func gpRemoveNodesWithEdges(gpIds: Array[String]) -> void:
 		else:
 			gpKeep.append(gpE)
 	gpEdges = gpKeep
-	gpGraphChanged.emit()
+	_gpNotifyChanged()
 
 
 # Insert an edge at a position (default: append). Used by undo to put a deleted edge back at
@@ -329,7 +354,7 @@ func gpInsertEdge(gpEdge: GPPIDEdge, gpAt: int = -1) -> void:
 		return
 	gpEdges.insert(gpAt if gpAt >= 0 else gpEdges.size(), gpEdge)
 	gpEdgeAdded.emit(gpEdge)
-	gpGraphChanged.emit()
+	_gpNotifyChanged()
 
 
 # Insert an annotation shape at a position (default: append). Used by undo to put a deleted
@@ -339,7 +364,7 @@ func gpInsertShape(gpShape: GPShape, gpAt: int = -1) -> void:
 	if gpShape == null:
 		return
 	gpShapes.insert(gpAt if gpAt >= 0 else gpShapes.size(), gpShape)
-	gpGraphChanged.emit()
+	_gpNotifyChanged()
 
 
 # Remove an annotation shape by object identity. Returns whether it was found.
@@ -353,7 +378,7 @@ func gpRemoveShape(gpShape: GPShape) -> bool:
 	if gpAt < 0:
 		return false
 	gpShapes.remove_at(gpAt)
-	gpGraphChanged.emit()
+	_gpNotifyChanged()
 	return true
 
 
@@ -370,7 +395,7 @@ func gpRemoveEdge(gpId: String) -> bool:
 			var gpE: GPPIDEdge = gpEdges[gpI]
 			gpEdges.remove_at(gpI)
 			gpEdgeRemoved.emit(gpE)
-			gpGraphChanged.emit()
+			_gpNotifyChanged()
 			return true
 	return false
 
@@ -414,7 +439,7 @@ func gpRemoveSymbolInstances(gpSymbolId: String) -> int:
 		else:
 			gpKeepEdges.append(gpE)
 	gpEdges = gpKeepEdges
-	gpGraphChanged.emit()
+	_gpNotifyChanged()
 	return gpCount
 
 
@@ -700,6 +725,9 @@ func gpRestoreGeometry(gpSnap: Dictionary, gpDelta: Vector2 = Vector2.ZERO) -> v
 			gpOut.append(gpP + gpDelta)
 		gpShapes[gpI].gpPoints = gpOut
 	_gpDropRestoreFromArchive(gpSnap.get("drops", []), gpDelta)
+	# Restoring geometry is a model mutation even though the arrays are written in place.
+	# 恢复几何虽为原地写四类数组，仍是模型变更。
+	_gpNotifyChanged()
 
 
 # Copy a ref's dangling `point`, or null when the end is bound to a port (nothing is stored for it —

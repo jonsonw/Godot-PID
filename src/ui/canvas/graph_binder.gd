@@ -36,6 +36,13 @@ var gpStyle: GPRenderStyle = null
 var _gpSymbolViews: Dictionary = {}
 var _gpEdgeViews: Dictionary = {}
 
+# Last graph revision seen by the binder (D03). A revision change means something IN THE MODEL
+# changed even when object references stayed equal (in-place mutation), so the cached views must
+# repaint. This is the replacement for the old reference-only criterion.
+# 绑定器上次看到的图修订号（D03）。修订号变化意味着**模型**变了、即使对象引用仍相等（原地
+# 修改），故缓存视图必须重绘。这是旧「仅比引用」判据的替代。
+var _gpLastRevision: int = -1
+
 # Whether newly created symbol views should play the drop animation. FALSE until the first sync
 # has completed: opening a drawing must not pop 500 symbols at once — only symbols the user
 # places (or that arrive later, e.g. pasted / imported ones) are worth announcing.
@@ -105,12 +112,15 @@ func gpSync(gpG: GPPIDGraph, gpD: Array[GPSymbolDef], gpSelection: Array[String]
 	gpZoom = maxf(gpZoomIn, 0.01)
 	if gpGraph == null or gpWorldRoot == null:
 		return
-	_gpSyncSymbolViews(gpSelection, gpConnectFrom)
-	_gpSyncEdgeViews(gpSelection, gpEdgeSelection, gpEditingEdgeId)
+	var gpRevisionChanged: bool = gpGraph.gpRevision != _gpLastRevision
+	_gpSyncSymbolViews(gpSelection, gpConnectFrom, gpRevisionChanged)
+	_gpSyncEdgeViews(gpSelection, gpEdgeSelection, gpEditingEdgeId, gpRevisionChanged)
+	_gpLastRevision = gpGraph.gpRevision
 
 # Incrementally sync symbol view nodes with gpGraph.gpNodes().
 # 增量同步图元视图节点与 gpGraph.gpNodes()。
-func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> void:
+func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String,
+		gpRevisionChanged: bool = false) -> void:
 	var gpFresh: Dictionary = {}
 	for gpN in gpGraph.gpNodes:
 		var gpId: String = gpN.gpInstanceId
@@ -162,7 +172,7 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String) -> vo
  # actually changed, or every idle mouse motion repaints the whole sheet (the flicker).
  # 定义驱动所绘几何，故重绑需要重绘「两层」（视图上的标签，body 子节点上的字形与端口）
  # —— 但仅在真正变化时：否则每一次静止的鼠标移动都会把整张图重绘一遍（即闪烁）。
-			if gpRebound or gpMoved:
+			if gpRebound or gpMoved or gpRevisionChanged:
 				gpV.gpRepaint()
 			if gpDefSwapped:
 				gpV.gpPlayFlash()
@@ -278,7 +288,7 @@ func _gpFillDepth(gpId: String, gpDepth: Dictionary) -> void:
 # [param gpEdgeSelection] selected edge ids / 选中的边 id
 # [param gpEditingEdgeId] edge being grip-dragged (edit highlight) / 正被拖拽的边 id（编辑高亮）
 func _gpSyncEdgeViews(gpSelection: Array[String], gpEdgeSelection: Array[String] = [],
-		gpEditingEdgeId: String = "") -> void:
+		gpEditingEdgeId: String = "", gpRevisionChanged: bool = false) -> void:
 	var gpFresh: Dictionary = {}
 	for gpE in gpGraph.gpEdges:
 		var gpId: String = gpE.gpInstanceId
@@ -317,7 +327,7 @@ func _gpSyncEdgeViews(gpSelection: Array[String], gpEdgeSelection: Array[String]
  # 边 id 存于独立的选择数组（gpEdgeSel），故需同时比对节点集与边集 —— 否则边的光晕永远不亮，
  # 用户只会看到抓取点三角。编辑态在本边正是被拖拽的那条时置真。
 		var gpIsSel: bool = gpSelection.has(gpId) or gpEdgeSelection.has(gpId)
-		if gpV.gpSetView(gpZoom, gpIsSel, false, gpId == gpEditingEdgeId) or gpEdgeChanged:
+		if gpV.gpSetView(gpZoom, gpIsSel, false, gpId == gpEditingEdgeId) or gpEdgeChanged or gpRevisionChanged:
 			gpV.queue_redraw()
 		gpFresh[gpId] = gpV
 	# Remove stale edge views.

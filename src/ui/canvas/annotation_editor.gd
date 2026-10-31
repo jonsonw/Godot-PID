@@ -259,7 +259,7 @@ func _gpSyncNoteEdges(gpS: GPShape) -> void:
 		# this signal — without it the line stays behind while the text moves.
 		# **重绘信号**。改引用字典只改**模型**，而边的**视图**在这个信号上重新同步 ——
 		# 缺了它，文字在动、线不动。
-		gpCv.gpGraph.gpGraphChanged.emit()
+		gpCv.gpGraph.gpNotifyChanged()
 
 
 # Restore the note position and the referencing ends from the drag-start snapshot.

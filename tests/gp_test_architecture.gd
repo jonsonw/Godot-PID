@@ -92,3 +92,22 @@ func gpTestSymbolGeometryBehaviour() -> void:
 		"no box falls back to 100x100")
 	gpApprox(GPSymbolGeometry.gpFitScale(Rect2(Vector2.ZERO, Vector2(10, 5)),
 		Vector2(100, 100)), 10.0, 0.001, "fit scale picks the tighter axis")
+
+
+# D03: canvas-level UI edits must use the one emit path; the binder must have a revision
+# criterion, not only reference equality.
+# D03：画布级界面编辑必须走唯一发信号路径；绑定器必须有 revision 判据，而非仅引用相等。
+func gpTestCanvasRefreshUsesRevisionPath() -> void:
+	for gpPath in [
+		"res://src/ui/canvas/annotation_editor.gd",
+		"res://src/ui/canvas/edit_facade.gd",
+		"res://src/ui/tools/grip_tool.gd",
+		"res://src/ui/tools/select_tool.gd",
+		"res://src/ui/tools/draw_shape_tool.gd",
+	]:
+		var gpText: String = FileAccess.get_file_as_string(gpPath)
+		gpCheck(not gpText.contains("gpCv.gpGraphChanged.emit()"),
+			"canvas edit uses the unified path: " + gpPath)
+	var gpBinder: String = FileAccess.get_file_as_string("res://src/ui/canvas/graph_binder.gd")
+	gpCheck(gpBinder.contains("gpRevision"), "the binder uses graph revision as a criterion")
+	gpCheck(gpBinder.contains("gpRevisionChanged"), "the binder applies the revision change")

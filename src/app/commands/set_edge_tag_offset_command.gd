@@ -52,7 +52,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	if _gpOld == _gpNew:
 		return false
 	gpE.gpSetTagOffset(_gpNew)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -63,7 +63,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 	if gpE == null:
 		return
 	gpE.gpSetTagOffset(_gpOld)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 # Re-apply. Safe to re-execute: the command stores no allocated id and the accessor is
@@ -78,4 +78,4 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 	if gpE == null:
 		return
 	gpE.gpSetTagOffset(_gpNew)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()

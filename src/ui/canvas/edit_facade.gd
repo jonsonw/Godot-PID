@@ -106,7 +106,7 @@ func gpRequestAutoConnect() -> String:
 		gpReportRefusal(gpHost.gpActions.gpLastRefusal)
 		return ""
 	gpClearPortPick()
-	gpHost.gpGraphChanged.emit()
+	gpHost.gpEmitGraphChanged(true)
 	gpHost.queue_redraw()
 	if gpKind != GPPIDEdge.GP_SIGNAL:
 		gpHost.gpNotifyLineCreated(gpId)

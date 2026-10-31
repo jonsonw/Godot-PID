@@ -69,7 +69,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		_gpWrite(gpN, gpT)
 	if not gpChanged:
 		return false
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -86,7 +86,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 		var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(_gpIds[gpI])
 		if gpN != null:
 			_gpWrite(gpN, _gpBefore[gpI])
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 # Replay the target tuples verbatim. gpExecute() would refuse when the values are already correct
@@ -103,7 +103,7 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 		var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(_gpIds[gpI])
 		if gpN != null:
 			_gpWrite(gpN, _gpTargets[gpI])
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 # Whether the target tuple differs from the current one in any field. A missing key means "leave

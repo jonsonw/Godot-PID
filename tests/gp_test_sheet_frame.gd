@@ -532,3 +532,22 @@ func gpTestNewA3SheetKeyRoundTripsFullScale() -> void:
 		"新建 A3 图纸应显式写出 1.0")
 	var gpBack: GPSheet = GPSheet.gpFromDict(gpD)
 	gpApprox(gpBack.gpSymbolScale, 1.0, 0.0001, "A3 图纸往返后仍为 1.0")
+
+
+# D07: the default title block uses the SAME {value:{zh,en}} shape as a filled one, so a
+# brand-new block reads as empty (not as "missing") and survives a round-trip.
+# D07：默认图签与已填图签同形 {value:{zh,en}}，故新图签读作空值（不是缺字段），且往返不丢。
+func gpTestDefaultTitleBlockSchemaAndRoundTrip() -> void:
+	var gpS: GPSheet = GPSheet.gpNew("tb-default", "首页", 0)
+	var gpCompany: Variant = gpS.gpTitleBlock.get("company")
+	gpCheck(gpCompany is Dictionary, "the default entry exists")
+	var gpEntry: Dictionary = gpCompany as Dictionary
+	gpCheck(gpEntry.has("value"), "the default entry carries the {value:{zh,en}} wrapper")
+	gpEq(gpS.gpTitleValue("company"), "", "an empty default reads as empty, not as absence")
+	gpS.gpTitleBlock["company"] = {"value": {"zh": "示例公司", "en": "Sample Co."}}
+	var gpBack: GPSheet = GPSheet.gpFromDict(gpS.gpToDict())
+	gpEq(gpBack.gpTitleValue("company"), "示例公司", "the wrapped value survives a round-trip")
+	# Legacy flat shape remains readable, but the new default never writes it.
+	var gpLegacy: GPSheet = GPSheet.gpNew("tb-legacy", "旧档", 0)
+	gpLegacy.gpTitleBlock["company"] = {"zh": "旧公司", "en": "Old Co."}
+	gpEq(gpLegacy.gpTitleValue("company"), "旧公司", "a legacy flat value remains readable")

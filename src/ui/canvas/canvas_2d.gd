@@ -763,6 +763,17 @@ func _gpSetGraph(gpValue: GPPIDGraph) -> void:
 # core 图被程序化改动（gpAddNode() / gpRemoveNodeWithEdges() / gpRemoveSymbolInstances() /
 # gpAddShape() 等）。汇入画布信号，使交互改动与程序化改动走同一路径。
 func _gpOnGraphDataChanged() -> void:
+	gpEmitGraphChanged(false)
+
+
+# The ONE canvas-level graph-change path (D03): emit the canvas signal, mark dirty, queue a
+# repaint and refresh cached child views. Direct UI edits call this instead of
+# `gpGraphChanged.emit()` so they cannot bypass the dirty flag / binder refresh.
+# 画布级唯一的图变化路径（D03）：发画布信号、标脏、排队重绘并刷新缓存子视图。界面直接编辑
+# 调这里，而不是 `gpGraphChanged.emit()`，从而不可能绕过脏标记 / 绑定器刷新。
+func gpEmitGraphChanged(gpBumpRevision: bool = false) -> void:
+	if gpBumpRevision and _gpGraphRef != null:
+		_gpGraphRef.gpBumpRevision()
 	gpGraphChanged.emit()
 	# any model mutation means there is unsaved work; let the document manager own the
 	# dirty flag rather than a global singleton. No-op until a manager is bound.
@@ -772,8 +783,8 @@ func _gpOnGraphDataChanged() -> void:
 	# a programmatic model change must repaint too. Without this, any command that
 	# mutates the graph (delete, move) updates the model but leaves stale pixels on
 	# screen whenever the caller forgets an explicit queue_redraw.
-	# 程序化改模型同样必须重绘。否则命令（删除、移动）改了模型却留下残影，
-	# 只要调用方忘了显式 queue_redraw，画面就是旧的。
+	# 程序化改模型同样必须重绘。否则命令（删除、移动）改了模型却留下残影，只要调用方忘了
+	# 显式 queue_redraw，画面就是旧的。
 	queue_redraw()
 	# Stage 3 S4 fix: a parent's queue_redraw() does NOT cascade to child CanvasItems (the
 	# trap GPCanvasSymbolLayer's header documents), and the binder's rebind-repaint guard is

@@ -66,7 +66,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		return false
 	for gpChangeRaw in _gpApplied:
 		_gpApply(gpCtx.gpGraph, gpChangeRaw as Dictionary)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -79,7 +79,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 			_gpWrite(gpCtx.gpGraph, gpChange, gpRow["old"])
 		else:
 			_gpErase(gpCtx.gpGraph, gpChange)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 func gpRedo(gpCtx: GPCommandContext) -> void:
@@ -87,7 +87,7 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 		return
 	for gpChangeRaw in _gpApplied:
 		_gpApply(gpCtx.gpGraph, gpChangeRaw as Dictionary)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 func _gpKeyOf(gpChange: Dictionary) -> String:

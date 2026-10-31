@@ -61,7 +61,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		return false
 	if not _gpApply(gpCtx, _gpAfter, _gpEdgesAfter):
 		return false
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -69,7 +69,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 	if gpCtx == null or gpCtx.gpGraph == null:
 		return
 	if _gpApply(gpCtx, _gpBefore, _gpEdgesBefore):
-		gpCtx.gpGraph.gpGraphChanged.emit()
+		gpCtx.gpGraph.gpNotifyChanged()
 
 
 func gpRedo(gpCtx: GPCommandContext) -> void:
@@ -79,7 +79,7 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 	if gpCtx == null or gpCtx.gpGraph == null:
 		return
 	if _gpApply(gpCtx, _gpAfter, _gpEdgesAfter):
-		gpCtx.gpGraph.gpGraphChanged.emit()
+		gpCtx.gpGraph.gpNotifyChanged()
 
 
 func _gpApply(gpCtx: GPCommandContext, gpShot: Dictionary, gpEdges: Array[Dictionary]) -> bool:

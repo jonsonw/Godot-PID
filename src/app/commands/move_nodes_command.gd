@@ -45,7 +45,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		if gpN != null:
 			gpN.gpPosition += _gpDelta
 	_gpApplied = true
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -59,7 +59,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 		if gpN != null:
 			gpN.gpPosition -= _gpDelta
 	_gpApplied = false
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 # Re-apply the same delta. Re-executing is idempotent here, so the default redo

@@ -44,7 +44,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	_gpOldSignal = gpE.gpSignalType
 	gpE.gpKind = gpNewKind
 	gpE.gpSignalType = gpNewSignalType
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -56,7 +56,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 		return
 	gpE.gpKind = _gpOldKind
 	gpE.gpSignalType = _gpOldSignal
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 func gpRedo(gpCtx: GPCommandContext) -> void:

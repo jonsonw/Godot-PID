@@ -59,7 +59,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		return false
 	else:
 		gpN.gpProps[_gpKey] = _gpNewVal
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -73,7 +73,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 		gpN.gpProps[_gpKey] = _gpOldVal
 	else:
 		gpN.gpProps.erase(_gpKey)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 func gpRedo(gpCtx: GPCommandContext) -> void:
@@ -86,4 +86,4 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 		gpN.gpProps.erase(_gpKey)
 	else:
 		gpN.gpProps[_gpKey] = _gpNewVal
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()

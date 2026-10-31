@@ -48,7 +48,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	if _gpOld == _gpNew:
 		return false
 	gpN.gpLabelOffset = _gpNew
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -59,7 +59,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 	if gpN == null:
 		return
 	gpN.gpLabelOffset = _gpOld
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 func gpRedo(gpCtx: GPCommandContext) -> void:
@@ -69,4 +69,4 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 	if gpN == null:
 		return
 	gpN.gpLabelOffset = _gpNew
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()

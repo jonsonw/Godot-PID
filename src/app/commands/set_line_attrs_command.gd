@@ -68,7 +68,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	_applyAttrs(gpE, gpAttrs)
 	if _gpNewTag != "":
 		gpE.gpTag = _gpNewTag
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -85,7 +85,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 		else:
 			gpE.gpAttrs.erase(gpK)
 	gpE.gpTag = _gpOldTag
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 func gpRedo(gpCtx: GPCommandContext) -> void:

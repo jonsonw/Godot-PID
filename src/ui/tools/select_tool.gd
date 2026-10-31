@@ -618,7 +618,7 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 					_gpDragOrigins.clear()
 					_gpPushOrigins.clear()
 					_gpDragStartEdges.clear()
-					gpCv.gpGraphChanged.emit()
+					gpCv.gpEmitGraphChanged(true)
 					gpCv.queue_redraw()
 					gpCv.gpEmitStatus()
 					return true
@@ -649,7 +649,7 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 		_gpDragOrigins.clear()
 		_gpPushOrigins.clear()
 		_gpDragStartEdges.clear()
-		gpCv.gpGraphChanged.emit()
+		gpCv.gpEmitGraphChanged(true)
 		gpCv.queue_redraw()
 		gpCv.gpEmitStatus()
 		return true

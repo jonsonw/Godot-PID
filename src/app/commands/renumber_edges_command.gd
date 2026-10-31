@@ -142,7 +142,7 @@ func _gpRenumberLegacy(gpCtx: GPCommandContext) -> bool:
 			continue
 		gpE.gpTag = GPTagGen.gpNextTag(gpGraph, GPTagGen.GP_PIPE_PREFIX)
 		_gpCount += 1
-	gpGraph.gpGraphChanged.emit()
+	gpGraph.gpNotifyChanged()
 	return _gpCount > 0
 
 

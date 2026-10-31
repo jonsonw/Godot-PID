@@ -209,3 +209,40 @@ func gpTestMoveNotifiesOncePerCommand() -> void:
 	st.gpUndo(ctx)
 	gpEq(_gpSignalHits, 2, "undo notifies again so the view can refresh")
 	g.gpGraphChanged.disconnect(Callable(self, "_gpOnGraphChanged"))
+
+
+# ----------------------------------------------------------------- revision token / 修订令牌
+
+func gpTestGraphRevisionBumpsOnMutationOnly() -> void:
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	gpEq(gpG.gpRevision, 0, "a fresh graph starts at revision 0")
+	var gpN: GPPIDNode = gpG.gpNewNode("N1", "pump", "P-101", Vector2.ZERO)
+	gpG.gpAddNode(gpN)
+	gpEq(gpG.gpRevision, 1, "adding a node bumps revision by one")
+	var gpBefore: int = gpG.gpRevision
+	gpG.gpGetNode("N1")
+	gpEq(gpG.gpRevision, gpBefore, "a read does not change revision")
+
+
+func gpTestCommandRevisionOnePerUserAction() -> void:
+	var f: Array = _mkFixture()
+	var g: GPPIDGraph = f[0] as GPPIDGraph
+	var ctx: GPCommandContext = f[1] as GPCommandContext
+	var st: GPCommandStack = f[2] as GPCommandStack
+	var gpStart: int = g.gpRevision
+	gpCheck(st.gpDo(GPMoveNodesCommand.new(["N1", "N2"], Vector2(5, 5)), ctx), "move applies")
+	gpEq(g.gpRevision, gpStart + 1, "one move command = one revision")
+	gpCheck(st.gpUndo(ctx), "undo applies")
+	gpEq(g.gpRevision, gpStart + 2, "undo is another revision")
+	gpCheck(st.gpRedo(ctx), "redo applies")
+	gpEq(g.gpRevision, gpStart + 3, "redo is another revision")
+
+
+func gpTestSheetRevisionBumpsOnFieldWrite() -> void:
+	var gpS: GPSheet = GPSheet.gpNew("s1", "首页", 0)
+	var gpStart: int = gpS.gpRevision
+	gpS.gpSetFrameMargins([25.0, 10.0, 10.0, 10.0])
+	gpEq(gpS.gpRevision, gpStart + 1, "writing frame margins bumps sheet revision")
+	var gpBefore: int = gpS.gpRevision
+	gpS.gpTitleValue("project")
+	gpEq(gpS.gpRevision, gpBefore, "reading a title field does not change revision")

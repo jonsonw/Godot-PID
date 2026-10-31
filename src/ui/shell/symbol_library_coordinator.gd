@@ -158,7 +158,7 @@ func gpOnCleanOrphans(gpNodeId: String) -> void:
 	var gpRemoved: int = GPPropertyResolver.gpCleanOrphans(gpNode, gpSchema)
 	if gpRemoved <= 0:
 		return
-	gpCanvas.gpGraph.gpGraphChanged.emit()
+	gpCanvas.gpGraph.gpNotifyChanged()
 	gpCanvas.queue_redraw()
 	gpHost.gpRefreshSelection()
 	gpHost.gpSetState("lib.orphans_cleaned", [gpRemoved])

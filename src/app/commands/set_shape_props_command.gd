@@ -72,7 +72,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	if not gpChanged and _gpHasAll(gpS):
 		return false
 	_gpApply(gpS, _gpValues)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -87,7 +87,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 	if gpS == null:
 		return
 	_gpApply(gpS, _gpBefore)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 # The four editable fields of one shape, as a dictionary.

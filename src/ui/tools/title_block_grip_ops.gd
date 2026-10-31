@@ -7,11 +7,11 @@ extends RefCounted
 # WHY THE WHOLE BLOCK IS THE TARGET HERE, UNLIKE THE FRAME'S BAND / 为何此处整块可抓、与图框的抓取带不同：
 # the frame is grabbable only along its four LINES because it is the whole sheet minus its margins — an
 # area target there would mean "click anywhere and you grab the frame". The title block is a single
-# 180x50 mm object with its own extent, so its area IS its outline; there is no ambiguity to remove. The
+# 135x50 mm object with its own extent, so its area IS its outline; there is no ambiguity to remove. The
 # price is a small one and Rev.3 §4.1 named it: a press inside the bottom-right corner starts a block drag
 # instead of a marquee, so a marquee over that corner has to start from outside it.
 # 图框**只沿四条线**可抓，因为它是整张纸减去边距 —— 在那里用面积目标等于「点哪都抓到图框」。而图签是一个
-# 有自身范围的 180×50mm 对象，其面积**就是**它的轮廓，没有歧义要消除。代价很小，且 Rev.3 §4.1 已点名：
+# 有自身范围的 135×50mm 对象，其面积**就是**它的轮廓，没有歧义要消除。代价很小，且 Rev.3 §4.1 已点名：
 # 在右下角内按下起的是图签拖拽而非框选，故要在该角范围内框选须从它外面起拖。
 #
 # ★ SAFETY PROPERTY / 安全性：like the frame, this can only ever change what happens where NOTHING was

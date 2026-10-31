@@ -68,7 +68,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 			return false
 	_gpOldTag = gpN.gpTag
 	gpN.gpTag = gpNew
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -99,7 +99,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 	if gpCtx.gpTags != null:
 		gpCtx.gpTags.gpGraph = gpCtx.gpGraph
 		gpCtx.gpTags.gpRegister(_gpId, _gpOldTag)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 func gpRedo(gpCtx: GPCommandContext) -> void:
@@ -112,4 +112,4 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 	if gpCtx.gpTags != null:
 		gpCtx.gpTags.gpGraph = gpCtx.gpGraph
 		gpCtx.gpTags.gpRegister(_gpId, _gpNewTag)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()

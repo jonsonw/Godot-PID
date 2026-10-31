@@ -89,7 +89,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 			gpRefusal = "note_missing"
 			return false
 		gpEdge.gpSetEndNoteUid(_gpIsFrom, _gpExistingUid)
-		gpCtx.gpGraph.gpGraphChanged.emit()
+		gpCtx.gpGraph.gpNotifyChanged()
 		return true
 	_gpNote = GPSetEndNoteCommand.new(gpCtx.gpGraph, gpCreatedId, _gpIsFrom, _gpText)
 	if not _gpNote.gpExecute(gpCtx):

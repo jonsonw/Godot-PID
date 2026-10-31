@@ -70,7 +70,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 			_gpApply(gpN)
 	if _gpOld.is_empty():
 		return false
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -82,7 +82,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 		if gpN == null:
 			continue
 		_gpRestore(gpN, gpRow)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 func gpRedo(gpCtx: GPCommandContext) -> void:
@@ -93,7 +93,7 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 		if gpN == null:
 			continue
 		_gpApply(gpN)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 # Record an instance's prior state; returns false when the edit would change nothing.

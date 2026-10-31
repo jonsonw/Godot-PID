@@ -55,7 +55,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	_gpOldMarks = gpCtx.gpTags.gpRules.gpSeqMarks.duplicate()
 	_gpPlan = gpCtx.gpTags.gpPlanRenumberAll(gpItems)
 	GPTagRuleService.gpApplyPlan(gpCtx.gpGraph, _gpPlan)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return GPTagRuleService.gpChangedCount(_gpPlan) > 0
 
 
@@ -68,7 +68,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 	if gpCtx.gpTags != null:
 		gpCtx.gpTags.gpRules.gpSeqMarks = _gpOldMarks.duplicate()
 		gpCtx.gpTags.gpRebuild()
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 # Replay the captured plan. / 重放已捕获的方案。
@@ -80,4 +80,4 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
  # The plan's numbers are already minted; just re-seed the index from the graph.
  # 方案里的号已经铸造过，只需从图重建索引。
 		gpCtx.gpTags.gpRebuild()
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()

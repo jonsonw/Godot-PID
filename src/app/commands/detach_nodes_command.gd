@@ -64,7 +64,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		return false
 	for gpI in range(_gpIds.size()):
 		_gpApply(gpCtx, _gpIds[gpI], _gpAfter[gpI])
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -75,7 +75,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 		return
 	for gpI in range(_gpIds.size()):
 		_gpApply(gpCtx, _gpIds[gpI], _gpBefore[gpI])
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 # Replay the baked state verbatim (see the value-object rule in the header).
@@ -85,7 +85,7 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 		return
 	for gpI in range(_gpIds.size()):
 		_gpApply(gpCtx, _gpIds[gpI], _gpAfter[gpI])
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 # Read the current fields of every mounted id and compute the baked twin. Unmounted or missing ids

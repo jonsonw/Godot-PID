@@ -37,7 +37,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		return false
 	_gpOldRouting = gpE.gpRouting.duplicate()
 	gpE.gpRouting = gpNewRouting.duplicate()
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -48,7 +48,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 	if gpE == null:
 		return
 	gpE.gpRouting = _gpOldRouting.duplicate()
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 func gpRedo(gpCtx: GPCommandContext) -> void:

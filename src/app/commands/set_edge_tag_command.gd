@@ -60,7 +60,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	# 手工输入的号是刻意选择：记住它，使重新编号时不碰它。
 	if gpNewTag != "":
 		gpE.gpAttrs["tag_manual"] = true
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -96,7 +96,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 		gpE.gpAttrs["tag_manual"] = true
 	else:
 		gpE.gpAttrs.erase("tag_manual")
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 func gpRedo(gpCtx: GPCommandContext) -> void:

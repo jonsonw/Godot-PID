@@ -6,7 +6,7 @@
 
 ## [Unreleased] — 2026-10-31 · 项目标准 / DRC v1.2 / 属性面板修复
 
-本段汇总 W10–W11 的项目标准、编号规则、DRC 与属性面板修复。门禁：核心套件 **9,533 通过 / 0 失败 / 118 套**，解析 0 错误。
+本段汇总 W10–W11 的项目标准、编号规则、DRC 与属性面板修复。门禁：核心套件 **9,556 通过 / 0 失败 / 118 套**，解析 0 错误。
 
 ### 新增 / Added
 - **项目标准层（ADR-36）**：`GPProjectStandard` 单实例随工程走；五类编号类别、分段规则、代号表（介质/材料/保温/专业/区域/管径）、分类映射、编号水位线、标准包 `*.gpstd.json` 导入导出与差异预览。
@@ -24,13 +24,16 @@
 - **属性面板刷新**：从已有管线的弹框应用属性后刷新右侧表单；避免旧号残留。
 
 ### 测试 / Tests
-- 核心 GPGTest：**9,533 / 0 / 118 套件**（2026-10-31）。
+- 核心 GPGTest：**9,556 / 0 / 118 套件**（2026-10-31）。
 
 ### 架构与可靠编辑收口 / Architecture & Reliable Editing
 - **B06**：`GPSymbolGeometry` 移入 core，`GPSymbolPainter` 委托、`GPPrintModel` 改用 core；新增 `gp_test_architecture.gd` 静态扫描，core→render 归零。
 - **D01**：属性写路径统一权限闸（set / batch / table / snapshot）；保留键 add/rename 拒绝；`gpCanEditSchema` 接入图元注册，force-deny 测试覆盖。
 - **D04**：注释图形拖拽 / 手柄 / 顶点编辑改为 `GPSetShapeGeometryCommand`，一次拖拽一个撤销步；文字注记边端随命令还原。
 - **A06**：修订、审计与证据模型交付为 **ADR-43**（ADR-31 永久空号不复用），固定 revision / canonical / journal / evidence 契约。
+- **A03 / H02**：ADR-28 一把尺边界与 ISO/GB 偏离表；可复现 DEXPI 覆盖报告 + ISO 偏离摘要。
+- **A02 / D07**：公开文档与实现对齐；默认图签统一 `{value:{zh,en}}`，旧扁平值兼容读取。
+- **D02 / D03 / D06**：图/图纸 revision 令牌；画布唯一变更通道 + binder revision 判据；900 节点 headless 模型基准。
 - 新增回归：dn 代号表两入口下拉、DN80 重渲染、动态字段/分节、空属性键回退、代号表按表区分示例。
 - BUG-002/003 由用户于 2026-10-31 人工测试通过并关闭。
 

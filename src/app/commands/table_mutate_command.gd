@@ -45,7 +45,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	if gpN == null:
 		return false
 	_gpSwap(gpN, _gpAfter)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -61,7 +61,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 	if gpN == null:
 		return
 	_gpSwap(gpN, _gpBefore)
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 # One snapshot application: erase the union of both snapshots' keys, then write the

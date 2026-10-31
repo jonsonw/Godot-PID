@@ -47,7 +47,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		_gpOld[gpId] = gpN.gpPosition
 		gpN.gpPosition = (_gpTargets[gpId] as Vector2)
 	_gpApplied = true
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 
 
@@ -60,7 +60,7 @@ func gpUndo(gpCtx: GPCommandContext) -> void:
 		if gpN != null:
 			gpN.gpPosition = (_gpOld[gpId] as Vector2)
 	_gpApplied = false
-	gpCtx.gpGraph.gpGraphChanged.emit()
+	gpCtx.gpGraph.gpNotifyChanged()
 
 
 # Re-apply the same targets. Idempotent here, so the default redo (gpExecute()) is correct.

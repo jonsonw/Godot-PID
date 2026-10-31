@@ -3,7 +3,7 @@
 > English: a quick read for GitHub visitors. Authoritative full version: `G-PID_项目架构说明_20260908.html` (workspace `架构/交付/`).
 > 中文：供 GitHub 访客速读。权威完整版见工作区 `架构/交付/G-PID_项目架构说明_20260908.html`。
 >
-> **基线 2026-10-31**：`src/**/*.gd` **264 文件 / 69,725 行**，Godot 4.7。门禁：编译 0 错 · GPGTest **9,533 / 0 / 118 套** · SCRIPT ERROR **0** · GUT 5 passing / 3,011 asserts · 运行时冒烟 exit=0。
+> **基线 2026-10-31**：`src/**/*.gd` **264 文件 / 69,725 行**，Godot 4.7。门禁：编译 0 错 · GPGTest **9,556 / 0 / 118 套** · SCRIPT ERROR **0** · GUT 5 passing / 3,021 asserts · 运行时冒烟 exit=0。
 > 与代码冲突之处，一律以代码为准。
 
 ## Layers · 分层
@@ -27,7 +27,7 @@
 | Addons | `src/addons` | `GPIPIDAddon` 商业化插件契约（v1/v2 + 加载器） | **契约 + `GPAddonLoader`；外挂能力不进入 core** |
 
 依赖方向严格自上而下：`ui → {app, io, render} → core`。
-`core` / `app` / `io` / `render` 均**不引用** `ui` 与 `autoload`（实测 0 处）——这是 headless 可测的前提，也是 9,533 条断言成立的原因。
+`core` / `app` / `io` / `render` 均**不引用** `ui` 与 `autoload`（实测 0 处）——这是 headless 可测的前提，也是 9,556 条断言成立的原因。
 
 > **门面约定**：`GPMainWindow` / `GPCanvas2D` 对外只暴露语义化公开端口（`gp*`），内部协作结构（7 协调者 / 4 实现类）不外泄；调用方在其它类 → 方法必须公开，仅类内调用 → `_gp*` 私有。
 
@@ -64,7 +64,7 @@ meta / sheets[] / library / config
 
 | 轨 | 位置 | 规模 | 运行命令 |
 |---|---|---|---|
-| 自研 `GPGTest` | `tests/gp_test_*.gd` | **118 套 / 9,533 条断言** | `godot --headless --script res://tests/run_core_tests.gd` |
+| 自研 `GPGTest` | `tests/gp_test_*.gd` | **118 套 / 9,556 条断言** | `godot --headless --script res://tests/run_core_tests.gd` |
 | `GUT 9.7.1` | `addons/gut`（vendored，MIT） | 桥接 + 原生用例 | `godot --headless --script res://addons/gut/gut_cmdln.gd -gexit` |
 
 桥接脚本 `tests/gut/test_gp_suites.gd` 让 GUT 反射驱动既有 GPGTest 套件，
