@@ -119,7 +119,12 @@ func gpTestUidCollisionReassignsIncoming() -> void:
 
 # A colliding tag gets a visible -dup suffix; the existing device keeps its tag.
 # 冲突位号获得显眼的 -dup 后缀；既有设备保住自己的位号。
-func gpTestTagCollisionAppendsDup() -> void:
+# ADR-36 C: a colliding incoming tag CONTINUES THE SEQUENCE ("P-1002"), it no longer becomes
+# "P-1001-dup" — a suffix breaks the numbering rule and the next renumber would treat it as a
+# manual oddity.
+# ADR-36 C：撞号的导入位号**顺延序号**（"P-1002"），不再变成 "P-1001-dup" —— 后缀破坏编号规则，
+# 下次重排会把它当成手工怪例。
+func gpTestTagCollisionContinuesTheSequence() -> void:
 	var gpTarget: GPPIDGraph = GPPIDGraph.new()
 	var gpExisting: GPPIDNode = gpTarget.gpNewNode("n0", "pump", "P-1001", Vector2.ZERO)
 	gpExisting.gpUid = "doclocal-n0"
@@ -130,8 +135,8 @@ func gpTestTagCollisionAppendsDup() -> void:
 	if gpTarget.gpNodes.size() >= 2:
 		gpCheck((gpTarget.gpNodes[0] as GPPIDNode).gpTag == "P-1001",
 			"the existing tag must be untouched")
-		gpCheck((gpTarget.gpNodes[1] as GPPIDNode).gpTag == "P-1001-dup",
-			"the incoming tag should get a -dup suffix, got "
+		gpCheck((gpTarget.gpNodes[1] as GPPIDNode).gpTag == "P-1002",
+			"the incoming tag should continue the sequence, got "
 			+ (gpTarget.gpNodes[1] as GPPIDNode).gpTag)
 
 

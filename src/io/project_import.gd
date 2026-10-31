@@ -228,11 +228,13 @@ static func gpMergeInto(gpTarget: GPPIDGraph, gpV3: Dictionary, gpMode: String =
  # 位号冲突：保留导入的设备、重命名它并明确告知。
 			var gpTag: String = str(gpNd.get("tag", ""))
 			if not gpTag.is_empty() and gpUsedTags.has(gpTag):
-				var gpNewTag: String = gpTag + GP_DUP_SUFFIX
-				var gpK: int = 2
-				while gpUsedTags.has(gpNewTag):
-					gpNewTag = gpTag + GP_DUP_SUFFIX + str(gpK)
-					gpK += 1
+				# ADR-36 C: continue the SEQUENCE instead of appending "-dup". A suffix breaks
+				# the numbering rule (the tag stops matching its own pattern) and the next
+				# renumber would treat it as a manual oddity. Incrementing the numeric tail
+				# keeps the imported device inside the convention.
+				# ADR-36 C：**顺延序号**而不是拼 "-dup"。后缀会破坏编号规则（位号不再符合自己的
+				# 图案），下次重排还会把它当怪例。递增数字尾段则让导入设备仍在约定之内。
+				var gpNewTag: String = gpNextFreeTagLike(gpTag, gpUsedTags)
 				gpReport.gpAddWarning("import.tag_renamed", gpTag + " -> " + gpNewTag)
 				gpNd["tag"] = gpNewTag
 				gpTag = gpNewTag
@@ -263,6 +265,39 @@ static func gpMergeInto(gpTarget: GPPIDGraph, gpV3: Dictionary, gpMode: String =
 			gpShape.gpFromDict(gpSh as Dictionary)
 			gpTarget.gpAddShape(gpShape)
 	return GPIOResult.gpSuccessWith(gpReport, "status.imported", "")
+
+
+# The next free tag that keeps the ORIGINAL SHAPE: "P-1001" -> "P-1002" (padding preserved).
+# Falls back to the old "-dup" suffix only when the tag has no numeric tail to increment, and
+# says so by returning a string the caller still reports as a rename.
+# 保持**原形状**的下一个空号："P-1001" -> "P-1002"（补零宽度保留）。只有位号没有数字尾段可递增时
+# 才退回旧的 "-dup" 后缀 —— 调用方仍会把它当一次重命名报告。
+static func gpNextFreeTagLike(gpTag: String, gpUsed: Dictionary) -> String:
+	var gpCut: int = gpTag.rfind("-")
+	if gpCut > 0:
+		var gpHead: String = gpTag.substr(0, gpCut + 1)
+		var gpTail: String = gpTag.substr(gpCut + 1)
+		if gpTail.is_valid_int():
+			var gpWidth: int = gpTail.length()
+			var gpN: int = int(gpTail)
+			for _gpI in range(100000):
+				gpN += 1
+				var gpCandidate: String = gpHead + _gpPad(gpN, gpWidth)
+				if not gpUsed.has(gpCandidate):
+					return gpCandidate
+	var gpFallback: String = gpTag + GP_DUP_SUFFIX
+	var gpK: int = 2
+	while gpUsed.has(gpFallback):
+		gpFallback = gpTag + GP_DUP_SUFFIX + str(gpK)
+		gpK += 1
+	return gpFallback
+
+
+static func _gpPad(gpN: int, gpWidth: int) -> String:
+	var gpText: String = str(gpN)
+	while gpText.length() < gpWidth:
+		gpText = "0" + gpText
+	return gpText
 
 
 # One edge endpoint, with its node_id rewritten through the uid remap.

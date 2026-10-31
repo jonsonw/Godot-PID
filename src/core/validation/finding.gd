@@ -30,9 +30,36 @@ const GP_WARNING: String = "warning"
 # 值得看一眼的味道；可交付。
 const GP_INFO: String = "info"
 
-# Stable rule id, e.g. "drc.dangling_end".
-# 稳定规则号，如 "drc.dangling_end"。
+# Stable rule id, e.g. "drc.dangling_end". Kept for backwards compatibility: the panel,
+# reports and existing integrations still key on it.
+# 稳定规则号，如 "drc.dangling_end"。为兼容保留：面板、报告与既有集成仍按它取键。
 var gpRuleId: String = ""
+
+# Fine-grained check id (ADR-39), e.g. "drc.layout.edge_crosses_symbol". Empty means "same as
+# gpRuleId", so every rule written before this field existed keeps working unchanged.
+# 细分检查号（ADR-39），如 "drc.layout.edge_crosses_symbol"。为空表示「同 gpRuleId」，
+# 故本字段出现之前写的每条规则都原样可用。
+var gpCheckId: String = ""
+
+# Cross-document stable uid of the object the finding is about (node / edge / shape). Waivers,
+# AI repair and cross-sheet navigation address THIS, never the per-sheet instance id.
+# 发现所指对象的跨文档稳定 uid（节点 / 连线 / 图形）。豁免、AI 修复与跨页导航都指向它，
+# 绝不用单图纸实例 id。
+var gpEntityUid: String = ""
+
+# The sheet the finding belongs to (stable sheet id). Empty for a finding with no sheet context.
+# 发现所属图纸的稳定 id。无图纸上下文时为空。
+var gpSheetId: String = ""
+
+# Machine-readable repair hint (e.g. "drc.fix.reroute"), consumed by the AI repair loop.
+# 机器可读的修复提示（如 "drc.fix.reroute"），供 AI 修复回路消费。
+var gpFixHint: String = ""
+
+# True when a project waiver suppresses this finding. The row is still reported (never hidden),
+# but it no longer blocks a delivery and is counted separately.
+# 工程豁免压制了本条发现时为 true。该行仍会出现在报告里（绝不隐藏），但不再阻断交付，
+# 并单独计数。
+var gpWaived: bool = false
 
 # Severity (one of the constants above).
 # 严重度（上面三个常量之一）。
@@ -75,6 +102,22 @@ static func gpMake(gpRuleId: String, gpSeverity: String, gpMessageKey: String,
 	return gpF
 
 
+# Attach the fine-grained check id and the machine-readable repair hint.
+# 挂上细分检查号与机器可读的修复提示。
+func gpAs(gpCheck: String, gpHint: String = "") -> GPFinding:
+	gpCheckId = gpCheck
+	gpFixHint = gpHint
+	return self
+
+
+# Attach the stable entity uid and the sheet id (engine enrichment).
+# 挂上稳定对象 uid 与图纸 id（由引擎补全）。
+func gpOnEntity(gpEntity: String, gpSheet: String = "") -> GPFinding:
+	gpEntityUid = gpEntity
+	gpSheetId = gpSheet
+	return self
+
+
 # The same finding attached to a node and a location.
 # 把同一条发现挂到某节点与某位置上。
 func gpOnNode(gpId: String, gpWorld: Vector2) -> GPFinding:
@@ -102,7 +145,7 @@ func gpOnShape(gpIdx: int, gpWorld: Vector2) -> GPFinding:
 # Whether this finding should block a delivery (errors do, warnings and infos do not).
 # 该发现是否应拦住交付（error 拦，warning / info 不拦）。
 func gpBlocksDelivery() -> bool:
-	return gpSeverity == GP_ERROR
+	return gpSeverity == GP_ERROR and not gpWaived
 
 
 # Plain dictionary for the report exporters and for tests.
@@ -110,12 +153,17 @@ func gpBlocksDelivery() -> bool:
 func gpToDict() -> Dictionary:
 	return {
 		"rule": gpRuleId,
+		"check": gpCheckId if gpCheckId != "" else gpRuleId,
 		"severity": gpSeverity,
 		"message_key": gpMessageKey,
 		"params": gpParams.duplicate(),
 		"node_id": gpNodeId,
 		"edge_id": gpEdgeId,
 		"shape_idx": gpShapeIdx,
+		"entity_uid": gpEntityUid,
+		"sheet_id": gpSheetId,
+		"fix_hint": gpFixHint,
+		"waived": gpWaived,
 		"x": gpWorld.x if gpWorld != Vector2.INF else null,
 		"y": gpWorld.y if gpWorld != Vector2.INF else null,
 	}

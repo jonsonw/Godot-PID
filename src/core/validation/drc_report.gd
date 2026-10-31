@@ -23,11 +23,15 @@ const GP_CSV_HEADER: String = "severity,rule,node,edge,shape_idx,x,y,message"
 # One-line summary: "3 errors / 2 warnings / 1 info".
 # 单行摘要："3 errors / 2 warnings / 1 info"。
 static func gpSummary(gpFindings: Array[GPFinding]) -> String:
-	return I18n.gpTr("drc.summary") % [
-		GPRulePack.gpCount(gpFindings, GPFinding.GP_ERROR),
-		GPRulePack.gpCount(gpFindings, GPFinding.GP_WARNING),
-		GPRulePack.gpCount(gpFindings, GPFinding.GP_INFO),
+	var gpText: String = I18n.gpTr("drc.summary") % [
+		GPDRCConfig.gpCountActive(gpFindings, GPFinding.GP_ERROR),
+		GPDRCConfig.gpCountActive(gpFindings, GPFinding.GP_WARNING),
+		GPDRCConfig.gpCountActive(gpFindings, GPFinding.GP_INFO),
 	]
+	var gpWaived: int = GPDRCConfig.gpCountWaived(gpFindings)
+	if gpWaived > 0:
+		gpText += " · " + (I18n.gpTr("drc.summary_waived") % gpWaived)
+	return gpText
 
 
 # Human-readable text report: a header, the summary, then one line per finding grouped by
@@ -94,3 +98,44 @@ static func _csv(gpV: String) -> String:
 	if gpV.contains(",") or gpV.contains("\"") or gpV.contains("\n"):
 		return "\"" + gpV.replace("\"", "\"\"") + "\""
 	return gpV
+
+
+# Machine-readable report (ADR-39 D5). Text / CSV above are renderings of this data; the JSON is
+# what the panel, CLI, export gate and AI repair loop all consume.
+# 机器可读报告（ADR-39 D5）。上面的文本 / CSV 是它的渲染；JSON 是面板、CLI、导出闸门与 AI 修复
+# 回路共同消费的数据。
+static func gpToJson(gpFindings: Array[GPFinding], gpMeta: Dictionary = {}) -> String:
+	var gpItems: Array = []
+	for gpF in gpFindings:
+		if gpF != null:
+			gpItems.append(gpF.gpToDict())
+	var gpOut: Dictionary = {
+		"schema": "gpid.drc/1",
+		"mode": str(gpMeta.get("mode", "sheet")),
+		"doc_hash": str(gpMeta.get("doc_hash", "")),
+		"rules_hash": str(gpMeta.get("rules_hash", "")),
+		"counts": {
+			"error": GPDRCConfig.gpCountActive(gpFindings, GPFinding.GP_ERROR),
+			"warning": GPDRCConfig.gpCountActive(gpFindings, GPFinding.GP_WARNING),
+			"info": GPDRCConfig.gpCountActive(gpFindings, GPFinding.GP_INFO),
+			"waived": GPDRCConfig.gpCountWaived(gpFindings),
+		},
+		"findings": gpItems,
+	}
+	return JSON.stringify(gpOut, "\t")
+
+
+# Write the JSON report and return its path ("" on failure).
+# 写出 JSON 报告并返回路径（失败为空串）。
+static func gpWriteJson(gpFindings: Array[GPFinding], gpDir: String, gpBaseName: String,
+		gpMeta: Dictionary = {}) -> String:
+	if gpDir == "":
+		return ""
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(gpDir))
+	var gpPath: String = gpDir.path_join(gpBaseName + ".json")
+	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.WRITE)
+	if gpF == null:
+		return ""
+	gpF.store_string(gpToJson(gpFindings, gpMeta))
+	gpF.close()
+	return gpPath

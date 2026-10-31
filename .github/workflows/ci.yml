@@ -73,6 +73,28 @@ jobs:
             -gjunit_xml_file=res://gut_junit.xml \
             -gexit
 
+      - name: DRC CLI gate (good fixture green, bad fixture red)
+        run: |
+          set -euo pipefail
+          godot --headless --path . res://tools/gp_cli.tscn -- \
+            check --project tests/fixtures/drc_good.pid.json --report drc-good.json
+          if godot --headless --path . res://tools/gp_cli.tscn -- \
+               check --project tests/fixtures/drc_bad.pid.json --report drc-bad.json; then
+            echo "FAIL: the bad DRC fixture unexpectedly passed the gate"
+            exit 1
+          fi
+          echo "OK: bad DRC fixture was blocked (exit 1)"
+
+      - name: Upload DRC reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drc-reports-${{ github.run_number }}
+          path: |
+            drc-good.json
+            drc-bad.json
+          if-no-files-found: warn
+
       - name: Upload GUT JUnit report
         if: always()
         uses: actions/upload-artifact@v4

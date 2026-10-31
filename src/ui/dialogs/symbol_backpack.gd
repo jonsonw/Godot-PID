@@ -92,7 +92,12 @@ func gpSetSymbols(gpDefs: Array[GPSymbolDef], gpFavorites: Array[String],
 # 以最新列表显示面板，并把焦点放进搜索框。
 func gpOpen() -> void:
 	gpRefresh()
-	popup_centered()
+	# ADR-37: content-adaptive and resizable.
+	# ADR-37：按内容自适应且可拖动。
+	var gpHost: Window = null
+	if get_parent() != null:
+		gpHost = get_parent().get_window()
+	GPWindowFit.gpPopupContentFitted(self, gpHost, Vector2i(420, 320), Vector2i(860, 720))
 	# Focus AFTER the popup is visible: a LineEdit grabbed focus while hidden keeps it only
 	# intermittently on some platforms.
 	# **弹出后**再取焦点：隐藏时抓焦点的 LineEdit 在某些平台上只能间歇保持。

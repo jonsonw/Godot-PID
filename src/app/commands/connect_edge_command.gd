@@ -89,7 +89,16 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
  # 在命令内部铸管线号（见文件头：撤销不得烧号）。信号线按惯例不带线号，故为 ""。
 		var gpTag: String = ""
 		if gpKind != GPPIDEdge.GP_SIGNAL:
-			gpTag = GPTagGen.gpNextTag(gpCtx.gpGraph)
+			# ADR-36: a line is numbered through its CLASS rule (the five-field designation),
+			# not by the legacy PL counter. Attributes are not known at this moment — the
+			# attribute panel fills them in and re-renders the SAME number, so the placeholder
+			# costs nothing.
+			# ADR-36：管线号走**类别**规则（五段代号），不再是旧的 PL 计数器。此刻还没有属性 ——
+			# 属性面板填完后会重渲染**同一个号**，故占位不消耗序号。
+			if gpCtx.gpTags != null:
+				gpTag = gpCtx.gpTags.gpNextTagForClass(GPProjectStandard.GP_CLASS_LINE)
+			else:
+				gpTag = GPTagGen.gpNextTag(gpCtx.gpGraph)
 		_gpEdge = gpCtx.gpGraph.gpNewEdgeEx(gpEid, gpFromRef, gpToRef, gpKind, gpSignalType, gpTag)
 		_gpEdge.gpOrtho = gpOrtho
  # An auto-routed edge stores its waypoints as DATA, never as baked geometry: the two ends

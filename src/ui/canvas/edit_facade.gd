@@ -108,6 +108,8 @@ func gpRequestAutoConnect() -> String:
 	gpClearPortPick()
 	gpHost.gpGraphChanged.emit()
 	gpHost.queue_redraw()
+	if gpKind != GPPIDEdge.GP_SIGNAL:
+		gpHost.gpNotifyLineCreated(gpId)
 	return gpId
 
 # Drop the auto-connect endpoint picks (ESC path and every selection change).
@@ -169,7 +171,11 @@ func gpRequestDeleteEdges(gpEdgeIds: Array[String]) -> bool:
 
 func gpRequestConnectEdge(gpFromRef: Dictionary, gpToRef: Dictionary, gpKind: String,
 		gpSignalType: String = "", gpOrtho: bool = true) -> String:
-	return gpHost.gpActions.gpConnectEdge(gpFromRef, gpToRef, gpKind, gpSignalType, gpOrtho)
+	var gpId: String = gpHost.gpActions.gpConnectEdge(gpFromRef, gpToRef, gpKind,
+		gpSignalType, gpOrtho)
+	if gpId != "" and gpKind != GPPIDEdge.GP_SIGNAL:
+		gpHost.gpNotifyLineCreated(gpId)
+	return gpId
 
 # Draw a pipe or a signal line between two resolved ends. Returns the new edge id, "" on refusal.
 # 在两个已解析端点之间画管道或信号线。返回新边 id，拒绝时为 ""。

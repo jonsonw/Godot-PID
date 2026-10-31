@@ -201,3 +201,52 @@ static func gpPopupFitted(
 		return
 	gpApply(gpWin, gpHost, gpMinLogical, gpMaxLogical, true, gpFrac)
 	gpWin.popup_centered_clamped(gpWin.size, GP_MAX_FRAC)
+
+
+# Show a dialog sized to its CONTENT (ADR-37), clamped to a comfortable logical range and to the
+# parent area. This is the ONE entry every project dialog should call.
+# 按**内容**定尺寸显示对话框（ADR-37），并夹到舒适的逻辑区间与父区域内。这是项目内所有对话框
+# 应当调用的唯一入口。
+#
+# Why `wrap_controls = false` / 为何要关掉 `wrap_controls`：
+# with wrap on, the window follows the content minimum instead of the size we computed — and one
+# autowrap Label beside another control reports a minimum height of "everything wrapped at 1px",
+# which is how a three-row dialog once opened full-screen.
+# 开着 wrap 时窗口跟着内容最小尺寸走，而不是我们算出的尺寸 —— 而一个与别的控件并排的 autowrap
+# Label 会把最小高度报成「按 1px 宽折行后的全高」，三行内容的对话框因此曾经满屏打开。
+static func gpPopupContentFitted(gpWin: Window, gpHost: Window, gpMinLogical: Vector2i,
+		gpMaxLogical: Vector2i) -> void:
+	if gpWin == null:
+		return
+	gpSyncScale(gpWin, gpHost)
+	gpWin.wrap_controls = false
+	gpWin.unresizable = false
+	var gpParent: Vector2i = gpParentSize(gpWin, gpHost)
+	var gpCeil: Vector2i = Vector2i(int(gpParent.x * GP_MAX_FRAC), int(gpParent.y * GP_MAX_FRAC))
+	var gpFloor: Vector2i = gpToWindowUnits(gpWin, gpMinLogical)
+	var gpTop: Vector2i = gpToWindowUnits(gpWin, gpMaxLogical)
+	gpFloor = Vector2i(mini(gpFloor.x, gpCeil.x), mini(gpFloor.y, gpCeil.y))
+	gpTop = Vector2i(maxi(gpTop.x, gpFloor.x), maxi(gpTop.y, gpFloor.y))
+	gpWin.min_size = gpFloor
+	# Content minimum must be measured in the same unit space as `Window.size`.
+	# 内容最小尺寸必须与 `Window.size` 处在同一单位空间。
+	gpWin.reset_size()
+	var gpContent: Vector2i = gpToWindowUnits(gpWin, gpWin.get_contents_minimum_size())
+	var gpWant: Vector2i = gpContentSize(gpContent, gpCeil, gpFloor, gpTop)
+	gpWin.size = gpWant
+	gpWin.popup_centered_clamped(gpWant, GP_MAX_FRAC)
+
+
+# Pure size rule for a content-adaptive dialog (ADR-37), in ONE unit space. Public + static so the
+# clamp is testable without a window server.
+# 内容自适应对话框的纯尺寸规则（ADR-37），单一单位空间内。公开且静态，使夹紧无需窗口服务器即可测试。
+#   content + padding, never below the design floor, never above the design ceiling nor the area.
+#   内容 + 内边距；不低于设计下限，不超过设计上限，也不超过可用区域。
+static func gpContentSize(gpContent: Vector2i, gpArea: Vector2i, gpMin: Vector2i,
+		gpMax: Vector2i) -> Vector2i:
+	var gpFloor: Vector2i = Vector2i(mini(gpMin.x, gpArea.x), mini(gpMin.y, gpArea.y))
+	var gpTop: Vector2i = Vector2i(maxi(gpMax.x, gpFloor.x), maxi(gpMax.y, gpFloor.y))
+	return Vector2i(
+		clampi(gpContent.x + 24, gpFloor.x, mini(gpTop.x, gpArea.x)),
+		clampi(gpContent.y + 24, gpFloor.y, mini(gpTop.y, gpArea.y))
+	)

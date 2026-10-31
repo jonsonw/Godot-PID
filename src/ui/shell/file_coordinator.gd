@@ -664,6 +664,20 @@ func gpDoExport(gpPath: String, gpKind: String) -> void:
 	# 绝不产生「W6.pid.pid.xml」）。
 	var gpExt: String = GPExporterRegistry.gpExtensionOf(gpKind)
 	gpPath = GPExporterRegistry.gpFinishName(gpPath, gpExt)
+	# ADR-39 / E05: PDF and DXF are delivery artefacts, so the SAME DRC gate that guards XLSX
+	# must guard them too. A blocked export writes no file and says why.
+	# ADR-39 / E05：PDF 与 DXF 是交付物，故守卫 XLSX 的**同一套** DRC 闸门也必须守卫它们。
+	# 被阻断的导出不写文件，并说明原因。
+	if gpKind == GPExporterRegistry.GP_PDF or gpKind == GPExporterRegistry.GP_DXF:
+		var gpSheetGate: GPSheet = _gpActiveSheet()
+		if gpSheetGate != null:
+			var gpStd: GPProjectStandard = null
+			if gpSheetGate.gpGraph != null:
+				gpStd = gpSheetGate.gpGraph.gpStandard
+			var gpGate: Dictionary = GPExportGate.gpCheck([gpSheetGate], gpHost.gpDefs, gpStd)
+			if bool(gpGate.get("blocked", false)):
+				gpHost.gpSetState("drc.export_blocked", [int(gpGate.get("errors", 0))])
+				return
 	var gpPacks: Array = GPSymbolLibrary.gpUserPacks()
 	var gpOut: GPIOResult = GPExporterRegistry.gpExport(gpKind, gpPath,
 		gpHost.gpActiveGraph(), gpPacks, _gpActiveSheet())

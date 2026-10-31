@@ -91,6 +91,19 @@ var gpCategoryPrefixes: Dictionary = {}
 # symbol id -> prefix. / 图元 id -> 前缀。
 var gpSymbolPrefixes: Dictionary = {}
 
+# ---- segmented rules (ADR-36 D4) ----
+# EMPTY means "legacy single-template rule": the {prefix}-{seq} path above stays authoritative
+# for it, and gpToDict() writes exactly the same keys as before (byte-stable archives).
+# 为空表示「旧式单模板规则」：上面那条 {prefix}-{seq} 路径对它保持权威，且 gpToDict() 写出的键
+# 与从前完全一致（存档逐字节稳定）。
+# When NON-empty, this rule renders and validates through its segments instead.
+# 非空时，本规则改由各段负责渲染与校验。
+var gpSegments: Array[GPTagSegment] = []
+
+# Separator between segments ("-" by convention). Only meaningful with gpSegments.
+# 段间分隔符（约定为 "-"）。仅在 gpSegments 非空时有意义。
+var gpSeparator: String = "-"
+
 
 # Build the factory rule. / 构造出厂规则。
 static func gpDefault() -> GPTagRule:
@@ -227,12 +240,148 @@ static func _gpReplaceSeqWithWidth(gpText: String, gpSeq: int) -> String:
 	return gpOut
 
 
+# ---- segmented rendering & checking (ADR-36 D4/D7) ----
+
+# Whether this rule is segment-based rather than the legacy template string.
+# 本规则是否基于分段（而非旧式模板串）。
+func gpUsesSegments() -> bool:
+	return not gpSegments.is_empty()
+
+
+# Render a tag from a context. Context keys:
+#   "seq"   : int, the sequence number (defaults to start + step)
+#   "attrs" : Dictionary of instance / edge attributes (dn, medium, spec, insulation, area…)
+# Returns "" when a segment cannot be produced legally (sequence overflow) — the caller must
+# treat that as a refusal, never as an empty field.
+# 按上下文渲染位号。上下文键见上。某段无法合法产出（序号溢出）时返回 "" —— 调用方必须
+# 把它当作拒绝，绝不能当成空字段。
+# NOTE: `gpStd` is deliberately UNTYPED — annotating it as GPProjectStandard would create a
+# parse-time cycle (standard → presets → rule → segment) that Godot refuses to resolve.
+# 注意：`gpStd` 刻意不写类型 —— 标注成 GPProjectStandard 会造成解析期循环
+#（标准 → 预置 → 规则 → 分段），Godot 无法解析。
+func gpRender(gpCtx: Dictionary = {}, gpStd = null) -> String:
+	if not gpUsesSegments():
+		# A template rule needs a prefix from the caller (the graph knows the symbol, this rule
+		# does not). Returning "" beats returning "-1001" — a caller that forgot the prefix must
+		# not get a plausible-looking wrong tag.
+		# 模板规则需要调用方给出前缀（图知道是哪个图元，本规则不知道）。返回 "" 胜过返回 "-1001" ——
+		# 忘了传前缀的调用方不该拿到一个「看着像对的」错位号。
+		var gpPrefix: String = str(gpCtx.get("prefix", gpFixedPrefix))
+		if gpPrefix == "":
+			return ""
+		return gpFormat(gpPrefix, int(gpCtx.get("seq", gpStart + gpStep)),
+			str(gpCtx.get("area", "")), str(gpCtx.get("sheet", "")))
+	var gpSeq: int = int(gpCtx.get("seq", gpStart + gpStep))
+	var gpAttrs: Variant = gpCtx.get("attrs", {})
+	var gpAttrMap: Dictionary = {}
+	if gpAttrs is Dictionary:
+		gpAttrMap = gpAttrs as Dictionary
+	var gpLookup: Callable = Callable()
+	if gpStd != null:
+		gpLookup = Callable(gpStd, "gpCodeOf")
+	var gpParts: Array[String] = []
+	for gpSegRaw in gpSegments:
+		var gpSeg: GPTagSegment = gpSegRaw as GPTagSegment
+		if gpSeg == null:
+			continue
+		var gpValue: String = gpSeg.gpRenderValue(gpSeq, gpAttrMap, gpLookup)
+		if gpValue == "":
+			return ""
+		gpParts.append(gpValue)
+	return gpSeparator.join(gpParts)
+
+
+# Compile this rule into a validator (regex + per-segment checks).
+# 把本规则编译成校验器（正则 + 逐段检查）。
+func gpCompile() -> GPTagPattern:
+	return GPTagPattern.gpCompile(gpSegments, gpSeparator)
+
+
+# Check a candidate tag for a LEGACY template rule. Only the default "{prefix}-{seq}" shape can
+# be judged without guessing; anything else is accepted (a project that hand-crafted a template
+# gets uniqueness checking only, never a false refusal).
+# 校验**旧式模板规则**的候选位号。只有默认的 "{prefix}-{seq}" 形态可判；其它形态一律接受
+#（手工构造过模板的工程至少还有唯一性校验，绝不误拒）。
+func gpCheckTemplateTag(gpTag: String, gpPrefix: String, gpSeparatorIn: String = "-") -> Dictionary:
+	var gpOut: Dictionary = {"ok": true, "index": -1, "key": "", "label": "",
+		"expected": "", "detail": ""}
+	if gpUsesSegments():
+		return gpCheckTag(gpTag)
+	if gpPrefix == "" or gpTemplate.find("{prefix}") < 0:
+		return gpOut
+	var gpText: String = gpTag.strip_edges()
+	if gpText == "":
+		gpOut["ok"] = false
+		gpOut["detail"] = "位号为空"
+		return gpOut
+	var gpHead: String = gpPrefix + gpSeparatorIn
+	if not gpText.to_upper().begins_with(gpHead.to_upper()):
+		gpOut["ok"] = false
+		gpOut["expected"] = gpHead + "数字"
+		gpOut["detail"] = "应以 %s 开头（%s）" % [gpHead, gpPrefix]
+		return gpOut
+	var gpTail: String = gpText.substr(gpHead.length())
+	if not gpTail.is_valid_int():
+		gpOut["ok"] = false
+		gpOut["expected"] = gpHead + "数字"
+		gpOut["detail"] = "「%s」之后应为数字" % gpPrefix
+		return gpOut
+	return gpOut
+
+
+# The sequence number carried by a rendered tag, or -1 when it cannot be read. Used by the line
+# attribute panel: filling the attributes must re-render the SAME number, not burn a new one.
+# 从已渲染的位号里读回序号；读不出时返回 -1。供管线属性面板使用：补属性应**重渲染同一个号**，
+# 而不是再烧掉一个号。
+func gpSequenceOf(gpTag: String) -> int:
+	if not gpUsesSegments():
+		var gpTail: String = gpTag.strip_edges()
+		var gpCut: int = gpTail.rfind(gpSeparator)
+		if gpCut < 0:
+			return -1
+		gpTail = gpTail.substr(gpCut + 1)
+		return int(gpTail) if gpTail.is_valid_int() else -1
+	var gpParts: PackedStringArray = gpTag.strip_edges().split(gpSeparator, true)
+	if gpParts.size() != gpSegments.size():
+		return -1
+	for gpI in range(gpSegments.size()):
+		var gpSeg: GPTagSegment = gpSegments[gpI]
+		if gpSeg != null and gpSeg.gpSource == GPTagSegment.GPSource.GP_SEQ:
+			var gpDigits: String = gpParts[gpI]
+			return int(gpDigits) if gpDigits.is_valid_int() else -1
+	return -1
+
+
+# Check a candidate tag against this rule. Returns GPITagPattern.gpCheck()'s dictionary.
+# 按本规则校验一个候选位号。返回 GPTagPattern.gpCheck() 的字典。
+func gpCheckTag(gpTag: String) -> Dictionary:
+	if not gpUsesSegments():
+		# The legacy template cannot be checked positionally; accept anything non-empty so a
+		# pre-ADR-36 project keeps working until it migrates.
+		# 旧式模板无法按段校验；只要非空就接受，使 ADR-36 之前的工程在迁移前继续可用。
+		var gpOk: bool = gpTag.strip_edges() != ""
+		return {"ok": gpOk, "index": -1, "key": "", "label": "", "expected": "",
+			"detail": "" if gpOk else "位号为空"}
+	return gpCompile().gpCheck(gpTag)
+
+
+# Result-typed wrapper around gpCheckTag(), for command-layer refusals.
+# gpCheckTag() 的结果类型包装，供命令层拒绝时使用。
+func gpValidateTag(gpTag: String) -> GPIOResult:
+	var gpChk: Dictionary = gpCheckTag(gpTag)
+	if bool(gpChk.get("ok", false)):
+		return GPIOResult.gpSuccess()
+	return GPIOResult.gpFailure("tag.err_rule", "tag.err_rule", str(gpChk.get("detail", "")))
+
+
 # ---- validation ----
 
 # Check the rule. Returns a failure GPIOResult naming the first problem found; the UI shows
 # the message live and disables OK while the rule is invalid.
 # 校验规则。返回指出首个问题的失败结果；界面实时显示提示并在非法态下禁用「确定」。
 func gpValidate() -> GPIOResult:
+	if gpUsesSegments():
+		return _gpValidateSegments()
 	if gpTemplate.find("{seq}") < 0 and not _gpHasWidthSeq():
 		return GPIOResult.gpFailure("tag_rule.no_seq", "tag_rule.err_no_seq", gpTemplate)
 	if gpStart < 0:
@@ -246,6 +395,37 @@ func gpValidate() -> GPIOResult:
 	return GPIOResult.gpSuccess()
 
 
+# Validate the segment declarations: exactly one counter, legal widths, a fallback that fits,
+# and no literal that contains the separator.
+# 校验分段声明：恰有一个序号段、宽度合法、兜底自身合规、且没有含分隔符的字面量。
+func _gpValidateSegments() -> GPIOResult:
+	if gpSeparator == "":
+		return GPIOResult.gpFailure("tag_seg.no_separator", "tag_seg.err_no_separator", "")
+	if gpStart < 0:
+		return GPIOResult.gpFailure("tag_rule.bad_start", "tag_rule.err_bad_start", str(gpStart))
+	if gpStep < 1:
+		return GPIOResult.gpFailure("tag_rule.bad_step", "tag_rule.err_bad_step", str(gpStep))
+	var gpSeenKeys: Dictionary = {}
+	var gpSeqCount: int = 0
+	for gpSegRaw in gpSegments:
+		var gpSeg: GPTagSegment = gpSegRaw as GPTagSegment
+		if gpSeg == null:
+			return GPIOResult.gpFailure("tag_seg.bad_segment", "tag_seg.err_bad_segment", "")
+		if gpSeenKeys.has(gpSeg.gpKey):
+			return GPIOResult.gpFailure("tag_seg.duplicate_key", "tag_seg.err_duplicate_key",
+				gpSeg.gpKey)
+		gpSeenKeys[gpSeg.gpKey] = true
+		if gpSeg.gpSource == GPTagSegment.GPSource.GP_SEQ:
+			gpSeqCount += 1
+		var gpOne: GPIOResult = gpSeg.gpValidate(gpSeparator)
+		if not gpOne.gpIsOk():
+			return gpOne
+	if gpSeqCount != 1:
+		return GPIOResult.gpFailure("tag_seg.seq_count", "tag_seg.err_seq_count",
+			str(gpSeqCount))
+	return GPIOResult.gpSuccess()
+
+
 # Whether the template carries a {seq:N} placeholder.
 # 模板是否含 {seq:N} 占位符。
 func _gpHasWidthSeq() -> bool:
@@ -256,7 +436,7 @@ func _gpHasWidthSeq() -> bool:
 # ---- persistence ----
 
 func gpToDict() -> Dictionary:
-	return {
+	var gpOut: Dictionary = {
 		"template": gpTemplate,
 		"start": gpStart,
 		"step": gpStep,
@@ -266,6 +446,19 @@ func gpToDict() -> Dictionary:
 		"category_prefixes": gpCategoryPrefixes.duplicate(),
 		"symbol_prefixes": gpSymbolPrefixes.duplicate(),
 	}
+	# Segments are written ONLY when used, so a legacy rule keeps its exact v1 key set
+	# (ADR-36 D12: reopening an old archive must reproduce its bytes).
+	# 仅在使用时才写分段键，使旧式规则保持完全相同的 v1 键集
+	#（ADR-36 D12：重开旧存档必须复现其字节）。
+	if gpUsesSegments():
+		var gpSegsOut: Array = []
+		for gpSegRaw in gpSegments:
+			var gpSeg: GPTagSegment = gpSegRaw as GPTagSegment
+			if gpSeg != null:
+				gpSegsOut.append(gpSeg.gpToDict())
+		gpOut["separator"] = gpSeparator
+		gpOut["segments"] = gpSegsOut
+	return gpOut
 
 
 # Tolerant read: every key falls back to the factory value, so a rule saved by a future
@@ -285,4 +478,10 @@ static func gpFromDict(gpD: Dictionary) -> GPTagRule:
 	gpR.gpCategoryPrefixes = gpCats.duplicate() if gpCats is Dictionary else {}
 	var gpSyms: Dictionary = gpD.get("symbol_prefixes", {})
 	gpR.gpSymbolPrefixes = gpSyms.duplicate() if gpSyms is Dictionary else {}
+	gpR.gpSeparator = str(gpD.get("separator", "-"))
+	var gpSegsIn: Variant = gpD.get("segments", null)
+	if gpSegsIn is Array:
+		for gpSegRaw in (gpSegsIn as Array):
+			if gpSegRaw is Dictionary:
+				gpR.gpSegments.append(GPTagSegment.gpFromDict(gpSegRaw as Dictionary))
 	return gpR

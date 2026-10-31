@@ -41,6 +41,10 @@ var gpId: String = ""
 # Human-readable tab title. / 人类可读的标签标题。
 var gpName: String = ""
 
+# Auto-generated drawing number (project rule). Empty in archives written before this field.
+# 自动生成的图纸编号（项目规则）。本字段之前的存档里为空。
+var gpNumber: String = ""
+
 # Position in the tab bar (0-based). Re-derived on load, so a gap never appears.
 # 在标签栏中的位置（从 0 起）。载入时重新推导，故永不出现空位。
 var gpIndex: int = 0
@@ -477,6 +481,11 @@ func gpToDict() -> Dictionary:
 		"height_mm": gpHeightMM,
 		"frame_on": gpFrameOn,
 	}
+	# Drawing number: written only when assigned, so an archive from before this field stays
+	# byte-identical on re-save.
+	# 图纸编号：仅在已分配时写出，使本字段出现之前的存档重新保存后逐字节一致。
+	if gpNumber != "":
+		gpOut["number"] = gpNumber
 	# Written only when non-default, so an archive that never touched the frame stays
 	# byte-identical to what older builds produced (see ADR-7 write policy).
 	# 仅在非默认时写出，使从未动过图框的存档与旧版本产物逐字节一致（见 ADR-7 写出策略）。
@@ -528,6 +537,7 @@ static func gpFromDict(gpD: Dictionary) -> GPSheet:
 	var gpS: GPSheet = GPSheet.new()
 	gpS.gpId = str(gpD.get("id", ""))
 	gpS.gpName = str(gpD.get("name", ""))
+	gpS.gpNumber = str(gpD.get("number", ""))
 	gpS.gpIndex = int(gpD.get("index", 0))
 	# ⚠️ Missing-key fallback stays 420/297 (A3-era), NOT the new default: an archive old enough to
 	# lack these keys is by definition an A3-era drawing.
@@ -612,6 +622,106 @@ static func gpFromDict(gpD: Dictionary) -> GPSheet:
 		gpGraphDict["tag_rules"] = gpD.get("tag_rules", {})
 	gpS.gpGraph = GPPIDGraph.gpFromDict(gpGraphDict)
 	return gpS
+
+
+# Fill EMPTY title-block fields from the project info (ADR-38). A field the user typed on THIS
+# sheet is never overwritten — the project supplies defaults, the sheet keeps exceptions.
+# 用项目信息填充**空缺**的标题栏字段（ADR-38）。本图纸上用户填过的字段绝不被覆盖 ——
+# 项目提供默认值，图纸保留例外。
+func gpApplyProjectInfo(gpStd: GPProjectStandard) -> void:
+	if gpStd == null:
+		return
+	var gpChanged: bool = false
+	if gpTitleBlock.is_empty():
+		gpTitleBlock = gpDefaultTitleBlock()
+	if gpNumber != "" and _gpTitleFieldEmpty("drawing_no"):
+		_gpSetTitleField("drawing_no", gpNumber)
+		gpChanged = true
+	var gpProject: String = gpStd.gpInfo("project_name")
+	if gpProject == "":
+		gpProject = gpStd.gpInfo("project_no")
+	var gpMap: Dictionary = {
+		"company": "company",
+		"project": "project_name",
+		"designed": "designed",
+		"checked": "checked",
+		"approved": "approved",
+	}
+	for gpKeyRaw in gpMap.keys():
+		var gpKey: String = str(gpKeyRaw)
+		var gpValue: String = gpStd.gpInfo(str(gpMap[gpKey]))
+		if gpValue == "":
+			continue
+		if _gpTitleFieldEmpty(gpKey):
+			_gpSetTitleField(gpKey, gpValue)
+			gpChanged = true
+	if gpProject != "" and _gpTitleFieldEmpty("project"):
+		_gpSetTitleField("project", gpProject)
+		gpChanged = true
+	# The frame repaints on THIS signal; without it the title block would show stale values
+	# until something else happened to repaint the sheet ("I set the project info but the frame
+	# did not change").
+	# 图框正是靠这个信号重绘的；不发它，标题栏会一直显示旧值，直到别的事情触发重绘
+	#（「我填了项目信息，图框却没变」）。
+	if gpChanged:
+		gpSheetChanged.emit()
+
+
+# Assign the drawing number, keeping the title block in step. A hand-edited drawing number is
+# preserved: the auto value only wins while the block still shows the previous auto value (or
+# nothing at all) — that is how "regenerate numbers" can run over a project with exceptions.
+# 分配图纸编号，并让标题栏跟上。手改过的图号**保留**：只有当标题栏仍是上一个自动值（或为空）时
+# 自动值才生效 —— 这正是「重编图纸编号」可以在有例外的工程上安全运行的原因。
+func gpAssignNumber(gpNewNumber: String) -> void:
+	var gpOld: String = gpNumber
+	var gpBlockOld: String = gpTitleValue("drawing_no")
+	gpNumber = gpNewNumber
+	if _gpTitleFieldEmpty("drawing_no") or gpBlockOld == gpOld:
+		_gpSetTitleField("drawing_no", gpNewNumber)
+	if gpOld != gpNewNumber or gpBlockOld != gpTitleValue("drawing_no"):
+		gpSheetChanged.emit()
+
+
+# Effective value of one title-block field, falling back to the project info. Used by the dialog
+# to show what the sheet will actually print, without mutating it.
+# 某标题栏字段的**生效**值，缺失时回落到项目信息。对话框用它显示图纸实际会打印的内容，
+# 而不改动图纸。
+func gpTitleValueWithProject(gpKey: String, gpStd: GPProjectStandard) -> String:
+	var gpOwn: String = gpTitleValue(gpKey)
+	if gpOwn != "" or gpStd == null:
+		return gpOwn
+	match gpKey:
+		"drawing_no":
+			return gpNumber
+		"company":
+			return gpStd.gpInfo("company")
+		"project":
+			var gpName: String = gpStd.gpInfo("project_name")
+			return gpName if gpName != "" else gpStd.gpInfo("project_no")
+		"designed":
+			return gpStd.gpInfo("designed")
+		"checked":
+			return gpStd.gpInfo("checked")
+		"approved":
+			return gpStd.gpInfo("approved")
+	return ""
+
+
+func _gpTitleFieldEmpty(gpKey: String) -> bool:
+	var gpEntry: Variant = gpTitleBlock.get(gpKey)
+	if gpEntry == null:
+		return true
+	var gpVal: Variant = (gpEntry as Dictionary).get("value", null)
+	if gpVal == null:
+		return true
+	var gpV: Dictionary = gpVal as Dictionary
+	return str(gpV.get("zh", "")).strip_edges() == "" \
+		and str(gpV.get("en", "")).strip_edges() == ""
+
+
+func _gpSetTitleField(gpKey: String, gpText: String) -> void:
+	gpTitleBlock[gpKey] = {"caption": str((gpTitleBlock.get(gpKey, {}) as Dictionary).get(
+		"caption", "")), "value": {"zh": gpText, "en": gpText}}
 
 
 # Convenience: an empty sheet with the given identity.

@@ -50,6 +50,8 @@ This project is in **early development** (app version `0.1.0`, Godot 4.7). The t
 | 边路径编辑：拖动段中点 / 角点改路径，自动重正交 | ✅ 可用 / Working |
 | 边标签（管线号）拖拽 + 引出线 | ✅ 可用 / Working |
 | 图框与标题栏、画布文字档位（mm↔px 单一换算源） | ✅ 可用 / Working |
+| **项目标准 / 编号规则**：编号类别、分段规则、代号表、分类映射、标准包导入导出、管线号/位号唯一性 | ✅ 可用 / Working |
+| **图面 DRC 校验**：规则族 / 严重度 / 面板 / 屏幕角标 / 豁免 / 文本·CSV·JSON 报告 / CLI check | ✅ 可用 / Working |
 | 自动保存：首次保存后启用（脏 1 min / 净 5 min） | ✅ 可用 / Working |
 | **DEXPI 1.4 导出 / 导入**（Proteus XML 4.2.0） | ✅ 可用 / Working（概念层 + 图形层 + Extent；导出入口：导出子菜单） |
 | DXF R12 / PDF 1.4（矢量直写 + TTF 子集内嵌中文） / 分类清单 Excel（四类、每类模板、属性回写）/ 旧 CSV | ✅ 可用 / Working（PDF 字体源目前仅 macOS Arial Unicode；跨平台字体设置待补） |
@@ -109,7 +111,7 @@ The core code is released under the **MIT License** — free to use, modify, and
 # macOS / Linux 必须给引擎可写 HOME，否则 user:// 建不出来会直接 SIGSEGV（详见 CONTRIBUTING）
 mkdir -p /tmp/gpidhome
 
-# 自研 GPGTest：109 套 / 9,086 断言（编译 0 错 · SCRIPT ERROR 0）
+# 自研 GPGTest：115 套 / 9,487 断言（编译 0 错 · SCRIPT ERROR 0）
 HOME=/tmp/gpidhome godot --headless --path . --script res://tests/run_core_tests.gd
 
 # 解析检查：新增 class_name 后先跑这条（headless runner 从 .godot 的类名缓存解析类）

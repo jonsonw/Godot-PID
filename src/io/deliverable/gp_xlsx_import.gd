@@ -115,13 +115,25 @@ static func _readFile(gpEntries: Dictionary, gpBinding: Dictionary, gpList: Stri
 		if gpKeyText.begins_with("编制") or gpKeyText.begins_with("审核") \
 				or gpKeyText.begins_with("批准"):
 			continue
-		var gpSheet: GPSheet = _gpResolveSheet(gpValues, gpSheets, gpIssues, gpRowNum)
-		if gpSheet == null:
+		var gpRowSheets: Array[GPSheet] = _gpResolveSheets(gpValues, gpSheets, gpIssues,
+			gpRowNum)
+		if gpRowSheets.is_empty():
 			continue
-		var gpTargets: Array[Dictionary] = _gpTargets(gpSheet, gpList, gpKeyText, gpIssues)
+		if gpList != GPDeliverableFields.GP_LIST_LINE and gpRowSheets.size() > 1:
+			# A device / instrument / valve row belongs to exactly one sheet; "A, B" would be
+			# ambiguous, and guessing would write into the wrong drawing.
+			# 设备 / 仪表 / 阀门行只属于一张图纸；"A, B" 是歧义，猜就会写进错的图纸。
+			gpIssues.append(_gpIssue("xlsx.sheet_ambiguous", {"row": gpRowNum,
+				"sheet": str(gpValues.get("sheet", {}).get("value", ""))}))
+			continue
+		var gpTargets: Array[Dictionary] = gpMatchTargets(gpRowSheets, gpList, gpKeyText,
+			gpIssues)
 		if gpTargets.is_empty():
 			continue
 		for gpTarget in gpTargets:
+			var gpSheet: GPSheet = gpTarget.get("sheet", null) as GPSheet
+			if gpSheet == null:
+				continue
 			for gpColRaw in gpColumns.keys():
 				var gpInfo: Dictionary = gpColumns[gpColRaw] as Dictionary
 				var gpField: String = str(gpInfo.get("key", ""))
@@ -142,56 +154,97 @@ static func gpWritable(gpField: String) -> bool:
 	return GPDeliverableFields.gpIsWritable(gpField)
 
 
-static func _gpResolveSheet(gpValues: Dictionary, gpSheets: Array, gpIssues: Array,
-		gpRowNum: int) -> GPSheet:
+# Resolve the sheet cell into one or more sheets. Line rows may list several sheets (a line
+# continues across pages, ADR-36 D1 / C); device rows must end up with exactly one.
+# 把图纸单元格解析成一张或多张图纸。管线行可以列出多张（管线跨页延续，ADR-36 D1 / C）；
+# 设备行必须恰好一张。
+static func _gpResolveSheets(gpValues: Dictionary, gpSheets: Array, gpIssues: Array,
+		gpRowNum: int) -> Array[GPSheet]:
+	var gpOut: Array[GPSheet] = []
 	if gpSheets.is_empty():
-		return null
+		return gpOut
 	var gpSheetCell: Dictionary = gpValues.get("sheet", {}) as Dictionary
-	var gpSheetName: String = str(gpSheetCell.get("value", "")).strip_edges() \
-		if gpSheetCell.get("value", null) != null else ""
-	if gpSheetName == "":
+	var gpRaw: Variant = gpSheetCell.get("value", null)
+	var gpSheetText: String = str(gpRaw).strip_edges() if gpRaw != null else ""
+	if gpSheetText == "":
 		if gpSheets.size() == 1:
-			return gpSheets[0] as GPSheet
+			gpOut.append(gpSheets[0] as GPSheet)
+			return gpOut
 		gpIssues.append(_gpIssue("xlsx.sheet_missing", {"row": gpRowNum}))
-		return null
-	for gpSheetRaw in gpSheets:
-		var gpSheet: GPSheet = gpSheetRaw as GPSheet
-		if gpSheet != null and gpSheet.gpName == gpSheetName:
-			return gpSheet
-	gpIssues.append(_gpIssue("xlsx.sheet_not_found", {"row": gpRowNum,
-		"sheet": gpSheetName}))
-	return null
+		return gpOut
+	for gpNameRaw in gpSheetText.replace("，", ",").split(","):
+		var gpName: String = str(gpNameRaw).strip_edges()
+		if gpName == "":
+			continue
+		var gpFound: bool = false
+		for gpSheetRaw in gpSheets:
+			var gpSheet: GPSheet = gpSheetRaw as GPSheet
+			if gpSheet != null and gpSheet.gpName == gpName:
+				if not gpOut.has(gpSheet):
+					gpOut.append(gpSheet)
+				gpFound = true
+				break
+		if not gpFound:
+			gpIssues.append(_gpIssue("xlsx.sheet_not_found", {"row": gpRowNum,
+				"sheet": gpName}))
+	return gpOut
 
 
-static func _gpTargets(gpSheet: GPSheet, gpList: String, gpKey: String,
+# Match a row's key (tag / line number) against the candidate sheets. PUBLIC so the "does the
+# round trip find this row?" question is testable without building a workbook.
+# 把行的键（位号 / 管线号）与候选图纸匹配。设为公开，使「往返能否找到这一行」不必造工作簿也能测。
+# Comparison is NORMALISED: "P 1001" and "P-1001" are the same tag (ADR-36 D6).
+# 比较是**归一化**的："P 1001" 与 "P-1001" 是同一个位号（ADR-36 D6）。
+static func gpMatchTargets(gpSheets: Array[GPSheet], gpList: String, gpKey: String,
 		gpIssues: Array) -> Array[Dictionary]:
 	var gpOut: Array[Dictionary] = []
-	var gpGraph: GPPIDGraph = gpSheet.gpGraph
-	if gpGraph == null:
-		return gpOut
+	var gpWant: String = GPTagRegistry.gpNormalize(gpKey)
+	var gpNames: Array[String] = []
+	for gpSheetRaw in gpSheets:
+		var gpSheet: GPSheet = gpSheetRaw as GPSheet
+		if gpSheet != null:
+			gpNames.append(gpSheet.gpName)
 	if gpList == GPDeliverableFields.GP_LIST_LINE:
-		for gpEdge in gpGraph.gpEdges:
-			if gpEdge == null or gpEdge.gpKind != GPPIDEdge.GP_PROCESS:
+		for gpSheetRaw in gpSheets:
+			var gpSheet: GPSheet = gpSheetRaw as GPSheet
+			if gpSheet == null or gpSheet.gpGraph == null:
 				continue
-			if gpEdge.gpTag == gpKey:
-				gpOut.append({"kind": "edge", "id": gpEdge.gpInstanceId,
-					"label": gpEdge.gpTag})
+			for gpEdge in gpSheet.gpGraph.gpEdges:
+				if gpEdge == null:
+					continue
+				# UTILITY lines are lines: the exporter lists them, so the importer must find
+				# them (they used to be filtered out here and silently unmatched).
+				# 公用工程线也是管线：导出侧列它们，导入侧就必须找得到
+				#（以前这里被过滤掉，于是静默「找不到」）。
+				if gpEdge.gpKind != GPPIDEdge.GP_PROCESS \
+						and gpEdge.gpKind != GPPIDEdge.GP_UTILITY:
+					continue
+				if GPTagRegistry.gpNormalize(gpEdge.gpTag) == gpWant:
+					gpOut.append({"kind": "edge", "id": gpEdge.gpInstanceId,
+						"label": gpEdge.gpTag, "sheet": gpSheet})
 		if gpOut.is_empty():
-			gpIssues.append(_gpIssue("xlsx.line_not_found", {"sheet": gpSheet.gpName,
-				"line": gpKey}))
+			gpIssues.append(_gpIssue("xlsx.line_not_found",
+				{"sheet": ", ".join(gpNames), "line": gpKey}))
 		return gpOut
-	var gpHits: Array[GPPIDNode] = []
-	for gpNode in gpGraph.gpNodes:
-		if gpNode != null and gpNode.gpTag == gpKey:
-			gpHits.append(gpNode)
-	if gpHits.is_empty():
-		gpIssues.append(_gpIssue("xlsx.tag_not_found", {"sheet": gpSheet.gpName,
-			"tag": gpKey}))
-	elif gpHits.size() > 1:
-		gpIssues.append(_gpIssue("xlsx.tag_ambiguous", {"sheet": gpSheet.gpName,
-			"tag": gpKey}))
-	else:
-		gpOut.append({"kind": "node", "id": gpHits[0].gpInstanceId, "label": gpKey})
+	for gpSheetRaw in gpSheets:
+		var gpSheet: GPSheet = gpSheetRaw as GPSheet
+		if gpSheet == null or gpSheet.gpGraph == null:
+			continue
+		var gpHits: Array[GPPIDNode] = []
+		for gpNode in gpSheet.gpGraph.gpNodes:
+			if gpNode != null and GPTagRegistry.gpNormalize(gpNode.gpTag) == gpWant:
+				gpHits.append(gpNode)
+		if gpHits.is_empty():
+			continue
+		if gpHits.size() > 1:
+			gpIssues.append(_gpIssue("xlsx.tag_ambiguous",
+				{"sheet": gpSheet.gpName, "tag": gpKey}))
+			continue
+		gpOut.append({"kind": "node", "id": gpHits[0].gpInstanceId, "label": gpKey,
+			"sheet": gpSheet})
+	if gpOut.is_empty():
+		gpIssues.append(_gpIssue("xlsx.tag_not_found",
+			{"sheet": ", ".join(gpNames), "tag": gpKey}))
 	return gpOut
 
 

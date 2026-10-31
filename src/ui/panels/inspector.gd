@@ -38,6 +38,16 @@ signal gpAttrChanged(gpId: String, key: String, val)
 # 边属性被编辑：边 id、属性键、新值。
 signal gpEdgeAttrChanged(gpEdgeId: String, key: String, val)
 
+# The user asked for the full line-attributes editor from the edge form (existing lines have
+# no other way back to it; the panel used to open only when a NEW pipe was drawn).
+# 用户在边表单里请求完整的管线属性编辑器（已有管线没有别的入口；此前面板只在新画线时打开）。
+signal gpLineAttrsRequested(gpEdgeId: String)
+
+# Re-render the line number from the CURRENT edge attributes without changing any value. This is
+# the repair path for an old tag left stale by an earlier blind edit / rule change.
+# 不改任何值，仅按当前边属性重渲染管线号；用于修复此前盲写 / 规则变更留下的陈旧号。
+signal gpLineRerenderRequested(gpEdgeId: String)
+
 # The user picked a different symbol in the swap dropdown: node id, new symbol id.
 # 用户在「更换图元」下拉中选了另一个图元：节点 id、新图元 id。
 signal gpSymbolSwapRequested(gpNodeId: String, gpNewSymbolId: String)
@@ -96,6 +106,13 @@ var gpCurrentNode: GPPIDNode = null
 # 当前查看边的引用（权威的图边）。显示节点（或无）时为 null。gpCurrentNode 与 gpCurrentEdge
 # 同一时刻仅一个非 null。
 var gpCurrentEdge: GPPIDEdge = null
+
+# Supplies the project standard for the edge form's code pickers (medium / pipe class /
+# insulation). A panel owns no graph, so the host injects this once instead of the inspector
+# reaching into the canvas.
+# 为边表单的代号下拉（介质 / 管道等级 / 保温）提供项目标准。面板不持有图，故由宿主注入一次，
+# 而不是让面板反向去摸画布。
+var gpStandardProvider: Callable = Callable()
 
 # Every symbol definition in the library, for the swap dropdown. Owned by the shell, which
 # re-assigns it whenever the library is reloaded.
@@ -839,8 +856,11 @@ func gpShowEdge(gpEdge: GPPIDEdge) -> void:
 	var gpHead: Label = Label.new()
 	gpHead.text = "▾ %s" % I18n.gpTr(GPEdgeStyle.gpLineTypeKey(gpEdge.gpKind, gpEdge.gpSignalType))
 	gpFormRoot.add_child(gpHead)
-	for gpKey in gpEdgeFieldKeys(gpEdge.gpKind):
-		_gpAddEdgeField(gpEdge, gpKey)
+	var gpSections: Dictionary = gpEdgeFieldSections(gpEdge, _gpEdgeStandard())
+	_gpAddEdgeSection("inspector.section.line_number", gpSections["identity"] as Array[String],
+		gpEdge, true)
+	_gpAddEdgeSection("inspector.section.general", gpSections["general"] as Array[String],
+		gpEdge, false)
 
 
 # Field keys shown in the edge form for a given kind. SIGNAL edges hide the pipe-only
@@ -857,6 +877,150 @@ static func gpEdgeFieldKeys(gpKind: String) -> Array[String]:
 	return gpKeys
 
 
+# Attribute keys that are plumbing, not user-editable line properties.
+# 属于内部管线状态、不应作为用户属性字段的键。
+const GP_EDGE_INTERNAL_ATTRS: Array[String] = [
+	"tag", "tag_manual", "end_notes", "tag_offset", "broken_from", "broken_to", "routing",
+	"line_group", "kind", "signal_type", "show_arrow", "show_tag",
+]
+const GP_EDGE_PIPE_FALLBACK: Array[String] = ["dn", "medium", "spec", "insulation"]
+# Always-available engineering attributes, so the general section is useful even before an
+# import created them. They are ordinary edge attributes and do not participate in the tag rule.
+# 常驻的工程属性：即使导入前尚未存在，也给出可填字段；它们是普通边属性，不参与编号规则。
+const GP_EDGE_GENERAL_DEFAULTS: Array[String] = ["design_pressure", "design_temp"]
+
+
+# The two field groups of an edge form: identity (what makes the line number) and general
+# engineering properties. Rules drive the identity group, so a project-standard field can never
+# be missing here again; existing gpAttrs keys that are not identity/internal appear in general.
+# 边表单的两个字段组：标识（构成管线号的字段）与常规工程属性。标识组由项目标准规则驱动，
+# 故项目标准新增字段不可能再在这里消失；不属于标识/内部的既有 gpAttrs 键进入常规组。
+static func gpEdgeFieldSections(gpEdge: GPPIDEdge, gpStd: GPProjectStandard) -> Dictionary:
+	var gpIdentity: Array[String] = []
+	var gpGeneral: Array[String] = []
+	if gpEdge == null:
+		return {"identity": gpIdentity, "general": gpGeneral}
+	if gpEdge.gpKind == GPPIDEdge.GP_SIGNAL:
+		# A signal line has no pipeline number; show its kind / signal type / flags as general.
+		gpGeneral.append_array(["kind", "signal_type", "tag", "show_arrow", "show_tag"])
+	else:
+		gpIdentity.append("tag")
+		var gpSeen: Dictionary = {}
+		var gpRule: GPTagRule = _gpLineRule(gpStd)
+		if gpRule != null:
+			for gpSegRaw in gpRule.gpSegments:
+				var gpSeg: GPTagSegment = gpSegRaw as GPTagSegment
+				if gpSeg == null:
+					continue
+				if gpSeg.gpSource != GPTagSegment.GPSource.GP_ATTR 						and gpSeg.gpSource != GPTagSegment.GPSource.GP_ATTR_DIGITS 						and gpSeg.gpSource != GPTagSegment.GPSource.GP_CODE_TABLE:
+					continue
+				var gpAttrKey: String = gpSeg.gpAttrKey()
+				if gpAttrKey == "" or gpSeen.has(gpAttrKey):
+					continue
+				gpSeen[gpAttrKey] = true
+				gpIdentity.append(gpAttrKey)
+		if gpIdentity.size() == 1:
+			# No rule available (headless / legacy): keep the historic pipe fields.
+			for gpKey in GP_EDGE_PIPE_FALLBACK:
+				gpIdentity.append(gpKey)
+		gpGeneral.append_array(["kind", "show_arrow", "show_tag"])
+		for gpKey in GP_EDGE_GENERAL_DEFAULTS:
+			if not gpGeneral.has(gpKey):
+				gpGeneral.append(gpKey)
+		var gpExtras: Array[String] = []
+		for gpKeyRaw in gpEdge.gpAttrs.keys():
+			var gpKey: String = str(gpKeyRaw)
+			if gpIdentity.has(gpKey) or gpGeneral.has(gpKey) or GP_EDGE_INTERNAL_ATTRS.has(gpKey):
+				continue
+			if gpKey.begins_with("_"):
+				continue
+			gpExtras.append(gpKey)
+		gpExtras.sort()
+		gpGeneral.append_array(gpExtras)
+	return {"identity": gpIdentity, "general": gpGeneral}
+
+
+# Flat field list, for callers/tests that do not render sections.
+# 扁平字段列表，供不渲染分节的调用方/测试使用。
+static func gpEdgeFieldKeysFor(gpEdge: GPPIDEdge, gpStd: GPProjectStandard) -> Array[String]:
+	var gpSections: Dictionary = gpEdgeFieldSections(gpEdge, gpStd)
+	var gpOut: Array[String] = []
+	gpOut.append_array(gpSections["identity"] as Array[String])
+	gpOut.append_array(gpSections["general"] as Array[String])
+	return gpOut
+
+
+# Line-number rule of the project (the edge class has one default rule).
+# 工程的管线号规则（边类别使用默认规则）。
+static func _gpLineRule(gpStd: GPProjectStandard) -> GPTagRule:
+	if gpStd == null:
+		return null
+	return gpStd.gpRulesOf(GPProjectStandard.GP_CLASS_LINE).gpRuleFor(null)
+
+
+# True when the project-standard line rule consumes this key (so editing it must re-render the
+# line number through gpApplyLineAttr, not the blind gpSetEdgeAttr path).
+# 项目标准管线规则是否消费该键（是则编辑必须经 gpApplyLineAttr 重渲染号，而不是盲写 gpSetEdgeAttr）。
+static func gpIsLineRuleAttr(gpKey: String, gpStd: GPProjectStandard) -> bool:
+	return _gpLineSegmentFor(gpKey, gpStd) != null
+
+
+# The line-rule segment that owns an attribute key, or null.
+# 拥有某个属性键的管线规则段，没有则 null。
+static func _gpLineSegmentFor(gpKey: String, gpStd: GPProjectStandard) -> GPTagSegment:
+	var gpRule: GPTagRule = _gpLineRule(gpStd)
+	if gpRule == null:
+		return null
+	for gpSegRaw in gpRule.gpSegments:
+		var gpSeg: GPTagSegment = gpSegRaw as GPTagSegment
+		if gpSeg != null and gpSeg.gpAttrKey() == gpKey:
+			return gpSeg
+	return null
+
+
+# Label for one edge field: the rule segment's label wins (new project-standard fields), then
+# the existing edge.* translation, then the raw key as a last resort.
+# 边字段标签：优先规则段标签（项目标准新增字段），其次既有 edge.* 翻译，最后裸键。
+static func gpEdgeFieldLabel(gpKey: String, gpStd: GPProjectStandard) -> String:
+	var gpSeg: GPTagSegment = _gpLineSegmentFor(gpKey, gpStd)
+	if gpSeg != null and gpSeg.gpLabel != "":
+		return gpSeg.gpLabel
+	return I18n.gpTr("edge." + gpKey, gpKey)
+
+
+# Add one titled group; the identity group gets the "edit line attributes" entry, which is the
+# only way back to the full dialog for an existing pipe.
+# 添加一个带标题的字段组；标识组带「编辑管线属性」入口 —— 已有管线回到完整面板的唯一路径。
+func _gpAddEdgeSection(gpTitleKey: String, gpKeys: Array[String], gpEdge: GPPIDEdge,
+		gpWithEdit: bool) -> void:
+	if gpKeys.is_empty():
+		return
+	var gpHead: HBoxContainer = HBoxContainer.new()
+	gpHead.add_theme_constant_override("separation", 8)
+	gpFormRoot.add_child(gpHead)
+	var gpTitle: Label = Label.new()
+	gpTitle.text = I18n.gpTr(gpTitleKey)
+	gpTitle.add_theme_font_size_override("font_size", 11)
+	gpTitle.modulate = Color(1, 1, 1, 0.65)
+	gpTitle.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpHead.add_child(gpTitle)
+	if gpWithEdit:
+		var gpEdit: Button = Button.new()
+		gpEdit.text = I18n.gpTr("inspector.edit_line_attrs")
+		gpEdit.tooltip_text = I18n.gpTr("inspector.edit_line_attrs_tip")
+		gpEdit.pressed.connect(func() -> void:
+			gpLineAttrsRequested.emit(gpEdge.gpInstanceId))
+		gpHead.add_child(gpEdit)
+		var gpRerender: Button = Button.new()
+		gpRerender.text = I18n.gpTr("inspector.rerender_line")
+		gpRerender.tooltip_text = I18n.gpTr("inspector.rerender_line_tip")
+		gpRerender.pressed.connect(func() -> void:
+			gpLineRerenderRequested.emit(gpEdge.gpInstanceId))
+		gpHead.add_child(gpRerender)
+	for gpKey in gpKeys:
+		_gpAddEdgeField(gpEdge, gpKey)
+
+
 # Initial display values for an edge form (pure, headless-testable). tag is pre-filled from the
 # edge; show_tag defaults to "draw for pipes, hide for signal lines".
 # 边表单的初始显示值（纯函数，可 headless 测试）。tag 预填自边；show_tag 默认「管道画、信号线不画」。
@@ -871,13 +1035,24 @@ static func gpEdgeInitialValues(gpEdge: GPPIDEdge) -> Dictionary:
 	gpOut["insulation"] = str(gpEdge.gpAttrs.get("insulation", ""))
 	gpOut["show_arrow"] = bool(gpEdge.gpAttrs.get("show_arrow", true))
 	gpOut["show_tag"] = bool(gpEdge.gpAttrs.get("show_tag", gpEdge.gpKind != GPPIDEdge.GP_SIGNAL))
+	for gpKey in GP_EDGE_GENERAL_DEFAULTS:
+		if not gpOut.has(gpKey):
+			gpOut[gpKey] = str(gpEdge.gpAttrs.get(gpKey, ""))
+	# Project-standard / engineering attributes added after the fixed set: expose them too, so
+	# the pure helper matches what the dynamic form will render.
+	# 固定字段之后新增的项目标准 / 工程属性：一并暴露，使纯助手与动态表单一致。
+	for gpKeyRaw in gpEdge.gpAttrs.keys():
+		var gpKey: String = str(gpKeyRaw)
+		if not gpOut.has(gpKey) and not GP_EDGE_INTERNAL_ATTRS.has(gpKey):
+			gpOut[gpKey] = gpEdge.gpAttrs[gpKey]
 	return gpOut
 
 
 # Build one labeled control for an edge field and wire it to gpEdgeAttrChanged.
 # 为边的一个字段构建带标签的控件，并接入 gpEdgeAttrChanged。
 func _gpAddEdgeField(gpEdge: GPPIDEdge, gpKey: String) -> void:
-	var gpRow: HBoxContainer = _gpFieldRow(I18n.gpTr("edge." + gpKey))
+	var gpStd: GPProjectStandard = _gpEdgeStandard()
+	var gpRow: HBoxContainer = _gpFieldRow(gpEdgeFieldLabel(gpKey, gpStd))
 	match gpKey:
 		"kind":
 			_gpAddEnum(gpRow, gpEdge, "kind", ["PROCESS", "UTILITY", "SIGNAL"],
@@ -897,19 +1072,113 @@ func _gpAddEdgeField(gpEdge: GPPIDEdge, gpKey: String) -> void:
 				gpEdgeAttrChanged.emit(gpEdge.gpInstanceId, gpKey, gpV))
 			gpRow.add_child(gpChk)
 		_:
- # tag / dn / medium / spec / insulation -> a single-line text field.
- # tag / dn / medium / spec / insulation -> 单行文本字段。
-			var gpEdit: LineEdit = LineEdit.new()
-			gpEdit.size_flags_horizontal = SIZE_EXPAND_FILL
-			if gpKey == "tag":
-				gpEdit.text = gpEdge.gpTag
-			else:
-				gpEdit.text = str(gpEdge.gpAttrs.get(gpKey, ""))
- # Commit on Enter, not on every keystroke, so the form is not rebuilt mid-typing.
- # 在回车时提交而非每次按键，避免输入途中重建表单。
-			gpEdit.text_submitted.connect(func(gpV: String) -> void:
-				gpEdgeAttrChanged.emit(gpEdge.gpInstanceId, gpKey, gpV))
-			gpRow.add_child(gpEdit)
+			# Any attribute with a non-empty project code table is a picker — this is what
+			# makes `dn` a dropdown once the standard defines a dn table, and it also covers
+			# project-standard custom fields without a second hard-coded field map.
+			# 任何有非空项目代号表的属性都走下拉 —— 这就是项目标准定义 dn 表后管径变成
+			# 下拉的原因，也让项目标准自定义字段无需第二张硬编码字段表。
+			var gpChoices: Array[Dictionary] = gpEdgeAttrChoices(gpKey, gpStd)
+			if not gpChoices.is_empty():
+				_gpAddEdgeCodePicker(gpRow, gpEdge, gpKey, gpChoices)
+				return
+			_gpAddEdgeText(gpRow, gpEdge, gpKey)
+
+
+# The code table behind an edge attribute key; "" when the field is not a code field.
+# 边属性键背后的代号表；不是代号字段时返回 ""。
+# A project-standard rule segment can name the table explicitly (material -> spec); otherwise
+# the attribute key itself is tried, which is what makes `dn` use the `dn` table.
+# 项目标准规则段可以显式指定表名（material -> spec）；否则直接试属性键本身 ——
+# 这正是 `dn` 使用 `dn` 代号表的原因。
+static func gpEdgeAttrTable(gpKey: String, gpStd: GPProjectStandard = null) -> String:
+	if gpStd != null:
+		var gpSeg: GPTagSegment = _gpLineSegmentFor(gpKey, gpStd)
+		if gpSeg != null and gpSeg.gpTable != "" and not gpStd.gpCodeTable(gpSeg.gpTable).is_empty():
+			return gpSeg.gpTable
+		if not gpStd.gpCodeTable(gpKey).is_empty():
+			return gpKey
+	match gpKey:
+		"medium":
+			return GPProjectStandard.GP_TABLE_MEDIUM
+		"spec":
+			return GPProjectStandard.GP_TABLE_MATERIAL
+		"insulation":
+			return GPProjectStandard.GP_TABLE_INSULATION
+	return ""
+
+
+# Pickable codes for an edge attribute, straight from the project standard (pure + testable).
+# 边属性的可选代号，直接取自项目标准（纯函数，可测试）。
+static func gpEdgeAttrChoices(gpKey: String, gpStd: GPProjectStandard) -> Array[Dictionary]:
+	var gpOut: Array[Dictionary] = []
+	var gpTable: String = gpEdgeAttrTable(gpKey, gpStd)
+	if gpTable == "" or gpStd == null:
+		return gpOut
+	for gpRowRaw in gpStd.gpCodeTable(gpTable):
+		if not (gpRowRaw is Dictionary):
+			continue
+		var gpRow: Dictionary = gpRowRaw as Dictionary
+		var gpCode: String = str(gpRow.get("code", "")).strip_edges()
+		if gpCode != "":
+			gpOut.append({"code": gpCode, "label": str(gpRow.get("label", ""))})
+	return gpOut
+
+
+func _gpEdgeStandard() -> GPProjectStandard:
+	if not gpStandardProvider.is_valid():
+		return null
+	var gpStdRaw: Variant = gpStandardProvider.call()
+	return gpStdRaw as GPProjectStandard if gpStdRaw is GPProjectStandard else null
+
+
+# Code picker for medium / pipe class / insulation: the table's codes ARE the options.
+# 介质 / 管道等级 / 保温的代号下拉：表里的代号**就是**选项。
+func _gpAddEdgeCodePicker(gpRow: HBoxContainer, gpEdge: GPPIDEdge, gpKey: String,
+		gpChoices: Array[Dictionary]) -> void:
+	var gpCur: String = str(gpEdge.gpAttrs.get(gpKey, "")).strip_edges()
+	var gpOpt: OptionButton = OptionButton.new()
+	gpOpt.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpOpt.add_item(I18n.gpTr("line_attrs.empty_choice"))
+	gpOpt.set_item_metadata(0, "")
+	var gpSel: int = 0
+	for gpI in range(gpChoices.size()):
+		var gpItem: Dictionary = gpChoices[gpI]
+		var gpCode: String = str(gpItem.get("code", ""))
+		var gpLabel: String = str(gpItem.get("label", ""))
+		gpOpt.add_item("%s · %s" % [gpCode, gpLabel] if gpLabel != "" else gpCode)
+		gpOpt.set_item_metadata(gpI + 1, gpCode)
+		if gpCode == gpCur:
+			gpSel = gpI + 1
+	if gpSel == 0 and gpCur != "":
+		# Keep an unknown legacy value visible instead of silently clearing it.
+		# 保留未知的旧值可见，而不是静默清空它。
+		gpOpt.add_item(I18n.gpTr("line_attrs.current_choice") % gpCur)
+		gpOpt.set_item_metadata(gpOpt.item_count - 1, gpCur)
+		gpSel = gpOpt.item_count - 1
+	gpOpt.select(gpSel)
+	var gpOriginal: String = gpCur
+	gpOpt.item_selected.connect(func(gpI: int) -> void:
+		var gpNew: String = str(gpOpt.get_item_metadata(gpI))
+		if gpNew != gpOriginal:
+			gpEdgeAttrChanged.emit(gpEdge.gpInstanceId, gpKey, gpNew))
+	gpRow.add_child(gpOpt)
+
+
+# Single-line text field that commits on Enter AND on losing focus. Committing on focus loss is
+# what makes "type and click away" work — with Enter only, the edit looked like it did nothing.
+# 单行文本字段：回车**以及失焦**时提交。失焦提交让「打完点别处」也能生效 —— 只认回车时，
+# 这次编辑看起来就像什么都没发生。
+func _gpAddEdgeText(gpRow: HBoxContainer, gpEdge: GPPIDEdge, gpKey: String) -> void:
+	var gpEdit: LineEdit = LineEdit.new()
+	gpEdit.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpEdit.text = gpEdge.gpTag if gpKey == "tag" else str(gpEdge.gpAttrs.get(gpKey, ""))
+	var gpOriginal: String = gpEdit.text
+	var gpCommit: Callable = func(gpV: String) -> void:
+		if gpV.strip_edges() != gpOriginal.strip_edges():
+			gpEdgeAttrChanged.emit(gpEdge.gpInstanceId, gpKey, gpV)
+	gpEdit.text_submitted.connect(gpCommit)
+	gpEdit.focus_exited.connect(func() -> void: gpCommit.call(gpEdit.text))
+	gpRow.add_child(gpEdit)
 
 
 # Build an OptionButton from parallel value / i18n-key arrays and emit the raw value on select.

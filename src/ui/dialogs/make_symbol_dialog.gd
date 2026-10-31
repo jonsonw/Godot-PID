@@ -110,7 +110,9 @@ static func gpOpen(gpOwner: Window, gpDraft: Dictionary, gpInitialName: String =
 	gpDlg.gpInitialDisplay = gpInitialDisplay
 	gpOwner.add_child(gpDlg)
 	gpDlg._gpBuild()
-	gpDlg.popup_centered(Vector2i(560, 720))
+	# ADR-37: content-adaptive + resizable. A fixed 560x720 was wrong on every screen but one.
+	# ADR-37：按内容自适应且可拖动；写死 560×720 只在某一台屏幕上是对的。
+	GPWindowFit.gpPopupContentFitted(gpDlg, gpOwner, Vector2i(480, 420), Vector2i(760, 900))
 	return gpDlg
 
 

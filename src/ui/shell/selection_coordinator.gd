@@ -42,13 +42,43 @@ func gpOnEdgeAttrChanged(gpEdgeId: String, gpKey: String, gpVal) -> void:
 			var gpKind: String = gpEdge.gpKind if gpEdge != null else GPPIDEdge.GP_SIGNAL
 			gpCanvas.gpActions.gpSetEdgeKind(gpEdgeId, gpKind, gpVal)
 		"tag":
-			gpCanvas.gpActions.gpSetEdgeTag(gpEdgeId, str(gpVal))
+			# ADR-36 D7: a refused line number must SAY why (rule segment / duplicate).
+			# ADR-36 D7：被拒的管线号必须说明原因（规则段位 / 重号）。
+			if not gpCanvas.gpActions.gpSetEdgeTag(gpEdgeId, str(gpVal)):
+				_gpReportRefusal(gpCanvas.gpActions)
+		"dn", "medium", "spec", "insulation":
+			# These four feed the LINE NUMBER: applying them through the line-attrs command
+			# re-renders the number with the SAME sequence, so the edit is visible on the canvas
+			# instead of leaving a stale tag behind (the old blind key write did exactly that).
+			# 这四个字段**构成线号**：经管线属性命令应用会用**同一个序号**重渲染线号，编辑在画布上
+			# 立即可见，而不是留下一个陈旧位号（旧的盲写键正是如此）。
+			if not gpCanvas.gpActions.gpApplyLineAttr(gpEdgeId, gpKey, gpVal):
+				_gpReportRefusal(gpCanvas.gpActions)
 		_:
-			gpCanvas.gpActions.gpSetEdgeAttr(gpEdgeId, gpKey, gpVal)
+			# A project-standard custom field also feeds the number; it must take the same
+			# re-render path. Only truly non-rule attributes may use the blind write.
+			# 项目标准自定义字段同样参与编号，必须走同一条重渲染路径；只有真正不在规则里的
+			# 属性才允许盲写。
+			if GPInspector.gpIsLineRuleAttr(gpKey, gpCanvas.gpGraph.gpStandard):
+				if not gpCanvas.gpActions.gpApplyLineAttr(gpEdgeId, gpKey, gpVal):
+					_gpReportRefusal(gpCanvas.gpActions)
+			else:
+				gpCanvas.gpActions.gpSetEdgeAttr(gpEdgeId, gpKey, gpVal)
 	gpCanvas.queue_redraw()
 	# Re-show the form so kind-dependent fields update (e.g. switching to SIGNAL hides dn/medium).
 	# 重新显示表单，使依赖类型的字段随新类型更新（如切到信号线时隐藏 dn/medium）。
 	gpRefreshSelection()
+
+
+# Show a command-layer refusal with its human detail when there is one.
+# 显示命令层的拒绝原因；有明细时一并显示。
+func _gpReportRefusal(gpActs: GPEditService) -> void:
+	if gpActs == null or gpActs.gpLastRefusal == "":
+		return
+	if gpActs.gpLastRefusalDetail != "":
+		gpHost.gpSetState(gpActs.gpLastRefusal, [gpActs.gpLastRefusalDetail])
+	else:
+		gpHost.gpSetState(gpActs.gpLastRefusal)
 
 
 # Route an annotation-shape field edit to the command layer (A2).
@@ -99,7 +129,7 @@ func gpApplyAttr(gpIds: Array[String], gpKey: String, gpVal: Variant) -> void:
 	# A refused edit explains itself (e.g. a duplicate tag); "nothing changed" stays silent.
 	# 被拒绝的编辑会自己说明原因（如位号重复）；「无实际变化」则保持安静。
 	if gpActs.gpLastRefusal != "":
-		gpHost.gpSetState(gpActs.gpLastRefusal)
+		_gpReportRefusal(gpActs)
 
 func gpOnBatchAttrChanged(gpIds: Array[String], gpKey: String, gpVal) -> void:
 	gpApplyAttr(gpIds, gpKey, gpVal)

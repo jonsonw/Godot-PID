@@ -67,34 +67,46 @@ func gpConfirmRenumberTags() -> void:
 	gpDlg.canceled.connect(gpDlg.queue_free)
 	gpDlg.popup_centered()
 
-# Apply the edited rules, then optionally renumber (with a confirmation, because a tag ends
-# up on a physical nameplate and in the DCS point list).
-# 应用编辑后的规则；可选地随后重编号（需确认，因为位号会落到现场标牌与 DCS 点表上）。
-func gpOnTagRulesApplied(gpRules: GPProjectTagRules, gpRenumber: bool) -> void:
+# Apply the standard to EVERY sheet, then optionally renumber (with a confirmation, because a
+# tag ends up on a physical nameplate and in the DCS point list).
+# 把标准套用到**每一张**图纸，然后可选地重编号（需确认，因为位号会落到现场标牌与 DCS 点表上）。
+func gpOnStandardApplied(gpStd: GPProjectStandard, gpRenumber: bool) -> void:
+	if gpStd == null:
+		return
+	gpHost.gpCenter.gpApplyStandard(gpStd)
+	# The sheet list may have grown since the dialog opened; re-announce it so every registry
+	# judges uniqueness against all sheets with the NEW scopes.
+	# 对话框打开后图纸列表可能变过；重新通告一次，使每个注册器按**新**作用域判断唯一性。
+	gpHost.gpCenter.gpSyncProjectGraphs()
+	gpHost.gpSetState("standard.applied")
 	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
-	if gpCanvas == null:
-		return
-	gpCanvas.gpActions.gpSetTagRules(gpRules)
-	if not gpRenumber:
-		gpHost.gpSetState("tag_rule.applied")
-		return
-	gpConfirmRenumberTags()
+	if gpCanvas != null:
+		gpCanvas.queue_redraw()
+		gpHost.gpSelCoord.gpRefreshSelection()
+	if gpRenumber:
+		gpConfirmRenumberTags()
 
-# Menu 项目 / 位号编号规则 . The dialog edits a copy and hands it back; renumbering
-# is a separate, confirmed, single-undo-step operation.
-# 菜单「项目 / 位号编号规则」。对话框编辑副本并交回；重编号是独立的、
-# 需确认的、单撤销步操作。
+
+# Menu 项目 / 项目标准 . The dialog edits a copy and hands it back; renumbering is a separate,
+# confirmed, single-undo-step operation.
+# 菜单「项目 / 项目标准」。对话框编辑副本并交回；重编号是独立的、需确认的、单撤销步操作。
 func gpOpenTagRuleDialog() -> void:
 	var gpCanvas: GPCanvas2D = gpHost.gpActiveCanvas()
 	if gpCanvas == null:
 		return
-	# 刻意不写类型标注：一旦标注，编译器会在启动期解析该类并把它拉进启动依赖图。
-	# Deliberately UNTYPED: annotating it would resolve the class at startup and pull it into
-	# the startup dependency graph.
-	var gpDlg = (load("res://src/ui/dialogs/tag_rule_dialog.gd") as GDScript).new()
+	# Deliberately UNTYPED + load(): annotating would pull the dialog into the startup graph.
+	# 刻意不写类型标注并用 load()：标注会把该对话框拉进启动依赖图。
+	var gpDlg = (load("res://src/ui/dialogs/project_standard_dialog.gd") as GDScript).new()
 	gpHost.add_child(gpDlg)
-	gpDlg.gpRulesApplied.connect(gpOnTagRulesApplied)
-	gpDlg.gpShowRules(gpCanvas.gpActions.gpTagRules(), gpCanvas.gpGraph.gpNodes.size())
+	gpDlg.gpStandardApplied.connect(gpOnStandardApplied)
+	# ADR-38: "renumber all sheets" is a separate, explicit action — it changes printed numbers.
+	# ADR-38：「重编全部图纸编号」是独立的显式动作 —— 它会改变已打印的图号。
+	gpDlg.gpSheetsRenumberRequested.connect(func() -> void:
+		gpHost.gpCenter.gpRenumberSheets()
+		gpHost.gpSetState("standard.applied"))
+	gpDlg.gpStatus.connect(func(gpKey: String, gpArgs: Array) -> void:
+		gpHost.gpSetState(gpKey, gpArgs))
+	gpDlg.gpShowStandard(gpCanvas.gpGraph.gpStandardOrCreate())
 	# Free the dialog on close either way; it is a one-shot editor, not a panel.
 	# 无论何种关闭方式都释放对话框：它是一次性编辑器，而非常驻面板。
 	gpDlg.close_requested.connect(gpDlg.queue_free)

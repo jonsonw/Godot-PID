@@ -54,6 +54,118 @@ static func _gpOf(gpFindings: Array[GPFinding], gpRuleId: String) -> Array[GPFin
 	return gpOut
 
 
+# ---- assembly fixtures (mount-aware layout regression) ----
+# ---- 装配体夹具（挂载感知的布局回归） ----
+
+# A 60 x 102 vessel with five mounting anchors, one per face / corner.
+# 一台 60 x 102 容器，五个安装锚点（每个面 / 角各一）。
+static func _gpTankDef() -> GPSymbolDef:
+	var gpD: GPSymbolDef = GPSymbolDef.new()
+	gpD.gpId = "TANK"
+	gpD.gpCategory = "tank"
+	gpD.gpDefaultSize = Vector2(28.0, 40.0)
+	var gpA: Array[GPAttachPoint] = []
+	gpA.append(GPAttachPoint.gpMake("bottom", Vector2(0.5, 1.0), Vector2(0.0, 1.0)))
+	gpA.append(GPAttachPoint.gpMake("left", Vector2(0.0, 0.5), Vector2(-1.0, 0.0)))
+	gpA.append(GPAttachPoint.gpMake("right", Vector2(1.0, 0.5), Vector2(1.0, 0.0)))
+	gpA.append(GPAttachPoint.gpMake("top_left", Vector2(0.3, 0.0), Vector2(0.0, -1.0)))
+	gpA.append(GPAttachPoint.gpMake("top_right", Vector2(0.7, 0.0), Vector2(0.0, -1.0)))
+	gpD.gpAttachPoints = gpA
+	return gpD
+
+
+# A small mountable nozzle: its single port sits at local +X, i.e. along the mount normal.
+# 一支可挂载的短接管：唯一端口在本地 +X，即沿安装面法线向外。
+static func _gpNozzleDef() -> GPSymbolDef:
+	var gpD: GPSymbolDef = GPSymbolDef.new()
+	gpD.gpId = "NOZ"
+	gpD.gpCategory = "general"
+	gpD.gpDefaultSize = Vector2(24.0, 24.0)
+	gpD.gpMountKind = "NOZZLE"
+	var gpP: GPPort = GPPort.new()
+	gpP.gpName = "pipe"
+	gpP.gpType = GPPort.GP_NOZZLE
+	gpP.gpPos = Vector2(1.0, 0.5)
+	gpP.gpDir = Vector2(1.0, 0.0)
+	gpD.gpPorts = [gpP]
+	return gpD
+
+
+# A 60 x 60 pump with two built-in ports AND two nozzle sockets (the real pump shape).
+# 一台 60 x 60 泵：两个内置端口 + 两个管口插座（与真实泵图元同形）。
+static func _gpPumpDef() -> GPSymbolDef:
+	var gpD: GPSymbolDef = GPSymbolDef.new()
+	gpD.gpId = "PUMP"
+	gpD.gpCategory = "pump"
+	gpD.gpDefaultSize = Vector2(60.0, 60.0)
+	var gpIn: GPPort = GPPort.new()
+	gpIn.gpName = "suction"
+	gpIn.gpType = GPPort.GP_NOZZLE
+	gpIn.gpPos = Vector2(0.0, 0.5)
+	gpIn.gpDir = Vector2(-1.0, 0.0)
+	var gpOut: GPPort = GPPort.new()
+	gpOut.gpName = "discharge"
+	gpOut.gpType = GPPort.GP_NOZZLE
+	gpOut.gpPos = Vector2(0.5, 0.0)
+	gpOut.gpDir = Vector2(0.0, -1.0)
+	gpD.gpPorts = [gpIn, gpOut]
+	var gpA: Array[GPAttachPoint] = []
+	gpA.append(GPAttachPoint.gpMake("pump_suction", Vector2(0.0, 0.5), Vector2(-1.0, 0.0)))
+	gpA.append(GPAttachPoint.gpMake("pump_discharge", Vector2(0.5, 0.0), Vector2(0.0, -1.0)))
+	gpD.gpAttachPoints = gpA
+	return gpD
+
+
+# The three definitions above, in one array.
+# 上述三个定义合成一个数组。
+static func _gpAssemblyDefs() -> Array[GPSymbolDef]:
+	return [_gpTankDef(), _gpNozzleDef(), _gpPumpDef()]
+
+
+# A symbol with ports on both sides, for the "real crossing" case.
+# 左右各一端口的最小图元，用于「真的穿越」用例。
+static func _gpBoxDef() -> GPSymbolDef:
+	var gpD: GPSymbolDef = GPSymbolDef.new()
+	gpD.gpId = "BOX"
+	gpD.gpCategory = "equipment"
+	gpD.gpDefaultSize = Vector2(40.0, 40.0)
+	var gpL: GPPort = GPPort.new()
+	gpL.gpName = "in"
+	gpL.gpType = GPPort.GP_NOZZLE
+	gpL.gpPos = Vector2(0.0, 0.5)
+	gpL.gpDir = Vector2(-1.0, 0.0)
+	var gpR: GPPort = GPPort.new()
+	gpR.gpName = "out"
+	gpR.gpType = GPPort.GP_NOZZLE
+	gpR.gpPos = Vector2(1.0, 0.5)
+	gpR.gpDir = Vector2(1.0, 0.0)
+	gpD.gpPorts = [gpL, gpR]
+	return gpD
+
+
+# Add a node with a chosen symbol id / tag.
+# 以指定图元 id 与位号加入一个节点。
+static func _gpSym(gpG: GPPIDGraph, gpId: String, gpSymbolId: String, gpTag: String,
+		gpPos: Vector2) -> GPPIDNode:
+	var gpN: GPPIDNode = gpG.gpNewNode(gpId, gpSymbolId, gpTag, gpPos)
+	gpG.gpAddNode(gpN)
+	return gpN
+
+
+# Mount a nozzle on a host and give it a DELIBERATELY stale stored position, exactly like an
+# archive whose host was moved after the nozzles were created. The stored position must never be
+# used by DRC — the world origin is derived from the host chain.
+# 把管口挂到宿主上，并故意写入**过期**的存储坐标 —— 与「管口建好后宿主被移动」的存档一致。
+# DRC 绝不能使用该存储坐标，世界坐标必须由宿主父链推导。
+static func _gpMountedNozzle(gpG: GPPIDGraph, gpId: String, gpParent: String,
+		gpAnchor: String, gpStalePos: Vector2) -> GPPIDNode:
+	var gpN: GPPIDNode = gpG.gpNewNode(gpId, "NOZ", "", gpStalePos)
+	gpN.gpParentUid = gpParent
+	gpN.gpMountAnchor = gpAnchor
+	gpG.gpAddNode(gpN)
+	return gpN
+
+
 # ---------------------------------------------------------------------------
 # Rule 1 — open ends need a note (ADR-34)
 # 规则 1 —— 开口端需要注记（ADR-34）
@@ -282,6 +394,85 @@ func gpTestMountChildOverHostIsSilent() -> void:
 		if gpF.gpMessageKey == "drc.symbols_overlap":
 			gpOverlaps += 1
 	gpEq(gpOverlaps, 0, "子件压宿主不产生重叠发现 / a mounted child over its host yields no overlap")
+
+
+# Rule 5 regression: mounted parts are measured at their DERIVED world position, never at the
+# stale gpPosition an archive happens to carry (a mounted child stores no world coordinate).
+# 规则 5 回归：挂载子件按**推导**的世界坐标度量，绝不使用存档里那个过期 gpPosition
+#（挂载子件本就不存世界坐标）。
+func gpTestMountedPartsUseDerivedPositionNotStoredPosition() -> void:
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	_gpSym(gpG, "n1", "TANK", "T-1002", Vector2(200.0, 300.0))
+	var gpAnchors: Array[String] = ["bottom", "left", "right", "top_left", "top_right"]
+	for gpI in range(gpAnchors.size()):
+		# Every child stores the SAME stale point (the old host origin) — the archive shape that
+		# produced ten bogus overlap pairs on a real drawing.
+		# 每个子件都存**同一个**过期点（旧宿主原点）—— 正是真实图纸上产生十条假重叠的存档形态。
+		_gpMountedNozzle(gpG, "n%d" % (gpI + 2), "n1", gpAnchors[gpI], Vector2(200.0, 300.0))
+	var gpF: Array[GPFinding] = GPRulePack.gpRun(gpG, _gpSheet(), _gpAssemblyDefs())
+	var gpOverlaps: int = 0
+	for gpFnd in _gpOf(gpF, GPRulePack.GP_RULE_LAYOUT):
+		if gpFnd.gpMessageKey == "drc.symbols_overlap":
+			gpOverlaps += 1
+	gpEq(gpOverlaps, 0, "同一装配体内的管口不算重叠 / parts of one assembly never overlap")
+
+
+# Rule 5 regression: a line that terminates on a nozzle must be routed from the PORT, not from
+# the stale child centre, and must not be reported against its own host / sibling nozzles.
+# 规则 5 回归：接在管口上的线必须从**端口**出发布线，而不是从过期的子件中心；
+# 也不得报它穿过自己的宿主 / 兄弟管口。
+func gpTestEdgeToNozzleDoesNotCrossItsOwnAssembly() -> void:
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	_gpSym(gpG, "n1", "TANK", "T-1002", Vector2(200.0, 300.0))
+	var gpTankAnchors: Array[String] = ["bottom", "left", "right", "top_left", "top_right"]
+	for gpI in range(gpTankAnchors.size()):
+		_gpMountedNozzle(gpG, "n%d" % (gpI + 2), "n1", gpTankAnchors[gpI], Vector2(200.0, 300.0))
+	_gpSym(gpG, "n7", "PUMP", "P-1002", Vector2(500.0, 400.0))
+	_gpMountedNozzle(gpG, "n8", "n7", "pump_suction", Vector2(500.0, 400.0))
+	_gpMountedNozzle(gpG, "n9", "n7", "pump_discharge", Vector2(500.0, 400.0))
+	var gpE: GPPIDEdge = gpG.gpNewEdgeEx("e10",
+		{"node_id": "n2", "port_id": "pipe"}, {"node_id": "n8", "port_id": "pipe"},
+		GPPIDEdge.GP_PROCESS, "", "100-PW-0002-A1A-H")
+	gpE.gpAttrs = {"dn": "DN50", "medium": "PW", "spec": "A1A"}
+	gpG.gpAddEdge(gpE)
+	var gpF: Array[GPFinding] = GPRulePack.gpRun(gpG, _gpSheet(), _gpAssemblyDefs())
+	var gpCrossings: int = 0
+	for gpFnd in _gpOf(gpF, GPRulePack.GP_RULE_LAYOUT):
+		if gpFnd.gpMessageKey == "drc.edge_crosses_symbol":
+			gpCrossings += 1
+	gpEq(gpCrossings, 0, "接到管口的线不穿自己的装配体 / a nozzle-bound line never crosses its own assembly")
+
+
+# Rule 5 regression: the hit test is segment-vs-rect, not vertex-in-rect. A straight run through
+# a symbol has NO vertex inside it and used to be missed.
+# 规则 5 回归：命中判定是「线段 × 矩形」，不是「顶点落矩形内」。直穿图元的线没有任何顶点
+# 落在图元内，旧实现因此漏报。
+func gpTestSegmentCrossingWithoutVerticesInsideIsDetected() -> void:
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	_gpSym(gpG, "n1", "BOX", "A-1", Vector2(100.0, 100.0))
+	_gpSym(gpG, "n2", "BOX", "B-1", Vector2(400.0, 100.0))
+	_gpSym(gpG, "n3", "BOX", "C-1", Vector2(250.0, 100.0))
+	var gpE: GPPIDEdge = gpG.gpNewEdgeEx("e1",
+		{"node_id": "n1", "port_id": "out"}, {"node_id": "n2", "port_id": "in"},
+		GPPIDEdge.GP_PROCESS, "", "PL-1")
+	gpE.gpAttrs = {"dn": "DN50", "medium": "PW", "spec": "A1A"}
+	gpG.gpAddEdge(gpE)
+	var gpF: Array[GPFinding] = GPRulePack.gpRun(gpG, _gpSheet(), [_gpBoxDef()])
+	var gpCrossings: int = 0
+	var gpFirst: GPFinding = null
+	for gpFnd in _gpOf(gpF, GPRulePack.GP_RULE_LAYOUT):
+		if gpFnd.gpMessageKey == "drc.edge_crosses_symbol":
+			gpCrossings += 1
+			if gpFirst == null:
+				gpFirst = gpFnd
+	gpEq(gpCrossings, 1, "线段穿过中间的图元被检出 / a run through a symbol is reported")
+	# A report the user cannot read is a report they will not fix: the tag must be in the params.
+	# 用户读不懂的报告不会被修：参数里必须先出现位号，而不只是技术 id。
+	if gpFirst != null and gpFirst.gpParams.size() >= 2:
+		gpCheck(str(gpFirst.gpParams[1]).contains("C-1"),
+			"发现里带位号 / the finding names the tag")
+		gpCheck(str(gpFirst.gpParams[0]).contains("PL-1"),
+			"发现里带管线号 / the finding names the line tag")
 
 
 func gpTestOffSheetIsWarning() -> void:

@@ -78,6 +78,25 @@ var gpShapes: Array[GPShape] = []
 # 首次使用前为 null；gpTagRulesOrCreate() 负责建立。
 var gpTagRules: GPProjectTagRules = null
 
+# The PROJECT STANDARD this graph belongs to (ADR-36). Several sheets of one project all point
+# at the SAME object, so a sequence mark advanced on sheet 1 is visible on sheet 2 and the
+# numbering convention is saved once, at container level.
+# 本图所属的**项目标准**（ADR-36）。同一工程的若干图纸指向**同一个**对象，故第一页推进的水位线
+# 第二页看得见，编号约定也只在容器级保存一次。
+# Null until first touched; gpStandardOrCreate() materialises it. `gpTagRules` is kept as the
+# equipment class's rule set (the v1 holder) so every existing caller keeps working unchanged.
+# 首次使用前为 null；gpStandardOrCreate() 负责建立。`gpTagRules` 保持为设备类别的规则集
+#（v1 的持有者），使所有既有调用方无需改动。
+var gpStandard: GPProjectStandard = null
+
+# Optional LAZY source of the project standard, installed by the project shell so that several
+# sheets share ONE convention even when the project has not numbered anything yet. Asking for
+# the standard is what creates it, so a project that never numbers anything still writes no
+# `tag_rules` key (ADR-36 D12 byte-stability).
+# 可选的**惰性**项目标准来源，由外壳安装，使工程在尚未编号时多张图纸也共享**同一套**约定。
+# 「取标准」这个动作本身才建立它，故从不编号的工程仍然不写出 `tag_rules` 键（ADR-36 D12 逐字节稳定）。
+var gpStandardProvider: Callable = Callable()
+
 # keyed by symbol id: {"LPUMP003": "-12093481"}.
 # Comparing it against the live library on load is how a drawing can tell that a field was
 # added, renamed or deleted since it was saved — without that, "edit the library, every
@@ -93,8 +112,53 @@ var gpSchemaFingerprints: Dictionary = {}
 # 工程的编号规则，首次使用时建立出厂默认。绝不返回 null。
 func gpTagRulesOrCreate() -> GPProjectTagRules:
 	if gpTagRules == null:
-		gpTagRules = GPProjectTagRules.gpDefaultRules()
+		gpTagRules = gpStandardOrCreate().gpRulesOf(GPProjectStandard.GP_CLASS_EQUIPMENT)
+	elif gpStandard != null and gpTagRules != gpStandard.gpRulesOf(
+			GPProjectStandard.GP_CLASS_EQUIPMENT):
+		# A caller assigned gpTagRules directly (the pre-ADR-36 contract). Fold it into the
+		# standard instead of letting two owners drift apart.
+		# 调用方直接赋了 gpTagRules（ADR-36 之前的契约）。把它折进标准，而不是让两个持有者分叉。
+		gpStandard.gpSetRulesOf(GPProjectStandard.GP_CLASS_EQUIPMENT, gpTagRules)
 	return gpTagRules
+
+
+# The project standard, creating it on first use and keeping its equipment class in step with
+# `gpTagRules`. A graph loaded from a v1 archive therefore starts in LEGACY mode — it holds
+# only the equipment rules and writes the v1 shape back byte for byte (ADR-36 D12).
+# 项目标准，首次使用时建立，并让它的设备类别与 `gpTagRules` 保持一致。故从 v1 存档载入的图
+# 以 **legacy 模式**起步 —— 只持有设备规则，并按 v1 形态逐字节写回（ADR-36 D12）。
+func gpStandardOrCreate() -> GPProjectStandard:
+	if gpStandard == null and gpStandardProvider.is_valid():
+		var gpShared: Variant = gpStandardProvider.call()
+		if gpShared is GPProjectStandard:
+			gpAdoptStandard(gpShared as GPProjectStandard)
+	if gpStandard == null:
+		gpStandard = GPProjectStandard.gpDefaultStandard()
+		if gpTagRules != null:
+			gpStandard.gpSetRulesOf(GPProjectStandard.GP_CLASS_EQUIPMENT, gpTagRules)
+		else:
+			gpTagRules = gpStandard.gpRulesOf(GPProjectStandard.GP_CLASS_EQUIPMENT)
+	return gpStandard
+
+
+# Replace the project's numbering rules (the equipment class, for pre-ADR-36 callers).
+# 替换工程的编号规则（设备类别，供 ADR-36 之前的调用方使用）。
+func gpSetTagRules(gpRules: GPProjectTagRules) -> void:
+	if gpRules == null:
+		return
+	gpTagRules = gpRules
+	gpStandardOrCreate()
+	gpStandard.gpSetRulesOf(GPProjectStandard.GP_CLASS_EQUIPMENT, gpRules)
+
+
+# Adopt another graph's standard (a new tab inherits the project's convention instead of
+# starting from its own factory copy — the root cause of cross-sheet duplicates).
+# 采纳另一张图纸的标准（新标签页继承工程约定，而不是从自己的出厂副本起步 —— 这正是跨页重复的根因）。
+func gpAdoptStandard(gpIn: GPProjectStandard) -> void:
+	if gpIn == null:
+		return
+	gpStandard = gpIn
+	gpTagRules = gpIn.gpRulesOf(GPProjectStandard.GP_CLASS_EQUIPMENT)
 
 
 # Signals fired when data changes; the canvas subscribes to keep views in sync.
@@ -697,7 +761,12 @@ func gpToDict() -> Dictionary:
 	# Written only once the project actually has rules, so a file untouched by M9 keeps
 	# its v1 shape byte for byte. / 仅当工程确有规则时写出，使未经 M9 改动的文件
 	# 逐字节保持 v1 形态。
-	if gpTagRules != null:
+	# ADR-36: the standard decides the shape. A legacy standard (loaded from v1, never upgraded)
+	# emits the v1 block verbatim; an upgraded one emits the v2 block.
+	# ADR-36：由标准决定形态。legacy 标准（自 v1 载入且从未升格）原样输出 v1 块；已升格者输出 v2 块。
+	if gpStandard != null:
+		gpOut["tag_rules"] = gpStandard.gpToDict()
+	elif gpTagRules != null:
 		gpOut["tag_rules"] = gpTagRules.gpToDict()
 	# Persist drop-restore records only when non-empty, so an untouched file keeps its byte shape.
 	# 仅当非空时持久化落点恢复记录，使未触及本功能的文件保持原字节形态。
@@ -722,7 +791,12 @@ static func gpFromDict(gpData: Dictionary) -> GPPIDGraph:
 	# v2：编号规则。v1 文件里没有此键 -> 保持 null，由 gpTagRulesOrCreate() 在首次使用
 	# 时给出出厂默认，故旧存档载入行为不变。
 	if gpData.has("tag_rules"):
-		gpG.gpTagRules = GPProjectTagRules.gpFromDict(gpData["tag_rules"] as Dictionary)
+		# ADR-36: one parser knows both shapes. A v1 block becomes the equipment class and
+		# leaves the standard in legacy mode, so saving it back reproduces the old bytes.
+		# ADR-36：同一个解析器认得两种形态。v1 块成为设备类别，标准保持 legacy 模式，
+		# 故保存回去复现旧字节。
+		gpG.gpStandard = GPProjectStandard.gpFromDict(gpData["tag_rules"] as Dictionary)
+		gpG.gpTagRules = gpG.gpStandard.gpRulesOf(GPProjectStandard.GP_CLASS_EQUIPMENT)
 	if gpData.has("nodes"):
 		for gpND in gpData["nodes"]:
 			var gpN: GPPIDNode = GPPIDNode.new()

@@ -157,19 +157,44 @@ static func gpReadSheets(gpPath: String) -> GPIOResult:
 		var gpD: Dictionary = (gpS as Dictionary).duplicate(true)
 		gpD["index"] = gpI
  # Project-level data is copied onto every sheet so the graph rebuild can reconcile
- # embedded packs and numbering rules regardless of which tab is opened first.
- # 工程级数据复制到每张图纸上，使无论先打开哪一页，
- # 图重建都能调和内嵌图元包与编号规则。
+ # embedded packs regardless of which tab is opened first.
+ # 工程级数据复制到每张图纸上，使无论先打开哪一页，图重建都能调和内嵌图元包。
+ # ADR-36: numbering rules are NOT copied per sheet any more — one standard is parsed from
+ # the container and ADOPTED by every sheet's graph below, so all tabs share one convention
+ # (and one set of sequence marks) instead of diverging copies.
+ # ADR-36：编号规则不再逐图纸复制 —— 由容器解析出**一份**标准，下面被每张图纸的图采纳，
+ # 使所有标签页共享同一套约定（与同一组水位线），而不是各自分叉的副本。
 		gpD["meta"] = (gpV3.get("meta", {}) as Dictionary).duplicate(true)
 		gpD["user_symbol_packs"] = ((gpV3.get("library", {}) as Dictionary).get(
 			"packs", []) as Array).duplicate(true)
-		if gpV3.has("tag_rules"):
-			gpD["tag_rules"] = (gpV3.get("tag_rules", {}) as Dictionary).duplicate(true)
+		gpD.erase("tag_rules")
 		gpSheetsOut.append(GPSheet.gpFromDict(gpD))
 		gpI += 1
 	if gpSheetsOut.is_empty():
 		gpSheetsOut.append(GPSheet.gpNew("sheet-1", str((gpV3.get("meta", {})
 			as Dictionary).get("title", "")), 0))
+	# One standard object, adopted by every sheet. Absent in a v1/v2 file without rules:
+	# then the graphs stay null and a first mint creates one lazily (single-sheet behaviour
+	# is unchanged; cross-sheet sharing is seeded on the first rule edit or by a new tab).
+	# 一个标准对象，由每张图纸采纳。v1/v2 文件若没有规则则缺失：此时图保持 null，
+	# 首次铸号时惰性创建（单图纸行为不变；跨页共享由首次改规则或新建标签页播下）。
+	if gpV3.has("tag_rules"):
+		var gpStd: GPProjectStandard = GPProjectStandard.gpFromDict(
+			gpV3.get("tag_rules", {}) as Dictionary)
+		var gpNoIdx: int = 0
+		for gpSheetRaw in gpSheetsOut:
+			var gpSheetObj: GPSheet = gpSheetRaw as GPSheet
+			if gpSheetObj != null and gpSheetObj.gpGraph != null:
+				gpSheetObj.gpGraph.gpAdoptStandard(gpStd)
+				# ADR-38: a sheet with no number yet (an archive from before numbering) gets
+				# one from the project rule, and its EMPTY title-block fields inherit the
+				# project info — per-sheet values the user typed are left alone.
+				# ADR-38：尚无编号的图纸（编号功能之前的存档）按项目规则补号，其**空缺**的标题栏
+				# 字段继承项目信息 —— 用户逐张填过的值不动。
+				if gpSheetObj.gpNumber.strip_edges() == "":
+					gpSheetObj.gpAssignNumber(gpStd.gpSheetNumberFor(gpNoIdx + 1))
+				gpSheetObj.gpApplyProjectInfo(gpStd)
+			gpNoIdx += 1
 	return GPIOResult.gpSuccessWith(gpSheetsOut, "io.loaded", gpPath)
 
 

@@ -3,7 +3,7 @@
 > English: a quick read for GitHub visitors. Authoritative full version: `G-PID_项目架构说明_20260908.html` (workspace `架构/交付/`).
 > 中文：供 GitHub 访客速读。权威完整版见工作区 `架构/交付/G-PID_项目架构说明_20260908.html`。
 >
-> **基线 2026-09-26**：`src/**/*.gd` **175 文件 / 32,376 行**，Godot 4.7。门禁：编译 0 错 · GPGTest **2,901 / 0** · SCRIPT ERROR **0** · GUT 5 passing / 1,261 asserts · 运行时冒烟 exit=0。
+> **基线 2026-10-31**：`src/**/*.gd` **262 文件 / 69,415 行**，Godot 4.7。门禁：编译 0 错 · GPGTest **9,487 / 0 / 115 套** · SCRIPT ERROR **0** · GUT 5 passing（W11 记录 2,901 asserts）· 运行时冒烟 exit=0。
 > 与代码冲突之处，一律以代码为准。
 
 ## Layers · 分层
@@ -11,8 +11,8 @@
 | 层 | 路径 | 职责 | 说明 |
 |---|---|---|---|
 | UI | `src/ui` | shell（组合根 `GPMainWindow` + 7 协调者）、canvas（`GPCanvas2D` + **5 实现类**）、tools、panels、dialogs（含 `symbol_editor/`） | 唯一依赖 Godot 控件与 autoload 的层 |
-| App | `src/app` | 用例编排：命令栈 + **29 条命令** + `GPEditService` + `GPAppDocumentManager` + `GPEventBus` + 自动保存服务 | 纯 `RefCounted`，无 UI 引用 |
-| Core | `src/core` | model（`GPPIDGraph` 聚合根）、geometry、symbol、view（画布纯状态 + 画布文字档位）、platform、service、`gp_constants` | **49 个类无一个是 `Node`** → 可 headless 测试 |
+| App | `src/app` | 用例编排：命令栈 + **44 条命令** + `GPEditService` + `GPAppDocumentManager` + `GPEventBus` + 自动保存服务 + `rules/` 实时 DRC 调度 | 纯 `RefCounted`，无 UI 引用 |
+| Core | `src/core` | model（`GPPIDGraph` 聚合根）、geometry、symbol、view（画布纯状态 + 画布文字档位）、validation（DRC 快照/规则/豁免）、platform、service、`gp_constants` | **76 个类无一个是 `Node`** → 可 headless 测试 |
 | IO | `src/io` | `*.pid.json` 读写（`GPProjectIO`）+ 原子写 + schema 迁移 + 导入导出 + **DEXPI（Proteus XML）导入导出** + **DXF R12 / PDF 1.4 导出** | 唯一允许碰 `FileAccess` 的层；DXF/PDF 消费 `GPPrintModel`，自身不做几何 |
 
 **DEXPI 子模块（第二个外部方言适配器，与 `*.pid.json` 平级）**：`GPDexpiSchema`（常量/版本能力表）、
@@ -24,10 +24,10 @@
 只有规范已核实的才写，其余留空并进报告。
 | Render | `src/render` | `GPSymbolView` / `GPEdgeView` 视图节点与绘制器、`GPFrameView`（图框）/ `GPBackgroundView`（底图） | 只读模型；3D 构建为空桩 |
 | Autoload | `src/autoload` | `I18n`（zh/en）、`Settings`（`user://settings.cfg`）、`SnapState`（CAD 开关） | 3 个全局单例，**仅 ui 可依赖** |
-| Addons | `src/addons` | `GPIPIDAddon` 商业化插件契约（8 个钩子） | **仅契约，无加载器** |
+| Addons | `src/addons` | `GPIPIDAddon` 商业化插件契约（v1/v2 + 加载器） | **契约 + `GPAddonLoader`；外挂能力不进入 core** |
 
 依赖方向严格自上而下：`ui → {app, io, render} → core`。
-`core` / `app` / `io` / `render` 均**不引用** `ui` 与 `autoload`（实测 0 处）——这是 headless 可测的前提，也是 2,901 条断言成立的原因。
+`core` / `app` / `io` / `render` 均**不引用** `ui` 与 `autoload`（实测 0 处）——这是 headless 可测的前提，也是 9,487 条断言成立的原因。
 
 > **门面约定**：`GPMainWindow` / `GPCanvas2D` 对外只暴露语义化公开端口（`gp*`），内部协作结构（7 协调者 / 4 实现类）不外泄；调用方在其它类 → 方法必须公开，仅类内调用 → `_gp*` 私有。
 
@@ -64,7 +64,7 @@ meta / sheets[] / library / config
 
 | 轨 | 位置 | 规模 | 运行命令 |
 |---|---|---|---|
-| 自研 `GPGTest` | `tests/gp_test_*.gd` | **109 套 / 9,086 条断言** | `godot --headless --script res://tests/run_core_tests.gd` |
+| 自研 `GPGTest` | `tests/gp_test_*.gd` | **115 套 / 9,487 条断言** | `godot --headless --script res://tests/run_core_tests.gd` |
 | `GUT 9.7.1` | `addons/gut`（vendored，MIT） | 桥接 + 原生用例 | `godot --headless --script res://addons/gut/gut_cmdln.gd -gexit` |
 
 桥接脚本 `tests/gut/test_gp_suites.gd` 让 GUT 反射驱动既有 GPGTest 套件，

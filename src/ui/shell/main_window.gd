@@ -96,6 +96,19 @@ var gpBackpack: GPSymbolBackpack = null
 # DRC 面板（B2）：第五个停靠页，与大纲一样在装配时创建。
 var gpDrcPanel: GPDRCPanel = null
 
+# The top-toolbar DRC result dialog (ADR-39 UI). Lazily created; non-modal so the user can
+# inspect the drawing while it stays open.
+# 顶部工具栏的 DRC 结果弹窗（ADR-39 UI）。懒创建；非模态，用户可一边看图一边点行。
+var gpDrcDialog: GPDRCDialog = null
+
+# Live DRC scheduler (E02): debounced engine run after every graph change.
+# 实时 DRC 调度（E02）：每次图变化后去抖跑一次引擎。
+var gpRuleScheduler: GPRuleScheduler = null
+
+# Screen-space DRC badges above the active canvas.
+# 活动画布之上的屏幕空间 DRC 角标。
+var gpRuleOverlay: GPRuleOverlay = null
+
 # Right-side tab container.
 # 右侧标签页容器。
 var gpTabs: TabContainer
@@ -250,6 +263,13 @@ func _gpAssembleCoordinators() -> void:
 	gpLayoutCoord.gpHost = self
 	gpMenuCoord = GPMenuCoordinator.new()
 	gpMenuCoord.gpHost = self
+	gpRuleScheduler = GPRuleScheduler.new()
+	gpRuleScheduler.name = "DRCScheduler"
+	add_child(gpRuleScheduler)
+	gpRuleScheduler.gpFindingsReady.connect(_gpOnLiveDrc)
+	gpRuleOverlay = GPRuleOverlay.new()
+	gpRuleOverlay.name = "DrcOverlay"
+	add_child(gpRuleOverlay)
 	get_window().close_requested.connect(gpFileCoord.gpOnCloseRequested)
 	# Autosave: build its timer now; it stays idle until the first manual save arms it (ADR-9).
 	# 自动保存：现在构建其计时器；在首次手动保存启用它之前保持空闲（ADR-9）。
@@ -345,6 +365,8 @@ func _gpAssembleInspector() -> void:
 	# ---- 属性面板 ----
 	gpInspector.gpAttrChanged.connect(gpSelCoord.gpOnAttrChanged)
 	gpInspector.gpEdgeAttrChanged.connect(gpSelCoord.gpOnEdgeAttrChanged)
+	gpInspector.gpLineAttrsRequested.connect(_gpOnInspectorLineAttrs)
+	gpInspector.gpLineRerenderRequested.connect(_gpOnInspectorRerenderLine)
 	# the panel owns no graph, so a symbol swap is announced and executed here.
 	# 面板不持有图，故「更换图元」在此被宣告并执行。
 	gpInspector.gpSymbolSwapRequested.connect(gpSymbolLibCoord.gpOnSymbolSwap)
@@ -357,6 +379,28 @@ func _gpAssembleInspector() -> void:
 	# annotation-shape fields (A2): name / layer edits become one undoable command each.
 	# 注释图形字段（A2）：名称 / 图层编辑各成一条可撤销命令。
 	gpInspector.gpShapePropChanged.connect(gpSelCoord.gpOnShapePropChanged)
+	# The inspector owns no graph; give it the ACTIVE canvas's project standard for the code
+	# pickers (medium / pipe class / insulation). Pulled lazily so tab switches need no re-wiring.
+	# 属性面板不持有图；把**活动画布**的项目标准给它用于代号下拉（介质 / 管道等级 / 保温）。
+	# 惰性取值，切换标签页无需重新接线。
+	gpInspector.gpStandardProvider = func() -> GPProjectStandard:
+		var gpCanvas: GPCanvas2D = gpActiveCanvas()
+		if gpCanvas == null or gpCanvas.gpGraph == null:
+			return null
+		if gpCanvas.gpGraph.gpStandard != null:
+			return gpCanvas.gpGraph.gpStandard
+		# Same split as the re-render path: the registry may hold the standard the numbering
+		# actually used, and the center owns the project-level one. Without these fallbacks the
+		# pickers silently degrade to text boxes (the reported "still an input box").
+		# 与重渲染路径同样的分裂：注册器可能持有铸造真正用的标准，中心持有工程级那一份。
+		# 没有这两级兜底，下拉会静默退化成文本框（用户报告的「还是输入框」）。
+		if gpCanvas.gpActions != null and gpCanvas.gpActions.gpCtx != null \
+				and gpCanvas.gpActions.gpCtx.gpTags != null \
+				and gpCanvas.gpActions.gpCtx.gpTags.gpStandard != null:
+			return gpCanvas.gpActions.gpCtx.gpTags.gpStandard as GPProjectStandard
+		if gpCenter != null:
+			return gpCenter.gpProjectStandardOrCreate()
+		return null
 	# custom-entry CRUD (Rev.3 stage 1.5, R2): add / rename / delete, instance level.
 	# 自定义条目增删改（Rev.3 阶段 1.5，R2）：新增 / 改名 / 删除，仅实例级。
 	gpInspector.gpPropAddRequested.connect(gpSelCoord.gpOnPropAdd)
@@ -517,6 +561,13 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 		gpBus.gpStatusUpdated.connect(gpSelCoord.gpOnStatus)
 	if not gpBus.gpModeChanged.is_connected(gpRibbonCoord.gpSyncToolBar):
 		gpBus.gpModeChanged.connect(gpRibbonCoord.gpSyncToolBar)
+	if gpRuleScheduler != null:
+		if not gpBus.gpGraphChanged.is_connected(gpRuleScheduler.gpMarkDirty):
+			gpBus.gpGraphChanged.connect(gpRuleScheduler.gpMarkDirty)
+		if gpActiveCanvas() == gpCanvas:
+			gpRuleScheduler.gpBind(gpCanvas, gpDefs)
+			if gpRuleOverlay != null:
+				gpRuleOverlay.gpAttach(gpCanvas)
 	# Announce the document already loaded onto this canvas so bus subscribers (title bar,
 	# project tree) bind to the correct graph in one place, and the dirty flag resets.
 	# 通告本画布已载入的文档，使总线订阅者（标题栏、工程树）在一处绑定到正确的图，并重置脏标记。
@@ -532,6 +583,14 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 	# Promote selected annotation shapes into a real symbol: open the Make-Symbol dialog.
 	# 把选中的注释图形提升为真正图元：打开「生成图元」对话框。
 	gpCanvas.gpMakeSymbolRequested.connect(gpSymbolLibCoord.gpOnMakeSymbolFromShapes)
+	# ADR-36 D9: a NEW line opens the "line attributes" panel, so its number is generated from
+	# real attributes instead of staying a placeholder. Bound per canvas so the panel always
+	# targets the sheet the line was drawn on.
+	# ADR-36 D9：新画出的管线打开「管线属性」面板，使号由真实属性生成而不是长期挂占位。
+	# 逐画布绑定，故面板永远作用于画线的那张图纸。
+	var gpLineCb: Callable = Callable(self, "_gpOnLineCreated").bind(gpCanvas)
+	if not gpCanvas.gpLineCreated.is_connected(gpLineCb):
+		gpCanvas.gpLineCreated.connect(gpLineCb)
 	# fire the toolbar sync twice, so it is intentionally not connected here.
 	# 故此处有意不再连接。
 	# A brand-new sheet has an empty undo stack: make the 编辑 menu agree with it right away.
@@ -550,6 +609,12 @@ func _gpOnActiveTabChanged() -> void:
 	gpSelCoord.gpRefreshSelection()
 	gpRibbonCoord.gpSyncToolBar()
 	_gpBindOutline()
+	_gpBindDrc()
+	if gpRuleScheduler != null:
+		gpRuleScheduler.gpBind(gpActiveCanvas(), gpDefs)
+	if gpRuleOverlay != null and gpActiveCanvas() != null:
+		gpRuleOverlay.gpAttach(gpActiveCanvas())
+		gpRuleOverlay.gpShow([], _gpActiveSheetId())
 
 
 # Fullscreen toggle from the center header: hide/show the side docks so the canvas
@@ -668,7 +733,98 @@ func _gpAssembleDrc() -> void:
 	gpDrcPanel.gpBuild()
 	gpTabs.set_tab_title(gpTabs.get_tab_count() - 1, I18n.gpTr("drc.panel_title"))
 	gpDrcPanel.gpFindingActivated.connect(_gpOnDrcJump)
+	gpDrcPanel.gpFindingActivatedFull.connect(_gpOnDrcFindingFromPanel)
+	gpDrcPanel.gpFindingsChanged.connect(_gpOnDrcFindingsForOverlay)
+	# ADR-36 C: "whole project" mode needs every sheet; the shell owns the tab bar.
+	# ADR-36 C：「全工程」模式需要每张图纸；标签栏归外壳所有。
+	gpDrcPanel.gpSetSheetsProvider(Callable(self, "_gpDrcSheets"))
 	_gpBindDrc()
+
+
+# A new process / utility line was created: open the line attributes panel (deferred, so the
+# dialog does not open inside the tool's input handler).
+# 新画出工艺 / 公用管线：打开管线属性面板（延后，避免在工具的输入处理过程中弹模态框）。
+# Re-open the full line-attributes dialog for an EXISTING pipe from the inspector. The dialog
+# used to be available only at creation time, so a project-standard field added later could not
+# be filled on old lines.
+# 从右侧属性面板重新打开已有管线的完整「管线属性」对话框。此前该对话框只在新画线时出现，
+# 故后来在项目标准里新增的字段无法补填到旧管线上。
+func _gpOnInspectorLineAttrs(gpEdgeId: String) -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null or gpCanvas.gpGraph == null:
+		return
+	var gpEdge: GPPIDEdge = gpCanvas.gpGraph.gpGetEdge(gpEdgeId)
+	if gpEdge == null:
+		return
+	var gpStd: GPProjectStandard = gpCanvas.gpGraph.gpStandard
+	if gpStd == null:
+		return
+	var gpRule: GPTagRule = gpStd.gpRulesOf(GPProjectStandard.GP_CLASS_LINE).gpRuleFor(null)
+	_gpOpenLineAttrs(gpCanvas, gpEdgeId, gpRule, gpStd)
+
+
+# Repair path: re-render the line number from the current edge attributes without touching values.
+# 修复路径：只按当前边属性重渲染管线号，不改值。
+func _gpOnInspectorRerenderLine(gpEdgeId: String) -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null or gpCanvas.gpGraph == null:
+		return
+	if not gpCanvas.gpActions.gpApplyLineAttrs(gpEdgeId, {}):
+		gpSetState(gpCanvas.gpActions.gpLastRefusal,
+			[gpCanvas.gpActions.gpLastRefusalDetail] if gpCanvas.gpActions.gpLastRefusalDetail != "" else [])
+	gpCanvas.queue_redraw()
+	gpCanvas.gpEmitStatus()
+	gpRefreshSelection()
+
+
+func _gpOnLineCreated(gpEdgeId: String, gpCanvas: GPCanvas2D) -> void:
+	if gpCanvas == null or gpCanvas.gpGraph == null:
+		return
+	var gpEdge: GPPIDEdge = gpCanvas.gpGraph.gpGetEdge(gpEdgeId)
+	if gpEdge == null:
+		return
+	var gpStd: GPProjectStandard = gpCanvas.gpGraph.gpStandard
+	if gpStd == null:
+		return
+	var gpRule: GPTagRule = gpStd.gpRulesOf(GPProjectStandard.GP_CLASS_LINE).gpRuleFor(null)
+	if not gpRule.gpUsesSegments():
+		return
+	call_deferred("_gpOpenLineAttrs", gpCanvas, gpEdgeId, gpRule, gpStd)
+
+
+func _gpOpenLineAttrs(gpCanvas: GPCanvas2D, gpEdgeId: String, gpRule: GPTagRule,
+		gpStd: GPProjectStandard) -> void:
+	var gpEdge: GPPIDEdge = gpCanvas.gpGraph.gpGetEdge(gpEdgeId)
+	if gpEdge == null:
+		return
+	# Deliberately UNTYPED + load(): annotating would pull the dialog into the startup graph.
+	# 刻意不写类型并用 load()：标注会把该对话框拉进启动依赖图。
+	var gpDlg = (load("res://src/ui/dialogs/line_attrs_dialog.gd") as GDScript).new()
+	add_child(gpDlg)
+	gpDlg.gpApplied.connect(func(gpAttrs: Dictionary) -> void:
+		if not gpCanvas.gpActions.gpApplyLineAttrs(gpEdgeId, gpAttrs):
+			var gpDetail: String = gpCanvas.gpActions.gpLastRefusalDetail
+			gpSetState(gpCanvas.gpActions.gpLastRefusal,
+				[gpDetail if gpDetail != "" else "-"] if gpCanvas.gpActions.gpLastRefusal != "" else [])
+		gpCanvas.queue_redraw()
+		gpCanvas.gpEmitStatus()
+		# The dialog may have been opened from the inspector for an EXISTING line; refresh the
+		# form so the new values are visible immediately (the graph signal alone does not rebuild
+		# an already-open edge form).
+		# 对话框可能是从右侧面板对**已有管线**打开的；这里刷新表单，使新值立即可见
+		#（仅靠图信号不会重建已经打开的边表单）。
+		gpRefreshSelection())
+	gpDlg.confirmed.connect(gpDlg.queue_free)
+	gpDlg.canceled.connect(gpDlg.queue_free)
+	gpDlg.gpShowFor(gpEdge, gpRule, gpStd)
+
+
+# All sheets, for the DRC's whole-project mode (and the export gate's equivalent check).
+# 全部图纸，供 DRC 全工程模式（以及导出闸门的等价检查）使用。
+func _gpDrcSheets() -> Array:
+	if gpCenter == null:
+		return []
+	return gpCenter.gpToSheets()
 
 
 # Bind the DRC panel to the active canvas (called wherever the outline is bound, too).
@@ -679,6 +835,8 @@ func _gpBindDrc() -> void:
 	var gpCv: GPCanvas2D = gpActiveCanvas()
 	if gpCv != null:
 		gpDrcPanel.gpBindCanvas(gpCv)
+		if gpRuleScheduler != null:
+			gpRuleScheduler.gpBind(gpCv, gpDefs)
 
 
 # Run the health check on the active sheet and expose the counts in the status bar.
@@ -701,9 +859,9 @@ func gpRunDrc() -> void:
 			break
 	var gpFound: Array[GPFinding] = gpDrcPanel.gpFindings()
 	gpSetState("status.drc_done", [
-		GPRulePack.gpCount(gpFound, GPFinding.GP_ERROR),
-		GPRulePack.gpCount(gpFound, GPFinding.GP_WARNING),
-		GPRulePack.gpCount(gpFound, GPFinding.GP_INFO),
+		GPDrcEngine.gpCount(gpFound, GPFinding.GP_ERROR),
+		GPDrcEngine.gpCount(gpFound, GPFinding.GP_WARNING),
+		GPDrcEngine.gpCount(gpFound, GPFinding.GP_INFO),
 	])
 
 
@@ -715,10 +873,142 @@ func _gpOnDrcJump(gpWorld: Vector2) -> void:
 	var gpCv: GPCanvas2D = gpActiveCanvas()
 	if gpCv == null:
 		return
-	# Screen = world * zoom + offset, so offset = screenCentre - world * zoom.
-	# 屏幕 = 世界 × 缩放 + 偏移，故 偏移 = 屏幕中心 − 世界 × 缩放。
-	gpCv.gpViewOffset = gpCv.size * 0.5 - gpWorld * gpCv.gpViewZoom
-	gpCv.queue_redraw()
+	gpCv.gpFocusWorld(gpWorld)
+
+
+# Open the top-toolbar DRC result dialog (ADR-39 UI). It stays non-modal so clicking a row can
+# take the user to the canvas and the property panel without closing the list.
+# 打开顶部工具栏的 DRC 结果弹窗（ADR-39 UI）。非模态，故点行后用户能到画布/属性面板，列表不关。
+func gpShowDrcDialog() -> void:
+	if gpDrcDialog == null:
+		gpDrcDialog = GPDRCDialog.new()
+		gpDrcDialog.name = "DrcDialog"
+		add_child(gpDrcDialog)
+		gpDrcDialog.gpFindingActivated.connect(_gpOnDrcFindingFromDialog)
+	gpDrcDialog.gpOpenFor(gpActiveCanvas(), Callable(self, "_gpDrcSheets"))
+
+
+# A row in the DOCK panel: locate + select, but do NOT switch tabs (the user may be reading the
+# DRC list and must stay there until they choose the property tab themselves).
+# 停靠面板的行：定位 + 选中，但**不**切页（用户可能正在看 DRC 列表，应由他自己切属性页）。
+func _gpOnDrcFindingFromPanel(gpFinding: GPFinding) -> void:
+	_gpFocusFinding(gpFinding, false)
+
+
+# A row in the DIALOG: locate + select + switch to the property tab.
+# 弹窗的行：定位 + 选中 + 切到属性页。
+func _gpOnDrcFindingFromDialog(gpFinding: GPFinding) -> void:
+	_gpFocusFinding(gpFinding, true)
+
+
+# Live DRC result: refresh the dock panel silently (never switch tabs). Project mode is a
+# manual, whole-project run and must not be overwritten by a sheet-only live pass.
+# 实时 DRC 结果：静默刷新右侧面板（绝不切页）。全工程模式是手动整包运行，不能被单页实时结果覆盖。
+# Keep the screen-space badges in step with the panel's current list (manual or live run).
+# 让屏幕空间角标与面板当前列表保持一致（手动或实时运行）。
+func _gpOnDrcFindingsForOverlay(gpFindings: Array[GPFinding]) -> void:
+	if gpRuleOverlay != null:
+		gpRuleOverlay.gpShow(gpFindings, _gpActiveSheetId())
+
+
+func _gpActiveSheetId() -> String:
+	var gpSheet: GPSheet = gpCenter.gpActiveSheet() if gpCenter != null else null
+	return gpSheet.gpId if gpSheet != null else ""
+
+
+func _gpOnLiveDrc(gpFindings: Array[GPFinding], gpCanvas: GPCanvas2D) -> void:
+	if gpCanvas == null or gpCanvas != gpActiveCanvas():
+		return
+	if gpDrcPanel == null or gpDrcPanel.gpIsProjectMode():
+		return
+	gpDrcPanel.gpBindCanvas(gpCanvas)
+	gpDrcPanel.gpShowFindings(gpFindings)
+	if gpRuleOverlay != null:
+		gpRuleOverlay.gpShow(gpFindings, _gpActiveSheetId())
+
+
+# Shared focus/selection. `gpSwitchToProps` is the single behavioural difference between the
+# dialog and the dock panel.
+# 共用定位/选中。`gpSwitchToProps` 是弹窗与停靠面板唯一的行为差异。
+func _gpFocusFinding(gpFinding: GPFinding, gpSwitchToProps: bool, gpRetry: bool = true) -> void:
+	if gpFinding == null:
+		return
+	# Project mode may point at another sheet: activate it first, then use the (new) active canvas.
+	# 全工程模式可能指向另一张图纸：先激活它，再用新的活动画布。
+	if gpFinding.gpSheetId != "" and gpCenter != null:
+		var gpBefore: GPSheet = gpCenter.gpActiveSheet()
+		gpCenter.gpActivateSheet(gpFinding.gpSheetId)
+		var gpAfter: GPSheet = gpCenter.gpActiveSheet()
+		if gpAfter == null or gpAfter.gpId != gpFinding.gpSheetId:
+			# TabBar may publish the change on the next frame; retry once instead of focusing
+			# the previous sheet (which is exactly the "click does nothing" symptom).
+			# TabBar 可能下一帧才发布切换；重试一次，避免聚焦上一张图纸（正是「点了没反应」）。
+			if gpRetry:
+				call_deferred("_gpFocusFinding", gpFinding, gpSwitchToProps, false)
+			return
+	var gpCv: GPCanvas2D = gpActiveCanvas()
+	if gpCv == null:
+		return
+	# Title block / frame findings belong to the SHEET, not to a graph node. Select/focus them
+	# through the sheet-furniture rect and show the DOC tab (their real property page).
+	# 图签 / 图框类发现属于**图纸**而非图节点。按图纸陈设矩形定位，并打开 DOC（它们真正的属性页）。
+	if _gpIsSheetFurnitureFinding(gpFinding) and gpCv.gpSheet != null:
+		var gpFurniture: Rect2 = GPFrameGeometry.gpFrameRect(gpCv.gpSheet) \
+			if gpFinding.gpCheckId.find("frame") >= 0 \
+			else GPFrameGeometry.gpTitleBlockRect(gpCv.gpSheet)
+		gpCv.gpFocusRect(gpFurniture)
+		if gpRuleOverlay != null:
+			gpRuleOverlay.gpShowFocusRect(gpFurniture)
+		if gpSwitchToProps:
+			gpTabs.current_tab = 2
+		return
+	# Graph entity: fit its rect (edge / node) or a small window around a shape point.
+	# 图实体：按矩形适配（连线 / 节点），注释图形则围绕其点开小窗。
+	if gpRuleOverlay != null:
+		gpRuleOverlay.gpShowFocusRect(Rect2())
+	if gpFinding.gpEdgeId != "":
+		var gpEdgeRect: Rect2 = gpCv.gpEdgeRect(gpFinding.gpEdgeId)
+		if gpEdgeRect.size != Vector2.ZERO:
+			gpCv.gpFocusRect(gpEdgeRect, 2.5)
+		elif gpFinding.gpWorld != Vector2.INF:
+			gpCv.gpFocusRect(Rect2(gpFinding.gpWorld - Vector2(50.0, 35.0), Vector2(100.0, 70.0)), 2.5)
+	elif gpFinding.gpNodeId != "":
+		var gpNodeRect: Rect2 = gpCv.gpNodeRect(gpFinding.gpNodeId)
+		if gpNodeRect.size != Vector2.ZERO:
+			gpCv.gpFocusRect(gpNodeRect, 2.5)
+		elif gpFinding.gpWorld != Vector2.INF:
+			gpCv.gpFocusRect(Rect2(gpFinding.gpWorld - Vector2(50.0, 35.0), Vector2(100.0, 70.0)), 2.5)
+	elif gpFinding.gpWorld != Vector2.INF:
+		gpCv.gpFocusWorld(gpFinding.gpWorld)
+	var gpSelected: bool = false
+	if gpFinding.gpEdgeId != "" and gpCv.gpGraph != null \
+			and gpCv.gpGraph.gpGetEdge(gpFinding.gpEdgeId) != null:
+		gpCv.gpSetEdgeSelection([gpFinding.gpEdgeId])
+		gpSelected = true
+	elif gpFinding.gpNodeId != "" and gpCv.gpGraph != null \
+			and gpCv.gpGraph.gpGetNode(gpFinding.gpNodeId) != null:
+		gpCv.gpEdgeSel.clear()
+		gpCv.gpShapeSel.clear()
+		gpCv.gpSetSelection([gpFinding.gpNodeId])
+		gpSelected = true
+	elif gpFinding.gpShapeIdx >= 0 and gpCv.gpGraph != null \
+			and gpFinding.gpShapeIdx < gpCv.gpGraph.gpShapes.size():
+		gpCv.gpEdgeSel.clear()
+		gpCv.gpSelection.clear()
+		gpCv.gpShapeSel = [gpFinding.gpShapeIdx]
+		gpCv.gpAnnounceShapeSelection()
+		gpSelected = true
+	if gpSwitchToProps and gpSelected:
+		gpTabs.current_tab = 0
+
+
+# Whether a finding targets the sheet's title block / frame rather than a graph entity.
+# 判断一条发现是否指向图纸的图签 / 图框，而非图实体。
+func _gpIsSheetFurnitureFinding(gpFinding: GPFinding) -> bool:
+	if gpFinding.gpNodeId != "" or gpFinding.gpEdgeId != "" or gpFinding.gpShapeIdx >= 0:
+		return false
+	var gpId: String = gpFinding.gpCheckId if gpFinding.gpCheckId != "" else gpFinding.gpRuleId
+	return gpId.begins_with("drc.doc.") or gpFinding.gpRuleId == "drc.sheet_fit"
 
 
 # ============================ localization refresh ============================

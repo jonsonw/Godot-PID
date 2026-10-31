@@ -50,6 +50,13 @@ signal gpModeChanged(gpNewMode: int)
 # （paths / circles / rects），可直接载入隔离编辑器的几何画板。宿主打开预装好的编辑器。
 signal gpMakeSymbolRequested(gpDraft: Dictionary)
 
+# Emitted right after a NEW process / utility line was created (ADR-36 D9). The host opens the
+# "line attributes" panel; pasting or duplicating a line does NOT emit it (a copy must not
+# interrupt the paste with dialogs).
+# 新画出一根工艺 / 公用管线后立即发出（ADR-36 D9）。宿主据此打开「管线属性」面板；
+# 粘贴或复制管线**不**发出（副本不该用对话框打断粘贴）。
+signal gpLineCreated(gpEdgeId: String)
+
 # (Minimum marquee drag distance now lives on GPCanvasMarquee.GP_MIN_DRAG, next to the
 # window/crossing rule it belongs with.)
 # （框选最小拖拽距离现位于 GPCanvasMarquee.GP_MIN_DRAG，与它所属的窗口/交叉规则放在一起。）
@@ -131,6 +138,26 @@ var gpActions: GPEditService = GPEditService.new()
 # the sequence marks stay the ones the file serialises.
 # 每次切换文档时它都会重新绑定到图的规则上，使序号水位线始终是文件会序列化的那一份。
 var gpTags: GPTagRegistry = GPTagRegistry.new()
+
+# Give the tag registry the project's sheet list (ADR-36 D6). The shell calls this whenever
+# tabs are added, closed or loaded, so uniqueness is judged against every sheet rather than
+# against this one alone.
+# 把工程图纸列表交给位号注册器（ADR-36 D6）。外壳在标签页增删 / 载入后调用，使唯一性按
+# **整个工程**判断，而不是只看本张图纸。
+func gpSetProjectGraphs(gpGraphs: Array) -> void:
+	gpTags.gpSetProjectGraphs(gpGraphs)
+
+
+# Adopt a new project standard on this canvas (B: the standard dialog applied a package).
+# 在本画布上采纳新的项目标准（B：标准对话框应用了标准包）。
+func gpApplyStandard(gpStd: GPProjectStandard) -> void:
+	if gpStd == null or gpGraph == null:
+		return
+	gpGraph.gpAdoptStandard(gpStd)
+	gpTags.gpStandard = gpStd
+	gpTags.gpRules = gpGraph.gpTagRules
+	gpTags.gpRebuild()
+	queue_redraw()
 
 # Tag (位号) label grip / drag delegate . Mirrors gpEdgeGrips: the transient drag state
 # lives here, not on the canvas.
@@ -982,6 +1009,67 @@ func gpOnCameraChanged() -> void:
 	queue_redraw()
 
 
+# Centre the view on a world point and APPLY the camera to the world root. Setting gpViewOffset
+# alone only edits the pure-data camera; the Node2D world root, glyph raster and grid do not move
+# until gpApplyCamera()/gpOnCameraChanged() run. DRC row clicks must use this, not the setter.
+# 把视图对准世界点，并把相机**应用**到世界根。只改 gpViewOffset 只动纯数据相机；Node2D 世界根、
+# 字形光栅与网格要等 gpApplyCamera()/gpOnCameraChanged() 才移动。DRC 行点击必须走这里，不能只写 setter。
+func gpFocusWorld(gpWorld: Vector2) -> void:
+	if gpWorld == Vector2.INF:
+		return
+	gpViewOffset = size * 0.5 - gpWorld * gpViewZoom
+	gpViewController.gpApplyCamera()
+	gpOnCameraChanged()
+	gpEmitStatus()
+
+
+# Fit a WORLD rect into the viewport (with a small margin) and clamp the zoom. A DRC row that
+# only pans leaves a tiny symbol as a dot; fitting is what makes the locate visibly "zoom there".
+# 把**世界矩形**适配进视口（留边距）并夹取缩放。DRC 行若只平移，小图元仍只是一个点；
+# 适配才会让定位看起来真的「缩放过去」。
+func gpFocusRect(gpRect: Rect2, gpMaxZoom: float = 2.0) -> void:
+	if size.x <= 0.0 or size.y <= 0.0:
+		return
+	var gpR: Rect2 = gpRect.abs()
+	if gpR.size.x < 0.01 or gpR.size.y < 0.01:
+		gpR = Rect2(gpR.position - Vector2(40.0, 30.0), Vector2(80.0, 60.0))
+	gpR = gpR.grow(maxf(gpR.size.x, gpR.size.y) * 0.12)
+	var gpZ: float = minf(size.x / gpR.size.x, size.y / gpR.size.y)
+	gpZ = clampf(gpZ, GPCanvasCamera.GP_ZOOM_MIN, minf(gpMaxZoom, GPCanvasCamera.GP_ZOOM_MAX))
+	gpViewZoom = gpZ
+	gpViewOffset = size * 0.5 - gpR.get_center() * gpZ
+	gpViewController.gpApplyCamera()
+	gpOnCameraChanged()
+	gpEmitStatus()
+
+
+# World rect of an edge: resolved endpoints plus any stored routing waypoints.
+# 连线世界矩形：已解析端点 + 存储的折点。
+func gpEdgeRect(gpEdgeId: String) -> Rect2:
+	if gpGraph == null:
+		return Rect2()
+	var gpE: GPPIDEdge = gpGraph.gpGetEdge(gpEdgeId)
+	if gpE == null:
+		return Rect2()
+	var gpPoints: Array[Vector2] = []
+	var gpFromNode: String = str(gpE.gpFromRef.get("node_id", ""))
+	var gpToNode: String = str(gpE.gpToRef.get("node_id", ""))
+	if gpFromNode != "":
+		gpPoints.append(gpNodeCenter(gpFromNode))
+	if gpToNode != "":
+		gpPoints.append(gpNodeCenter(gpToNode))
+	for gpP in gpE.gpRouting:
+		gpPoints.append(gpP)
+	if gpPoints.is_empty():
+		return Rect2()
+	var gpMin: Vector2 = gpPoints[0]
+	var gpMax: Vector2 = gpPoints[0]
+	for gpP in gpPoints:
+		gpMin = gpMin.min(gpP)
+		gpMax = gpMax.max(gpP)
+	return Rect2(gpMin, gpMax - gpMin)
+
+
 func gpNodeCenter(gpId: String) -> Vector2:
 	return gpSymbolLayer.gpNodeCenter(gpId)
 
@@ -1635,6 +1723,13 @@ func gpRequestSetEdgeTagOffset(gpEdgeId: String, gpOffset: Vector2) -> bool:
 
 func gpDefFor(gpSymbolId: String) -> GPSymbolDef:
 	return gpSymbolLayer.gpDefFor(gpSymbolId)
+
+
+# Tell the host a new line exists (called by the edit facade after a successful connect).
+# 告知宿主新线已创建（由编辑门面在连线成功后调用）。
+func gpNotifyLineCreated(gpEdgeId: String) -> void:
+	if gpEdgeId != "":
+		gpLineCreated.emit(gpEdgeId)
 
 
 func gpRequestConnectEdge(gpFromRef: Dictionary, gpToRef: Dictionary, gpKind: String,

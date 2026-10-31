@@ -121,9 +121,16 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		var gpParentSrc: String = str(gpD.get("parent_uid", ""))
 		var gpTopLevel: bool = gpParentSrc == "" or not _gpHasNode(gpD, gpParentSrc)
 		var gpTag: String = str(gpD.get("tag", ""))
+		var gpPropsRaw: Dictionary = gpD.get("props", {}) as Dictionary
 		if gpCtx.gpTags != null and gpTopLevel:
 			gpCtx.gpTags.gpGraph = gpCtx.gpGraph
-			gpTag = gpCtx.gpTags.gpNextTag(GPSymbolLibrary.gpFindById(gpSymbolId))
+			# ADR-36: the CLASS decides whether a copy is numbered at all (a manual valve is
+			# not, an actuated valve is an instrument). The paste path shares the placement
+			# path's rule instead of keeping a second copy of the decision.
+			# ADR-36：由**类别**决定副本是否编号（手动阀不编号，自动阀属仪表）。粘贴路径与放置
+			# 路径共用同一条规则，而不是把判断抄第二份。
+			gpTag = gpCtx.gpTags.gpNextTagForDef(
+				GPSymbolLibrary.gpFindById(gpSymbolId), gpPropsRaw)
 		var gpPos: Vector2 = _gpVec(gpD.get("position", []))
 		if gpTopLevel:
 			gpPos += _gpDelta
@@ -180,19 +187,28 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		var gpKind: String = str(gpD.get("kind", GPPIDEdge.GP_PROCESS))
 		var gpSignalType: String = str(gpD.get("signal_type", ""))
 		var gpETag: String = str(gpD.get("tag", ""))
+		var gpEAttrs: Dictionary = (gpD.get("attrs", {}) as Dictionary).duplicate(true)
 		if gpETag != "":
-			# Edge numbers are minted by GPTagGen (pipe prefix), NOT by the node tag registry:
-			# the registry keys off a symbol DEFINITION, and a line has none — the connect command
-			# mints its numbers exactly this way.
-			# 线号由 GPTagGen（管线前缀）铸造，**不是**节点标签注册器：注册器按图元**定义**取规则，
-			# 而线没有定义 —— 连线命令正是这么铸号的。
-			gpETag = GPTagGen.gpNextTag(gpCtx.gpGraph)
+			# ADR-36 D8: a pasted pipe is a NEW line and must be numbered by the LINE RULE —
+			# with the attributes it carries — not by the legacy PL counter. Using GPTagGen here
+			# was why a copied pipe fell back to "PL-xxxx" while the copied devices were numbered
+			# correctly: the two paths had different minters.
+			# ADR-36 D8：粘贴出来的管线是**新**管线，必须按**线规则**（带着它自己的属性）编号，
+			# 而不是旧的 PL 计数器。这里用 GPTagGen 正是「设备号会更新、管线号却退回 PL-xxxx」
+			# 的原因 —— 两条路径用了不同的铸号入口。
+			if gpCtx.gpTags != null:
+				gpCtx.gpTags.gpGraph = gpCtx.gpGraph
+				var gpMinted: String = gpCtx.gpTags.gpNextTagForClass(
+					GPProjectStandard.GP_CLASS_LINE, null, gpEAttrs)
+				gpETag = gpMinted if gpMinted != "" else GPTagGen.gpNextTag(gpCtx.gpGraph)
+			else:
+				gpETag = GPTagGen.gpNextTag(gpCtx.gpGraph)
 		var gpNewFrom: Dictionary = {"node_id": str(_gpMap[gpFromNode]), "port_id": str(gpFrom.get("port_id", ""))}
 		var gpNewTo: Dictionary = {"node_id": str(_gpMap[gpToNode]), "port_id": str(gpTo.get("port_id", ""))}
 		var gpE: GPPIDEdge = gpCtx.gpGraph.gpNewEdgeEx(gpEid, gpNewFrom, gpNewTo, gpKind,
 			gpSignalType, gpETag)
 		gpE.gpOrtho = bool(gpD.get("ortho", true))
-		gpE.gpAttrs = (gpD.get("attrs", {}) as Dictionary).duplicate(true)
+		gpE.gpAttrs = gpEAttrs
 		# Waypoints are copied as DATA relative to the sheet origin. They are kept verbatim
 		# because a routed line that lost its bends would silently become a straight jump across
 		# the sheet; the +delta on the nodes and the untouched polyline can disagree visually, so

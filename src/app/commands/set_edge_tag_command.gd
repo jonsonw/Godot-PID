@@ -2,12 +2,13 @@ class_name GPSetEdgeTagCommand
 extends GPCommand
 # Copyright © 2026 Jonson Wang
 #
-# Duplicate numbers are NOT refused / 重号不作拒绝：
-# Two branches legitimately carry the same line number on a real P&ID, so refusing would be
-# wrong. The caller surfaces a status-bar warning and sets gpAttrs["tag_manual"], which makes
-# a future "renumber all" skip this edge instead of overwriting a deliberate choice.
-# 真实 P&ID 上两条支管完全可以同号，故拒绝是错的。调用方给出状态栏警告并置
-# gpAttrs["tag_manual"]，使将来的「全部重新编号」跳过本边，而非覆盖一次刻意的选择。
+# ADR-36 D6/D7 supersede the old "duplicates are not refused" stance: a hand-typed line number
+# must satisfy the line rule AND be unique ON THIS SHEET (the same number on another sheet is
+# the legitimate continuation case, D1). A successful hand edit still sets gpAttrs["tag_manual"]
+# so a future renumber skips a deliberate choice.
+# ADR-36 D6/D7 取代旧口径「重号不作拒绝」：手打的管线号必须符合线规则，且在本图内唯一
+#（同号出现在另一张图纸是合法的延续，见 D1）。手工改号成功后仍置 gpAttrs["tag_manual"]，
+# 使今后的重编号跳过这次刻意的选择。
 #
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
@@ -19,6 +20,11 @@ var gpNewTag: String = ""
 # 执行时捕获的原位号，使撤销精确。
 var _gpOldTag: String = ""
 var _gpHadManual: bool = false
+
+# Machine-readable refusal + human detail, mirroring GPSetTagCommand.
+# 机器可读拒绝码 + 人类明细，与 GPSetTagCommand 一致。
+var gpRefusal: String = ""
+var gpRefusalDetail: String = ""
 
 
 func _init(gpInEdgeId: String, gpInNewTag: String) -> void:
@@ -33,6 +39,20 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	var gpE: GPPIDEdge = gpCtx.gpGraph.gpGetEdge(gpEdgeId)
 	if gpE == null or gpE.gpTag == gpNewTag:
 		return false
+	gpRefusal = ""
+	gpRefusalDetail = ""
+	var gpWant: String = gpNewTag.strip_edges()
+	if gpWant != "":
+		var gpChk: Dictionary = _gpCheckRule(gpCtx, gpWant)
+		if not bool(gpChk.get("ok", true)):
+			gpRefusal = "tag.err_rule"
+			gpRefusalDetail = str(gpChk.get("detail", ""))
+			return false
+		if _gpIsTaken(gpCtx, gpWant):
+			gpRefusal = "tag.err_duplicate"
+			gpRefusalDetail = gpWant
+			return false
+	gpNewTag = gpWant
 	_gpOldTag = gpE.gpTag
 	_gpHadManual = bool(gpE.gpAttrs.get("tag_manual", false))
 	gpE.gpTag = gpNewTag
@@ -42,6 +62,27 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		gpE.gpAttrs["tag_manual"] = true
 	gpCtx.gpGraph.gpGraphChanged.emit()
 	return true
+
+
+# Check a candidate against the project's LINE rule (segmented designation, or a legacy
+# template if the project has not migrated yet).
+# 按工程的**管线**规则校验候选号（分段代号；工程尚未迁移时为旧式模板）。
+func _gpCheckRule(gpCtx: GPCommandContext, gpTag: String) -> Dictionary:
+	var gpStd: GPProjectStandard = gpCtx.gpGraph.gpStandard
+	if gpStd == null:
+		return {"ok": true}
+	var gpRules: GPProjectTagRules = gpStd.gpRulesOf(GPProjectStandard.GP_CLASS_LINE)
+	var gpRule: GPTagRule = gpRules.gpRuleFor(null)
+	return gpRule.gpCheckTemplateTag(gpTag, gpRules.gpPrefixFor(null))
+
+
+# Sheet scope (D1): the same number may legitimately appear on ANOTHER sheet.
+# 单页作用域（D1）：同一个号可以合法地出现在**另一张**图纸上。
+func _gpIsTaken(gpCtx: GPCommandContext, gpTag: String) -> bool:
+	if gpCtx.gpTags != null:
+		gpCtx.gpTags.gpGraph = gpCtx.gpGraph
+		return gpCtx.gpTags.gpIsTakenForClass(GPProjectStandard.GP_CLASS_LINE, gpTag, gpEdgeId)
+	return GPTagGen.gpIsTaken(gpCtx.gpGraph, gpTag, gpEdgeId)
 
 
 func gpUndo(gpCtx: GPCommandContext) -> void:

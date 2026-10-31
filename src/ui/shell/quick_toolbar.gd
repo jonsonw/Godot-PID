@@ -36,6 +36,7 @@ const GP_ITEMS: Array = [
 	{"action": "edit_redo", "key": "menu.edit_redo", "icon": "redo"},
 	{"action": "edit_delete", "key": "menu.edit_delete", "icon": "delete"},
 	{"action": "tool_settings", "key": "menu.tool_settings", "icon": "settings"},
+	{"action": "tool_drc_dialog", "key": "menu.tool_drc", "text_key": "drc.toolbar", "icon": "drc"},
 	null,
 	{"action": "file_print", "key": "menu.file_print", "icon": "file_print"},
 	{"action": "file_import", "key": "menu.file_import", "icon": "file_import"},
@@ -69,6 +70,8 @@ var _gpExportPopup: PopupMenu = null
 # 一次性构建图标带。行容器 alignment=居中，使图标带在任意窗口宽度下都水平居中
 #（即需求：工具栏悬挂于菜单栏下方居中）。
 func _ready() -> void:
+	if not _gpBtns.is_empty():
+		return
 	mouse_filter = MOUSE_FILTER_STOP
 	alignment = BoxContainer.ALIGNMENT_CENTER
 	add_theme_constant_override("separation", 2)
@@ -93,6 +96,11 @@ func _gpBuildBtn(gpSpec: Dictionary) -> Button:
 	gpBtn.focus_mode = Control.FOCUS_NONE
 	gpBtn.tooltip_text = I18n.gpTr(str(gpSpec["key"]))
 	gpBtn.set_meta("gpKey", str(gpSpec["key"]))
+	if gpSpec.has("text_key"):
+		gpBtn.text = I18n.gpTr(str(gpSpec["text_key"]))
+		gpBtn.set_meta("gpTextKey", str(gpSpec["text_key"]))
+		gpBtn.add_theme_font_size_override("font_size", 12)
+		gpBtn.custom_minimum_size = Vector2(78.0, 24.0)
 	var gpIcon: Texture2D = load("res://assets/icons/%s.svg" % str(gpSpec["icon"])) as Texture2D
 	if gpIcon != null:
 		gpBtn.icon = gpIcon
@@ -183,6 +191,8 @@ func _gpRefreshTooltips(_gpLocale: String) -> void:
 		var gpBtn: Button = _gpBtns[gpAct] as Button
 		if gpBtn != null and gpBtn.has_meta("gpKey"):
 			gpBtn.tooltip_text = I18n.gpTr(str(gpBtn.get_meta("gpKey")))
+			if gpBtn.has_meta("gpTextKey"):
+				gpBtn.text = I18n.gpTr(str(gpBtn.get_meta("gpTextKey")))
 
 
 # Paint the chrome background + a dark bottom groove (separates the toolbar from

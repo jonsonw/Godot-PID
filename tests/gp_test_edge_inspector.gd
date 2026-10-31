@@ -95,3 +95,52 @@ func gpTestSetUtilityClearsSignalType() -> void:
 	svc.gpSetEdgeKind(id, GPPIDEdge.GP_UTILITY)
 	gpEq(e.gpKind, GPPIDEdge.GP_UTILITY, "kind is UTILITY")
 	gpEq(e.gpSignalType, "", "signal type cleared for a non-signal line")
+
+
+# BUG-002: the edge form is driven by the project-standard line rule, so a newly added segment
+# appears in the identity section; non-identity attrs land in the general section.
+# BUG-002：边表单由项目标准管线规则驱动；新增段进入「管线编号」节，非标识属性进入「常规属性」节。
+func gpTestEdgeSectionsFollowProjectStandardAndGeneralAttrs() -> void:
+	var f: Array = _mkEdge(GPPIDEdge.GP_PROCESS)
+	var e: GPPIDEdge = f[2]
+	var std: GPProjectStandard = GPProjectStandard.gpDefaultStandard()
+	var rule: GPTagRule = std.gpRulesOf(GPProjectStandard.GP_CLASS_LINE).gpRuleFor(null)
+	rule.gpSegments.append(GPTagSegment.gpAttrText(
+		"service", "服务等级", "service", 1, 6, GPTagSegment.GPCharset.GP_ALNUM, ""))
+	e.gpAttrs["service"] = "CS"
+	e.gpAttrs["design_pressure"] = "1.6"
+	var sec: Dictionary = GPInspector.gpEdgeFieldSections(e, std)
+	var identity: Array = sec["identity"] as Array
+	var general: Array = sec["general"] as Array
+	gpCheck(identity.has("tag"), "identity section has the line number")
+	gpCheck(identity.has("dn"), "identity section has dn")
+	gpCheck(identity.has("service"), "identity section has the new project-standard field")
+	gpCheck(general.has("kind"), "general section has kind")
+	gpCheck(general.has("design_pressure"), "general section has an engineering attribute")
+	gpEq(GPInspector.gpEdgeFieldLabel("service", std), "服务等级",
+		"the new field uses the rule segment's label")
+	var keys: Array[String] = GPInspector.gpEdgeFieldKeysFor(e, std)
+	gpCheck(keys.has("service"), "flat key list includes the new field")
+	gpCheck(keys.has("design_pressure"), "flat key list includes the engineering attribute")
+	gpCheck(GPInspector.gpEdgeInitialValues(e).has("service"),
+		"initial values include the new field")
+
+
+# A segment saved with a blank / reserved attr key falls back to its own gpKey, so the field is
+# still visible and editing it can still re-render the line number (the early-editor mistake that
+# produced "I added 子项号 but got an extra 管线号 11").
+# 空属性键 / 保留属性键（tag 等）的段回退到段键，使字段仍可见、编辑仍能重渲染线号
+#（即「加了子项号却多出一个管线号 11」的早期编辑器错误）。
+func gpTestBlankAttrSegmentFallsBackToKey() -> void:
+	var f: Array = _mkEdge(GPPIDEdge.GP_PROCESS)
+	var e: GPPIDEdge = f[2]
+	var std: GPProjectStandard = GPProjectStandard.gpDefaultStandard()
+	var rule: GPTagRule = std.gpRulesOf(GPProjectStandard.GP_CLASS_LINE).gpRuleFor(null)
+	rule.gpSegments.append(GPTagSegment.gpAttrText(
+		"subitem", "子项号", "", 1, 4, GPTagSegment.GPCharset.GP_ALNUM, ""))
+	e.gpAttrs["subitem"] = "11"
+	var sec: Dictionary = GPInspector.gpEdgeFieldSections(e, std)
+	gpCheck((sec["identity"] as Array).has("subitem"),
+		"the blank-attr segment falls back to its key and stays visible")
+	gpEq(GPInspector.gpEdgeFieldLabel("subitem", std), "子项号",
+		"the segment label is used for the fallback key")

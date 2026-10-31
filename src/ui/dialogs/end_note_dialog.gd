@@ -56,16 +56,15 @@ func gpBuild() -> void:
 	var gpHint: Label = Label.new()
 	gpHint.text = I18n.gpTr("open_end.hint")
 	gpHint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# A real minimum width, or the wrap height becomes "one pixel wide" and the window explodes.
+	# 给一个真实的最小宽度，否则折行高度会变成「一像素宽」并把窗口撑爆。
+	gpHint.custom_minimum_size = Vector2(340, 0)
 	gpHint.modulate = Color(0.62, 0.62, 0.68)
 	gpBox.add_child(gpHint)
 	add_child(gpBox)
-	# A FIXED, compact size. Without it an AcceptDialog grows to fit its content (and the autowrap
-	# hint label wants the whole viewport width), which pushed the OK / Cancel row off the screen —
-	# the dialog then had no visible way to confirm anything.
-	# **固定的小尺寸**。否则 AcceptDialog 会撑到内容大小（而自动折行的提示标签想要整个视口宽），
-	# 把确定 / 取消挤到屏幕外 —— 那个对话框于是没有任何可见的确认途径。
-	min_size = Vector2i(420, 200)
-	size = Vector2i(420, 200)
+	# ADR-37: size comes from the content (see gpOpenFor); the floor keeps it compact.
+	# ADR-37：尺寸由内容决定（见 gpOpenFor），下限保证它保持紧凑。
+	min_size = Vector2i(360, 170)
 	# Picking a preset FILLS the field instead of bypassing it: the user can append a drawing
 	# number ("CONT. ON DWG " → "CONT. ON DWG W-102") before confirming.
 	# 选中预置是**填进**输入框而非直接生效：用户可以先补一个图号（"CONT. ON DWG " →
@@ -89,19 +88,15 @@ func gpOpenFor(gpCurrentText: String) -> void:
 		return
 	_gpEdit.text = gpCurrentText
 	_gpPreset.selected = -1
-	# popup_centered(size) sets the size AND centres: the dialog never inherits a runaway height
-	# from its content.
-	# popup_centered(size) 同时设定尺寸并居中：对话框绝不会从内容继承一个失控的高度。
-	# First open: an AcceptDialog computes its size from the wrapped content BEFORE the window is
-	# created, so `popup_centered(size)` was overridden and the OK / Cancel row fell off screen.
-	# The second open looked right because the window already existed. Setting the size once more
-	# AFTER the popup is realised is what makes the FIRST open correct too.
-	# 首次打开：AcceptDialog 在窗口真正建立**之前**就按内容算了尺寸，故 `popup_centered(size)` 被覆盖，
-	# 确定 / 取消 掉到屏幕外；第二次打开看着正常是因为窗口已存在。**弹出之后**再设一次尺寸，
-	# 才能让第一次打开也正确。
-	popup_centered(Vector2i(420, 200))
-	set_deferred("size", Vector2i(420, 200))
-	set_deferred("min_size", Vector2i(420, 200))
+	# ADR-37: content-adaptive and resizable; the hint label has a real minimum width, so the
+	# window can no longer be inflated by "wrapped at 1px" (the old fixed 420x200 existed only to
+	# stop that, and it also cropped the buttons on the first open).
+	# ADR-37：按内容自适应且可拖动；提示标签已有真实最小宽度，不会再被「按 1px 折行」撑爆
+	#（旧的固定 420×200 只是为了挡住那个问题，而且首次打开还会把按钮裁掉）。
+	var gpHost: Window = null
+	if get_parent() != null:
+		gpHost = get_parent().get_window()
+	GPWindowFit.gpPopupContentFitted(self, gpHost, Vector2i(360, 170), Vector2i(560, 380))
 	_gpEdit.grab_focus()
 	_gpEdit.select_all()
 

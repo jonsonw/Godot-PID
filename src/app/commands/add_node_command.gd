@@ -95,7 +95,7 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 			# 工程级唯一号段，且排除是**显式**的，绝不靠「前缀碰巧为空」碰运气。
 			var gpDefForTag: GPSymbolDef = _gpResolveDef(gpSymbolId)
 			if gpDefForTag == null or gpDefForTag.gpTaggable:
-				gpTagToUse = gpCtx.gpTags.gpNextTag(gpDefForTag)
+				gpTagToUse = gpCtx.gpTags.gpNextTagForDef(gpDefForTag)
 		_gpNode = gpCtx.gpGraph.gpNewNode(gpId, gpSymbolId, gpTagToUse, gpPos)
 		if gpCtx.gpTags != null:
 			gpCtx.gpTags.gpRegister(_gpNode.gpInstanceId, _gpNode.gpTag)

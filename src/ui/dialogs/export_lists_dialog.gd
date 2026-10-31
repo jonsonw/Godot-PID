@@ -71,7 +71,7 @@ func gpConfigure(gpSheetsIn: Array, gpDefsIn: Array[GPSymbolDef],
 func gpPopupOverHost() -> void:
 	var gpParent: Node = get_parent()
 	var gpHost: Window = gpParent.get_window() if gpParent != null else null
-	GP_WINDOW_FIT.gpPopupFitted(self, gpHost, GP_MIN_LOGICAL, GP_MAX_LOGICAL)
+	GP_WINDOW_FIT.gpPopupContentFitted(self, gpHost, GP_MIN_LOGICAL, GP_MAX_LOGICAL)
 
 
 func _ready() -> void:
@@ -497,6 +497,20 @@ func _gpOnExport() -> void:
 	var gpOutDir: String = gpOutputEdit.text.strip_edges()
 	if gpOutDir == "":
 		gpStatusLabel.text = I18n.gpTr("xlsx.err_output_dir")
+		return
+	# ADR-39 / E05: the SAME engine gates the delivery. An un-waived error blocks export;
+	# warnings are allowed but remain in the report the user can export from the DRC panel.
+	# ADR-39 / E05：**同一套**引擎把守交付。未豁免 error 阻断导出；warning 放行但仍在
+	# DRC 面板可导出的报告中。
+	var gpGateStd: GPProjectStandard = null
+	for gpSheetRaw in gpSelected:
+		var gpSheet: GPSheet = gpSheetRaw as GPSheet
+		if gpSheet != null and gpSheet.gpGraph != null and gpSheet.gpGraph.gpStandard != null:
+			gpGateStd = gpSheet.gpGraph.gpStandard
+			break
+	var gpGate: Dictionary = GPExportGate.gpCheck(gpSelected, gpDefs, gpGateStd)
+	if bool(gpGate.get("blocked", false)):
+		gpStatusLabel.text = GPExportGate.gpBlockerText(gpGate)
 		return
 	_gpSavePrefs()
 	var gpTpl: Dictionary = {}

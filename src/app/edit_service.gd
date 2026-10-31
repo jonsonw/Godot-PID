@@ -38,6 +38,10 @@ var gpStack: GPCommandStack = GPCommandStack.new()
 # 服务本身绝不触碰控件。
 var gpLastRefusal: String = ""
 
+# Human detail that goes with gpLastRefusal (e.g. "第 3 段（管线号）：应为 4 位数字").
+# 与 gpLastRefusal 配套的人类明细（如「第 3 段（管线号）：应为 4 位数字」）。
+var gpLastRefusalDetail: String = ""
+
 # Old->new mapping produced by the most recent gpRenumberTags(), so the shell can offer the
 # audit CSV. Empty when no renumbering has run.
 # 最近一次 gpRenumberTags() 产生的「旧→新」映射，供外壳提供对照表 CSV。
@@ -61,6 +65,11 @@ func gpBindGraph(gpGraph: GPPIDGraph, gpIds: GPIdGen, gpTags: GPTagRegistry = nu
 	gpStack.gpClear()
 	if gpTags != null:
 		gpTags.gpGraph = gpGraph
+		# ADR-36: the registry judges uniqueness against the whole project, which needs the
+		# standard (scopes per class). The sheet list itself is installed by the shell.
+		# ADR-36：注册器按整个工程判断唯一性，而这需要标准（每个类别的作用域）。
+		# 图纸列表本身由外壳安装。
+		gpTags.gpStandard = gpGraph.gpStandard
  # The index is a cache: re-derive it so a document that was edited before this
  # service existed starts from the truth.
  # 索引是缓存：重新推导它，使在本服务存在之前就被编辑过的文档从真相出发。
@@ -90,7 +99,12 @@ func gpRenumberTags() -> bool:
 func gpSetTagRules(gpRules: GPProjectTagRules) -> bool:
 	if gpCtx.gpGraph == null or gpRules == null:
 		return false
-	gpCtx.gpGraph.gpTagRules = gpRules
+	# ADR-36: the standard owns the rules now. Assigning through the graph keeps the equipment
+	# class and `gpTagRules` in step (and upgrades a legacy archive to v2 — honest, because the
+	# convention really did change).
+	# ADR-36：规则现在归「项目标准」所有。经图赋值可让设备类别与 `gpTagRules` 保持同步
+	#（并把 legacy 存档升格为 v2 —— 这是诚实的：约定确实变了）。
+	gpCtx.gpGraph.gpSetTagRules(gpRules)
 	if gpCtx.gpTags != null:
 		gpCtx.gpTags.gpRules = gpRules
 	return true
@@ -302,16 +316,20 @@ func gpReplaceSymbol(gpNodeId: String, gpNewDef: GPSymbolDef) -> bool:
 # —— 命令本身对「无实际变化」也返回 false，那不是错误，不能当成错误上报。
 func gpSetTag(gpNodeId: String, gpTag: String) -> bool:
 	gpLastRefusal = ""
+	gpLastRefusalDetail = ""
 	if gpNodeId == "":
 		return false
-	var gpWant: String = gpTag.strip_edges()
-	if gpCtx.gpTags != null and gpWant != "":
+	if gpCtx.gpTags != null:
 		gpCtx.gpTags.gpGraph = gpCtx.gpGraph
-		if gpCtx.gpTags.gpIsTaken(gpWant, gpNodeId):
-			gpLastRefusal = "tag.err_duplicate"
-			return false
 	var gpCmd: GPSetTagCommand = GPSetTagCommand.new(gpNodeId, gpTag)
-	return gpStack.gpDo(gpCmd, gpCtx)
+	if gpStack.gpDo(gpCmd, gpCtx):
+		return true
+	# The command owns rule + uniqueness (ADR-36 D7); a "nothing changed" no-op leaves both
+	# refusal fields empty and the shell stays silent, as before.
+	# 规则与唯一性由命令负责（ADR-36 D7）；「无实际变化」时两个拒绝字段为空，外壳保持安静。
+	gpLastRefusal = gpCmd.gpRefusal
+	gpLastRefusalDetail = gpCmd.gpRefusalDetail
+	return false
 
 
 # Change one instance's name in one language, e.g. gpLocale = "zh_CN".
@@ -331,7 +349,40 @@ func gpSetProperty(gpNodeId: String, gpKey: String, gpValue: Variant) -> bool:
 	if gpNodeId == "" or gpKey == "":
 		return false
 	var gpCmd: GPSetPropertyCommand = GPSetPropertyCommand.new(gpNodeId, gpKey, gpValue)
-	return gpStack.gpDo(gpCmd, gpCtx)
+	if not gpStack.gpDo(gpCmd, gpCtx):
+		return false
+	# ADR-36 D5: a valve's class depends on its actuator. Setting it to 气动/电动/液动 moves the
+	# valve into the instrument class, and an unnumbered valve then receives an instrument
+	# number. This is a SECOND undo step on purpose: "changed the actuator" and "got a number"
+	# are two facts, and undoing the number must not undo the actuator.
+	# ADR-36 D5：阀门的类别取决于执行机构。设为气动/电动/液动即归入仪表类，尚未编号的阀门因此
+	# 得到仪表位号。刻意是**第二个**撤销步：「改了执行机构」与「拿到号」是两件事，撤销号不该连带
+	# 撤销执行机构的修改。
+	_gpNumberAfterClassChange(gpNodeId, gpKey)
+	return true
+
+
+# Mint a tag when a property change moved an UNNUMBERED node into an enabled class.
+# 当属性变更把一个**尚未编号**的节点移入已启用类别时，为它铸号。
+func _gpNumberAfterClassChange(gpNodeId: String, gpKey: String) -> void:
+	if gpKey != "actuator_type" or gpCtx.gpGraph == null or gpCtx.gpTags == null:
+		return
+	var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(gpNodeId)
+	if gpN == null or gpN.gpTag.strip_edges() != "":
+		return
+	var gpStd: GPProjectStandard = gpCtx.gpGraph.gpStandard
+	if gpStd == null:
+		return
+	var gpDef: GPSymbolDef = GPSymbolLibrary.gpFindById(gpN.gpSymbolId)
+	var gpClass: String = gpStd.gpClassOf(gpDef, gpN.gpProps)
+	if gpClass == "" or not gpStd.gpEnabled(gpClass):
+		return
+	gpCtx.gpTags.gpGraph = gpCtx.gpGraph
+	gpCtx.gpTags.gpStandard = gpStd
+	var gpTag: String = gpCtx.gpTags.gpNextTagForClass(gpClass, gpDef, gpN.gpProps)
+	if gpTag == "":
+		return
+	gpStack.gpDo(GPSetTagCommand.new(gpNodeId, gpTag), gpCtx)
 
 
 # Stage 3 (S3): a grid-table STRUCTURE operation (insert/delete row/col) as ONE undo step.
@@ -587,8 +638,54 @@ func gpDeleteEdges(gpEdgeIds: Array[String]) -> bool:
 
 # Rename an edge's line number. / 修改一条边的管线号。
 func gpSetEdgeTag(gpEdgeId: String, gpTag: String) -> bool:
+	gpLastRefusal = ""
+	gpLastRefusalDetail = ""
+	if gpCtx.gpTags != null:
+		gpCtx.gpTags.gpGraph = gpCtx.gpGraph
 	var gpCmd: GPSetEdgeTagCommand = GPSetEdgeTagCommand.new(gpEdgeId, gpTag)
-	return gpStack.gpDo(gpCmd, gpCtx)
+	if gpStack.gpDo(gpCmd, gpCtx):
+		return true
+	gpLastRefusal = gpCmd.gpRefusal
+	gpLastRefusalDetail = gpCmd.gpRefusalDetail
+	return false
+
+
+# Apply the attributes typed into the "line attributes" panel and re-render the SAME line
+# number from them (ADR-36 D8/D9). One undo step: attributes and tag move together.
+# 把「管线属性」面板里填的属性写回，并据此重渲染**同一个**管线号（ADR-36 D8/D9）。
+# 一个撤销步：属性与位号一起动。
+func gpApplyLineAttrs(gpEdgeId: String, gpAttrs: Dictionary) -> bool:
+	gpLastRefusal = ""
+	gpLastRefusalDetail = ""
+	if gpCtx.gpTags != null:
+		gpCtx.gpTags.gpGraph = gpCtx.gpGraph
+	# HEAL A SPLIT STANDARD: numbering is driven by the registry's standard, but the re-render
+	# path reads the GRAPH's. When only the registry has one (a session whose project never went
+	# through "apply standard"), the graph was null and every attribute edit left the number
+	# stale — the user saw "I typed a new diameter and nothing happened".
+	# **修复标准分裂**：铸造走注册器的标准，重渲染却读**图**上的。只有注册器有时（工程从未
+	# 点过「应用标准」的会话），图上的为 null，于是每次属性编辑都留下陈旧线号 ——
+	# 用户看到的就是「我改了管径，什么都没发生」。
+	if gpCtx.gpGraph != null and gpCtx.gpGraph.gpStandard == null and gpCtx.gpTags != null \
+			and gpCtx.gpTags.gpStandard != null:
+		gpCtx.gpGraph.gpAdoptStandard(gpCtx.gpTags.gpStandard)
+	var gpCmd: GPSetLineAttrsCommand = GPSetLineAttrsCommand.new(gpEdgeId, gpAttrs)
+	if gpStack.gpDo(gpCmd, gpCtx):
+		return true
+	gpLastRefusal = gpCmd.gpRefusal
+	gpLastRefusalDetail = gpCmd.gpRefusalDetail
+	return false
+
+
+# Apply ONE line attribute and re-render the line number from it — the inspector path. Unlike
+# gpSetEdgeAttr (a blind key write), this goes through the line-attrs command so the number can
+# never go stale behind an edited attribute, and it is still one undo step.
+# 应用**一个**管线属性并据此重渲染线号 —— 属性面板走这条路。与 gpSetEdgeAttr（盲写一个键）不同，
+# 它经管线属性命令，故线号不会在属性被改后变得陈旧，且仍是一个撤销步。
+func gpApplyLineAttr(gpEdgeId: String, gpKey: String, gpValue: Variant) -> bool:
+	var gpOne: Dictionary = {}
+	gpOne[gpKey] = gpValue
+	return gpApplyLineAttrs(gpEdgeId, gpOne)
 
 
 # Set one well-known attribute (dn / medium / spec / insulation / show_arrow / show_tag / ...).

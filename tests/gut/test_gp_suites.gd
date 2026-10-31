@@ -78,7 +78,13 @@ const GP_METHOD_PREFIX: String = "gpTest"
 # 108 = 107 + gp_test_addon_loader.gd（B3 addon 加载器）。
 # 109 = 108 + gp_test_addon_contract.gd (B4 契约 v2).
 # 109 = 108 + gp_test_addon_contract.gd（B4 契约 v2）。
-const GP_EXPECTED_SUITES: int = 109
+# 110 = 109 + gp_test_project_standard.gd（ADR-36 / A1 项目标准与跨图纸共享）。
+# 111 = 110 + gp_test_tag_segment.gd（ADR-36 / A2 分段规则、渲染与逐段校验）。
+# 112 = 111 + gp_test_tag_scope.gd（ADR-36 / A3 工程级唯一性与按类作用域）。
+# 113 = 112 + gp_test_tag_actions.gd（ADR-36 / A4 生成·校验·重算三入口与类别规则）。
+# 114 = 113 + gp_test_standard_package.gd（ADR-36 / B 标准包与导入差异）。
+# 115 = 114 + gp_test_tag_audit.gd（ADR-36 / C 工程级审计、导出闸门与回导匹配）。
+const GP_EXPECTED_SUITES: int = 117
 
 # Engine errors the legacy suites are *expected* to emit. GUT fails any test that leaves an
 # error unhandled, so these are marked handled explicitly (see _gpHandleExpectedErrors).

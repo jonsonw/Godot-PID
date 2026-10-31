@@ -97,7 +97,8 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		var gpCopyTag: String = gpSrc.gpTag
 		if gpCtx.gpTags != null and gpTopLevel:
 			gpCtx.gpTags.gpGraph = gpCtx.gpGraph
-			gpCopyTag = gpCtx.gpTags.gpNextTag(GPSymbolLibrary.gpFindById(gpSrc.gpSymbolId))
+			gpCopyTag = gpCtx.gpTags.gpNextTagForDef(
+				GPSymbolLibrary.gpFindById(gpSrc.gpSymbolId), gpSrc.gpProps)
 		var gpCopy: GPPIDNode = gpCtx.gpGraph.gpNewNode(
 			gpNid, gpSrc.gpSymbolId, gpCopyTag, gpCopyPos,
 			gpSrc.gpProps.duplicate(true))

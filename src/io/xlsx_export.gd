@@ -18,6 +18,16 @@ const GP_DEFAULT_TEMPLATE_DIR: String = "res://assets/templates"
 const GP_DEFAULT_PREFIX: String = "G-PID"
 
 
+# The project standard of a sheet list (all sheets share one object in memory).
+# 一组图纸的项目标准（内存里所有图纸共享同一个对象）。
+static func _gpStdOfSheets(gpSheets: Array) -> GPProjectStandard:
+	for gpSheetRaw in gpSheets:
+		var gpSheet: GPSheet = gpSheetRaw as GPSheet
+		if gpSheet != null and gpSheet.gpGraph != null:
+			return gpSheet.gpGraph.gpStandard
+	return null
+
+
 # Export the requested lists. Returns GPIOResult with payload:
 #   {"files": [{list, ok, path, rows, skipped, issues, error}], "counts": {...}, "issues": [...]}
 # 导出请求的清单。返回 payload 见上。
@@ -25,6 +35,16 @@ static func gpExportLists(gpSheets: Array, gpDefs: Array[GPSymbolDef],
 		gpOptions: Dictionary) -> GPIOResult:
 	var gpLocale: String = str(gpOptions.get("locale", "zh"))
 	var gpTypeLabels: Dictionary = gpOptions.get("type_labels", {}) as Dictionary
+	# ADR-36 C: the EXPORT GATE. A list is a deliverable — shipping one with duplicate or
+	# non-compliant tags is worse than refusing, because the receiver cannot tell which row is
+	# which. The same audit the DRC runs, run here, so the two can never disagree.
+	# ADR-36 C：**导出闸门**。清单是交付物 —— 带着重复或不合规位号发出去，比拒绝更糟，因为接收方
+	# 分不清哪一行是哪一台。这里跑与 DRC 同一条审计，故两者不可能给出不同结论。
+	var gpAudit: Array[GPFinding] = GPTagAudit.gpRun(gpSheets, gpDefs,
+		_gpStdOfSheets(gpSheets))
+	if GPTagAudit.gpHasBlocking(gpAudit):
+		return GPIOResult.gpFailure("xlsx.blocked_tag_duplicate",
+			"xlsx.blocked_tag_duplicate", GPTagAudit.gpBlockingSummary(gpAudit))
 	var gpModel: Dictionary = GPDeliverableModel.gpBuildAll(gpSheets, gpDefs,
 		{"locale": gpLocale, "type_labels": gpTypeLabels})
 	var gpCounts: Dictionary = {}
@@ -42,6 +62,14 @@ static func gpExportLists(gpSheets: Array, gpDefs: Array[GPSymbolDef],
 			return GPIOResult.gpFailure("xlsx.output_dir_failed", "xlsx.err_output_dir", gpOutputDir)
 	var gpFiles: Array = []
 	var gpAllIssues: Array = []
+	# Non-blocking audit findings (stale line numbers, unmapped symbols) travel with the
+	# result, so the export dialog can list them next to the model's own issues.
+	# 非阻断的审计发现（线号陈旧、图元未分类）随结果一起返回，使导出对话框把它们与模型自身的
+	# 问题并列显示。
+	for gpF in gpAudit:
+		if gpF.gpSeverity == GPFinding.GP_WARNING:
+			gpAllIssues.append({"code": gpF.gpMessageKey, "severity": "warning",
+				"params": gpF.gpParams})
 	var gpWritten: int = 0
 	var gpFailed: int = 0
 	for gpListRaw in gpLists:

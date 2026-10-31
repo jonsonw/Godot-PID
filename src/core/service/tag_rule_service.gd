@@ -199,3 +199,116 @@ static func gpRulesFromJson(gpText: String) -> GPProjectTagRules:
 	if gpParsed == null or not (gpParsed is Dictionary):
 		return null
 	return GPProjectTagRules.gpFromDict(gpParsed as Dictionary)
+
+
+# ==================== B: portable PROJECT STANDARD (.gpstd.json) ====================
+# ==================== B：可移植的**项目标准**（.gpstd.json） ====================
+# What travels is the CONVENTION: numbering classes, their rules, the code tables and the
+# classification map. What does NOT travel is `seq_marks` — the numbers a particular project has
+# already issued are project history, not convention; importing them would make a new project
+# continue someone else's counter and skip the first N numbers.
+# 随包走的是**约定**：编号类别、类别规则、代号表、分类映射。**不**带走 `seq_marks` —— 某个工程
+# 已发出的号属于该工程的历史，不是约定；带过去会让新工程接着别人的计数器跑、白白跳过前 N 个号。
+
+# Serialise a standard as a portable package. Pretty-printed on purpose (diffable in git).
+# 把标准序列化为可移植标准包。刻意美化缩进（可在 git 里 diff）。
+static func gpStandardToJson(gpStd: GPProjectStandard) -> String:
+	if gpStd == null:
+		return "{}"
+	var gpCopy: GPProjectStandard = gpStd.gpClone()
+	# Force the v2 shape: a legacy project exporting its convention must hand over the NEW
+	# format, otherwise the receiver cannot carry classes / tables at all.
+	# 强制 v2 形态：legacy 工程导出约定必须交出新格式，否则接收方根本无法携带类别 / 代号表。
+	gpCopy.gpTouch()
+	var gpRules: Dictionary = gpCopy.gpToDict()
+	var gpClasses: Dictionary = gpRules.get("classes", {}) as Dictionary
+	for gpClassRaw in gpClasses.keys():
+		var gpEntry: Variant = gpClasses[gpClassRaw]
+		if gpEntry is Dictionary:
+			var gpRuleBlock: Variant = (gpEntry as Dictionary).get("rules", null)
+			if gpRuleBlock is Dictionary:
+				(gpRuleBlock as Dictionary).erase("seq_marks")
+	return JSON.stringify({
+		"schema": GPProjectStandard.GP_SCHEMA,
+		"kind": "standard",
+		"revision": gpCopy.gpRevision.duplicate(true),
+		"tag_rules": gpRules,
+	}, "  ", true)
+
+
+# Parse a portable package OR a legacy `.gptagrule.json`. Returns null when the text is not a
+# JSON object, so a hand-broken file is reported as "could not read", never silently defaulted.
+# 解析标准包**或**旧式 `.gptagrule.json`。文本不是 JSON 对象时返回 null —— 手工改坏的文件应报
+# 「读不了」，绝不静默退回默认。
+static func gpStandardFromJson(gpText: String) -> GPProjectStandard:
+	var gpParsed: Variant = JSON.parse_string(gpText)
+	if gpParsed == null or not (gpParsed is Dictionary):
+		return null
+	var gpD: Dictionary = gpParsed as Dictionary
+	if gpD.has("tag_rules") and gpD.get("tag_rules") is Dictionary:
+		return GPProjectStandard.gpFromDict(gpD.get("tag_rules") as Dictionary)
+	# Legacy: a bare rules block (what .gptagrule.json used to be).
+	# 旧式：裸规则块（.gptagrule.json 过去的内容）。
+	if gpD.has("version") or gpD.has("default"):
+		return GPProjectStandard.gpFromDict(gpD)
+	return null
+
+
+# What would change if `gpAfter` replaced `gpBefore`. Returns rows {kind, text}; empty means
+# "no difference". This is the preview an importing project sees BEFORE it accepts a standard.
+# 若用 `gpAfter` 替换 `gpBefore` 会改什么。返回 {kind, text} 行；空表示「无差异」。这是导入方在
+# 接受标准**之前**看到的预览。
+static func gpStandardDiff(gpBefore: GPProjectStandard, gpAfter: GPProjectStandard) -> Array[Dictionary]:
+	var gpOut: Array[Dictionary] = []
+	if gpBefore == null or gpAfter == null:
+		return gpOut
+	for gpClass in GPProjectStandard.GP_CLASS_IDS:
+		var gpOnBefore: bool = gpBefore.gpEnabled(gpClass)
+		var gpOnAfter: bool = gpAfter.gpEnabled(gpClass)
+		if gpOnBefore != gpOnAfter:
+			gpOut.append({"kind": "class", "text": "类别「%s」：%s → %s" % [
+				GPProjectStandard.gpClassLabel(gpClass),
+				"启用" if gpOnBefore else "停用",
+				"启用" if gpOnAfter else "停用"]})
+		var gpRuleBefore: Dictionary = gpBefore.gpRulesOf(gpClass).gpToDict()
+		var gpRuleAfter: Dictionary = gpAfter.gpRulesOf(gpClass).gpToDict()
+		(gpRuleBefore as Dictionary).erase("seq_marks")
+		(gpRuleAfter as Dictionary).erase("seq_marks")
+		if JSON.stringify(gpRuleBefore, "", true) != JSON.stringify(gpRuleAfter, "", true):
+			gpOut.append({"kind": "class", "text": "类别「%s」的规则被修改" % [
+				GPProjectStandard.gpClassLabel(gpClass)]})
+	for gpTable in GPProjectStandard.GP_TABLE_IDS:
+		var gpCodesBefore: Dictionary = _gpCodesOf(gpBefore, gpTable)
+		var gpCodesAfter: Dictionary = _gpCodesOf(gpAfter, gpTable)
+		for gpCodeRaw in gpCodesAfter.keys():
+			if not gpCodesBefore.has(gpCodeRaw):
+				gpOut.append({"kind": "table", "text": "代号表「%s」新增 %s" % [
+					gpTable, gpCodeRaw]})
+		for gpCodeRaw in gpCodesBefore.keys():
+			if not gpCodesAfter.has(gpCodeRaw):
+				gpOut.append({"kind": "table", "text": "代号表「%s」移除 %s" % [
+					gpTable, gpCodeRaw]})
+	for gpKey in ["by_category", "by_symbol", "valve_by_actuator"]:
+		var gpMapBefore: Dictionary = gpBefore.gpClassification.get(gpKey, {}) as Dictionary
+		var gpMapAfter: Dictionary = gpAfter.gpClassification.get(gpKey, {}) as Dictionary
+		for gpEntryRaw in gpMapAfter.keys():
+			if str(gpMapBefore.get(gpEntryRaw, "")) != str(gpMapAfter[gpEntryRaw]):
+				gpOut.append({"kind": "classification", "text": "分类「%s」：%s → %s" % [
+					gpEntryRaw, str(gpMapBefore.get(gpEntryRaw, "（无）")),
+					str(gpMapAfter[gpEntryRaw])]})
+		for gpEntryRaw in gpMapBefore.keys():
+			if not gpMapAfter.has(gpEntryRaw):
+				gpOut.append({"kind": "classification", "text": "分类「%s」被移除" % [gpEntryRaw]})
+	return gpOut
+
+
+# Code -> true for one table (comparison form), so the diff is order- and label-insensitive.
+# 某表的「代号 -> true」（比较形式），使差异与顺序、名称无关。
+static func _gpCodesOf(gpStd: GPProjectStandard, gpTable: String) -> Dictionary:
+	var gpOut: Dictionary = {}
+	for gpRowRaw in gpStd.gpCodeTable(gpTable):
+		if gpRowRaw is Dictionary:
+			var gpCode: String = str((gpRowRaw as Dictionary).get("code", "")).strip_edges()
+			if gpCode != "":
+				gpOut[gpCode] = true
+	return gpOut

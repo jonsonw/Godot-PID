@@ -51,7 +51,7 @@ func gpConfigure(gpSheetsIn: Array, gpDefsIn: Array[GPSymbolDef], gpCenterIn: GP
 func gpPopupOverHost() -> void:
 	var gpParent: Node = get_parent()
 	var gpHost: Window = gpParent.get_window() if gpParent != null else null
-	GP_WINDOW_FIT.gpPopupFitted(self, gpHost, GP_MIN_LOGICAL, GP_MAX_LOGICAL)
+	GP_WINDOW_FIT.gpPopupContentFitted(self, gpHost, GP_MIN_LOGICAL, GP_MAX_LOGICAL)
 
 
 func _ready() -> void:
@@ -96,10 +96,11 @@ func gpReadPreview() -> void:
 	gpIssues = gpRead.get("issues", []) as Array
 	_gpFillTree()
 	gpApplyButton.disabled = gpChanges.is_empty()
-	if gpChanges.is_empty():
+	if gpChanges.is_empty() and gpIssues.is_empty():
 		gpStatusLabel.text = I18n.gpTr("xlsx.import_no_changes")
 	else:
-		gpStatusLabel.text = I18n.gpTr("xlsx.import_ready") % gpChanges.size()
+		gpStatusLabel.text = I18n.gpTr("xlsx.import_summary") % [
+			gpChanges.size(), gpIssues.size()]
 
 
 func gpApplyPreview() -> void:
@@ -314,15 +315,36 @@ func _gpFillTree() -> void:
 		gpItem.set_custom_color(6, Color(0.55, 0.85, 0.6))
 	for gpIssueRaw in gpIssues:
 		var gpIssue: Dictionary = gpIssueRaw as Dictionary
+		var gpParams: Dictionary = gpIssue.get("params", {}) as Dictionary
 		var gpItem: TreeItem = gpTree.create_item(gpRootItem)
-		gpItem.set_text(0, "")
+		gpItem.set_text(0, str(gpParams.get("sheet", "")))
 		gpItem.set_text(1, "")
-		gpItem.set_text(2, "")
-		gpItem.set_text(3, str(gpIssue.get("code", "")))
+		gpItem.set_text(2, str(gpParams.get("tag", gpParams.get("line", ""))))
+		gpItem.set_text(3, _gpIssueText(gpIssue))
 		gpItem.set_text(4, "")
 		gpItem.set_text(5, "")
 		gpItem.set_text(6, I18n.gpTr("xlsx.import_issue"))
 		gpItem.set_custom_color(6, Color(0.95, 0.55, 0.55))
+
+
+func _gpIssueText(gpIssue: Dictionary) -> String:
+	var gpCode: String = str(gpIssue.get("code", ""))
+	var gpParams: Dictionary = gpIssue.get("params", {}) as Dictionary
+	match gpCode:
+		"xlsx.tag_not_found":
+			return I18n.gpTr("xlsx.issue_tag_not_found") % [
+				str(gpParams.get("tag", "")), str(gpParams.get("sheet", ""))]
+		"xlsx.line_not_found":
+			return I18n.gpTr("xlsx.issue_line_not_found") % [
+				str(gpParams.get("line", "")), str(gpParams.get("sheet", ""))]
+		"xlsx.tag_ambiguous":
+			return I18n.gpTr("xlsx.issue_tag_ambiguous") % [
+				str(gpParams.get("tag", "")), str(gpParams.get("sheet", ""))]
+		"xlsx.sheet_not_found":
+			return I18n.gpTr("xlsx.issue_sheet_not_found") % str(gpParams.get("sheet", ""))
+		"xlsx.sheet_missing":
+			return I18n.gpTr("xlsx.issue_sheet_missing")
+	return gpCode
 
 
 func _gpFieldLabel(gpChange: Dictionary) -> String:

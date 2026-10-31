@@ -44,6 +44,12 @@ var gpTabs: Array[Dictionary] = []
 # 当前活动图纸在 gpTabs 中的下标（空时为 -1）。
 var gpActive: int = -1
 
+# The PROJECT's numbering standard shared by every tab (ADR-36). Null until something asks
+# for it, so a project that never numbers anything still saves no `tag_rules` key.
+# 全部标签页共享的**工程**编号标准（ADR-36）。在被索取之前为 null，故从不编号的工程
+# 仍然不写出 `tag_rules` 键。
+var gpProjectStandard: GPProjectStandard = null
+
 # Symbol definitions shared by every sheet (kept in sync via gpSetDefs()).
 # 所有图纸共用的图元定义（经 gpSetDefs() 保持同步）。
 var gpDefs: Array[GPSymbolDef] = []
@@ -283,6 +289,26 @@ func gpAllCanvases() -> Array[GPCanvas2D]:
 	return gpOut
 
 
+# Activate a sheet by its stable id (or name). Returns true when it was found.
+# Used by the DRC dialog's whole-project rows, which may point at another sheet.
+# 按稳定 id（或名称）激活图纸。供 DRC 弹窗的全工程行使用（可能指向另一张图纸）。
+func gpActivateSheet(gpSheetId: String) -> bool:
+	if gpSheetId == "":
+		return false
+	for gpI in range(gpTabs.size()):
+		var gpSheet: GPSheet = gpTabs[gpI].get("sheet") as GPSheet
+		if gpSheet == null:
+			continue
+		if gpSheet.gpId == gpSheetId or gpSheet.gpName == gpSheetId:
+			if gpTabBar.current_tab == gpI:
+				_gpShowOnly(gpI)
+				gpActiveChanged.emit()
+			else:
+				gpTabBar.current_tab = gpI
+			return true
+	return false
+
+
 # Replace the active sheet's graph (used when opening a project file).
 # 替换活动图纸的图（打开工程文件时调用）。
 func gpSetActiveGraph(gpNewGraph: GPPIDGraph) -> void:
@@ -332,6 +358,10 @@ func gpLoadSheets(gpSheets: Array) -> void:
 	gpTabBar.clear_tabs()
 	gpActive = -1
 	gpSheetSeq = 0
+	# A different project brings a different convention: drop the old shared standard so the
+	# first sheet of the incoming file seeds its own (ADR-36).
+	# 换了工程就换了约定：丢掉旧的共享标准，让载入文件的第一张图纸播下自己的（ADR-36）。
+	gpProjectStandard = null
 	var gpI: int = 0
 	for gpS in gpSheets:
 		var gpSheet: GPSheet = gpS as GPSheet
@@ -340,6 +370,9 @@ func gpLoadSheets(gpSheets: Array) -> void:
 		gpSheetSeq += 1
 		_gpAddTabWith(gpSheet.gpName, gpSheet.gpId, gpSheet.gpGraph, gpSheet)
 		gpI += 1
+	# One final pass: while loading, each tab's list was still incomplete.
+	# 最后再推一次：载入过程中每次拿到的列表都还不完整。
+	gpSyncProjectGraphs()
 
 
 # Push a new symbol-definition set to every sheet's canvas (e.g. after exporting
@@ -353,6 +386,104 @@ func gpSetDefs(gpNewDefs: Array[GPSymbolDef]) -> void:
 
 
 # ============================ internal ============================
+
+# The project's numbering standard, created on first use and shared by every tab (ADR-36).
+# Installed as each new graph's lazy provider, so the first sheet that numbers something
+# establishes the convention and the others inherit exactly that object.
+# 工程的编号标准，首次使用时建立并由所有标签页共享（ADR-36）。作为每张新图的惰性来源安装，
+# 故第一张需要编号的图纸建立约定，其它图纸继承的正是同一个对象。
+func gpProjectStandardOrCreate() -> GPProjectStandard:
+	if gpProjectStandard == null:
+		gpProjectStandard = GPProjectStandard.gpDefaultStandard()
+	return gpProjectStandard
+
+
+# Push the current tab list into every canvas's tag registry (ADR-36 D6). Uniqueness is then
+# judged against the whole project, so sheet 2 can never mint a number sheet 1 already uses.
+# 把当前标签页列表推给每个画布的位号注册器（ADR-36 D6）。此后唯一性按整个工程判断，
+# 第二张图纸再也不可能铸出第一张已用的号。
+# Give a sheet its drawing number (when missing) and fill its empty title-block fields from the
+# project info (ADR-38).
+# 给图纸分配图号（缺失时），并用项目信息填充其空缺的标题栏字段（ADR-38）。
+func _gpEnsureSheetIdentity(gpSheet: GPSheet) -> void:
+	if gpSheet == null:
+		return
+	var gpStd: GPProjectStandard = gpProjectStandard
+	if gpStd == null and gpSheet.gpGraph != null:
+		gpStd = gpSheet.gpGraph.gpStandard
+	if gpStd == null:
+		return
+	if gpSheet.gpNumber.strip_edges() == "":
+		gpSheet.gpAssignNumber(gpStd.gpSheetNumberFor(gpSheet.gpIndex + 1))
+	gpSheet.gpApplyProjectInfo(gpStd)
+
+
+# Tab caption: "<number> <name>" so the drawing number is visible on the sheet's tab — the same
+# number the title block prints (.gpstd 图号 only lived in the block before).
+# 标签标题：「<编号> <名称>」，使图纸编号在标签页上可见 —— 与标题栏打印的是同一个号
+#（此前该号只存在于图签里）。
+func _gpTabTitleOf(gpSheet: GPSheet) -> String:
+	if gpSheet == null:
+		return ""
+	var gpName: String = gpSheet.gpName.strip_edges()
+	var gpNo: String = gpSheet.gpNumber.strip_edges()
+	if gpNo == "":
+		return gpName
+	if gpName == "":
+		return gpNo
+	return "%s %s" % [gpNo, gpName]
+
+
+# Regenerate every sheet's number from tab order (ADR-38). Hand-edited drawing numbers survive
+# because gpAssignNumber only overwrites the block while it still shows the previous auto value.
+# 按标签顺序重编全部图纸编号（ADR-38）。手改过的图号会保留 —— gpAssignNumber 只在图签仍是
+# 上一个自动值时才覆盖。
+func gpRenumberSheets() -> void:
+	var gpStd: GPProjectStandard = gpProjectStandard
+	if gpStd == null:
+		return
+	var gpI: int = 0
+	for gpTabRaw in gpTabs:
+		var gpSheet: GPSheet = (gpTabRaw as Dictionary).get("sheet") as GPSheet
+		if gpSheet != null:
+			gpSheet.gpAssignNumber(gpStd.gpSheetNumberFor(gpI + 1))
+			gpSheet.gpApplyProjectInfo(gpStd)
+			gpTabBar.set_tab_title(gpI, _gpTabTitleOf(gpSheet))
+		gpI += 1
+
+
+# Apply one project standard to every tab (B: the dialog edits a copy, then hands it over once).
+# 把同一套项目标准套用到每个标签页（B：对话框编辑副本，然后一次性交出）。
+func gpApplyStandard(gpStd: GPProjectStandard) -> void:
+	if gpStd == null:
+		return
+	gpProjectStandard = gpStd
+	var gpI: int = 0
+	for gpTabRaw in gpTabs:
+		var gpCanvasOne: GPCanvas2D = (gpTabRaw as Dictionary).get("canvas") as GPCanvas2D
+		if gpCanvasOne != null:
+			gpCanvasOne.gpApplyStandard(gpStd)
+		var gpSheetOne: GPSheet = (gpTabRaw as Dictionary).get("sheet") as GPSheet
+		if gpSheetOne != null:
+			gpSheetOne.gpGraph.gpAdoptStandard(gpStd)
+			gpSheetOne.gpIndex = gpI
+			_gpEnsureSheetIdentity(gpSheetOne)
+			gpTabBar.set_tab_title(gpI, _gpTabTitleOf(gpSheetOne))
+		gpI += 1
+
+
+func gpSyncProjectGraphs() -> void:
+	var gpGraphs: Array = []
+	for gpTabRaw in gpTabs:
+		var gpGraphOne: GPPIDGraph = (gpTabRaw as Dictionary).get("graph") as GPPIDGraph
+		if gpGraphOne != null:
+			gpGraphs.append(gpGraphOne)
+	for gpTabRaw in gpTabs:
+		var gpCanvasOne: GPCanvas2D = (gpTabRaw as Dictionary).get("canvas") as GPCanvas2D
+		if gpCanvasOne != null:
+			gpCanvasOne.gpSetProjectGraphs(gpGraphs)
+
+
 # ============================ 内部方法 ============================
 # Create a sheet with the given title and wire it into the tab bar / body.
 # 以给定标题创建图纸并接入标签栏 / 画布体。
@@ -363,10 +494,27 @@ func gpSetDefs(gpNewDefs: Array[GPSymbolDef]) -> void:
 func _gpAddTabWith(gpTitle: String, gpId: String = "", gpGraphIn: GPPIDGraph = null,
 		gpSheetIn: GPSheet = null) -> void:
 	var gpGraph: GPPIDGraph = gpGraphIn if gpGraphIn != null else GPPIDGraph.new()
+	# ADR-36: every tab belongs to the SAME project, so it adopts the project's numbering
+	# standard instead of starting from its own factory copy. Without this, every new sheet
+	# began handing out P-1001 again — the cross-sheet duplicate that started this task.
+	# ADR-36：每个标签页都属于同一个工程，故采纳工程的编号标准，而不是从自己的出厂副本起步。
+	# 缺了这一步，每张新图纸都会再从 P-1001 发号 —— 正是引发本任务的跨页重复。
+	# When the file carries rules, the first tab seeds the project standard and every later tab
+	# adopts it; when it does not, each tab gets the LAZY provider, so the standard is created
+	# once (by whoever numbers something first) and shared from then on.
+	# 文件带规则时，第一页播下工程标准、后续每页采纳；不带规则时，每页拿到**惰性**来源，
+	# 故标准只会被「第一个需要它的页」建立一次，此后共享。
+	if gpProjectStandard == null and gpGraph.gpStandard != null:
+		gpProjectStandard = gpGraph.gpStandard
+	if gpProjectStandard != null:
+		gpGraph.gpAdoptStandard(gpProjectStandard)
+	else:
+		gpGraph.gpStandardProvider = Callable(self, "gpProjectStandardOrCreate")
 	var gpSheet: GPSheet = gpSheetIn
 	if gpSheet == null:
 		gpSheet = GPSheet.gpNew(gpId, gpTitle, gpTabs.size())
 	gpSheet.gpGraph = gpGraph
+	_gpEnsureSheetIdentity(gpSheet)
 	var gpCanvas: GPCanvas2D = GPCanvas2D.new()
 	gpCanvas.gpGraph = gpGraph
 	gpCanvas.gpDefs = gpDefs
@@ -381,10 +529,11 @@ func _gpAddTabWith(gpTitle: String, gpId: String = "", gpGraphIn: GPPIDGraph = n
 	var gpTab: Dictionary = {"id": gpId, "title": gpTitle, "graph": gpGraph, "canvas": gpCanvas,
 		"sheet": gpSheet}
 	gpTabs.append(gpTab)
-	gpTabBar.add_tab(gpTitle)
+	gpTabBar.add_tab(_gpTabTitleOf(gpSheet))
 	var gpIdx: int = gpTabs.size() - 1
 	gpTabBar.current_tab = gpIdx
 	_gpShowOnly(gpIdx)
+	gpSyncProjectGraphs()
 	gpOnCanvasReady.emit(gpCanvas)
 	gpActiveChanged.emit()
 
@@ -423,6 +572,7 @@ func _gpOnTabClose(gpIdx: int) -> void:
 	var gpNew: int = mini(gpIdx, gpTabs.size() - 1)
 	gpTabBar.current_tab = gpNew
 	_gpShowOnly(gpNew)
+	gpSyncProjectGraphs()
 	gpActiveChanged.emit()
 
 
@@ -546,7 +696,8 @@ func _gpCommitRename(gpText: String, gpIdx: int = -1) -> void:
 	var gpSheet: GPSheet = gpTabs[gpIdx].get("sheet") as GPSheet
 	if gpSheet != null:
 		gpSheet.gpName = gpNew
-	gpTabBar.set_tab_title(gpIdx, gpNew)
+	var gpSheetForTitle: GPSheet = gpTabs[gpIdx].get("sheet") as GPSheet
+	gpTabBar.set_tab_title(gpIdx, _gpTabTitleOf(gpSheetForTitle) if gpSheetForTitle != null else gpNew)
 
 
 # Paint the canvas working-area background (brightest tier) so the sheet stands out

@@ -87,7 +87,7 @@ func gpConfigure(gpS: GPSheet, gpCanvas: GPCanvas2D = null) -> void:
 func gpPopupOverHost() -> void:
 	var gpParent: Node = get_parent()
 	var gpHost: Window = gpParent.get_window() if gpParent != null else null
-	GPWindowFit.gpPopupFitted(self, gpHost, GP_MIN_LOGICAL, GP_MAX_LOGICAL)
+	GPWindowFit.gpPopupContentFitted(self, gpHost, GP_MIN_LOGICAL, GP_MAX_LOGICAL)
 
 
 func _ready() -> void:

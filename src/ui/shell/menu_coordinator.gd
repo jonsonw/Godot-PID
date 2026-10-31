@@ -218,6 +218,11 @@ func gpOnMenu(gpAction: String) -> void:
 			# B2：一键体检。对**当前**图纸运行，并让列表停在右侧停靠页 ——
 			# 因为 DRC 是「改 → 再跑」的循环，不是一次性对话框。
 			gpHost.gpRunDrc()
+		"tool_drc_dialog":
+			# ADR-39 UI: the top toolbar opens a NON-MODAL result window; a row click locates,
+			# selects and switches the right dock to the property tab.
+			# ADR-39 UI：顶部工具栏打开**非模态**结果窗；点行定位、选中并把右栏切到属性页。
+			gpHost.gpShowDrcDialog()
 		"insert_symbol":
 			# A14: open the glyph editor with an EMPTY draft (no canvas detour).
 			# A14：以**空白**草稿打开图元编辑器（不绕画布）。

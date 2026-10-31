@@ -17,6 +17,13 @@ var _gpId: String = ""
 var _gpNewTag: String = ""
 var _gpOldTag: String = ""
 
+# Machine-readable refusal + the human detail (e.g. "第 3 段（管线号）：应为 4 位数字"),
+# so the shell can say WHY instead of a generic failure.
+# 机器可读的拒绝码 + 人类可读明细（如「第 3 段（管线号）：应为 4 位数字」），
+# 使外壳能说明**为什么**，而不是笼统失败。
+var gpRefusal: String = ""
+var gpRefusalDetail: String = ""
+
 
 func _init(gpInId: String, gpInTag: String) -> void:
 	_gpId = gpInId
@@ -37,16 +44,49 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	var gpNew: String = _gpNewTag.strip_edges()
 	if gpN.gpTag == gpNew:
 		return false
+	gpRefusal = ""
+	gpRefusalDetail = ""
+	# ADR-36 D7: a hand-typed tag must satisfy the numbering rule, not just be unique.
+	# 候选号先过规则，再过唯一性。
+	if gpNew != "":
+		var gpChk: Dictionary = _gpCheckRule(gpCtx, gpN, gpNew)
+		if not bool(gpChk.get("ok", true)):
+			gpRefusal = "tag.err_rule"
+			gpRefusalDetail = str(gpChk.get("detail", ""))
+			return false
 	if gpCtx.gpTags != null:
 		gpCtx.gpTags.gpGraph = gpCtx.gpGraph
+		if gpNew != "" and gpCtx.gpTags.gpIsTaken(gpNew, _gpId):
+			gpRefusal = "tag.err_duplicate"
+			gpRefusalDetail = gpNew
+			return false
  # gpRegister() releases any previous binding for this id first, so register == rename.
  # gpRegister() 会先注销该 id 的旧绑定，故「登记」即「改名」。
 		if not gpCtx.gpTags.gpRegister(_gpId, gpNew).gpIsOk():
+			gpRefusal = "tag.err_duplicate"
+			gpRefusalDetail = gpNew
 			return false
 	_gpOldTag = gpN.gpTag
 	gpN.gpTag = gpNew
 	gpCtx.gpGraph.gpGraphChanged.emit()
 	return true
+
+
+# Check the candidate against the RULE OF THE NODE'S CLASS. A node whose class is unknown
+# (an unmapped symbol) is only checked for uniqueness — there is no rule to violate.
+# 按该节点**所属类别**的规则校验。类别未知（未映射图元）只查唯一性 —— 没有规则可违反。
+func _gpCheckRule(gpCtx: GPCommandContext, gpN: GPPIDNode, gpTag: String) -> Dictionary:
+	var gpStd: GPProjectStandard = gpCtx.gpGraph.gpStandard
+	if gpStd == null or gpN == null:
+		return {"ok": true}
+	var gpDef: GPSymbolDef = GPSymbolLibrary.gpFindById(gpN.gpSymbolId)
+	var gpClass: String = gpStd.gpClassOf(gpDef, gpN.gpProps)
+	if gpClass == "":
+		return {"ok": true}
+	var gpRules: GPProjectTagRules = gpStd.gpRulesOf(gpClass)
+	var gpRule: GPTagRule = gpRules.gpRuleFor(gpDef)
+	var gpPrefix: String = gpRules.gpPrefixFor(gpDef)
+	return gpRule.gpCheckTemplateTag(gpTag, gpPrefix)
 
 
 func gpUndo(gpCtx: GPCommandContext) -> void:

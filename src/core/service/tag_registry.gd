@@ -32,6 +32,19 @@ var gpGraph: GPPIDGraph = null
 # 工程编号规则（前缀表、模板、序号水位线）。
 var gpRules: GPProjectTagRules = null
 
+# Every sheet's graph of THIS project, including this registry's own (ADR-36 D6). Empty means
+# "single sheet": the registry then sees only gpGraph, which is exactly the pre-ADR-36
+# behaviour, so headless callers and tests that never set it keep working.
+# 本工程**每张**图纸的图，含本注册器自己的那张（ADR-36 D6）。为空表示「单图纸」：此时注册器
+# 只看 gpGraph，正是 ADR-36 之前的行为，故从未设置它的 headless 调用方与测试照旧可用。
+var gpProjectGraphs: Array[GPPIDGraph] = []
+
+# The project standard (class rules, scopes, code tables). Optional: null falls back to
+# `gpGraph.gpStandard`, and if that is null too the registry behaves like the legacy one.
+# 项目标准（类别规则、作用域、代号表）。可选：为空时回落 `gpGraph.gpStandard`；仍为空则
+# 注册器退回旧行为。
+var gpStandard: GPProjectStandard = null
+
 # uid -> tag (as typed, display-cased). / uid -> 位号（按用户输入，保留大小写）。
 var _gpTagByUid: Dictionary = {}
 
@@ -106,26 +119,74 @@ func gpClear() -> void:
 
 # ---- queries ----
 
-# Whether a tag is in use by somebody other than gpExceptUid. Empty tags are never taken.
-# 某位号是否已被 gpExceptUid 之外的对象占用。空位号永不算被占用。
-func gpIsTaken(gpTag: String, gpExceptUid: String = "") -> bool:
-	var gpNorm: String = gpNormalize(gpTag)
-	if gpNorm == "":
-		return false
-	if _gpUidByNorm.has(gpNorm):
-		var gpOwner: String = str(_gpUidByNorm[gpNorm])
-		if gpOwner != gpExceptUid:
-			return true
+# ---- scope / 作用域 ----
+
+# Every graph this registry must see: the project's sheets (when known) plus this one.
+# 本注册器必须看到的全部图：工程各图纸（已知时）加上自己这张。
+func gpGraphs() -> Array[GPPIDGraph]:
+	var gpOut: Array[GPPIDGraph] = []
+	for gpG in gpProjectGraphs:
+		if gpG != null and not gpOut.has(gpG):
+			gpOut.append(gpG)
+	if gpGraph != null and not gpOut.has(gpGraph):
+		gpOut.append(gpGraph)
+	return gpOut
+
+
+# Install the project's sheet list. Called by the shell whenever tabs are added, closed or
+# loaded; a null/empty list downgrades the registry to single-sheet behaviour.
+# 安装工程图纸列表。外壳在标签页增删或载入后调用；null / 空列表使注册器退回单图纸行为。
+func gpSetProjectGraphs(gpGraphsIn: Array) -> void:
+	gpProjectGraphs = []
+	for gpGRaw in gpGraphsIn:
+		if gpGRaw is GPPIDGraph:
+			gpProjectGraphs.append(gpGRaw as GPPIDGraph)
+	gpRebuild()
+
+
+# The standard this registry consults (may be null, meaning "legacy single-class").
+# 本注册器查询的标准（可为 null，即「旧式单类别」）。
+func gpStandardRef() -> GPProjectStandard:
+	if gpStandard != null:
+		return gpStandard
 	if gpGraph != null:
-		for gpN in gpGraph.gpNodes:
-			if gpN.gpInstanceId == gpExceptUid:
-				continue
-			if gpNormalize(gpN.gpTag) == gpNorm:
-				return true
-	return false
+		return gpGraph.gpStandard
+	return null
 
 
-# uid owning a tag, or "" when free. / 占用该位号的 uid；空闲时返回 ""。
+# Whether a tag is in use by somebody other than gpExceptUid, ACROSS THE WHOLE PROJECT
+# (every sheet, nodes and edges — one table, ADR-36 D6). Empty tags are never taken.
+# 某位号是否已被 gpExceptUid 之外的对象占用，**跨整个工程**（每张图纸、节点与边 —— 一张表，
+# ADR-36 D6）。空位号永不算被占用。
+func gpIsTaken(gpTag: String, gpExceptUid: String = "") -> bool:
+	return _gpIsTakenIn(gpGraphs(), gpTag, gpExceptUid)
+
+
+# Whether a tag is taken ON ONE SHEET (nodes and edges). This is the scope of line numbers:
+# the same line may legitimately continue onto another sheet (ADR-36 D1).
+# 某位号在**单张图纸**上是否被占用（节点与边）。这是管线号的作用域：同一根管线可以合法延续到
+# 另一张图纸（ADR-36 D1）。
+func gpIsTakenOnSheet(gpTag: String, gpGraphIn: GPPIDGraph = null,
+		gpExceptUid: String = "") -> bool:
+	var gpOne: GPPIDGraph = gpGraphIn if gpGraphIn != null else gpGraph
+	var gpList: Array[GPPIDGraph] = []
+	if gpOne != null:
+		gpList.append(gpOne)
+	return _gpIsTakenIn(gpList, gpTag, gpExceptUid)
+
+
+# Whether a tag is taken FOR A CANDIDATE OF A GIVEN CLASS — the one entry every minting path
+# calls, so the scope rule lives in exactly one place.
+# 对**某个类别**的候选者而言某位号是否被占用 —— 所有铸号路径唯一的判断入口，故作用域规则只此一处。
+func gpIsTakenForClass(gpClass: String, gpTag: String, gpExceptUid: String = "") -> bool:
+	var gpStd: GPProjectStandard = gpStandardRef()
+	if gpStd != null and gpStd.gpScopeOf(gpClass) == GPProjectStandard.GP_SCOPE_SHEET:
+		return gpIsTakenOnSheet(gpTag, gpGraph, gpExceptUid)
+	return gpIsTaken(gpTag, gpExceptUid)
+
+
+# uid owning a tag, or "" when free. Searches the same scope as gpIsTaken().
+# 占用该位号的 uid；空闲时返回 ""。搜索范围与 gpIsTaken() 一致。
 func gpOwnerOf(gpTag: String) -> String:
 	var gpNorm: String = gpNormalize(gpTag)
 	if gpNorm == "":
@@ -133,11 +194,36 @@ func gpOwnerOf(gpTag: String) -> String:
 	var gpOwner: String = str(_gpUidByNorm.get(gpNorm, ""))
 	if gpOwner != "":
 		return gpOwner
-	if gpGraph != null:
-		for gpN in gpGraph.gpNodes:
+	for gpG in gpGraphs():
+		for gpN in gpG.gpNodes:
 			if gpNormalize(gpN.gpTag) == gpNorm:
 				return gpN.gpInstanceId
+		for gpE in gpG.gpEdges:
+			if gpNormalize(gpE.gpTag) == gpNorm:
+				return gpE.gpInstanceId
 	return ""
+
+
+# Scan one set of graphs for a normalised tag. The index is a fast path only: the graphs are
+# the truth, so a stale index can slow things down but never hand out a duplicate.
+# 在一组图中按归一化位号查找。索引只是快路径：图才是真相，故索引过期只会拖慢、绝不会放出重复位号。
+func _gpIsTakenIn(gpGraphsIn: Array[GPPIDGraph], gpTag: String,
+		gpExceptUid: String) -> bool:
+	var gpNorm: String = gpNormalize(gpTag)
+	if gpNorm == "":
+		return false
+	if _gpUidByNorm.has(gpNorm):
+		var gpKnownOwner: String = str(_gpUidByNorm[gpNorm])
+		if gpKnownOwner != gpExceptUid:
+			return true
+	for gpG in gpGraphsIn:
+		for gpN in gpG.gpNodes:
+			if gpN.gpInstanceId != gpExceptUid and gpNormalize(gpN.gpTag) == gpNorm:
+				return true
+		for gpE in gpG.gpEdges:
+			if gpE.gpInstanceId != gpExceptUid and gpNormalize(gpE.gpTag) == gpNorm:
+				return true
+	return false
 
 
 # Tag recorded for a uid ("" when unknown or un-numbered).
@@ -178,6 +264,74 @@ func gpNextTag(gpDef: GPSymbolDef, gpArea: String = "", gpSheet: String = "") ->
 	return ""
 
 
+# Mint a tag for a symbol instance through its numbering CLASS (ADR-36 D3/D5). Returns ""
+# when the class is unknown or disabled — the instance is then simply NOT numbered (a manual
+# valve by default, an unmapped symbol), which is a legitimate outcome, not an error.
+# 按图元实例所属的**编号类别**铸号（ADR-36 D3/D5）。类别未知或未启用时返回 "" —— 该实例就是
+# **不编号**（默认的手动阀、未映射的图元），这是合法结果，不是错误。
+# Every placement / paste / duplicate path goes through here, so a valve's actuator decides
+# whether it is an instrument or a manual valve in ONE place.
+# 放置 / 粘贴 / 复制的每条路径都走这里，故「阀门按执行机构归仪表还是手阀」只在这一处判断。
+func gpNextTagForDef(gpDef: GPSymbolDef, gpProps: Dictionary = {}) -> String:
+	var gpStd: GPProjectStandard = gpStandardRef()
+	if gpStd == null:
+		# No standard yet: keep the pre-ADR-36 behaviour so nothing regresses before the first
+		# rule edit.
+		# 尚无标准：保持 ADR-36 之前的行为，使首次改规则前不会有任何回归。
+		return gpNextTag(gpDef)
+	var gpClass: String = gpStd.gpClassOf(gpDef, gpProps)
+	if gpClass == "" or not gpStd.gpEnabled(gpClass):
+		return ""
+	return gpNextTagForClass(gpClass, gpDef, gpProps)
+
+
+# Mint the next free tag for one numbering CLASS (ADR-36 D3/D6). This is the single entry the
+# class-specific paths use; `gpNextTag()` above stays as the equipment shim for pre-ADR-36
+# callers.
+# 为某个编号类别铸造下一个空位号（ADR-36 D3/D6）。类别相关的路径都走这一个入口；
+# 上面的 `gpNextTag()` 保留为 ADR-36 之前调用方的设备侧兼容入口。
+# For a segmented rule (the line designation) the mark key is the CLASS id; for a template
+# rule it stays the prefix, so existing equipment counters are untouched.
+# 对分段规则（管线代号）而言水位线键是**类别 id**；对模板规则仍是前缀，故既有设备计数器不受影响。
+func gpNextTagForClass(gpClass: String, gpDef: GPSymbolDef = null,
+		gpAttrs: Dictionary = {}, gpArea: String = "", gpSheet: String = "") -> String:
+	var gpStd: GPProjectStandard = gpStandardRef()
+	var gpUseRules: GPProjectTagRules = gpRules
+	if gpStd != null:
+		gpUseRules = gpStd.gpRulesOf(gpClass)
+	elif gpClass == GPProjectStandard.GP_CLASS_LINE and gpGraph != null:
+		# A line cannot be numbered without the project standard (it owns the line rule and its
+		# mark). Materialise it on demand — minting is a write, so creating the standard here
+		# does not surprise a project that never numbers anything.
+		# 没有项目标准就无法给管线编号（线规则与水位线都在标准里）。按需建立 —— 铸号本身就是写操作，
+		# 故这里创建标准不会惊到「从不编号」的工程。
+		gpStd = gpGraph.gpStandardOrCreate()
+		gpUseRules = gpStd.gpRulesOf(gpClass)
+	var gpRule: GPTagRule = gpUseRules.gpRuleFor(gpDef)
+	var gpPrefix: String = ""
+	var gpMarkKey: String = gpClass
+	if not gpRule.gpUsesSegments():
+		gpPrefix = gpUseRules.gpPrefixFor(gpDef)
+		gpMarkKey = gpPrefix
+	var gpSkips: int = 0
+	while gpSkips < GPProjectTagRules.GP_MAX_SKIPS:
+		var gpN: int = gpUseRules.gpAdvance(gpMarkKey, gpRule)
+		var gpCandidate: String = ""
+		if gpRule.gpUsesSegments():
+			gpCandidate = gpRule.gpRender({"seq": gpN, "attrs": gpAttrs, "prefix": gpPrefix,
+				"area": gpArea, "sheet": gpSheet}, gpStd)
+			if gpCandidate == "":
+				# Sequence overflow / illegal value: minting must fail loudly, not hand out "".
+				# 序号溢出 / 取值非法：铸号必须明确失败，绝不交出 ""。
+				return ""
+		else:
+			gpCandidate = gpRule.gpFormat(gpPrefix, gpN, gpArea, gpSheet)
+		if not gpIsTakenForClass(gpClass, gpCandidate):
+			return gpCandidate
+		gpSkips += 1
+	return ""
+
+
 # Preview the next N tags WITHOUT consuming them — the numbering-rule dialog needs a live
 # sample while the user is still typing.
 # 预览接下来的 N 个位号而**不消耗**它们——编号规则对话框在用户仍在输入时就需要实时样例。
@@ -211,10 +365,15 @@ func gpRebuild(gpItems: Array[Dictionary] = []) -> void:
 	_gpUidByNorm.clear()
 	_gpConflicts.clear()
 	var gpSource: Array[Dictionary] = gpItems
-	if gpSource.is_empty() and gpGraph != null:
+	if gpSource.is_empty():
+		# ADR-36: the index covers EVERY sheet of the project, not just this one — otherwise
+		# the fast path would keep reporting "free" for a tag that sheet 2 already uses.
+		# ADR-36：索引覆盖**工程每一张**图纸，而不只是本张 —— 否则快路径会一直把第二页已用的
+		# 位号报成"空闲"。
 		gpSource = []
-		for gpN in gpGraph.gpNodes:
-			gpSource.append({"uid": gpN.gpInstanceId, "tag": gpN.gpTag})
+		for gpG in gpGraphs():
+			for gpN in gpG.gpNodes:
+				gpSource.append({"uid": gpN.gpInstanceId, "tag": gpN.gpTag})
 	for gpIt in gpSource:
 		var gpUid: String = str(gpIt.get("uid", ""))
 		var gpTag: String = str(gpIt.get("tag", ""))

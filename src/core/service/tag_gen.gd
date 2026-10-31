@@ -42,10 +42,18 @@ static func gpNextTag(gpGraph: GPPIDGraph, gpPrefix: String = GP_PIPE_PREFIX) ->
 		return ""
 	var gpSeq: Dictionary = gpGraph.gpMeta.get(GP_META_KEY, {}) as Dictionary
 	var gpN: int = int(gpSeq.get(gpPrefix, GP_BASE))
+	# ADR-36 D6: node tags and line tags share ONE table. Scanning the nodes as well means a
+	# pipe can never take a tag a device already owns — the two namespaces used to be blind to
+	# each other, which is how a line and a vessel could end up with the same number.
+	# ADR-36 D6：节点位号与管线号共用**一张**表。把节点也扫进来，使管线绝不会拿走设备已有的号
+	# —— 这两套命名空间以前互不可见，正是管线与容器会同号的原因。
 	var gpTaken: Dictionary = {}
 	for gpE in gpGraph.gpEdges:
 		if gpE.gpTag != "":
 			gpTaken[gpE.gpTag] = true
+	for gpNode in gpGraph.gpNodes:
+		if gpNode.gpTag != "":
+			gpTaken[gpNode.gpTag] = true
 	var gpCandidate: String = ""
 	var gpSkips: int = 0
 	while gpSkips < GP_MAX_SKIPS:
