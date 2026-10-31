@@ -3,7 +3,7 @@
 > English: a quick read for GitHub visitors. Authoritative full version: `G-PID_项目架构说明_20260908.html` (workspace `架构/交付/`).
 > 中文：供 GitHub 访客速读。权威完整版见工作区 `架构/交付/G-PID_项目架构说明_20260908.html`。
 >
-> **基线 2026-10-31**：`src/**/*.gd` **264 文件 / 69,725 行**，Godot 4.7。门禁：编译 0 错 · GPGTest **9,533 / 0 / 118 套** · SCRIPT ERROR **0** · GUT 5 passing / 3,011 asserts· 运行时冒烟 exit=0。
+> **基线 2026-10-31**：`src/**/*.gd` **264 文件 / 69,725 行**，Godot 4.7。门禁：编译 0 错 · GPGTest **9,533 / 0 / 118 套** · SCRIPT ERROR **0** · GUT 5 passing / 3,011 asserts · 运行时冒烟 exit=0。
 > 与代码冲突之处，一律以代码为准。
 
 ## Layers · 分层
