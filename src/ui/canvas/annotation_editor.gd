@@ -44,6 +44,13 @@ var _gpShapeStart: Vector2 = Vector2.ZERO
 # 拖拽开始时图形点位的快照，使整体移动无漂移地重放。
 var _gpShapeOrigPts: PackedVector2Array = PackedVector2Array()
 
+# Geometry snapshot at drag start. The live preview writes the model; the command at release
+# carries this exact "before" image so a 30-move drag is ONE undo step (D04).
+# 拖拽起始几何快照。实时预览写模型；释放时的命令携带这张精确的 before 镜像，使 30 次移动只是
+# 一个撤销步（D04）。
+var _gpGripShapeBefore: Dictionary = {}
+var _gpShapeBefore: Dictionary = {}
+
 
 func _init(gpCanvas: GPCanvas2D) -> void:
 	gpCv = gpCanvas
@@ -63,12 +70,74 @@ func gpHasShapeDrag() -> bool:
 	return _gpShapeIdx >= 0
 
 
+# Snapshot every edge end that references a text note. Used both at drag start (before) and at
+# release (after), so the command can restore the line together with the glyph.
+# 快照所有引用文字注记的边端；拖拽开始与释放各取一次，使命令能把连线与字形一起还原。
+func _gpCaptureNoteEdges(gpS: GPShape) -> Array[Dictionary]:
+	var gpOut: Array[Dictionary] = []
+	if gpS == null or gpS.gpKind != GPShape.GPKind.GP_TEXT or gpS.gpUid == "":
+		return gpOut
+	for gpE in gpCv.gpGraph.gpEdges:
+		if gpE == null:
+			continue
+		for gpIsFrom in [true, false]:
+			if gpE.gpEndNoteUid(gpIsFrom) == gpS.gpUid:
+				gpOut.append({
+					"edge_id": gpE.gpInstanceId,
+					"is_from": gpIsFrom,
+					"ref_from": gpE.gpFromRef.duplicate(true),
+					"ref_to": gpE.gpToRef.duplicate(true),
+				})
+	return gpOut
+
+
+# Apply a geometry snapshot to a shape (undo/cancel path).
+# 把几何快照写回图形（撤销 / 取消路径）。
+func _gpApplyShapeSnapshot(gpS: GPShape, gpShot: Dictionary) -> void:
+	if gpS == null or gpShot.is_empty():
+		return
+	gpS.gpPoints = (gpShot.get("points", PackedVector2Array()) as PackedVector2Array).duplicate()
+	gpS.gpRadius = float(gpShot.get("radius", 0.0))
+	gpS.gpHandles.clear()
+	for gpHandleRaw in (gpShot.get("handles", []) as Array):
+		gpS.gpHandles.append((gpHandleRaw as PackedVector2Array).duplicate())
+
+
+# Commit a one-shot geometry edit (handle pull/collapse, vertex removal) through the command
+# layer. The caller mutates the live model for immediate feedback, exactly like a drag preview.
+# 把手柄拉出/塌缩、删顶点这类一次性几何编辑经命令层提交；调用方像拖拽预览一样先写实时模型。
+func _gpCommitGeometry(gpS: GPShape, gpBefore: Dictionary) -> bool:
+	if gpS == null or gpBefore.is_empty():
+		return false
+	var gpIdx: int = gpCv.gpGraph.gpShapes.find(gpS)
+	if gpIdx < 0:
+		return false
+	var gpAfter: Dictionary = GPSetShapeGeometryCommand.gpSnapshotShape(gpS)
+	var gpEdgesAfter: Array[Dictionary] = _gpCaptureNoteEdges(gpS)
+	return gpCv.gpRequestSetShapeGeometry(gpIdx, gpBefore, gpAfter, [], gpEdgesAfter)
+
+
 # Abandon any in-flight drag without applying anything (ESC / cancel path).
 # 放弃进行中的拖拽，不应用任何改动（ESC / 取消路径）。
 func gpEndDrag() -> void:
+	if _gpGripShapeBefore != {}:
+		var gpGripIdx: int = int(_gpGrip.get("shape", -1))
+		if gpGripIdx >= 0 and gpGripIdx < gpCv.gpGraph.gpShapes.size():
+			_gpApplyShapeSnapshot(gpCv.gpGraph.gpShapes[gpGripIdx], _gpGripShapeBefore)
+	if _gpShapeIdx >= 0 and _gpShapeIdx < gpCv.gpGraph.gpShapes.size() and _gpShapeBefore != {}:
+		var gpS: GPShape = gpCv.gpGraph.gpShapes[_gpShapeIdx]
+		_gpApplyShapeSnapshot(gpS, _gpShapeBefore)
+		for gpT in _gpNoteEdgeBefore:
+			var gpE: GPPIDEdge = gpCv.gpGraph.gpGetEdge(str(gpT.get("edge_id", "")))
+			if gpE != null:
+				gpE.gpFromRef = (gpT.get("ref_from", {}) as Dictionary).duplicate(true)
+				gpE.gpToRef = (gpT.get("ref_to", {}) as Dictionary).duplicate(true)
 	_gpGrip = {}
 	_gpShapeIdx = -1
 	_gpShapeOrigPts = PackedVector2Array()
+	_gpGripShapeBefore = {}
+	_gpShapeBefore = {}
+	_gpNoteEdgeBefore.clear()
 
 
 # Return the grip under the world point (within screen-tolerant distance), or an empty dict.
@@ -90,42 +159,45 @@ func gpHitGrip(gpWorld: Vector2, gpShapeIdx: int) -> Dictionary:
 # Begin dragging the given grip (clears any whole-shape move so only the grip acts).
 # 开始拖拽给定锚点（清除整图形移动，使仅锚点生效）。
 func gpStartGripDrag(gpGrip: Dictionary) -> void:
+	gpEndDrag()
 	_gpGrip = gpGrip.duplicate()
 	_gpShapeIdx = -1
+	var gpIdx: int = int(_gpGrip.get("shape", -1))
+	if gpIdx >= 0 and gpIdx < gpCv.gpGraph.gpShapes.size():
+		_gpGripShapeBefore = GPSetShapeGeometryCommand.gpSnapshotShape(
+			gpCv.gpGraph.gpShapes[gpIdx])
 	gpCv.queue_redraw()
 
 
 # [param gpShapeIdx] index into gpGraph.gpShapes() / gpGraph.gpShapes() 中的下标。
 # [param gpWorld] world position of the press, used to measure the delta / 按下处的世界坐标，用于测量位移。
 func gpStartShapeDrag(gpShapeIdx: int, gpWorld: Vector2) -> void:
-	# Snapshot the referencing ends BEFORE anything moves (only for text notes).
-	# 在一切移动**之前**拍下引用端（仅文字注记）。
-	_gpNoteEdgeBefore.clear()
-	if gpCv.gpGraph != null and gpShapeIdx >= 0 and gpShapeIdx < gpCv.gpGraph.gpShapes.size():
-		var gpS0: GPShape = gpCv.gpGraph.gpShapes[gpShapeIdx]
-		if gpS0 != null and gpS0.gpKind == GPShape.GPKind.GP_TEXT and gpS0.gpUid != "":
-			for gpE0 in gpCv.gpGraph.gpEdges:
-				if gpE0 == null:
-					continue
-				for gpIsFrom0 in [true, false]:
-					if gpE0.gpEndNoteUid(gpIsFrom0) == gpS0.gpUid:
-						_gpNoteEdgeBefore.append({
-							"edge_id": gpE0.gpInstanceId,
-							"is_from": gpIsFrom0,
-							"ref_from": gpE0.gpFromRef.duplicate(true),
-							"ref_to": gpE0.gpToRef.duplicate(true),
-						})
+	# Cancel any previous gesture first, then snapshot the new one. Capturing note edges BEFORE
+	# gpEndDrag would let the cancel path clear the new snapshot.
+	# 先取消上一手势，再为新拖拽拍快照；若在 gpEndDrag 前采集边端，取消路径会把新快照清掉。
 	gpEndDrag()
 	if gpShapeIdx < 0 or gpShapeIdx >= gpCv.gpGraph.gpShapes.size():
 		return
+	var gpS0: GPShape = gpCv.gpGraph.gpShapes[gpShapeIdx]
+	if gpS0 == null:
+		return
+	_gpNoteEdgeBefore = _gpCaptureNoteEdges(gpS0)
 	_gpShapeIdx = gpShapeIdx
 	_gpShapeStart = gpWorld
-	_gpShapeOrigPts = gpCv.gpGraph.gpShapes[gpShapeIdx].gpPoints.duplicate()
+	_gpShapeOrigPts = gpS0.gpPoints.duplicate()
+	_gpShapeBefore = GPSetShapeGeometryCommand.gpSnapshotShape(gpS0)
 
 
 # Finish a grip drag / whole-shape move. Geometry was already mutated live during the drag, so
 func gpEndGripDrag() -> void:
+	var gpIdx: int = int(_gpGrip.get("shape", -1))
+	if gpIdx >= 0 and gpIdx < gpCv.gpGraph.gpShapes.size() and not _gpGripShapeBefore.is_empty():
+		var gpS: GPShape = gpCv.gpGraph.gpShapes[gpIdx]
+		var gpAfter: Dictionary = GPSetShapeGeometryCommand.gpSnapshotShape(gpS)
+		if gpAfter != _gpGripShapeBefore:
+			gpCv.gpRequestSetShapeGeometry(gpIdx, _gpGripShapeBefore, gpAfter)
 	_gpGrip = {}
+	_gpGripShapeBefore = {}
 
 
 # The port a dropped note should convert to: the closest anchor under EITHER the cursor or the
@@ -225,15 +297,26 @@ func gpEndShapeDrag(gpWorld: Vector2 = Vector2.INF) -> void:
 				_gpRestoreNoteDrag(gpS)
 				gpCv.gpRequestConvertNoteToPort(gpS.gpUid, gpPort)
 			else:
-				# No port under the release: the note stays, and the line stays with it.
-				# 松手处没有端口：注记留下，连线也跟着留下。
-				_gpNoteEdgeBefore.clear()
+				# No port under the release: commit the glyph + the following line ends as ONE
+				# step, using the drag-start and release snapshots.
+				# 松手处没有端口：用起始/释放快照把字形与跟随的线端提交为**一步**。
+				var gpAfter: Dictionary = GPSetShapeGeometryCommand.gpSnapshotShape(gpS)
+				var gpEdgesAfter: Array[Dictionary] = _gpCaptureNoteEdges(gpS)
+				if gpAfter != _gpShapeBefore or gpEdgesAfter != _gpNoteEdgeBefore:
+					gpCv.gpRequestSetShapeGeometry(gpIdx, _gpShapeBefore, gpAfter,
+						_gpNoteEdgeBefore, gpEdgesAfter)
+		elif gpS != null:
+			var gpAfter2: Dictionary = GPSetShapeGeometryCommand.gpSnapshotShape(gpS)
+			if gpAfter2 != _gpShapeBefore:
+				gpCv.gpRequestSetShapeGeometry(gpIdx, _gpShapeBefore, gpAfter2)
 	# The drag is over: the hover ring must not linger.
 	# 拖拽结束：悬停环不得残留。
 	gpCv.gpHoverPort = {}
 	gpCv.queue_redraw()
 	_gpShapeIdx = -1
 	_gpShapeOrigPts = PackedVector2Array()
+	_gpShapeBefore = {}
+	_gpNoteEdgeBefore.clear()
 
 
 # Live-update the shape geometry while a grip is being dragged.
@@ -304,10 +387,11 @@ func gpVertexHasHandles(gpShape: GPShape, gpGi: int) -> bool:
 func gpCollapseHandles(gpShape: GPShape, gpGi: int) -> void:
 	if gpShape == null or gpGi < 0 or gpGi >= gpShape.gpPoints.size():
 		return
+	var gpBefore: Dictionary = GPSetShapeGeometryCommand.gpSnapshotShape(gpShape)
 	gpShape.gpEnsureHandles()
 	gpShape.gpHandles[gpGi] = PackedVector2Array([Vector2.ZERO, Vector2.ZERO])
+	_gpCommitGeometry(gpShape, gpBefore)
 	gpCv.queue_redraw()
-	gpCv.gpGraphChanged.emit()
 	gpCv.gpEmitStatus()
 
 
@@ -320,6 +404,7 @@ func gpPullHandles(gpShape: GPShape, gpGi: int) -> void:
 		return
 	if gpGi < 0 or gpGi >= gpShape.gpPoints.size():
 		return
+	var gpBefore: Dictionary = GPSetShapeGeometryCommand.gpSnapshotShape(gpShape)
 	gpShape.gpEnsureHandles()
 	var gpN: int = gpShape.gpPoints.size()
 	var gpPrev: Vector2 = gpShape.gpPoints[gpGi]
@@ -342,8 +427,8 @@ func gpPullHandles(gpShape: GPShape, gpGi: int) -> void:
 		gpK = 8.0
 	gpShape.gpSetHandle(gpGi, 0, gpHere - gpDir * gpK)
 	gpShape.gpSetHandle(gpGi, 1, gpHere + gpDir * gpK)
+	_gpCommitGeometry(gpShape, gpBefore)
 	gpCv.queue_redraw()
-	gpCv.gpGraphChanged.emit()
 	gpCv.gpEmitStatus()
 
 
@@ -356,9 +441,10 @@ func gpRemoveVertex(gpShape: GPShape, gpGi: int) -> void:
 	if gpShape.gpPoints.size() <= 2:
 		gpCv.gpRequestDeleteSelected()
 		return
+	var gpBefore: Dictionary = GPSetShapeGeometryCommand.gpSnapshotShape(gpShape)
 	gpShape.gpRemoveVertex(gpGi)
+	_gpCommitGeometry(gpShape, gpBefore)
 	gpCv.queue_redraw()
-	gpCv.gpGraphChanged.emit()
 	gpCv.gpEmitStatus()
 
 

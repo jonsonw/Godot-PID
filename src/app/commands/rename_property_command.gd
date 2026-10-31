@@ -47,6 +47,9 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	if not GPPermissions.gpCanEditProps():
 		gpRefusal = "perm.err_props"
 		return false
+	if GPPropertySchema.gpIsReservedKey(_gpNewKey):
+		gpRefusal = "adhoc.err_reserved"
+		return false
 	var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(_gpId)
 	if gpN == null:
 		return false

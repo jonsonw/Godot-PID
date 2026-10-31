@@ -121,3 +121,93 @@ func gpTestShapeLayerBuckets() -> void:
 		var gpPair: Dictionary = I18n.GP_STRINGS.get(gpKey, {})
 		gpCheck(not gpPair.is_empty(), "图层键存在 / layer key present: " + gpKey)
 		gpCheck(str(gpPair.get("en", "")) != "", "图层键有英文 / layer key has en: " + gpKey)
+
+
+# ---------------------------------------------------------------------------
+# D04: geometry edits are undoable commands
+# D04：几何编辑是可撤销命令
+# ---------------------------------------------------------------------------
+
+func gpTestShapeGeometryUndoRedoAndHandles() -> void:
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	var gpS: GPShape = GPShape.gpPolyline([
+		Vector2(0, 0), Vector2(10, 0), Vector2(20, 5)], false)
+	gpS.gpRadius = 0.0
+	gpG.gpAddShape(gpS)
+	var gpCtx: GPCommandContext = _gpCtx(gpG)
+	var gpBefore: Dictionary = GPSetShapeGeometryCommand.gpSnapshotShape(gpS)
+	gpS.gpPoints = PackedVector2Array([Vector2(0, 0), Vector2(10, 8), Vector2(20, 5)])
+	gpS.gpHandles = [PackedVector2Array([Vector2.ZERO, Vector2.ZERO]),
+		PackedVector2Array([Vector2(-2, 0), Vector2(2, 0)]),
+		PackedVector2Array([Vector2.ZERO, Vector2.ZERO])]
+	var gpAfter: Dictionary = GPSetShapeGeometryCommand.gpSnapshotShape(gpS)
+	var gpCmd: GPSetShapeGeometryCommand = GPSetShapeGeometryCommand.new(
+		0, gpBefore, gpAfter)
+	gpCheck(gpCmd.gpExecute(gpCtx), "geometry command applies")
+	gpEq(gpS.gpPoints[1], Vector2(10, 8), "the dragged point is the after image")
+	gpCheck(gpS.gpHandles[1].size() == 2, "the handle image is preserved")
+	gpCmd.gpUndo(gpCtx)
+	gpEq(gpS.gpPoints[1], Vector2(10, 0), "undo restores the before point")
+	gpEq(gpS.gpHandles.size(), 0, "undo restores the before handle array")
+	gpCmd.gpRedo(gpCtx)
+	gpEq(gpS.gpPoints[1], Vector2(10, 8), "redo replays the after point")
+
+
+func gpTestShapeGeometryOneDragIsOneUndoStep() -> void:
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	var gpS: GPShape = GPShape.gpLine(Vector2(0, 0), Vector2(10, 0))
+	gpG.gpAddShape(gpS)
+	var gpCtx: GPCommandContext = _gpCtx(gpG)
+	var gpStack: GPCommandStack = GPCommandStack.new()
+	var gpBefore: Dictionary = GPSetShapeGeometryCommand.gpSnapshotShape(gpS)
+	# Simulate 30 live preview writes; only the release snapshot becomes one command.
+	for gpI in range(30):
+		gpS.gpPoints = PackedVector2Array([Vector2(gpI, 0), Vector2(10 + gpI, 0)])
+	var gpAfter: Dictionary = GPSetShapeGeometryCommand.gpSnapshotShape(gpS)
+	gpCheck(gpStack.gpDo(GPSetShapeGeometryCommand.new(0, gpBefore, gpAfter), gpCtx),
+		"the release commits one command")
+	gpEq(gpStack.gpUndoDepth(), 1, "30 preview writes are still one undo step")
+	gpStack.gpUndo(gpCtx)
+	gpEq(gpS.gpPoints[0], Vector2.ZERO, "undo returns to the pre-drag image")
+
+
+func gpTestShapeGeometryNoOpRecordsNothing() -> void:
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	var gpS: GPShape = GPShape.gpLine(Vector2(0, 0), Vector2(10, 0))
+	gpG.gpAddShape(gpS)
+	var gpCtx: GPCommandContext = _gpCtx(gpG)
+	var gpShot: Dictionary = GPSetShapeGeometryCommand.gpSnapshotShape(gpS)
+	var gpCmd: GPSetShapeGeometryCommand = GPSetShapeGeometryCommand.new(0, gpShot, gpShot)
+	gpCheck(not gpCmd.gpExecute(gpCtx), "identical before/after records no phantom step")
+
+
+func gpTestShapeGeometryRestoresEdgeEnds() -> void:
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	var gpS: GPShape = GPShape.gpLine(Vector2(0, 0), Vector2(10, 0))
+	gpG.gpAddShape(gpS)
+	var gpE: GPPIDEdge = gpG.gpNewEdgeEx("e1",
+		{"node_id": "N1", "port_id": "p1"}, {"node_id": "N2", "port_id": "p2"},
+		GPPIDEdge.GP_PROCESS)
+	gpG.gpAddEdge(gpE)
+	var gpCtx: GPCommandContext = _gpCtx(gpG)
+	var gpBefore: Dictionary = GPSetShapeGeometryCommand.gpSnapshotShape(gpS)
+	gpS.gpPoints = PackedVector2Array([Vector2(5, 5), Vector2(15, 5)])
+	var gpAfter: Dictionary = GPSetShapeGeometryCommand.gpSnapshotShape(gpS)
+	var gpEdgeBefore: Array[Dictionary] = [{
+		"edge_id": "e1",
+		"ref_from": {"node_id": "N1", "port_id": "p1"},
+		"ref_to": {"node_id": "N2", "port_id": "p2"},
+	}]
+	var gpEdgeAfter: Array[Dictionary] = [{
+		"edge_id": "e1",
+		"ref_from": {"point": Vector2(5, 5)},
+		"ref_to": {"node_id": "N2", "port_id": "p2"},
+	}]
+	var gpCmd: GPSetShapeGeometryCommand = GPSetShapeGeometryCommand.new(
+		0, gpBefore, gpAfter, gpEdgeBefore, gpEdgeAfter)
+	gpCheck(gpCmd.gpExecute(gpCtx), "geometry + edge snapshot applies")
+	gpEq(gpE.gpFromRef.get("point", Vector2.ZERO), Vector2(5, 5),
+		"the edge end follows the note")
+	gpCmd.gpUndo(gpCtx)
+	gpEq(str(gpE.gpFromRef.get("node_id", "")), "N1",
+		"undo restores the edge end together with the glyph")

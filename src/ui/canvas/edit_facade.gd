@@ -448,6 +448,20 @@ func gpRequestSetShapeProps(gpIdx: int, gpValues: Dictionary) -> bool:
 		gpHost.queue_redraw()
 	return gpOk
 
+
+# Commit one annotation-shape geometry edit (D04) as one undo step. The preview already wrote
+# the model; no second geometry application is needed here.
+# 一步提交注释图形几何编辑（D04）。预览已写模型，这里不再二次应用几何。
+func gpRequestSetShapeGeometry(gpIdx: int, gpBefore: Dictionary, gpAfter: Dictionary,
+		gpEdgesBefore: Array[Dictionary] = [], gpEdgesAfter: Array[Dictionary] = []) -> bool:
+	if gpHost.gpGraph == null:
+		return false
+	var gpOk: bool = gpHost.gpActions.gpSetShapeGeometry(
+		gpIdx, gpBefore, gpAfter, gpEdgesBefore, gpEdgesAfter)
+	if gpOk:
+		gpHost.queue_redraw()
+	return gpOk
+
 # Connect two nodes with an edge. Returns false for a self-connection or a missing graph.
 # 在两个节点之间连线。自连接或缺图时返回 false。
 func gpRequestConnect(gpFromId: String, gpToId: String) -> bool:

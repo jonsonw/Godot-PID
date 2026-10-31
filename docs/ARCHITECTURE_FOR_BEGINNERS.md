@@ -2,7 +2,7 @@
 
 > [!p] 阅读说明
 > 这不是 API 手册，而是一堂**用你自己的项目当教材**的架构课。
-> 本文基于 **2026-10-31** 基线（`src/**/*.gd` 262 文件 / 69,415 行），所有代码引用均已逐文件核对。
+> 本文基于 **2026-10-31** 基线（`src/**/*.gd` 264 文件 / 69,725 行），所有代码引用均已逐文件核对。
 > 读完之后，你应该能回答三类问题：**Godot 的机制到底解决了什么问题**、**这套分层为什么长成这样**、**下次要加功能时该把代码放在哪一层**。
 
 > [!b] 怎么读
@@ -63,7 +63,7 @@ Main (Control)              ← 挂 GPMainWindow 脚本
 | 多用 `.tscn` 场景 | 可视化编辑、结构清晰 | 加载期需解析每个场景；跨场景引用易形成隐式依赖 |
 | 少用场景 + 代码构造 | 装配顺序可控、可 headless 测试 | 失去可视化编辑 |
 
-本项目选后者，理由在 §3.8 会讲——**它换来了 9,487 条断言能在无窗口环境跑完**。
+本项目选后者，理由在 §3.8 会讲——**它换来了 9,533 条断言能在无窗口环境跑完**。
 
 ### 1.3 脚本（Script）= 挂在节点上的行为
 
@@ -75,7 +75,7 @@ Main (Control)              ← 挂 GPMainWindow 脚本
 | `RefCounted` | 纯内存对象，引用计数自动回收 | `GPPIDGraph`、`GPPIDNode`、`GPEdgeRoute` |
 | `Resource` | 可序列化、可在编辑器里编辑 | `GPSymbolDef`、`GPPropertyDef` |
 
-> [!a] 关键事实：本项目 `core/` 的 76 个类**没有一个**是 `Node`
+> [!a] 关键事实：本项目 `core/` 的 77 个类**没有一个**是 `Node`
 > 这不是巧合。`Node` 意味着"必须存在于场景树"，而场景树需要一个运行中的引擎——那就无法在 headless 下测试。
 > **选择基类 = 选择可测试性**。这是 §3.8 的地基。
 
@@ -184,7 +184,7 @@ func _init() -> void:
   <text x="80" y="256" font-size="14.5" font-weight="600" fill="#2c2c2a">core/ · 领域内核 · 47 文件 / 8,213 行</text>
   <text x="80" y="280" font-size="11.5" fill="#2c2c2a">model(16) · geometry(9) · view(8) · service(7) · symbol(4) · platform(2) · constants(1)</text>
   <text x="80" y="303" font-size="11.5" fill="#0f6e56">它知道：图数据、几何算法、位号规则。它一无所知：UI、文件格式、autoload、Node</text>
-  <text x="80" y="326" font-size="11.5" fill="#0f6e56">✓ 76 个类中 0 个是 Node → 可以完全 headless 测试 → 9,487 条断言的基础</text>
+  <text x="80" y="326" font-size="11.5" fill="#0f6e56">✓ 77 个类中 0 个是 Node → 可以完全 headless 测试 → 9,533 条断言的基础</text>
   <text x="80" y="345" font-size="11" fill="#5f5e5a">这是整个系统里最"纯"的一层：换掉 Godot，它几乎能原样搬到别的引擎</text>
 
   <rect x="60" y="366" width="380" height="52" rx="8" fill="#ffffff" stroke="#e2e0da" stroke-width="1.2"/>
@@ -248,7 +248,7 @@ func _init() -> void:
 
 ### 3.1 分层架构：为什么 `core` 必须不认识 UI
 
-`core` 的 76 个类**全部**是 `RefCounted` 或 `Resource`，没有一个是 `Node`。
+`core` 的 77 个类**全部**是 `RefCounted` 或 `Resource`，没有一个是 `Node`。
 
 连锁反应是这样的：
 
@@ -261,7 +261,7 @@ core 不需要运行中的引擎窗口
    ↓
 core 可以在 headless 下实例化
    ↓
-9,487 条断言能跑完（其中绝大多数测的是 core）
+9,533 条断言能跑完（其中绝大多数测的是 core）
 ```
 
 **这是一条因果链，不是巧合。** 如果某天有人为了方便，在 `core/model/pid_node.gd` 里加一句 `I18n.gpTr(...)` 来格式化显示名，这条链就断了——虽然功能上"能跑"，但 `core` 从此再也无法独立测试。
@@ -438,7 +438,7 @@ func gpFromDict(gpD: Dictionary) -> void:
 
 | 因为…… | 所以…… |
 |---|---|
-| `core` 不依赖 UI / autoload | 9,487 条断言在 headless 下跑完（约 6–17 秒） |
+| `core` 不依赖 UI / autoload | 9,533 条断言在 headless 下跑完（约 6–17 秒） |
 | 命令模式可自我求逆 | 每条命令都能测"执行 → 撤销 → 重做"的一致性 |
 | 几何函数全静态无状态 | 给定输入就有确定输出，无需搭建环境 |
 | 门面端口稳定 | UI 测试可以驱动真实 `main.tscn` 而不碰内部结构 |

@@ -111,7 +111,7 @@ The core code is released under the **MIT License** — free to use, modify, and
 # macOS / Linux 必须给引擎可写 HOME，否则 user:// 建不出来会直接 SIGSEGV（详见 CONTRIBUTING）
 mkdir -p /tmp/gpidhome
 
-# 自研 GPGTest：115 套 / 9,487 断言（编译 0 错 · SCRIPT ERROR 0）
+# 自研 GPGTest：118 套 / 9,533 断言（编译 0 错 · SCRIPT ERROR 0）
 HOME=/tmp/gpidhome godot --headless --path . --script res://tests/run_core_tests.gd
 
 # 解析检查：新增 class_name 后先跑这条（headless runner 从 .godot 的类名缓存解析类）

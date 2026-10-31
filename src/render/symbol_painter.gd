@@ -104,21 +104,13 @@ static func gpDrawShape(
 # Falls back to the full 100x100 unit box when the shape carries no "box" entry.
 # 当形状未携带 "box" 时，回退为完整的 100x100 单位框。
 static func gpUnitBox(gpShape: Dictionary) -> Rect2:
-	if gpShape.has("box"):
-		var gpB: Array = gpShape["box"]
-		if gpB.size() >= 4:
-			var gpW: float = maxf(float(gpB[2]), 0.001)
-			var gpH: float = maxf(float(gpB[3]), 0.001)
-			return Rect2(Vector2(float(gpB[0]), float(gpB[1])), Vector2(gpW, gpH))
-	return Rect2(Vector2.ZERO, Vector2(100.0, 100.0))
+	return GPSymbolGeometry.gpUnitBox(gpShape)
 
 
 # Uniform scale factor that fits a unit-space box into a target size without distortion.
 # 将单位空间包围盒无变形地塞入目标尺寸的均匀缩放系数。
 static func gpFitScale(gpBox: Rect2, gpTarget: Vector2) -> float:
-	var gpBw: float = maxf(gpBox.size.x, 0.001)
-	var gpBh: float = maxf(gpBox.size.y, 0.001)
-	return minf(gpTarget.x / gpBw, gpTarget.y / gpBh)
+	return GPSymbolGeometry.gpFitScale(gpBox, gpTarget)
 
 
 # Map a symbol category string to a base fill color.

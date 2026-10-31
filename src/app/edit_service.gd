@@ -342,10 +342,22 @@ func gpSetName(gpNodeId: String, gpLocale: String, gpText: String) -> bool:
 	return gpStack.gpDo(gpCmd, gpCtx)
 
 
+# One permission gate for every instance-property mutation. The service owns the refusal
+# message so all paths report the same key; the command layer keeps its own defense in depth.
+# 所有实例属性写路径共用的权限闸门。拒绝原因由服务层统一给出，命令层保留纵深防御。
+func _gpRequireProps() -> bool:
+	if GPPermissions.gpCanEditProps():
+		return true
+	gpLastRefusal = "perm.err_props"
+	return false
+
+
 # Set one property value. An EMPTY string resets the field to the library default.
 # 设置一个属性值。空字符串将该字段复位到库默认值。
 func gpSetProperty(gpNodeId: String, gpKey: String, gpValue: Variant) -> bool:
 	gpLastRefusal = ""
+	if not _gpRequireProps():
+		return false
 	if gpNodeId == "" or gpKey == "":
 		return false
 	var gpCmd: GPSetPropertyCommand = GPSetPropertyCommand.new(gpNodeId, gpKey, gpValue)
@@ -394,6 +406,8 @@ func _gpNumberAfterClassChange(gpNodeId: String, gpKey: String) -> void:
 # 并压入快照交换命令。拒绝以 i18n 键写入 gpLastRefusal，与位号路径同一惯例。
 func gpMutateTable(gpNodeId: String, gpOp: String, gpRow: int, gpCol: int) -> bool:
 	gpLastRefusal = ""
+	if not _gpRequireProps():
+		return false
 	if gpNodeId == "" or gpOp == "":
 		return false
 	if gpCtx.gpGraph == null:
@@ -421,6 +435,8 @@ func gpMutateTable(gpNodeId: String, gpOp: String, gpRow: int, gpCol: int) -> bo
 # 无变化的快照对被拒绝（不留幽灵撤销步），与 gpMutateTable 同一惯例。
 func gpCommitTableSnapshot(gpNodeId: String, gpBefore: Dictionary, gpAfter: Dictionary) -> bool:
 	gpLastRefusal = ""
+	if not _gpRequireProps():
+		return false
 	if gpNodeId == "" or gpCtx.gpGraph == null:
 		return false
 	var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(gpNodeId)
@@ -443,8 +459,10 @@ func gpAddProperty(gpNodeId: String, gpKey: String, gpValue: Variant) -> bool:
 	gpLastRefusal = ""
 	if gpNodeId == "" or gpKey == "":
 		return false
-	if not GPPermissions.gpCanEditProps():
-		gpLastRefusal = "perm.err_props"
+	if not _gpRequireProps():
+		return false
+	if GPPropertySchema.gpIsReservedKey(gpKey):
+		gpLastRefusal = "adhoc.err_reserved"
 		return false
 	if gpCtx.gpGraph != null:
 		var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(gpNodeId)
@@ -464,8 +482,10 @@ func gpRenameProperty(gpNodeId: String, gpOldKey: String, gpNewKey: String) -> b
 	gpLastRefusal = ""
 	if gpNodeId == "" or gpOldKey == "" or gpNewKey == "":
 		return false
-	if not GPPermissions.gpCanEditProps():
-		gpLastRefusal = "perm.err_props"
+	if not _gpRequireProps():
+		return false
+	if GPPropertySchema.gpIsReservedKey(gpNewKey):
+		gpLastRefusal = "adhoc.err_reserved"
 		return false
 	var gpCmd: GPRenamePropertyCommand = GPRenamePropertyCommand.new(gpNodeId, gpOldKey, gpNewKey)
 	if not gpStack.gpDo(gpCmd, gpCtx):
@@ -488,6 +508,8 @@ func gpSetLabelAnchor(gpNodeId: String, gpAnchor: int) -> bool:
 # 把一次编辑作用到整个选择集，只产生一个撤销步。"tag" 被拒绝（位号必须唯一）。
 func gpBatchSetProperty(gpNodeIds: Array[String], gpKey: String, gpValue: Variant) -> bool:
 	gpLastRefusal = ""
+	if not _gpRequireProps():
+		return false
 	if gpNodeIds.is_empty() or gpKey == "":
 		return false
 	var gpCmd: GPBatchSetPropertyCommand = GPBatchSetPropertyCommand.new(gpNodeIds, gpKey, gpValue)
@@ -935,6 +957,19 @@ func gpSetShapeProps(gpIdx: int, gpValues: Dictionary) -> bool:
 	if gpCtx.gpGraph == null or gpValues.is_empty():
 		return false
 	var gpCmd: GPSetShapePropsCommand = GPSetShapePropsCommand.new(gpIdx, gpValues)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Commit one annotation-shape geometry edit as ONE undo step (D04). The UI already wrote the
+# live preview; this method owns the before/after snapshots and optional text-note edge ends.
+# 把一次注释图形几何编辑提交为**一个**撤销步（D04）。界面已写实时预览；本方法持有
+# before/after 快照与可选的文字注记边端。
+func gpSetShapeGeometry(gpIdx: int, gpBefore: Dictionary, gpAfter: Dictionary,
+		gpEdgesBefore: Array[Dictionary] = [], gpEdgesAfter: Array[Dictionary] = []) -> bool:
+	if gpCtx.gpGraph == null or gpBefore.is_empty() or gpAfter.is_empty():
+		return false
+	var gpCmd: GPSetShapeGeometryCommand = GPSetShapeGeometryCommand.new(
+		gpIdx, gpBefore, gpAfter, gpEdgesBefore, gpEdgesAfter)
 	return gpStack.gpDo(gpCmd, gpCtx)
 
 

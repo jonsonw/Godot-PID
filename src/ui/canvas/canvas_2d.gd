@@ -1498,6 +1498,11 @@ func gpRequestMirrorSelected() -> bool:
 func gpRequestSetShapeProps(gpIdx: int, gpValues: Dictionary) -> bool:
 	return gpEditFacade.gpRequestSetShapeProps(gpIdx, gpValues)
 
+func gpRequestSetShapeGeometry(gpIdx: int, gpBefore: Dictionary, gpAfter: Dictionary,
+		gpEdgesBefore: Array[Dictionary] = [], gpEdgesAfter: Array[Dictionary] = []) -> bool:
+	return gpEditFacade.gpRequestSetShapeGeometry(
+		gpIdx, gpBefore, gpAfter, gpEdgesBefore, gpEdgesAfter)
+
 
 func gpRequestDeleteSelected() -> void:
 	gpEditFacade.gpRequestDeleteSelected()

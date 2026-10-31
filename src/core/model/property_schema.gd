@@ -19,6 +19,25 @@ extends Resource
 @export var gpFields: Array[GPPropertyDef] = []
 
 
+# Keys owned by the drawing model / generators. They may be DECLARED by a schema (the grid
+# template declares col_widths / row_heights), but a user must not create or rename a CUSTOM
+# entry onto them — the add/rename path would otherwise inject data the model overwrites.
+# 图纸模型 / 生成器拥有的键。它们可以由 schema 声明（grid 模板声明 col_widths / row_heights），
+# 但用户不能把自定义条目新增 / 改名到这些键上 —— 否则会注入模型随后覆盖的数据。
+const GP_RESERVED_KEYS: Array[String] = ["dn", "col_widths", "row_heights", "cols", "rows", "tag"]
+
+
+static func gpIsReservedKey(gpKey: String) -> bool:
+	var gpK: String = gpKey.strip_edges()
+	if gpK == "":
+		return false
+	if GP_RESERVED_KEYS.has(gpK):
+		return true
+	if gpK.begins_with("cell_") or gpK.begins_with("gp_") or gpK.begins_with("_"):
+		return true
+	return false
+
+
 # Look up a field by its technical key. Returns null when the library no longer has it (the
 # instance value then becomes an ORPHAN — never deleted silently, see GPPropertyResolver).
 # 按技术键查找字段；库中已无该字段时返回 null（此时实例值成为「孤儿」—— 绝不静默删除，

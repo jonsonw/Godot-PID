@@ -309,8 +309,10 @@ const GP_STRINGS: Dictionary = {
 	"inspector.search":         { "zh": "检索", "en": "Search" },
 	"inspector.search_ph":      { "zh": "输入后回车过滤属性…", "en": "Type + Enter to filter…" },
 	"perm.err_props":           { "zh": "当前无属性编辑权限", "en": "Property editing is not permitted" },
+	"perm.err_schema":          { "zh": "当前无图元库编辑权限", "en": "Symbol library editing is not permitted" },
 	"adhoc.err_exists":         { "zh": "键已存在", "en": "Key already exists" },
 	"adhoc.err_missing":        { "zh": "条目不存在", "en": "Entry not found" },
+	"adhoc.err_reserved":       { "zh": "该键由图纸模型保留，不能作为自定义属性", "en": "This key is reserved by the drawing model and cannot be a custom property" },
 
 	# ---- label anchors (GPLabelAnchor) ----
 	"anchor.auto":   { "zh": "自动", "en": "Auto" },

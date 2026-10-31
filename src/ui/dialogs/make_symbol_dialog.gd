@@ -668,6 +668,14 @@ func _gpOnOk() -> void:
 			"Category %s has no free id left (999 used)") % GPSymbolNaming.gpCategoryCode(gpCat)
 		return
 
+	# Schema-level edit: registering / overwriting a symbol changes every project that uses the
+	# library, so it asks the separate schema gate (not the instance-property gate).
+	# schema 级编辑：注册 / 覆盖图元会影响所有使用该库的工程，故走独立的 schema 闸门
+	#（不是实例属性闸门）。
+	if not GPPermissions.gpCanEditSchema():
+		_gpHint.text = I18n.gpTr("perm.err_schema")
+		return
+
 	# Serialize the edited geometry from the working model (lossless, keeps Bézier handles) plus
 	# the edited ports expressed in author-space pixels.
 	# 由工作模型序列化编辑后的几何（无损，保留贝塞尔手柄），并附上作者空间像素表达的编辑后端口。

@@ -19,7 +19,7 @@ extends RefCounted
 # SOURCES (all PURE, all shared with the live renderers) / 数据源（全部纯函数、与实时渲染器共享）：
 # - frame furnishings: GPFrameGeometry (trim / frame / zone ruler / title-block placement)
 # - title-block layout: GPSheet.GP_TB_FIELDS x gpFrameScale, same formula GPFrameView draws
-# - symbol glyphs: GPSymbolPainter.gpUnitBox + gpFitScale (the unit-box mapping)
+# - symbol glyphs: GPSymbolGeometry.gpUnitBox + gpFitScale (the unit-box mapping)
 # - mounted frames: GPMountResolver.gpWorldTransform (world transform never stored)
 # - pipes: GPPortResolver.gpResolveEnd x2 -> GPEdgeRoute.gpRoute (recomputed like every frame)
 # - annotations: GPShape.gpRenderPoints (world mm already) and the GENERATOR registry
@@ -264,8 +264,8 @@ static func gpGlyphEntities(gpSpec: Dictionary, gpSize: Vector2, gpWT: Dictionar
 		gpOut: Array[Dictionary]) -> void:
 	if gpSpec.is_empty():
 		return
-	var gpBox: Rect2 = GPSymbolPainter.gpUnitBox(gpSpec)
-	var gpK: float = GPSymbolPainter.gpFitScale(gpBox, gpSize)
+	var gpBox: Rect2 = GPSymbolGeometry.gpUnitBox(gpSpec)
+	var gpK: float = GPSymbolGeometry.gpFitScale(gpBox, gpSize)
 	var gpBoxCtr: Vector2 = gpBox.get_center()
 	# The envelope is Rect2(-size/2, size) in the body frame (see GPSymbolView.gpDrawBody),
 	# so the mapping CENTRE is the local ORIGIN, not half the size.

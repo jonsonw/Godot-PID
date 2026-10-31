@@ -120,9 +120,19 @@ func gpTestPermissionGateDeniesCrud() -> void:
 		"the gate denies the add")
 	gpCheck(not gpSvc.gpRenameProperty("N1", "legacy_kw", "moved"),
 		"the gate denies the rename")
-	gpEq(gpSvc.gpLastRefusal, "perm.err_props", "both refusals name the permission")
+	gpCheck(not gpSvc.gpSetProperty("N1", "legacy_kw", 9.0),
+		"the gate denies a single value write")
+	gpCheck(not gpSvc.gpBatchSetProperty(["N1"], "legacy_kw", 9.0),
+		"the gate denies a batch write")
+	gpCheck(not gpSvc.gpMutateTable("N1", "insert_row", 0, 0),
+		"the gate denies a table structure write")
+	gpCheck(not gpSvc.gpCommitTableSnapshot("N1", {"legacy_kw": 7.5}, {"legacy_kw": 9.0}),
+		"the gate denies a table snapshot write")
+	gpCheck(not GPPermissions.gpCanEditSchema(), "the schema gate also denies")
+	gpEq(gpSvc.gpLastRefusal, "perm.err_props", "all refusals name the permission")
 	GPPermissions.gpForceDeny = false
 	gpCheck(GPPermissions.gpCanEditProps(), "restoring the seam reopens the gate")
+	gpCheck(GPPermissions.gpCanEditSchema(), "restoring the seam reopens the schema gate")
 	# and the data is untouched by the denied attempts / 被拒的尝试不动数据
 	gpCheck(gpG.gpGetNode("N1").gpProps.has("legacy_kw"), "the deny left the data untouched")
 	gpCheck(not gpG.gpGetNode("N1").gpProps.has("blocked"), "and created nothing")
@@ -153,3 +163,30 @@ func gpTestCustomEntrySurvivesSaveReopen() -> void:
 			"the renamed custom entry (key AND value) survives save/reopen")
 		gpCheck(not gpN2.gpProps.has("custom_1"), "the old key stayed gone")
 	_gpCleanup()
+
+
+# ---- reserved keys / 保留键 ----
+
+func gpTestReservedKeysCannotBeAddedOrRenamed() -> void:
+	var gpG: GPPIDGraph = _gpGraph()
+	var gpSvc: GPEditService = _gpService(gpG)
+	for gpKey in ["dn", "col_widths", "row_heights", "cell_0_0", "tag", "gp_internal"]:
+		gpCheck(not gpSvc.gpAddProperty("N1", gpKey, "x"),
+			"adding reserved key is refused: " + gpKey)
+		gpEq(gpSvc.gpLastRefusal, "adhoc.err_reserved",
+			"the refusal names the reserved key: " + gpKey)
+	gpCheck(not gpSvc.gpRenameProperty("N1", "legacy_kw", "cell_0_0"),
+		"renaming onto a reserved key is refused")
+	gpEq(gpSvc.gpLastRefusal, "adhoc.err_reserved", "rename refusal names the reserved key")
+	gpCheck(gpG.gpGetNode("N1").gpProps.has("legacy_kw"),
+		"the refused rename left the old key in place")
+
+
+# The schema gate must have a REAL consumer, not just a definition. This pins the symbol
+# registration path (the one place a schema edit reaches the shared library).
+# schema 闸门必须有**真实**消费方，不能只有定义；这里钉住图元注册路径。
+func gpTestSchemaGateHasRealConsumer() -> void:
+	var gpText: String = FileAccess.get_file_as_string(
+		"res://src/ui/dialogs/make_symbol_dialog.gd")
+	gpCheck(gpText.contains("gpCanEditSchema"),
+		"the symbol-registration path asks the schema gate")
