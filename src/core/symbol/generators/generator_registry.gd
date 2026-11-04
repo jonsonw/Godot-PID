@@ -550,6 +550,28 @@ const GP_OFFPAGE_PAD_MM: float = 2.4
 const GP_OFFPAGE_MIN_BODY_MM: float = 12.0
 
 
+# D20 three-state ids (user feedback 2026-11-04). The generator is the SINGLE SOURCE of the
+# state decision; the view (stroke color) and the print model (lineweight) only translate it.
+# D20 三态 id（用户反馈 2026-11-04）。生成器是三态判定的**单一来源**；视图（描边色）与
+# 打印模型（线重）只做翻译。
+const GP_OFFPAGE_UNLINKED: String = "unlinked"
+const GP_OFFPAGE_DANGLING: String = "dangling"
+const GP_OFFPAGE_RESOLVED: String = "resolved"
+
+
+# The offpage three-state for a reference text — the same "" / "?" / tag contract
+# gpRefTextFor already owns, surfaced as a key. Pure.
+# 交叉编号文字对应的三态 —— 与 gpRefTextFor 已有的 "" / "?" / tag 契约同源，只是显式成键。
+# 纯函数。
+static func gpOffpageStateFor(gpRefText: String) -> String:
+	var gpT: String = gpRefText.strip_edges()
+	if gpT == "":
+		return GP_OFFPAGE_UNLINKED
+	if gpT == "?":
+		return GP_OFFPAGE_DANGLING
+	return GP_OFFPAGE_RESOLVED
+
+
 # Generate the flag + its derived reference text.
 # 生成旗标及其推导出的交叉编号文字。
 static func _gpGenerateOffpage(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> Dictionary:
@@ -588,6 +610,13 @@ static func _gpGenerateOffpage(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> Diction
 	# 保证），宽度由文字驱动。
 	var gpBodyW: float = _gpOffpageBodyWidth(gpDef, gpRef)
 	var gpPaths: Array = _gpOffpagePaths(gpH, gpBodyW, _gpIsSignalConnector(gpDef))
+	# D20 three-state visual (user feedback 2026-11-04): the STATE rides the generator output
+	# as a key — screen picks a STROKE color from it, print picks a LINEWEIGHT from it; both
+	# read this one decision so screen and paper cannot disagree (B2 redline: color/stroke
+	# only — geometry and the blank-row contract are untouched).
+	# D20 三态视觉（用户反馈 2026-11-04）：三态作为键随生成器输出走 —— 屏幕由它选**描边色**、
+	# 打印由它选**线重**，双方读同一份判定，屏幕与纸面不可能分家（B2 红线：只改描边/颜色
+	# —— 几何与空行占位契约分毫不动）。
 	# MIRRORED TWIN (user feedback 2026-11-03): a connector standing on the TARGET sheet is
 	# authored with gpFlipped = true — the BODY's own flip transform mirrors the glyph (flat
 	# face + port land on the RIGHT, pennant pointing back off-page) and mirrors the text
@@ -603,6 +632,7 @@ static func _gpGenerateOffpage(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> Diction
 		"text_lines": PackedStringArray([gpRef]),
 		"text_above": gpTarget,
 		"text_below": gpMedium,
+		"offpage_state": gpOffpageStateFor(gpRef),
 		# Where the text column is centred, in UNIT space (the body's midpoint). The view maps
 		# it through the spec box's uniform fit, so the text rides the BODY, not the envelope.
 		# 文字列的中心，单位空间（主体中点）。视图经 spec 盒的均匀适配映射它，文字跟着**主体**

@@ -921,6 +921,17 @@ func _gpAttachPane(gpPaneIdx: int, gpSheetIdx: int) -> void:
 	gpPane.gpSheetIdx = gpSheetIdx
 
 
+# D05: after a SWAP (or a refill) SEVERAL panes can change content at once — re-home every
+# pane from the binding table. gpAttachCanvas is idempotent for panes whose content did not
+# change (same canvas = no reparent, just focus rewire).
+# D05：交换（或回填）之后**多个**窗格的内容会同时变化 —— 按绑定表把每个窗格重新挂载。
+# gpAttachCanvas 对内容未变的窗格是幂等的（同一画布 = 不 reparent，只重接焦点）。
+func _gpAttachAllPanes() -> void:
+	for gpI in range(_gpPanes.size()):
+		_gpAttachPane(gpI, _gpPaneSheets[gpI] if gpI < _gpPaneSheets.size()
+			else GPPaneLayout.GP_EMPTY)
+
+
 # The canvas of sheet tab gpS (null when out of range or empty).
 # 图纸标签 gpS 的画布（越界或空时为 null）。
 func _gpCanvasOfTab(gpS: int) -> GPCanvas2D:
@@ -996,17 +1007,22 @@ func _gpOnPaneFocused(gpPane: GPCanvasPane) -> void:
 		gpActiveChanged.emit()
 
 
-# A pane's picker chose a sheet: rebind THIS pane (the uniqueness invariant empties the pane
-# that showed it before), and make the pane active — the user just aimed at it.
-# 某窗格的选择器选定了图纸：重绑**本窗格**（唯一性不变量会清空原先显示它的窗格），并把它
-# 设为活动窗格 —— 用户刚刚瞄准了它。
+# A pane's picker chose a sheet: rebind THIS pane (D05: if the sheet already shows in
+# another pane, the two panes SWAP contents — no pane is ever left blank; only a sheet
+# shown nowhere falls back to the plain bind), and make the pane active — the user just
+# aimed at it.
+# 某窗格的选择器选定了图纸：重绑**本窗格**（D05：若该图纸已显示在另一窗格，两窗格
+# **交换**内容 —— 任何窗格都不留白；只有无人显示的图纸才回落普通绑定），并把它设为
+# 活动窗格 —— 用户刚刚瞄准了它。
 func _gpOnPanePick(gpPane: GPCanvasPane, gpSheetIdx: int) -> void:
 	var gpIdx: int = _gpPanes.find(gpPane)
 	if gpIdx < 0 or gpSheetIdx < 0 or gpSheetIdx >= gpTabs.size():
 		return
 	_gpActivePane = gpIdx
-	_gpPaneSheets = GPPaneLayout.gpBind(_gpPaneSheets, gpIdx, gpSheetIdx)
-	_gpAttachPane(gpIdx, gpSheetIdx)
+	_gpPaneSheets = GPPaneLayout.gpSwapOrBind(_gpPaneSheets, gpIdx, gpSheetIdx)
+	# D05: a swap changes BOTH panes — re-home every pane from the binding table.
+	# D05：交换会同时改变**两个**窗格 —— 按绑定表重挂载每个窗格。
+	_gpAttachAllPanes()
 	gpActive = gpSheetIdx
 	_gpTabSyncing = true
 	gpTabBar.current_tab = gpSheetIdx
@@ -1037,11 +1053,19 @@ func _gpSyncActiveTab() -> void:
 		gpActiveChanged.emit()
 
 
-# Accent underline on the active pane only.
-# 仅活动窗格佩戴 accent 底线。
+# Accent underline on the active pane only. D22 also drives here: single-view hides the
+# pane header (the tab bar duplicates it), and the pop-out button greys out while a canvas
+# is already popped out (the second press used to die silently).
+# 仅活动窗格佩戴 accent 底线。D22 也经此驱动：单视图隐藏窗格头部（标签栏与之重复），
+# 已有画布被摘出时摘出按钮置灰（第二次按下此前会静默失效）。
 func _gpRestylePanes() -> void:
 	for gpI in range(_gpPanes.size()):
 		_gpPanes[gpI].gpActive = (gpI == _gpActivePane)
+		_gpPanes[gpI].gpSetChromeVisible(_gpPanes.size() > 1)
+		var gpPop: bool = _gpPopSheet != GPPaneLayout.GP_EMPTY
+		_gpPanes[gpI].gpPopBtn.disabled = gpPop
+		_gpPanes[gpI].gpPopBtn.tooltip_text = I18n.gpTr(
+			"center.popout_already" if gpPop else "center.popout_tip")
 
 
 # The picker of every pane: all sheets, own entry selected, entries held by OTHER panes (or
@@ -1054,7 +1078,11 @@ func _gpFillPickers() -> void:
 		gpPane.gpPick.clear()
 		var gpSel: int = -1
 		for gpS in range(gpTabs.size()):
-			var gpTitle: String = str(gpTabs[gpS].get("title", ""))
+			# D22: the picker caption goes through the SAME title builder as the tab bar —
+			# "图号 名称", and follows renames via _gpCommitRename's refresh.
+			# D22：选择器标题走与标签栏**同一个**标题构造器 —— 「图号 名称」，并经
+			# _gpCommitRename 的刷新跟随重命名。
+			var gpTitle: String = _gpTabTitleOf(gpTabs[gpS].get("sheet") as GPSheet)
 			gpPane.gpPick.add_item(gpTitle)
 			if gpS == gpPane.gpSheetIdx:
 				gpSel = gpS
@@ -1084,6 +1112,58 @@ func gpCanvasAtGlobalPoint(gpGlobal: Vector2) -> GPCanvas2D:
 	return null
 
 
+# D18 (user feedback 2026-11-04): whether a sheet is VISIBLE anywhere — a pane or the
+# popped-out window. Unknown sheet ids count as invisible (the caller opens nothing).
+# D18（用户反馈 2026-11-04）：某图纸是否**正在任何视图**显示 —— 窗格或摘出窗口。未知 id
+# 算不可见（调用方不会打开任何东西）。
+func gpSheetVisible(gpSheetId: String) -> bool:
+	for gpI in range(gpTabs.size()):
+		var gpSheet: GPSheet = gpTabs[gpI].get("sheet") as GPSheet
+		if gpSheet == null or gpSheet.gpId != gpSheetId:
+			continue
+		if gpI == _gpPopSheet:
+			return true
+		return _gpPaneSheets.has(gpI)
+	return false
+
+
+# D18: open a sheet (by id) in the FIRST EMPTY pane — the one-click "see what just happened
+# on the other sheet" answer after a cross-sheet link is created. Returns false when there
+# is no empty pane (or the sheet is the popped-out one, which no pane may take).
+# D18：把图纸（按 id）打开进**第一个空窗格** —— 跨图纸连接创建后「看看对端发生了什么」的
+# 一键答案。无空窗格（或该图纸已被摘出、窗格不得争抢）时返回 false。
+func gpOpenSheetInEmptyPane(gpSheetId: String) -> bool:
+	for gpI in range(gpTabs.size()):
+		var gpSheet: GPSheet = gpTabs[gpI].get("sheet") as GPSheet
+		if gpSheet == null or gpSheet.gpId != gpSheetId:
+			continue
+		if gpI == _gpPopSheet:
+			return false
+		var gpSlot: int = _gpPaneSheets.find(GPPaneLayout.GP_EMPTY)
+		if gpSlot < 0:
+			return false
+		_gpPaneSheets = GPPaneLayout.gpBind(_gpPaneSheets, gpSlot, gpI)
+		_gpAttachPane(gpSlot, gpI)
+		_gpFillPickers()
+		_gpRestylePanes()
+		return true
+	return false
+
+
+# D22: menu entries for pop-out / return — the pop-out button greys out while a window is
+# open, and single view hides the pane header, so the menu is the always-available entry.
+# D22：摘出 / 归位的菜单入口 —— 窗口开着时摘出按钮置灰、单视图隐藏窗格头部，
+# 菜单是**永远可用**的入口。
+func gpPopoutActive() -> void:
+	if _gpActivePane >= 0 and _gpActivePane < _gpPanes.size():
+		gpPopoutPane(_gpPanes[_gpActivePane])
+
+
+func gpReturnPopout() -> void:
+	if _gpPopSheet != GPPaneLayout.GP_EMPTY:
+		_gpOnPopClosed()
+
+
 # ---- pop-out (W13-S7, ADR-44 D3: EMBEDDED window — one code path on every platform) ----
 # ---- 摘出（W13-S7，ADR-44 D3：**嵌入式**窗口 —— 所有平台同一条代码路径）----
 
@@ -1111,7 +1191,7 @@ func gpPopoutPane(gpPane: GPCanvasPane) -> void:
 		_gpPopWin.close_requested.connect(_gpOnPopClosed)
 		_gpPopWin.min_size = Vector2i(480, 320)
 		add_child(_gpPopWin)
-	_gpPopWin.title = str(gpTabs[gpSheetIdx].get("title", ""))
+	_gpPopWin.title = _gpTabTitleOf(gpTabs[gpSheetIdx].get("sheet") as GPSheet)
 	_gpPopWin.add_child(gpCv)
 	gpCv.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# A click inside the popup must still make its sheet the ACTIVE one (the docks serve it),
@@ -1178,8 +1258,17 @@ func _gpOnPopClosed() -> void:
 		_gpFillPickers()
 		return
 	var gpHome: int = _gpPopPane if _gpPopPane < _gpPanes.size() else 0
-	_gpPaneSheets = GPPaneLayout.gpBind(_gpPaneSheets, gpHome, gpSheetIdx)
-	_gpAttachPane(gpHome, gpSheetIdx)
+	# D05: swap-or-bind keeps the return symmetric with the picker — if the home sheet
+	# somehow got bound elsewhere meanwhile, the panes swap instead of someone going blank;
+	# then refill so no empty slot survives the layout change that may have happened while
+	# the window was open.
+	# D05：归位与选择器走**同一**交换语义 —— 若窗格在窗口打开期间换过内容，两窗格交换而非
+	# 有人留白；随后回填，保证窗口打开期间可能发生的布局变化不留下空窗格。
+	_gpPaneSheets = GPPaneLayout.gpSwapOrBind(_gpPaneSheets, gpHome, gpSheetIdx)
+	_gpPaneSheets = GPPaneLayout.gpRefill(_gpPaneSheets, gpTabs.size(), GPPaneLayout.GP_EMPTY)
+	# D05: swap-or-bind plus refill can move SEVERAL panes — re-home them all.
+	# D05：交换或回填可能同时移动**多个**窗格 —— 全部重挂载。
+	_gpAttachAllPanes()
 	if _gpActivePane == gpHome and gpActive != gpSheetIdx:
 		gpActive = gpSheetIdx
 		_gpTabSyncing = true
@@ -1471,6 +1560,12 @@ func _gpCommitRename(gpText: String, gpIdx: int = -1) -> void:
 		gpSheet.gpName = gpNew
 	var gpSheetForTitle: GPSheet = gpTabs[gpIdx].get("sheet") as GPSheet
 	gpTabBar.set_tab_title(gpIdx, _gpTabTitleOf(gpSheetForTitle) if gpSheetForTitle != null else gpNew)
+	# D22: every surface that mirrors the title follows the rename — pane pickers and the
+	# popped-out window's title used to keep the stale name.
+	# D22：镜像标题的每个表面都跟随重命名 —— 窗格选择器与摘出窗口标题此前会保留旧名。
+	_gpFillPickers()
+	if _gpPopSheet == gpIdx and _gpPopWin != null and is_instance_valid(_gpPopWin):
+		_gpPopWin.title = _gpTabTitleOf(gpSheetForTitle) if gpSheetForTitle != null else gpNew
 
 
 # Paint the canvas working-area background (brightest tier) so the sheet stands out

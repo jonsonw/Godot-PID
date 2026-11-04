@@ -101,6 +101,15 @@ signal gpConnectPickRequested(gpNodeId: String, gpSheetId: String)
 # B 端延续边上的跨图纸继承勾选框（用户反馈 2026-11-04）：用户对本线段开关了「继承源端编号」。
 signal gpEdgeInheritToggled(gpEdgeId: String, gpFollow: bool)
 
+# U3 (user feedback 2026-11-04): the link's action row — jump to the peer sheet/connector,
+# unlink (both flags stay, honest unlinked state) and delete the whole pair. The shell owns
+# all three flows; the inspector only announces intent.
+# U3（用户反馈 2026-11-04）：link 的动作行 —— 跳到对端、断开（两面旗标保留、回到诚实的
+# 未连接态）、整对删除。三个流程都归外壳所有；属性面板只宣布意图。
+signal gpJumpToPeerRequested(gpNodeId: String)
+signal gpUnlinkRequested(gpLinkId: String)
+signal gpLinkDeleteRequested(gpLinkId: String)
+
 # Container link-table provider (the panel owns no link table). Invalid = section hidden.
 # 容器 link 表来源（本面板不持有 link 表）。无效时整段隐藏。
 var gpLinksProvider: Callable = Callable()
@@ -406,6 +415,37 @@ func _gpAddLinkSection(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> void:
 		gpLinkSyncRequested.emit(gpLink.gpInstanceId))
 	gpFormRoot.add_child(gpSyncBtn)
 	_gpAddNote(I18n.gpTr("offpage.insp_sync_hint"))
+	# U3 action row: the link's "home page" actions — jump to the peer, unlink (both flags
+	# stay, honest unlinked state), delete the whole pair (the shell keeps its confirm).
+	# U3 动作行：link 的「主页」动作 —— 跳到对端、断开（两面旗标保留、回到诚实的未连接态）、
+	# 整对删除（确认框仍归外壳）。
+	var gpActs: HBoxContainer = HBoxContainer.new()
+	gpActs.add_theme_constant_override("separation", 6)
+	gpFormRoot.add_child(gpActs)
+	var gpJumpBtn: Button = Button.new()
+	gpJumpBtn.text = I18n.gpTr("offpage.act_jump")
+	gpJumpBtn.tooltip_text = I18n.gpTr("offpage.act_jump_tip")
+	gpJumpBtn.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpJumpBtn.focus_mode = Control.FOCUS_NONE
+	gpJumpBtn.pressed.connect(func() -> void:
+		gpJumpToPeerRequested.emit(gpNode.gpInstanceId))
+	gpActs.add_child(gpJumpBtn)
+	var gpUnlinkBtn: Button = Button.new()
+	gpUnlinkBtn.text = I18n.gpTr("offpage.act_unlink")
+	gpUnlinkBtn.tooltip_text = I18n.gpTr("offpage.act_unlink_tip")
+	gpUnlinkBtn.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpUnlinkBtn.focus_mode = Control.FOCUS_NONE
+	gpUnlinkBtn.pressed.connect(func() -> void:
+		gpUnlinkRequested.emit(gpLink.gpInstanceId))
+	gpActs.add_child(gpUnlinkBtn)
+	var gpDelBtn: Button = Button.new()
+	gpDelBtn.text = I18n.gpTr("offpage.act_delete")
+	gpDelBtn.tooltip_text = I18n.gpTr("offpage.act_delete_tip")
+	gpDelBtn.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpDelBtn.focus_mode = Control.FOCUS_NONE
+	gpDelBtn.pressed.connect(func() -> void:
+		gpLinkDeleteRequested.emit(gpLink.gpInstanceId))
+	gpActs.add_child(gpDelBtn)
 
 
 # The peer-sheet dropdown for an UNLINKED connector. Ordered by drawing number through the

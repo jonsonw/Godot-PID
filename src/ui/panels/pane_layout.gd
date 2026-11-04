@@ -91,6 +91,39 @@ static func gpAfterTabRemoved(gpBindings: Array[int], gpRemovedIdx: int) -> Arra
 	return gpOut
 
 
+# D05 (user feedback 2026-11-04): SWAP the contents of two panes. Both panes keep showing
+# something — this is the fix for "pick sheet B in pane 1 → pane 2 goes blank": the pane
+# that used to show B receives pane 1's OLD sheet instead of being emptied. Pure.
+# D05（用户反馈 2026-11-04）：**交换**两个窗格的内容。两边始终有内容 —— 这正是
+# 「窗格 1 选图纸 B → 窗格 2 变空白」的修复：原先显示 B 的窗格改收窗格 1 的**旧**图纸，
+# 而不是被清空。纯函数。
+static func gpSwap(gpBindings: Array[int], gpPaneA: int, gpPaneB: int) -> Array[int]:
+	var gpOut: Array[int] = gpBindings.duplicate()
+	if gpPaneA < 0 or gpPaneB < 0 or gpPaneA >= gpOut.size() or gpPaneB >= gpOut.size() \
+			or gpPaneA == gpPaneB:
+		return gpOut
+	var gpTmp: int = gpOut[gpPaneA]
+	gpOut[gpPaneA] = gpOut[gpPaneB]
+	gpOut[gpPaneB] = gpTmp
+	return gpOut
+
+
+# D05 decision helper: bind gpSheetIdx into gpPaneIdx, EXCEPT when the sheet is already
+# shown in another pane — then SWAP the two panes' contents so no pane goes blank. A sheet
+# shown nowhere falls back to the plain bind (emptying is only legal in that case, where
+# nothing is displaced from another pane). Pure.
+# D05 判定助手：把 gpSheetIdx 绑进 gpPaneIdx —— 但若该图纸已显示在**另一个**窗格，则改为
+# **交换**两窗格内容，任何窗格都不留白。图纸无人显示时回落普通绑定（只有这种情况下才
+# 允许空出 —— 此时没有任何窗格的内容被挤走）。纯函数。
+static func gpSwapOrBind(gpBindings: Array[int], gpPaneIdx: int, gpSheetIdx: int) -> Array[int]:
+	if gpSheetIdx < 0:
+		return gpBind(gpBindings, gpPaneIdx, gpSheetIdx)
+	var gpHolder: int = gpBindings.find(gpSheetIdx)
+	if gpHolder >= 0 and gpHolder != gpPaneIdx:
+		return gpSwap(gpBindings, gpPaneIdx, gpHolder)
+	return gpBind(gpBindings, gpPaneIdx, gpSheetIdx)
+
+
 # The first sheet tab index NOT shown in any pane (or GP_EMPTY when every sheet is shown).
 # [param gpExclude] a sheet index that must not be picked (e.g. one living in the pop-out
 # window — binding it to a pane would fight the window for the same canvas).

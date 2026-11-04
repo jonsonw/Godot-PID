@@ -248,7 +248,20 @@ static func gpOneSymbol(gpGraph: GPPIDGraph, gpLookup: Callable, gpNode: GPPIDNo
 		gpSpec = gpGen.get("spec", {}) as Dictionary
 	elif not gpDef.gpShapes.is_empty():
 		gpSpec = gpDef.gpShapeSpec()
-	gpGlyphEntities(gpSpec, gpSize, gpWT, gpOut)
+	# D20 print mirror (user feedback 2026-11-04): paper cannot carry the screen's stroke
+	# colors, so the same generator state key maps to a LINEWEIGHT — unlinked prints thin
+	# (an honest placeholder), dangling prints heavy (attention), resolved keeps the body
+	# weight. Same single-source decision, no screen/paper fork (B2 redline).
+	# D20 打印镜像（用户反馈 2026-11-04）：纸面带不走屏幕的描边色，故同一生成器状态键映射
+	# 为**线重** —— 未连接印细线（诚实的占位）、悬空印粗线（提请注意）、已解析保持主体线重。
+	# 同一份单一来源判定，屏幕与纸面不分家（B2 红线）。
+	var gpBodyW: float = GP_W_BODY
+	match str(gpGen.get("offpage_state", "")):
+		GPSymbolGeneratorRegistry.GP_OFFPAGE_UNLINKED:
+			gpBodyW = GP_W_TRIM
+		GPSymbolGeneratorRegistry.GP_OFFPAGE_DANGLING:
+			gpBodyW = GP_W_FRAME
+	gpGlyphEntities(gpSpec, gpSize, gpWT, gpOut, gpBodyW)
 	gpGeneratorTexts(gpGen, gpNode, gpSize, gpWT, gpOut)
 	gpTagEntity(gpNode, gpDef, gpWT, gpOut)
 
@@ -261,7 +274,7 @@ static func gpOneSymbol(gpGraph: GPPIDGraph, gpLookup: Callable, gpNode: GPPIDNo
 # grid 生成器产出包络毫米路径与包络大小的 box。painter 的代数与尺度无关，故两者都走同一对
 # gpUnitBox + gpFitScale —— 没有逐生成器特判。
 static func gpGlyphEntities(gpSpec: Dictionary, gpSize: Vector2, gpWT: Dictionary,
-		gpOut: Array[Dictionary]) -> void:
+		gpOut: Array[Dictionary], gpBodyW: float = GP_W_BODY) -> void:
 	if gpSpec.is_empty():
 		return
 	var gpBox: Rect2 = GPSymbolGeometry.gpUnitBox(gpSpec)
@@ -280,21 +293,21 @@ static func gpGlyphEntities(gpSpec: Dictionary, gpSize: Vector2, gpWT: Dictionar
 		for gpPt in gpPts:
 			gpWorldPts.append(_gpToWorld(
 				gpCtr + (Vector2(float(gpPt[0]), float(gpPt[1])) - gpBoxCtr) * gpK, gpWT))
-		gpPushPoly(gpOut, gpWorldPts, false, GP_W_BODY, GP_LAYER_EQUIPMENT)
+		gpPushPoly(gpOut, gpWorldPts, false, gpBodyW, GP_LAYER_EQUIPMENT)
 	for gpC in gpSpec.get("circles", []):
 		var gpCen: Vector2 = gpCtr + (Vector2(float(gpC["c"][0]), float(gpC["c"][1])) - gpBoxCtr) * gpK
 		# A uniform scale keeps circles circles; the world transform only moves the centre.
 		# 均匀缩放使圆恒为圆；世界变换只移动圆心。
 		gpPushCircle(gpOut, _gpToWorld(gpCen, gpWT), float(gpC["r"]) * gpK,
-			GP_W_BODY, GP_LAYER_EQUIPMENT)
+			gpBodyW, GP_LAYER_EQUIPMENT)
 	for gpRd in gpSpec.get("rects", []):
 		var gpPos: Vector2 = gpCtr + (Vector2(float(gpRd["pos"][0]), float(gpRd["pos"][1])) - gpBoxCtr) * gpK
 		var gpR: Rect2 = Rect2(gpPos, Vector2(float(gpRd["size"][0]), float(gpRd["size"][1])) * gpK)
-		gpPushPoly(gpOut, _gpRectPts(gpR, gpWT), true, GP_W_BODY, GP_LAYER_EQUIPMENT)
+		gpPushPoly(gpOut, _gpRectPts(gpR, gpWT), true, gpBodyW, GP_LAYER_EQUIPMENT)
 	for gpA in gpSpec.get("arcs", []):
 		var gpAC: Vector2 = gpCtr + (Vector2(float(gpA["c"][0]), float(gpA["c"][1])) - gpBoxCtr) * gpK
 		gpPushPoly(gpOut, _gpArcPts(gpAC, float(gpA["r"]) * gpK,
-			float(gpA["a0"]), float(gpA["a1"]), gpWT), false, GP_W_BODY, GP_LAYER_EQUIPMENT)
+			float(gpA["a0"]), float(gpA["a1"]), gpWT), false, gpBodyW, GP_LAYER_EQUIPMENT)
 
 
 # Generator text lines: centred in the envelope, pitch 1.5x the sheet height — the SAME

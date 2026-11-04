@@ -372,6 +372,11 @@ func _gpAssembleInspector() -> void:
 	gpInspector.gpLinksProvider = Callable(gpCenter, "gpOffPageLinksList")
 	gpInspector.gpLinkAttrEditRequested.connect(_gpOnLinkAttrEdit)
 	gpInspector.gpLinkSyncRequested.connect(_gpOnInspectorLinkSync)
+	# U3 action row (user feedback 2026-11-04): jump / unlink / delete.
+	# U3 动作行（用户反馈 2026-11-04）：跳转 / 断开 / 删除。
+	gpInspector.gpJumpToPeerRequested.connect(_gpOnJumpToPeer)
+	gpInspector.gpUnlinkRequested.connect(_gpOnInspectorUnlink)
+	gpInspector.gpLinkDeleteRequested.connect(_gpOnInspectorLinkDelete)
 	# The peer-sheet dropdown's data source + the pick hand-off (user feedback 2026-11-03).
 	# 对端图纸下拉的数据源与选择移交（用户反馈 2026-11-03）。
 	gpInspector.gpSheetsProvider = func() -> Dictionary:
@@ -1045,9 +1050,9 @@ func _gpCreateCrossLink(gpCanvas: GPCanvas2D, gpFromRef: Dictionary, gpKind: Str
 		if gpKind == GPPIDEdge.GP_SIGNAL and gpSignalType == "":
 			gpSignalType = "ELECTRIC"
 	var gpLinkId: String = gpCanvas.gpActions.gpCrossSheetCreate(gpFromRef, gpKind,
-		gpSignalType, true, gpWorld, gpPeerPos, gpLocalSheet.gpId, gpPeerSheetId,
-		gpPeerSheet.gpNumber, gpPeerSheet.gpGraph, gpCenter.gpOffPageLinks,
-		gpExistingLocal, {}, gpServedFinal)
+		gpSignalType, true, _gpClampIntoFrame(gpWorld, gpLocalSheet, gpEnv), gpPeerPos,
+		gpLocalSheet.gpId, gpPeerSheetId, gpPeerSheet.gpNumber, gpPeerSheet.gpGraph,
+		gpCenter.gpOffPageLinks, gpExistingLocal, {}, gpServedFinal)
 	if gpLinkId == "":
 		# D24: cross-sheet refusal keys live under offpage.refuse_*, not edge.* — without
 		# the prefix the status bar shows a raw key like "edge.same_sheet".
@@ -1062,8 +1067,54 @@ func _gpCreateCrossLink(gpCanvas: GPCanvas2D, gpFromRef: Dictionary, gpKind: Str
 	for gpL in gpCenter.gpOffPageLinks:
 		if gpL.gpInstanceId == gpLinkId:
 			gpTag = gpL.gpTag
+	# D18 (user feedback 2026-11-04): the creation must LAND visibly — flash both flags, and
+	# when the peer sheet is not visible anywhere (no pane, not popped out), open it in the
+	# first EMPTY pane so the user can see what just happened on the other sheet.
+	# D18（用户反馈 2026-11-04）：创建必须有**落地感** —— 两端旗标短促高亮；对端图纸未在
+	# 任何视图显示（无窗格、未摘出）时，打开进**第一个空窗格**，让用户看见对端那张图刚发生了什么。
+	_gpFlashLinkEnds(gpLinkId)
+	if not gpCenter.gpSheetVisible(gpPeerSheetId) \
+			and gpCenter.gpOpenSheetInEmptyPane(gpPeerSheetId):
+		gpSetState("offpage.status_created_opened", [gpTag])
+		return gpLinkId
 	gpSetState("offpage.status_created", [gpTag])
 	return gpLinkId
+
+
+# D18: flash BOTH ends of a fresh link — the drop-highlight rect on each end's own canvas,
+# cleared after a beat. A token guards against clearing a NEWER highlight (a drag that
+# started meanwhile) — only the newest flash may clear.
+# D18：新 link 的**两端**短促高亮 —— 各自在所在画布上画落点高亮框，一拍半后清除。令牌防止
+# 清掉**更新**的高亮（期间用户开始了拖拽）—— 只有最新一次闪光可以清除。
+func _gpFlashLinkEnds(gpLinkId: String) -> void:
+	var gpLink: GPOffPageLink = null
+	for gpL in gpCenter.gpOffPageLinks:
+		if gpL.gpInstanceId == gpLinkId:
+			gpLink = gpL
+			break
+	if gpLink == null:
+		return
+	var gpEnds: Array = [gpLink.gpA, gpLink.gpB]
+	_gpFlashToken += 1
+	var gpToken: int = _gpFlashToken
+	for gpEnd in gpEnds:
+		var gpRef: Dictionary = gpEnd
+		var gpCv: GPCanvas2D = gpCenter.gpCanvasForSheetId(
+			str(gpRef.get(GPOffPageLink.GP_KEY_SHEET, "")))
+		var gpNode: String = str(gpRef.get(GPOffPageLink.GP_KEY_NODE, ""))
+		if gpCv != null and gpNode != "":
+			gpCv.gpSetDropHighlight(gpNode)
+	var gpClear: Callable = func() -> void:
+		if gpToken != _gpFlashToken:
+			return
+		for gpEnd in gpEnds:
+			var gpRef2: Dictionary = gpEnd
+			var gpCv2: GPCanvas2D = gpCenter.gpCanvasForSheetId(
+				str(gpRef2.get(GPOffPageLink.GP_KEY_SHEET, "")))
+			var gpNode2: String = str(gpRef2.get(GPOffPageLink.GP_KEY_NODE, ""))
+			if gpCv2 != null and is_instance_valid(gpCv2) and gpNode2 != "":
+				gpCv2.gpSetDropHighlight("")
+	get_tree().create_timer(1.4).timeout.connect(gpClear, CONNECT_ONE_SHOT)
 
 
 # D07: derive the link kind from the connector's OWN port purpose — the single
@@ -1079,6 +1130,25 @@ func _gpKindForConnector(gpNode: GPPIDNode) -> String:
 	return GPPIDEdge.GP_PROCESS
 
 
+# D17 minimal fix (user feedback 2026-11-04): the out-of-frame gesture DEFINES the drop
+# point as outside the frame — clamp the local flag into the frame rect (pad = half an
+# offpage envelope) so it can never print off-paper. The full edge-snapping stays in P3
+# (R4); mode B (existing local connector) never consumes this position.
+# D17 最小止血（用户反馈 2026-11-04）：出图框手势的松手点**定义上**就在图框外 —— 把本端
+# 旗标钳进图框矩形（内边距 = 半个离页连接符包络），绝无打印出纸的可能。完整吸附留在 P3
+#（R4）；模式 B（本端既有连接符）不消费该位置。
+func _gpClampIntoFrame(gpWorld: Vector2, gpSheet: GPSheet, gpEnv: Vector2) -> Vector2:
+	if gpSheet == null:
+		return gpWorld
+	var gpFrame: Rect2 = GPFrameGeometry.gpFrameRect(gpSheet)
+	var gpPad: float = minf(gpEnv.x, gpEnv.y) * 0.5
+	var gpLo: Vector2 = gpFrame.position + Vector2(gpPad, gpPad)
+	var gpHi: Vector2 = gpFrame.end - Vector2(gpPad, gpPad)
+	if gpHi.x <= gpLo.x or gpHi.y <= gpLo.y:
+		return gpFrame.get_center()
+	return gpWorld.clamp(gpLo, gpHi)
+
+
 # ---- W13-S8: cross-pane drag-to-connect (the SECOND connection logic) ----
 # ---- W13-S8：跨窗格拖拽连线（第二种连接逻辑）----
 
@@ -1087,12 +1157,37 @@ func _gpKindForConnector(gpNode: GPPIDNode) -> String:
 var _gpDragHlCanvas: GPCanvas2D = null
 var _gpDragHlNode: String = ""
 
+# D18: token of the newest link-end flash — only the newest may clear the highlights.
+# D18：最新一次 link 端闪光令牌 —— 只有最新一次可以清除高亮。
+var _gpFlashToken: int = 0
+
+# D23: cross-pane RUBBER BAND — a full-rect, mouse-transparent overlay on the shell that
+# draws the pending connection from the SOURCE flag to the pointer, across pane borders.
+# D23：跨窗格**橡皮筋** —— 外壳上的满矩形、鼠标透明覆盖层，画出从**源**旗标到指针的
+# 待定连接，跨越窗格边界。
+var _gpRubber: Control = null
+var _gpRubberActive: bool = false
+var _gpRubberFrom: Vector2 = Vector2.ZERO
+var _gpRubberTo: Vector2 = Vector2.ZERO
+
+# D23: the dragged source connector (canvas + id) so its "connecting" feedback (dimmed
+# view) can be restored whatever way the gesture ends.
+# D23：被拖拽的源连接符（画布 + id），使它的「连线中」反馈（视图变暗）无论手势如何结束
+# 都能恢复。
+var _gpDragSrcCanvas: GPCanvas2D = null
+var _gpDragSrcNode: String = ""
+
 
 # A connector is being dragged across panes: highlight the node under the pointer in
 # whichever OTHER canvas is under it. The source canvas never highlights itself.
 # 连接符正被拖过窗格：在其下方的**另一块**画布中高亮指针下的图元。源画布永不高亮自己。
 func _gpOnCrossPaneDragUpdated(gpNodeId: String, gpGlobal: Vector2,
 		gpSource: GPCanvas2D) -> void:
+	# D23: the source flag dims and the rubber band follows the pointer — the gesture is
+	# now VISIBLE on the source side too, not just as a rectangle on the target.
+	# D23：源旗标变暗、橡皮筋跟随指针 —— 手势在**源**一侧也可见，而不只是目标上的矩形。
+	_gpSetDragSourceFeedback(gpSource, gpNodeId, true)
+	_gpRubberUpdate(gpSource, gpNodeId, gpGlobal)
 	var gpTarget: GPCanvas2D = gpCenter.gpCanvasAtGlobalPoint(gpGlobal)
 	if gpTarget == gpSource:
 		gpTarget = null
@@ -1121,12 +1216,21 @@ func _gpOnCrossPaneDragUpdated(gpNodeId: String, gpGlobal: Vector2,
 # 的族别（管 / 信号），与工具的默认一致。
 func _gpOnCrossPaneDropped(gpNodeId: String, gpGlobal: Vector2, gpSource: GPCanvas2D) -> void:
 	_gpClearDragHighlight()
+	_gpRubberStop()
+	_gpSetDragSourceFeedback(gpSource, gpNodeId, false)
 	var gpTarget: GPCanvas2D = gpCenter.gpCanvasAtGlobalPoint(gpGlobal)
-	if gpTarget == null or gpTarget == gpSource:
+	# Dropped OUTSIDE every view (canvas + popup): a deliberate cancel — stay silent.
+	# 落在所有视图（画布 + 弹窗）**之外**：刻意的取消 —— 保持沉默。
+	if gpTarget == null:
 		return
 	var gpSrcSheet: GPSheet = gpSource.gpSheet
 	var gpTgtSheet: GPSheet = gpTarget.gpSheet
-	if gpSrcSheet == null or gpTgtSheet == null or gpSrcSheet.gpId == gpTgtSheet.gpId:
+	# D23: an invalid drop says WHY — dropping back on the source sheet is the same-sheet
+	# refusal, not a silent nothing.
+	# D23：无效落点要说明**原因** —— 落回源图纸就是「同图纸不能连」的拒绝，而非无声无息。
+	if gpTarget == gpSource or (gpSrcSheet != null and gpTgtSheet != null \
+			and gpSrcSheet.gpId == gpTgtSheet.gpId):
+		gpSetState("offpage.refuse_same_sheet", [])
 		return
 	var gpConn: GPPIDNode = gpSource.gpGraph.gpGetNode(gpNodeId)
 	if gpConn == null:
@@ -1140,7 +1244,10 @@ func _gpOnCrossPaneDropped(gpNodeId: String, gpGlobal: Vector2, gpSource: GPCanv
 		return
 	var gpWorld: Vector2 = gpTarget.gpWorldFromScreen(gpTarget.get_local_mouse_position())
 	var gpHit: String = gpTarget.gpHitTest(gpWorld)
+	# D23: blank canvas under the pointer is a reason too — point at the ITEM to serve.
+	# D23：指针下的空白画布也是一个原因 —— 请指向要**服务**的图元。
 	if gpHit == "":
+		gpSetState("offpage.drop_blank", [])
 		return
 	var gpKind: String = GPPIDEdge.GP_PROCESS
 	var gpSignalType: String = ""
@@ -1166,6 +1273,9 @@ func _gpOnCrossPaneDropped(gpNodeId: String, gpGlobal: Vector2, gpSource: GPCanv
 # 手势未落点即结束（ESC）：清除高亮。
 func _gpOnCrossPaneDragEnded() -> void:
 	_gpClearDragHighlight()
+	_gpRubberStop()
+	if _gpDragSrcCanvas != null and _gpDragSrcNode != "":
+		_gpSetDragSourceFeedback(_gpDragSrcCanvas, _gpDragSrcNode, false)
 
 
 # Clear the drop highlight (idempotent).
@@ -1175,6 +1285,76 @@ func _gpClearDragHighlight() -> void:
 		_gpDragHlCanvas.gpSetDropHighlight("")
 	_gpDragHlCanvas = null
 	_gpDragHlNode = ""
+
+
+# D23: dim ("connecting…") or restore the dragged SOURCE connector's view. Idempotent; the
+# remembered source refs are set here so ANY ending path can restore them.
+# D23：把被拖拽**源**连接符的视图调暗（「连线中」）或恢复。幂等；源引用在此记忆，
+# 使任何结束路径都能恢复。
+func _gpSetDragSourceFeedback(gpCanvas: GPCanvas2D, gpNodeId: String, gpOn: bool) -> void:
+	if gpCanvas == null or gpCanvas.gpBinder == null or gpNodeId == "":
+		return
+	if gpOn:
+		_gpDragSrcCanvas = gpCanvas
+		_gpDragSrcNode = gpNodeId
+	var gpView: GPSymbolView = gpCanvas.gpBinder.gpGetSymbolView(gpNodeId)
+	if gpView != null and is_instance_valid(gpView):
+		gpView.modulate = Color(1.0, 1.0, 1.0, 0.55) if gpOn else Color.WHITE
+	if not gpOn:
+		_gpDragSrcCanvas = null
+		_gpDragSrcNode = ""
+
+
+# D23: lazily create the rubber-band overlay (full-rect, mouse-transparent, topmost).
+# D23：惰性创建橡皮筋覆盖层（满矩形、鼠标透明、最顶层）。
+func _gpEnsureRubber() -> Control:
+	if _gpRubber != null and is_instance_valid(_gpRubber):
+		return _gpRubber
+	var gpOv: Control = Control.new()
+	gpOv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gpOv.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	gpOv.draw.connect(_gpOnRubberDraw)
+	add_child(gpOv)
+	gpOv.move_to_front()
+	_gpRubber = gpOv
+	return gpOv
+
+
+# The rubber band paint: accent line source→pointer plus a pointer dot, in GLOBAL space
+# mapped into the overlay's local frame (the overlay spans the whole shell).
+# 橡皮筋绘制：源→指针的 accent 线加指针圆点，**全局**空间映射进覆盖层的本地坐标系
+#（覆盖层横跨整个外壳）。
+func _gpOnRubberDraw() -> void:
+	if not _gpRubberActive or _gpRubber == null:
+		return
+	var gpInv: Transform2D = _gpRubber.get_global_transform().affine_inverse()
+	var gpA: Vector2 = gpInv * _gpRubberFrom
+	var gpB: Vector2 = gpInv * _gpRubberTo
+	_gpRubber.draw_line(gpA, gpB, Color(1.0, 0.62, 0.20, 0.85), 2.0)
+	_gpRubber.draw_circle(gpB, 4.0, Color(1.0, 0.62, 0.20, 0.9))
+
+
+# D23: refresh the rubber band from the source flag's global position to the pointer.
+# D23：把橡皮筋从源旗标的**全局**位置刷新到指针。
+func _gpRubberUpdate(gpSource: GPCanvas2D, gpNodeId: String, gpGlobal: Vector2) -> void:
+	if gpSource == null or gpSource.gpGraph == null:
+		return
+	var gpConn: GPPIDNode = gpSource.gpGraph.gpGetNode(gpNodeId)
+	if gpConn == null:
+		return
+	_gpRubberFrom = gpSource.get_global_transform() * gpSource.gpScreenFromWorld(gpConn.gpPosition)
+	_gpRubberTo = gpGlobal
+	_gpRubberActive = true
+	_gpEnsureRubber().queue_redraw()
+
+
+# D23: stop the rubber band. / D23：停止橡皮筋。
+func _gpRubberStop() -> void:
+	if not _gpRubberActive:
+		return
+	_gpRubberActive = false
+	if _gpRubber != null and is_instance_valid(_gpRubber):
+		_gpRubber.queue_redraw()
 
 
 # Navigation: switch to the peer sheet and select the peer connector.
@@ -1559,6 +1739,55 @@ func _gpOnCrossSheetDeleteConfirmed(gpPlans: Array[Dictionary], gpCanvas: GPCanv
 # 显示用编号：有手改编号用编号，否则用实例 id。
 static func _gpLinkTag(gpLink: GPOffPageLink) -> String:
 	return gpLink.gpTag if gpLink.gpTag != "" else gpLink.gpInstanceId
+
+
+# U3: UNLINK from the inspector action row — the link leaves the container table, both
+# connector flags stay on their sheets as honest unlinked placeholders, one undo step.
+# U3：属性面板动作行的「断开」—— link 离开容器表，两面连接符旗标留在各自图纸上成为
+# 诚实的未连接占位，一个撤销步。
+func _gpOnInspectorUnlink(gpLinkId: String) -> void:
+	var gpLink: GPOffPageLink = _gpLinkById(gpLinkId)
+	if gpLink == null:
+		return
+	var gpLocalCanvas: GPCanvas2D = gpCenter.gpCanvasForSheetId(
+		str(gpLink.gpA.get(GPOffPageLink.GP_KEY_SHEET, "")))
+	var gpPeerCanvas: GPCanvas2D = gpCenter.gpCanvasForSheetId(
+		str(gpLink.gpB.get(GPOffPageLink.GP_KEY_SHEET, "")))
+	if gpLocalCanvas == null or gpLocalCanvas.gpActions == null \
+			or gpPeerCanvas == null or gpPeerCanvas.gpGraph == null:
+		return
+	if gpLocalCanvas.gpActions.gpUnlinkOffPage(gpLink, gpCenter.gpOffPageLinks,
+			gpLocalCanvas.gpGraph, gpPeerCanvas.gpGraph):
+		gpCenter.gpRefreshOffPageContext()
+		gpSetState("offpage.unlink_done", [])
+	else:
+		gpSetState("offpage.unlink_fail", [])
+
+
+# U3: DELETE the whole pair from the inspector action row — same confirmed cascade as the
+# canvas context menu, pre-planned for THIS link only (the user aimed at one link).
+# U3：属性面板动作行的「删除」—— 与画布右键菜单相同的**确认后**级联，但只预计划本条
+# link（用户瞄准的就是这一条）。
+func _gpOnInspectorLinkDelete(gpLinkId: String) -> void:
+	var gpLink: GPOffPageLink = _gpLinkById(gpLinkId)
+	if gpLink == null:
+		return
+	var gpLocalSheetId: String = str(gpLink.gpA.get(GPOffPageLink.GP_KEY_SHEET, ""))
+	var gpCanvas: GPCanvas2D = gpCenter.gpCanvasForSheetId(gpLocalSheetId)
+	if gpCanvas == null:
+		return
+	var gpPlans: Array[Dictionary] = [{"link": gpLink,
+		"local": str(gpLink.gpA.get(GPOffPageLink.GP_KEY_NODE, ""))}]
+	var gpDlg: ConfirmationDialog = ConfirmationDialog.new()
+	gpDlg.title = I18n.gpTr("offpage.del_title")
+	gpDlg.dialog_text = I18n.gpTr("offpage.del_text") % [I18n.gpTr("offpage.del_line")
+		% [_gpLinkTag(gpLink), _gpPeerSheetLabel(gpLink, gpLocalSheetId)]]
+	gpDlg.ok_button_text = I18n.gpTr("dialog.ok")
+	gpDlg.cancel_button_text = I18n.gpTr("dialog.cancel")
+	add_child(gpDlg)
+	gpDlg.confirmed.connect(_gpOnCrossSheetDeleteConfirmed.bind(gpPlans, gpCanvas))
+	gpDlg.canceled.connect(gpDlg.queue_free)
+	gpDlg.popup_centered()
 
 
 # The link with this instance id in the container table, or null.

@@ -83,6 +83,11 @@ const GP_MENUS: Dictionary = {
 		["menu.view_layout2", "view_layout_side"],
 		["menu.view_layout3", "view_layout_big2"],
 		["menu.view_layout4", "view_layout_grid"],
+		# D22: pop-out / return — the always-available entry (single view hides the pane
+		# header; the button greys out while a window is open).
+		# D22：摘出 / 归位 —— 永远可用的入口（单视图隐藏窗格头部；窗口开着时按钮置灰）。
+		["menu.view_popout", "view_popout"],
+		["menu.view_popback", "view_popback"],
 	],
 	"menu.project": [
 		["menu.project_tag_rules", "project_tag_rules"],

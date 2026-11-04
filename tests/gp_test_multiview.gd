@@ -148,3 +148,53 @@ func gpTestResizeKeepsEveryVisibleSheetOrPrioritisesTheActiveOne() -> void:
 	gpEq(gpB[0], 9, "the active sheet wins the last slot when nothing else is free")
 	gpB = GPPaneLayout.gpResized([2, 3], 1, GPPaneLayout.GP_EMPTY)
 	gpEq(gpB[0], 2, "with no active sheet to protect, the first binding survives")
+
+
+# ------------------------------------------------------------------ D05 swap (2026-11-04)
+# Picking a sheet ALREADY shown in another pane must SWAP the two panes' contents — no pane
+# may go blank. A sheet shown nowhere falls back to the plain bind (only then is emptying
+# legal, because nothing is displaced from another pane).
+# 选定**已显示在另一窗格**的图纸必须**交换**两窗格内容 —— 任何窗格都不许留白。无人显示的
+# 图纸回落普通绑定（只有这种情况才允许空出 —— 此时没有任何窗格的内容被挤走）。
+func gpTestSwapExchangesTwoPanesWithoutBlanking() -> void:
+	var gpB: Array[int] = GPPaneLayout.gpSwap([0, 1, GPPaneLayout.GP_EMPTY], 0, 1)
+	gpEq(gpB[0], 1, "swap puts pane 1's sheet into pane 0")
+	gpEq(gpB[1], 0, "swap puts pane 0's sheet into pane 1")
+	gpEq(gpB[2], GPPaneLayout.GP_EMPTY, "the uninvolved pane is untouched")
+	gpEq(gpB.size(), 3, "the pane count never changes")
+	# Purity: the input array is not mutated. / 纯性：输入数组不被原地修改。
+	var gpIn: Array[int] = [0, 1]
+	GPPaneLayout.gpSwap(gpIn, 0, 1)
+	gpEq(gpIn[0], 0, "swap is PURE — the input keeps its contents")
+	gpEq(gpIn[1], 1, "swap is PURE — the input keeps its contents")
+	# Nonsense indices return the bindings unchanged. / 非法下标原样返回。
+	gpB = GPPaneLayout.gpSwap([0, 1], -1, 1)
+	gpEq(gpB[0], 0, "an out-of-range pane is a no-op")
+	gpB = GPPaneLayout.gpSwap([0, 1], 0, 0)
+	gpEq(gpB[0], 0, "swapping a pane with itself is a no-op")
+
+
+func gpTestSwapOrBindSwapsWhenHeldElsewhere() -> void:
+	# The D05 decision: pane 0 (showing sheet 0) picks sheet 1, which pane 1 shows — SWAP,
+	# both panes keep content, and the uniqueness invariant still holds.
+	# D05 判定：窗格 0（显示图纸 0）选择窗格 1 正显示的图纸 1 —— **交换**，两边都有内容，
+	# 唯一性不变量仍成立。
+	var gpB: Array[int] = GPPaneLayout.gpSwapOrBind([0, 1], 0, 1)
+	gpEq(gpB[0], 1, "the picking pane gets the picked sheet")
+	gpEq(gpB[1], 0, "the previous holder gets the picker's old sheet — no blank pane")
+	# Uniqueness: each sheet appears at most once. / 唯一性：每张图纸至多出现一次。
+	for gpS in [0, 1]:
+		var gpCount: int = 0
+		for gpV in gpB:
+			if gpV == gpS:
+				gpCount += 1
+		gpEq(gpCount, 1, "sheet %d still shows in exactly one pane" % gpS)
+	# A sheet shown NOWHERE falls back to the plain bind (emptying the old holder is legal).
+	# 无人显示的图纸回落普通绑定（清空旧持有者合法）。
+	gpB = GPPaneLayout.gpSwapOrBind([0, GPPaneLayout.GP_EMPTY], 1, 2)
+	gpEq(gpB[1], 2, "an unbound sheet binds into the pane")
+	gpEq(gpB[0], 0, "and the other pane is untouched")
+	# Re-picking the sheet a pane already shows is a no-op. / 重选自己正显示的图纸是空转。
+	gpB = GPPaneLayout.gpSwapOrBind([0, 1], 0, 0)
+	gpEq(gpB[0], 0, "re-picking the same sheet changes nothing")
+	gpEq(gpB[1], 1, "re-picking the same sheet changes nothing")

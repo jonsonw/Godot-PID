@@ -37,6 +37,13 @@ signal gpPaneFocused(gpPane: GPCanvasPane)
 # 画布 reparent 进来的承载区。
 var gpHost: Control
 
+# The slim header (picker + pop-out). Public so the center area can hide it in single-view
+# (D22: one pane + tab bar = the header is pure duplication) and grey out the pop button
+# while another pane's canvas is already popped out.
+# 纤细头部（选择器 + 摘出）。公开使中间区能在单视图下隐藏它（D22：单窗格 + 标签栏 =
+# 头部纯属重复），并在已有画布被摘出时把摘出按钮置灰。
+var gpHeader: HBoxContainer
+
 # The sheet picker (all sheets; the center area fills and disables entries).
 # 图纸选择器（列出全部图纸；由中间区填充并禁用被占条目）。
 var gpPick: OptionButton
@@ -75,11 +82,17 @@ func _ready() -> void:
 	gpCol.add_theme_constant_override("separation", 0)
 	add_child(gpCol)
 	# ---- header ---- / ---- 头部 ----
-	var gpHeader: HBoxContainer = HBoxContainer.new()
-	gpHeader.custom_minimum_size = Vector2(0.0, 22.0)
-	gpHeader.size_flags_vertical = SIZE_SHRINK_BEGIN
-	gpHeader.add_theme_constant_override("separation", 2)
-	gpCol.add_child(gpHeader)
+	var gpHeaderRow: HBoxContainer = HBoxContainer.new()
+	gpHeader = gpHeaderRow
+	gpHeaderRow.custom_minimum_size = Vector2(0.0, 22.0)
+	gpHeaderRow.size_flags_vertical = SIZE_SHRINK_BEGIN
+	gpHeaderRow.add_theme_constant_override("separation", 2)
+	gpCol.add_child(gpHeaderRow)
+	# D22: a click on the pane HEADER (not just the canvas) activates the pane too — the
+	# header is part of the pane's identity, and aiming at it is aiming at the pane.
+	# D22：点击窗格**头部**（而不只是画布）同样激活本窗格 —— 头部是窗格身份的一部分，
+	# 瞄准它就是瞄准窗格。
+	gpHeaderRow.gui_input.connect(_gpOnHeaderInput)
 	gpPick = OptionButton.new()
 	gpPick.size_flags_horizontal = SIZE_EXPAND_FILL
 	gpPick.size_flags_vertical = SIZE_SHRINK_CENTER
@@ -174,11 +187,28 @@ func _gpOnPicked(gpIdx: int) -> void:
 	gpSheetPicked.emit(self, gpIdx)
 
 
-# Active panes wear the selected-tab look (dark fill + accent bottom border); inactive ones
-# stay dock-toned. The "panel" slot paints the WHOLE pane, so the underline reads as the
-# pane's own, not the picker button's.
-# 活动窗格佩戴选中 tab 的外观（深底 + accent 下边框）；非活动保持 dock 色。"panel" 槽绘制
-# **整个**窗格，故底线读作窗格自己的，而不是选择器按钮的。
+# D22: show/hide the pane header. Single view hides it (the tab bar already carries the
+# picker and the menu carries the pop-out entry); multi-view panes keep it — with several
+# panes each needs its own picker at hand.
+# D22：显示/隐藏窗格头部。单视图隐藏（标签栏已承载选择器、菜单承载摘出入口）；多视图窗格
+# 保留 —— 多窗格时每个窗格都需要手边的选择器。
+func gpSetChromeVisible(gpOn: bool) -> void:
+	if gpHeader != null:
+		gpHeader.visible = gpOn
+
+
+# D22: header click = pane focus. / D22：头部点击 = 窗格激活。
+func _gpOnHeaderInput(gpEv: InputEvent) -> void:
+	if gpEv is InputEventMouseButton and gpEv.pressed \
+			and gpEv.button_index == MOUSE_BUTTON_LEFT:
+		gpPaneFocused.emit(self)
+
+
+# Active panes wear the selected-tab look (dark fill + accent bottom border) — D22 adds an
+# accent bar down the LEFT edge and an accent-tinted picker caption, so the active pane reads
+# at a glance even when panes sit far apart; inactive ones stay dock-toned.
+# 活动窗格佩戴选中 tab 的外观（深底 + accent 下边框）—— D22 再加**左缘** accent 竖条与
+# accent 色选择器标题，使活动窗格即使相距很远也一眼可辨；非活动保持 dock 色。
 func _gpRestyle() -> void:
 	var gpSb: StyleBoxFlat = GPChromeStyle.gpStyleFor(GPChromeStyle.GP_DOCK_BG, 0)
 	gpSb.content_margin_left = 2.0
@@ -189,7 +219,13 @@ func _gpRestyle() -> void:
 		gpSb.bg_color = Color(0.129, 0.165, 0.204)
 		gpSb.border_color = GPChromeStyle.GP_ACCENT
 		gpSb.border_width_bottom = 1
+		gpSb.border_width_left = 2
 	add_theme_stylebox_override("panel", gpSb)
+	if gpPick != null:
+		if gpActive:
+			gpPick.add_theme_color_override("font_color", GPChromeStyle.GP_ACCENT)
+		else:
+			gpPick.remove_theme_color_override("font_color")
 
 
 # Locale changed: refresh the placeholder and the pop-out tooltip.

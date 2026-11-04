@@ -274,6 +274,12 @@ func gpOnMenu(gpAction: String) -> void:
 			gpHost.gpCenter.gpSetLayoutMode(GPPaneLayout.GP_BIG2)
 		"view_layout_grid":
 			gpHost.gpCenter.gpSetLayoutMode(GPPaneLayout.GP_GRID)
+		# D22: pop-out / return through the center area's own paths.
+		# D22：摘出 / 归位走中间区自己的路径。
+		"view_popout":
+			gpHost.gpCenter.gpPopoutActive()
+		"view_popback":
+			gpHost.gpCenter.gpReturnPopout()
 		"edit_delete":
 			if gpHost.gpActiveCanvas().gpSelectedId != "":
 				gpDeleteSelected()

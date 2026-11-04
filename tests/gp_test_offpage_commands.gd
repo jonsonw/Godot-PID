@@ -947,3 +947,79 @@ func gpTestBatchServiceWriteIsSilentInspectorPathEmits() -> void:
 	gpKeys = gpLastKeys[0] as Array[String]
 	gpCheck(gpKeys.size() == 1 and gpKeys[0] == "design_pressure",
 		"the single emission names its key")
+
+
+# ------------------------------------------------------------------ D20 three-state (2026-11-04)
+# The offpage flag's three states ride the GENERATOR output as one key — screen translates
+# it to a stroke color, print to a lineweight; both read the SAME decision (B2 redline).
+# The decision itself is a pure function of the reference text.
+# 离页旗标的三态作为**一个键**随生成器输出走 —— 屏幕把它翻译成描边色、打印翻译成线重，
+# 双方读**同一份**判定（B2 红线）。判定本身是交叉编号文字的纯函数。
+func gpTestOffpageStateFollowsTheReferenceText() -> void:
+	gpEq(GPSymbolGeneratorRegistry.gpOffpageStateFor(""), "unlinked",
+		"an empty reference is the honest UNLINKED placeholder")
+	gpEq(GPSymbolGeneratorRegistry.gpOffpageStateFor("  "), "unlinked",
+		"whitespace-only is still unlinked")
+	gpEq(GPSymbolGeneratorRegistry.gpOffpageStateFor("?"), "dangling",
+		"the question mark is the DANGLING reference")
+	gpEq(GPSymbolGeneratorRegistry.gpOffpageStateFor("2-1"), "resolved",
+		"a real number is RESOLVED")
+
+
+# ------------------------------------------------------------------ U3 unlink (2026-11-04)
+# Unlink = the link leaves the table, BOTH connector flags STAY (honest unlinked state,
+# props cleared), one undo step; undo re-seats the link at its old index and both props.
+# 断开 = link 离开表、**两面**连接符旗标**留下**（诚实的未连接态、属性清除），一个撤销步；
+# 撤销把 link 插回原下标并复位两端属性。
+func gpTestUnlinkKeepsBothFlagsAndRoundTrips() -> void:
+	var gpRig: Dictionary = _gpRig()
+	_gpCreate(gpRig)
+	var gpLinks: Array[GPOffPageLink] = gpRig["links"]
+	var gpLink: GPOffPageLink = gpLinks[0]
+	var gpLocalId: String = str(gpLink.gpA.get(GPOffPageLink.GP_KEY_NODE, ""))
+	var gpPeerId: String = str(gpLink.gpB.get(GPOffPageLink.GP_KEY_NODE, ""))
+	var gpLocalGraph: GPPIDGraph = gpRig["local"] as GPPIDGraph
+	var gpPeerGraph: GPPIDGraph = gpRig["peer"] as GPPIDGraph
+	var gpUnlink: GPUnlinkOffPageCommand = GPUnlinkOffPageCommand.new(gpLink, gpLinks,
+		gpLocalGraph, gpPeerGraph)
+	gpCheck(gpUnlink.gpExecute(gpRig["ctx"]), "the unlink executes")
+	gpEq(gpLinks.size(), 0, "the link left the container table")
+	gpCheck(gpLocalGraph.gpGetNode(gpLocalId) != null,
+		"the LOCAL connector flag STAYS on its sheet")
+	gpCheck(gpPeerGraph.gpGetNode(gpPeerId) != null,
+		"the PEER connector flag STAYS on its sheet")
+	gpEq(str((gpLocalGraph.gpGetNode(gpLocalId) as GPPIDNode).gpProps.get(
+		GPOffPageLink.GP_KEY_LINK_ID, "")), "", "the local prop is cleared — honest unlinked")
+	gpEq(str((gpPeerGraph.gpGetNode(gpPeerId) as GPPIDNode).gpProps.get(
+		GPOffPageLink.GP_KEY_LINK_ID, "")), "", "the peer prop is cleared — honest unlinked")
+	# Undo: link back at its old index, both props re-seated. / 撤销：link 回原下标、属性复位。
+	gpUnlink.gpUndo(gpRig["ctx"])
+	gpEq(gpLinks.size(), 1, "undo puts the link back")
+	gpCheck(gpLinks[0] == gpLink, "the SAME link object returns")
+	gpEq(str((gpLocalGraph.gpGetNode(gpLocalId) as GPPIDNode).gpProps.get(
+		GPOffPageLink.GP_KEY_LINK_ID, "")), gpLink.gpInstanceId, "the local prop is re-seated")
+	gpEq(str((gpPeerGraph.gpGetNode(gpPeerId) as GPPIDNode).gpProps.get(
+		GPOffPageLink.GP_KEY_LINK_ID, "")), gpLink.gpInstanceId, "the peer prop is re-seated")
+	# Redo unlinks again. / 重做再断开一次。
+	gpUnlink.gpRedo(gpRig["ctx"])
+	gpEq(gpLinks.size(), 0, "redo removes the link again")
+	gpEq(str((gpLocalGraph.gpGetNode(gpLocalId) as GPPIDNode).gpProps.get(
+		GPOffPageLink.GP_KEY_LINK_ID, "")), "", "redo clears the local prop again")
+
+
+# A link already out of the table cannot be unlinked twice (the redo-race guard, same as delete).
+# 已不在表中的 link 不能再断开一次（重做竞态守卫，与整删一致）。
+func gpTestUnlinkRefusesAMissingLink() -> void:
+	var gpRig: Dictionary = _gpRig()
+	_gpCreate(gpRig)
+	var gpLinks: Array[GPOffPageLink] = gpRig["links"]
+	var gpLink: GPOffPageLink = gpLinks[0]
+	var gpLocalGraph: GPPIDGraph = gpRig["local"] as GPPIDGraph
+	var gpPeerGraph: GPPIDGraph = gpRig["peer"] as GPPIDGraph
+	var gpUnlink: GPUnlinkOffPageCommand = GPUnlinkOffPageCommand.new(gpLink, gpLinks,
+		gpLocalGraph, gpPeerGraph)
+	gpLinks.erase(gpLink)
+	gpCheck(not gpUnlink.gpExecute(gpRig["ctx"]),
+		"a link no longer in the table refuses to unlink")
+	gpCheck(gpLocalGraph.gpGetNode(str(gpLink.gpA.get(GPOffPageLink.GP_KEY_NODE, ""))) != null,
+		"and the local flag keeps its link reference")

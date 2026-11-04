@@ -401,6 +401,23 @@ func gpDrawBody(gpCv: CanvasItem) -> void:
 	if gpDef != null and GPSymbolGeneratorRegistry.gpIsGenerator(gpDef.gpGeometrySource):
 		var gpGen: Dictionary = GPSymbolGeneratorRegistry.gpGenerate(gpDef, gpNode)
 		var gpSpec: Dictionary = gpGen.get("spec", {}) as Dictionary
+		# D20 three-state visual (user feedback 2026-11-04): the offpage flag's STROKE color
+		# translates the generator's state key — unlinked = washed out (an honest placeholder,
+		# no longer "looks like a drawing mistake"), dangling = warning amber (the "?" gets a
+		# color voice), resolved = untouched. COLOR ONLY (B2 redline): geometry and the
+		# blank-row text contract are untouched; selection / connect-source highlights win.
+		# D20 三态视觉（用户反馈 2026-11-04）：离页旗标的**描边色**翻译生成器的状态键 ——
+		# 未连接 = 冲淡（诚实的占位，不再像画错了），悬空 = 警示琥珀色（"?" 有了颜色声音），
+		# 已解析 = 原样。**只改颜色**（B2 红线）：几何与空行文字契约分毫不动；选中 / 连线源
+		# 高亮优先。
+		if not gpSelected and not gpConnectSource:
+			match str(gpGen.get("offpage_state", "")):
+				GPSymbolGeneratorRegistry.GP_OFFPAGE_UNLINKED:
+					gpFill = gpBaseCol.lightened(0.65)
+					gpStroke = gpBaseCol.lightened(0.55)
+				GPSymbolGeneratorRegistry.GP_OFFPAGE_DANGLING:
+					gpFill = gpBaseCol.lightened(0.35)
+					gpStroke = Color(0.95, 0.55, 0.10)
 		if not gpSpec.is_empty():
 			GPSymbolPainter.gpDrawShape(gpCv, gpSpec, gpRect, gpFill, gpStroke, gpBorder)
 		elif gpSelected or gpConnectSource:

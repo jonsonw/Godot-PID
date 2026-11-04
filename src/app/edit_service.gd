@@ -732,6 +732,19 @@ func gpCrossSheetDelete(gpLink: GPOffPageLink, gpLocalNodeIds: Array[String],
 	return gpStack.gpDo(gpCmd, gpCtx)
 
 
+# U3: unlink a cross-sheet connection — the link leaves the table, both connectors return
+# to the honest unlinked state, ONE undo step (see GPUnlinkOffPageCommand).
+# U3：断开跨图纸连接 —— link 离开表、两连接符回到诚实的未连接态，一个撤销步
+#（见 GPUnlinkOffPageCommand）。
+func gpUnlinkOffPage(gpLink: GPOffPageLink, gpLinks: Array[GPOffPageLink],
+		gpLocalGraph: GPPIDGraph, gpPeerGraph: GPPIDGraph) -> bool:
+	if gpLink == null:
+		return false
+	var gpCmd: GPUnlinkOffPageCommand = GPUnlinkOffPageCommand.new(gpLink, gpLinks,
+		gpLocalGraph, gpPeerGraph)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
 # Rename an edge's line number. / 修改一条边的管线号。
 func gpSetEdgeTag(gpEdgeId: String, gpTag: String, gpPropagated: bool = false) -> bool:
 	gpLastRefusal = ""
