@@ -105,6 +105,13 @@ var _gpTabSyncing: bool = false
 # S3/S4（命令与 DRC）经同一路径访问。
 var gpOffPageLinks: Array[GPOffPageLink] = []
 
+# A2 (W12 closure plan §4.2): the mutation funnel for the table above. The store holds
+# THE SAME array by reference; every write goes through it so `gpChanged` drives the
+# snapshot republish + dirty marks from ONE place (D03 root cause removed).
+# A2（W12 收口方案 §4.2）：上表的变更汇流口。store 按**引用**持有同一个数组；一切写入
+# 都经它进行，让 gpChanged 从**一个**地方驱动快照重发 + 脏标记（拔除 D03 病根）。
+var _gpLinkStore: GPOffPageStore = GPOffPageStore.new()
+
 # The PROJECT's numbering standard shared by every tab (ADR-36). Null until something asks
 # for it, so a project that never numbers anything still saves no `tag_rules` key.
 # 全部标签页共享的**工程**编号标准（ADR-36）。在被索取之前为 null，故从不编号的工程
@@ -144,6 +151,13 @@ var _gpRenameIdx: int = -1
 # 构建头部（标签栏 + 新建 + 全屏按钮）与画布体。此处不创建首张图纸：宿主先连接
 # gpOnCanvasReady，再调用 gpAddTab()，使首张画布按正确顺序完成配置。
 func _ready() -> void:
+	# A2: bind the store to the live link table (by reference) and let its single signal
+	# drive the snapshot republish + dirty marks. Member initializers ran before _ready,
+	# so the array identity is already the one gpSetOffPageLinks keeps in place.
+	# A2：把 store 按引用绑定到活 link 表，让它的**单个**信号驱动快照重发 + 脏标记。
+	# 成员初始化先于 _ready 执行，数组身份已是 gpSetOffPageLinks 保持不变的那一个。
+	_gpLinkStore.gpSetup(gpOffPageLinks)
+	_gpLinkStore.gpChanged.connect(_gpOnLinksChanged)
 	# Assembly list: header (tab bar + the two icon buttons) -> canvas body -> locale hook.
 	# 装配清单：头部（标签栏 + 两个图标按钮）→ 画布体 → 语言订阅。
 	mouse_filter = MOUSE_FILTER_STOP
@@ -432,11 +446,50 @@ func gpSetActiveGraph(gpNewGraph: GPPIDGraph) -> void:
 
 # Install the container-level link table (ADR-43). THE way to set it: it also re-publishes the
 # render snapshot, so a connector's derived reference never lags the data it derives from.
+# A2: the swap happens IN PLACE (gpReplaceAll) so the array identity never changes —
+# commands and providers that captured the old array keep seeing the truth.
 # 安装容器级连接表（ADR-43）。这是设置它的**唯一**途径：它同时重新发布渲染快照，使连接符推导出的
-# 交叉编号永不落后于它所依据的数据。
+# 交叉编号永不落后于它所依据的数据。A2：替换**原地**进行（gpReplaceAll），数组身份永不改变 ——
+# 早前捕获旧数组的命令与来源继续看到真相。
 func gpSetOffPageLinks(gpLinks: Array[GPOffPageLink]) -> void:
-	gpOffPageLinks = gpLinks
+	# Idempotent re-bind: defends against a caller that runs before _ready (the array
+	# member initializer is the same array, so this is a no-op in the normal order).
+	# 幂等重绑：防调用早于 _ready（数组成员初始化器就是同一数组，正常顺序下这是空操作）。
+	_gpLinkStore.gpSetup(gpOffPageLinks)
+	_gpLinkStore.gpReplaceAll(gpLinks)
+
+
+# A2: the store handle for injection into edit services (edit_service touches it after
+# each cross-sheet command). Returns the singleton bound in _ready.
+# A2：供注入编辑服务的 store 句柄（edit_service 在每条跨图纸命令后 touch 它）。
+# 返回 _ready 中绑定的单例。
+func gpLinkStore() -> GPOffPageStore:
+	return _gpLinkStore
+
+
+# A2 — the ONE handler for link-table changes (D03): republish the render snapshot, then
+# mark every open canvas dirty through the single canvas change path (gpEmitGraphChanged:
+# signal + dirty + repaint + cached-view refresh). Revision is NOT bumped here — the link
+# table is container-level data, not one graph's; the collaboration revision (W22) will
+# fold cross_links in with its own scheme.
+# A2 —— link 表变化的**唯一**处理器（D03）：重发渲染快照，随后经画布唯一变更路径
+# （gpEmitGraphChanged：信号 + 脏标记 + 重绘 + 缓存视图刷新）把所有打开的画布标脏。
+# 此处**不**推进 revision —— link 表是容器级数据，不属于任何一张图；协作 revision（W22）
+# 会以自己的方案把 cross_links 纳入。
+func _gpOnLinksChanged(gpReason: String) -> void:
 	gpRefreshOffPageContext()
+	for gpTabRaw in gpTabs:
+		var gpC: GPCanvas2D = (gpTabRaw as Dictionary).get("canvas") as GPCanvas2D
+		if gpC != null and is_instance_valid(gpC):
+			gpC.gpEmitGraphChanged(false)
+
+
+# A2: undo/redo settled a cross-sheet command (gpCrossSheetHistoryChanged). Same funnel
+# as a data change — the link table may have changed shape either way.
+# A2：撤销/重做落定了一条跨图纸命令（gpCrossSheetHistoryChanged）。与数据变更走同一
+# 汇流口 —— 无论哪种情况 link 表都可能已变形。
+func gpOnCrossSheetHistory() -> void:
+	_gpOnLinksChanged("history")
 
 
 # Publish {sheet_id: drawing number} + the link table to GPOffPageIndex, then repaint every symbol
@@ -856,16 +909,12 @@ func _gpRebuildLayout() -> void:
 			gpC.queue_free()
 	_gpPanes.clear()
 	var gpCount: int = GPPaneLayout.gpPaneCount(gpLayoutMode)
-	_gpPaneSheets = GPPaneLayout.gpResized(_gpPaneSheets, gpCount, gpKeep)
-	# Same refill contract as closing a tab: no sheet may vanish from view while a pane
-	# seat exists — gpResized alone can leave orphan bindings when the mode shrinks, and
-	# a blank pane next to an invisible sheet reads exactly like the reported "blank
-	# canvas after a layout switch". The popped-out sheet stays excluded (the window and
-	# a pane would fight over the same canvas).
-	# 与关签同一份回填契约：只要还有窗格座位，就不许有图纸从视野里消失 —— 模式收窄时
-	# 仅 gpResized 会留下孤儿绑定，「空窗格 + 不可见图纸」读起来正是用户报告的
-	# 「切换布局后画布空白」。已摘出的图纸照旧排除（窗口与窗格会争抢同一块画布）。
-	_gpPaneSheets = GPPaneLayout.gpRefill(_gpPaneSheets, gpTabs.size(), _gpPopSheet)
+	# A1: resize + refill is ONE model call; the popped sheet stays excluded from the
+	# pane pool (the window and a pane would fight over the same canvas).
+	# A1：重排 + 回填是**一次**模型调用；已摘出图纸不进窗格池（窗口与窗格会争抢同一画布）。
+	var gpLaid: Dictionary = GPViewHostModel.gpResized(_gpPaneSheets, _gpPopSheet,
+		gpCount, gpKeep, gpTabs.size())
+	_gpPaneSheets = gpLaid["bindings"]
 	_gpBuildLayoutTree(gpLayoutMode)
 	_gpActivePane = clampi(_gpActivePane, 0, gpCount - 1)
 	for gpI in range(_gpPanes.size()):
@@ -1013,19 +1062,19 @@ func _gpBindActivePane(gpTabIdx: int) -> bool:
 	if gpTabIdx < 0 or gpTabIdx >= gpTabs.size():
 		gpActive = -1
 		return false
-	# D02 (the choke point): activating the POPPED-OUT sheet must FOCUS the window, never
-	# rebind — a bind+attach would reparent the canvas out of the window (add_child auto-
-	# reparent), leaving the window empty while _gpPopSheet still points at it (and a later
-	# close would steal the canvas from whatever pane took it). EVERY activation route —
-	# tab click, DRC jump, jump-to-peer — funnels through here.
-	# D02（收口点）：激活**已摘出**的图纸必须**聚焦窗口**而绝不重绑 —— 绑定+挂载会把画布
-	# 抢出窗口（add_child 自动 reparent），窗口空着而 _gpPopSheet 仍指着它（且此后关窗会
-	# 从收留它的窗格里把画布再抢走）。**所有**激活路径 —— 标签点击、DRC 跳转、跳转到对端
-	# —— 都汇入此处。
-	if gpTabIdx == _gpPopSheet:
+	# A1 (D02 as a model case): the activation decision goes through the view-host model.
+	# "focus_window" means the sheet lives in the WINDOW — focus it, never rebind (a
+	# bind+attach would reparent the canvas out of the window, the exact D02 bug shape).
+	# EVERY activation route — tab click, DRC jump, jump-to-peer — funnels through here.
+	# A1（D02 成为模型 case）：激活决策经视图宿主模型。focus_window 表示图纸住在**窗口**
+	# —— 聚焦它，绝不重绑（绑定+挂载会把画布抢出窗口，正是 D02 的病灶形状）。
+	# **所有**激活路径 —— 标签点击、DRC 跳转、跳转到对端 —— 都汇入此处。
+	var gpAct: Dictionary = GPViewHostModel.gpActivate(_gpPaneSheets, _gpPopSheet,
+		_gpActivePane, gpTabIdx)
+	if gpAct["action"] == "focus_window":
 		_gpFocusPopout()
 		return true
-	_gpPaneSheets = GPPaneLayout.gpBind(_gpPaneSheets, _gpActivePane, gpTabIdx)
+	_gpPaneSheets = gpAct["bindings"]
 	_gpAttachPane(_gpActivePane, gpTabIdx)
 	gpActive = gpTabIdx
 	_gpFillPickers()
@@ -1073,7 +1122,13 @@ func _gpOnPanePick(gpPane: GPCanvasPane, gpSheetIdx: int) -> void:
 		if gpSheetIdx < 0:
 			return
 	_gpActivePane = gpIdx
-	_gpPaneSheets = GPPaneLayout.gpSwapOrBind(_gpPaneSheets, gpIdx, gpSheetIdx)
+	# A1: the binding decision goes through the view-host model (window host included in
+	# the uniqueness domain); the model returns the whole new state in one Dictionary.
+	# A1：绑定决策经视图宿主模型（窗口宿主纳入唯一性判定域）；模型以一个 Dictionary 返回
+	# 整份新状态。
+	var gpPick: Dictionary = GPViewHostModel.gpBindOrSwap(_gpPaneSheets, _gpPopSheet,
+		gpIdx, gpSheetIdx)
+	_gpPaneSheets = gpPick["bindings"]
 	# D05: a swap changes BOTH panes — re-home every pane from the binding table.
 	# D05：交换会同时改变**两个**窗格 —— 按绑定表重挂载每个窗格。
 	_gpAttachAllPanes()
@@ -1183,18 +1238,21 @@ func _gpReopenClosed(gpClosedIdx: int) -> int:
 	return gpTabs.size() - 1
 
 
-# The canvas under a GLOBAL point, for cross-pane gestures (W13-S8 drag-to-connect). The
-# popped-out window counts too — it is as much a view of a sheet as any pane.
-# 全局点下的画布，供跨窗格手势使用（W13-S8 拖拽连线）。摘出窗口同样算数 —— 它与任何窗格
-# 一样是某张图纸的一个视图。
-func gpCanvasAtGlobalPoint(gpGlobal: Vector2) -> GPCanvas2D:
+# A4 (W12 closure plan §4.4): the canvas under a SCREEN point, for cross-host gestures
+# (W13-S8 drag-to-connect). The popped-out window counts too — it is as much a view of a
+# sheet as any pane, and with gpContainsScreenPoint it now actually MATCHES (the old
+# get_global_rect() compare silently missed every pop-out hit: D12).
+# A4（W12 收口方案 §4.4）：屏幕点下的画布，供跨宿主手势（W13-S8 拖拽连线）使用。摘出窗口
+# 同样算数 —— 它与任何窗格一样是某张图纸的一个视图，且经 gpContainsScreenPoint 现在**真正
+# 能命中**（旧的 get_global_rect() 直接比较会静默漏掉所有弹窗命中：D12）。
+func gpCanvasAtScreenPoint(gpScreen: Vector2) -> GPCanvas2D:
 	for gpP in _gpPanes:
 		var gpCv: GPCanvas2D = gpP.gpCanvas()
-		if gpCv != null and gpCv.get_global_rect().has_point(gpGlobal):
+		if gpCv != null and gpCv.gpContainsScreenPoint(gpScreen):
 			return gpCv
 	if _gpPopWin != null and is_instance_valid(_gpPopWin) and _gpPopSheet >= 0:
 		var gpCv: GPCanvas2D = _gpCanvasOfTab(_gpPopSheet)
-		if gpCv != null and gpCv.get_global_rect().has_point(gpGlobal):
+		if gpCv != null and gpCv.gpContainsScreenPoint(gpScreen):
 			return gpCv
 	return null
 
@@ -1239,10 +1297,13 @@ func gpOpenSheetInEmptyPane(gpSheetId: String) -> bool:
 		var gpSheet: GPSheet = gpTabs[gpI].get("sheet") as GPSheet
 		if gpSheet == null or gpSheet.gpId != gpSheetId:
 			continue
-		if gpI == _gpPopSheet:
-			return false
 		var gpSlot: int = _gpPaneSheets.find(GPPaneLayout.GP_EMPTY)
 		if gpSlot < 0:
+			return false
+		# A1: the popped sheet is refused through the model's pre-flight check (no pane
+		# may take what the window already hosts).
+		# A1：已摘出图纸经模型预检拒绝（窗口已持有的东西窗格不得争抢）。
+		if GPViewHostModel.gpCanBind(_gpPaneSheets, _gpPopSheet, gpSlot, gpI) != "":
 			return false
 		_gpPaneSheets = GPPaneLayout.gpBind(_gpPaneSheets, gpSlot, gpI)
 		_gpAttachPane(gpSlot, gpI)
@@ -1277,13 +1338,19 @@ func gpPopoutPane(gpPane: GPCanvasPane) -> void:
 	var gpIdx: int = _gpPanes.find(gpPane)
 	if gpIdx < 0 or _gpPopSheet != GPPaneLayout.GP_EMPTY:
 		return
-	var gpSheetIdx: int = _gpPaneSheets[gpIdx]
+	# A1: the pop-out decision is a model case — the sheet moves to the WINDOW host and
+	# the pane empties in the same pure step.
+	# A1：摘出决策是模型 case —— 图纸移入**窗口**宿主、窗格清空，同一步纯函数完成。
+	var gpPop: Dictionary = GPViewHostModel.gpPopOut(_gpPaneSheets, gpIdx)
+	var gpSheetIdx: int = gpPop["poppedSheet"]
+	if gpSheetIdx < 0:
+		return
 	var gpCv: GPCanvas2D = gpPane.gpDetachCanvas()
 	if gpCv == null:
 		return
-	_gpPopPane = gpIdx
+	_gpPaneSheets = gpPop["bindings"]
 	_gpPopSheet = gpSheetIdx
-	_gpPaneSheets[gpIdx] = GPPaneLayout.GP_EMPTY
+	_gpPopPane = gpIdx
 	gpPane.gpSheetIdx = GPPaneLayout.GP_EMPTY
 	if _gpPopWin == null or not is_instance_valid(_gpPopWin):
 		_gpPopWin = Window.new()
@@ -1360,14 +1427,14 @@ func _gpOnPopClosed() -> void:
 		_gpFillPickers()
 		return
 	var gpHome: int = _gpPopPane if _gpPopPane < _gpPanes.size() else 0
-	# D05: swap-or-bind keeps the return symmetric with the picker — if the home sheet
-	# somehow got bound elsewhere meanwhile, the panes swap instead of someone going blank;
-	# then refill so no empty slot survives the layout change that may have happened while
-	# the window was open.
-	# D05：归位与选择器走**同一**交换语义 —— 若窗格在窗口打开期间换过内容，两窗格交换而非
-	# 有人留白；随后回填，保证窗口打开期间可能发生的布局变化不留下空窗格。
-	_gpPaneSheets = GPPaneLayout.gpSwapOrBind(_gpPaneSheets, gpHome, gpSheetIdx)
-	_gpPaneSheets = GPPaneLayout.gpRefill(_gpPaneSheets, gpTabs.size(), GPPaneLayout.GP_EMPTY)
+	# A1: the return is ONE model call — swap-or-bind into the home pane (D05 symmetry)
+	# plus the refill, with the window slot cleared as part of the same decision.
+	# A1：归位是**一次**模型调用 —— 交换或绑定进优先窗格（D05 对称性）加回填，窗口槽位的
+	# 清空并入同一决策。
+	var gpBack: Dictionary = GPViewHostModel.gpReturn(_gpPaneSheets, gpSheetIdx, gpHome,
+		gpTabs.size())
+	_gpPaneSheets = gpBack["bindings"]
+	_gpPopSheet = gpBack["popSheet"]
 	# D05: swap-or-bind plus refill can move SEVERAL panes — re-home them all.
 	# D05：交换或回填可能同时移动**多个**窗格 —— 全部重挂载。
 	_gpAttachAllPanes()
@@ -1451,9 +1518,11 @@ func _gpCloseTabNow(gpIdx: int) -> void:
 	# 已摘出的那张，窗口随之撤下。
 	if _gpPopSheet == gpIdx and _gpPopWin != null and is_instance_valid(_gpPopWin):
 		_gpPopWin.remove_child(gpC)
-		_gpPopSheet = GPPaneLayout.GP_EMPTY
 		# D01: the closed sheet WAS the popped one — hide the window too, or it lingers.
-		# D01：被关的正是已摘出的那张 —— 窗口也要随之隐藏，否则留在屏幕上。
+		# The pop-state itself is cleared by the model below (gpAfterSheetClosed absorbs
+		# the window bookkeeping).
+		# D01：被关的正是已摘出的那张 —— 窗口也要随之隐藏，否则留在屏幕上。弹窗状态本身
+		# 由下方模型清掉（gpAfterSheetClosed 吸收窗口记账）。
 		_gpPopWin.hide()
 	if gpC.get_parent() != null:
 		gpC.get_parent().remove_child(gpC)
@@ -1467,12 +1536,17 @@ func _gpCloseTabNow(gpIdx: int) -> void:
 	_gpClosedSheets.append(gpTab)
 	gpTabs.remove_at(gpIdx)
 	gpTabBar.remove_tab(gpIdx)
-	# Keep the binding invariant: panes that showed this sheet go empty, later sheets shift
-	# down one slot, then the empty panes refill from the sheets nothing shows.
-	# 保持绑定不变量：显示该图纸的窗格变空，其后的图纸整体前移一位，空窗格再从「无人显示的
-	# 图纸」里回填。
-	_gpPaneSheets = GPPaneLayout.gpAfterTabRemoved(_gpPaneSheets, gpIdx)
-	_gpPaneSheets = GPPaneLayout.gpRefill(_gpPaneSheets, gpTabs.size(), _gpPopSheet)
+	# Keep the binding invariant (A1, ONE model call): panes that showed this sheet go
+	# empty, later sheets shift down, the window host follows the same shift (or empties
+	# when the closed sheet was the popped one), then empty panes refill.
+	# 保持绑定不变量（A1，**一次**模型调用）：显示该图纸的窗格变空、其后图纸整体前移、
+	# 窗口宿主同样前移（被关的正是已摘出图纸时窗口清空），空窗格再回填。
+	var gpClosed: Dictionary = GPViewHostModel.gpAfterSheetClosed(_gpPaneSheets,
+		_gpPopSheet, gpIdx)
+	_gpPaneSheets = gpClosed["bindings"]
+	_gpPopSheet = gpClosed["popSheet"]
+	_gpPaneSheets = GPViewHostModel.gpRefillAll(_gpPaneSheets, _gpPopSheet,
+		gpTabs.size())["bindings"]
 	for gpI in range(_gpPanes.size()):
 		_gpAttachPane(gpI, _gpPaneSheets[gpI])
 	var gpNew: int = mini(gpIdx, gpTabs.size() - 1)

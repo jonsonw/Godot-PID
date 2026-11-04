@@ -97,7 +97,9 @@ func gpOnDragMove(gpScreen: Vector2) -> void:
 	# W13-S8: the gesture already left the canvas — freeze the geometry and keep reporting.
 	# W13-S8：手势已经离开画布 —— 几何冻结，持续上报。
 	if _gpCrossPane != "":
-		gpCv.gpCrossPaneDragUpdated.emit(_gpCrossPane, gpCv.get_global_mouse_position())
+		# A4: SCREEN-space pointer — every host (pane or pop-out window) can test it.
+		# A4：**屏幕**空间指针 —— 任何宿主（窗格或摘出窗口）都能判定它。
+		gpCv.gpCrossPaneDragUpdated.emit(_gpCrossPane, gpCv.gpScreenMouse())
 		return
 	# W13-S8 ARMING: dragging EXACTLY ONE off-page connector whose pointer just LEFT this
 	# canvas converts the move into a cross-pane connect. Everything else keeps dragging
@@ -125,7 +127,8 @@ func gpOnDragMove(gpScreen: Vector2) -> void:
 						gpV.gpUpdateTransform()
 			gpCv.gpRedrawEdgesForNodes([gpConnId])
 			gpCv.queue_redraw()
-			gpCv.gpCrossPaneDragUpdated.emit(gpConnId, gpCv.get_global_mouse_position())
+			# A4: SCREEN-space pointer. / A4：**屏幕**空间指针。
+			gpCv.gpCrossPaneDragUpdated.emit(gpConnId, gpCv.gpScreenMouse())
 			return
 	var gpDelta: Vector2 = gpCv.gpWorldFromScreen(gpScreen) - _gpDragStartWorld
 	var gpMoved: Array[String] = []
@@ -613,7 +616,8 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 	if _gpCrossPane != "":
 		var gpDropped: String = _gpCrossPane
 		gpCrossPaneClear()
-		gpCv.gpCrossPaneDropped.emit(gpDropped, gpCv.get_global_mouse_position())
+		# A4: SCREEN-space pointer. / A4：**屏幕**空间指针。
+		gpCv.gpCrossPaneDropped.emit(gpDropped, gpCv.gpScreenMouse())
 		gpCv.gpEmitStatus()
 		return true
 	# Finish a marquee: gpFinish() reports whether the band was dragged far enough to be a real

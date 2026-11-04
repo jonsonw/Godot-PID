@@ -222,42 +222,13 @@ static func gpTargetTagFor(gpNode: GPPIDNode) -> String:
 	var gpLink: GPOffPageLink = gpLinkForNode(gpNode.gpInstanceId)
 	if gpLink == null:
 		return ""
-	var gpBNodeId: String = str(gpLink.gpB.get(GPOffPageLink.GP_KEY_NODE, ""))
-	var gpGraph: GPPIDGraph = _gpGraphs.get(
-		str(gpLink.gpB.get(GPOffPageLink.GP_KEY_SHEET, ""))) as GPPIDGraph
-	if gpBNodeId == "" or gpGraph == null:
-		return ""
-	var gpB: GPPIDNode = gpGraph.gpGetNode(gpBNodeId)
-	if gpB == null:
-		return ""
-	if not (gpB.gpProps as Dictionary).has(GPOffPageLink.GP_KEY_LINK_ID):
-		return gpB.gpTag
-	# B is a CONNECTOR (the twin): the served item lives across its edge — the first edge
-	# whose other end is not itself a connector (chained connectors carry no tag of their own).
-	# B 是**连接符**（孪生体）：被服务的对象在它的边的那一头 —— 第一条「对端不是连接符」的边
-	#（链式连接符自己不带位号）。
-	for gpE in gpGraph.gpEdges:
-		if gpE == null:
-			continue
-		var gpOtherId: String = _gpEdgeOtherNode(gpE, gpBNodeId)
-		if gpOtherId == "":
-			continue
-		var gpN: GPPIDNode = gpGraph.gpGetNode(gpOtherId)
-		if gpN != null and not (gpN.gpProps as Dictionary).has(GPOffPageLink.GP_KEY_LINK_ID):
-			return gpN.gpTag
-	return ""
-
-
-# The id of the node at the OPPOSITE end of an edge, or "" when gpNodeId is not an end.
-# 边**另一端**节点的 id；gpNodeId 不是端点时返回 ""。
-static func _gpEdgeOtherNode(gpEdge: GPPIDEdge, gpNodeId: String) -> String:
-	var gpF: String = str(gpEdge.gpFromRef.get("node_id", ""))
-	var gpT: String = str(gpEdge.gpToRef.get("node_id", ""))
-	if gpF == gpNodeId and gpT != "":
-		return gpT
-	if gpT == gpNodeId and gpF != "":
-		return gpF
-	return ""
+	# A3: the derivation itself lives in GPOffPageResolver (explicit context, pure); this
+	# index is only the UI's cache shell feeding the current snapshot in. One copy of the
+	# semantics — the renderer, print model, DRC and the W22 exporter all share it.
+	# A3：推导本体住在 GPOffPageResolver（显式上下文、纯函数）；本索引只是喂入当前快照的
+	# UI **缓存壳**。语义只有一份 —— 渲染器、打印模型、DRC 与 W22 导出器共享它。
+	var gpOut: Dictionary = GPOffPageResolver.gpResolve(gpLink, _gpSheetNumbers, _gpGraphs)
+	return str(gpOut.get("target_tag", ""))
 
 
 # ---- auto placement / 自动落位 ------------------------------------------

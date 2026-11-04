@@ -49,6 +49,16 @@ signal gpEdgeAttrsCommitted(gpEdgeId: String, gpKeys: Array[String])
 # 本文档的撤销 / 重做历史。
 var gpStack: GPCommandStack = GPCommandStack.new()
 
+# A2 (W12 closure plan §4.2): the container-level link-store handle, injected by the shell
+# once per canvas. When non-null, every successful cross-sheet command ends with ONE
+# gpTouch() so the store's single `gpChanged` signal drives snapshot/ dirty/ repaints —
+# callers no longer have to remember to refresh (D03 root cause). Null in headless tests
+# that drive the stack directly.
+# A2（W12 收口方案 §4.2）：容器级 link store 句柄，由外壳逐画布注入。非空时，每条成功的
+# 跨图纸命令以**一次** gpTouch() 收尾，store 的单个 gpChanged 信号统一驱动快照/脏标记/
+# 重绘 —— 调用方不再需要「记得」刷新（D03 病根）。headless 直驱栈的测试中为 null。
+var gpLinkStore: GPOffPageStore = null
+
 # Machine-readable reason the most recent edge intent refused ("" when it succeeded). The canvas
 # translates it through i18n for the status bar; the service itself never touches a widget.
 # 最近一次连线意图拒绝执行的机器可读原因（成功时为 ""）。画布经 i18n 翻译后显示到状态栏；
@@ -697,6 +707,10 @@ func gpCrossSheetCreate(gpFromRef: Dictionary, gpKind: String, gpSignalType: Str
 	if not gpStack.gpDo(gpCmd, gpCtx):
 		gpLastRefusal = gpCmd.gpRefusal
 		return ""
+	# A2: the link table just grew — notify through the store's single funnel.
+	# A2：link 表刚增长 —— 经 store 的唯一汇流口通知。
+	if gpLinkStore != null:
+		gpLinkStore.gpTouch("add")
 	gpLastRefusal = ""
 	return gpCmd.gpCreatedLinkId
 
@@ -715,7 +729,12 @@ func gpCrossSheetSync(gpLink: GPOffPageLink, gpValues: Dictionary,
 		gpCmd.gpGraphs.append(gpCtx.gpGraph)
 	if gpPeerGraph != null and gpPeerGraph != gpCtx.gpGraph:
 		gpCmd.gpGraphs.append(gpPeerGraph)
-	return gpStack.gpDo(gpCmd, gpCtx)
+	var gpOk: bool = gpStack.gpDo(gpCmd, gpCtx)
+	# A2: the sync rewrote the link's contract attributes in place — notify as "attr".
+	# A2：同步原地改写了 link 的契约属性 —— 以 attr 通知。
+	if gpOk and gpLinkStore != null:
+		gpLinkStore.gpTouch("attr")
+	return gpOk
 
 
 # Delete ONE cross-sheet connection ENTIRELY (link + both connectors + their edges) as ONE
@@ -729,7 +748,12 @@ func gpCrossSheetDelete(gpLink: GPOffPageLink, gpLocalNodeIds: Array[String],
 		return false
 	var gpCmd: GPCrossSheetDeleteCommand = GPCrossSheetDeleteCommand.new(gpLink,
 		gpLocalNodeIds, gpPeerNodeIds, gpPeerGraph, gpLinks, gpDefLookup)
-	return gpStack.gpDo(gpCmd, gpCtx)
+	var gpOk: bool = gpStack.gpDo(gpCmd, gpCtx)
+	# A2: the whole link left the table — notify as "remove".
+	# A2：整条 link 已离开表 —— 以 remove 通知。
+	if gpOk and gpLinkStore != null:
+		gpLinkStore.gpTouch("remove")
+	return gpOk
 
 
 # U3: unlink a cross-sheet connection — the link leaves the table, both connectors return
@@ -742,7 +766,12 @@ func gpUnlinkOffPage(gpLink: GPOffPageLink, gpLinks: Array[GPOffPageLink],
 		return false
 	var gpCmd: GPUnlinkOffPageCommand = GPUnlinkOffPageCommand.new(gpLink, gpLinks,
 		gpLocalGraph, gpPeerGraph)
-	return gpStack.gpDo(gpCmd, gpCtx)
+	var gpOk: bool = gpStack.gpDo(gpCmd, gpCtx)
+	# A2: the link left the table (flags stay as honest placeholders) — notify as "remove".
+	# A2：link 已离开表（旗标保留为诚实的占位）—— 以 remove 通知。
+	if gpOk and gpLinkStore != null:
+		gpLinkStore.gpTouch("remove")
+	return gpOk
 
 
 # Rename an edge's line number. / 修改一条边的管线号。

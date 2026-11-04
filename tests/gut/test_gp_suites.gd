@@ -90,7 +90,10 @@ const GP_METHOD_PREFIX: String = "gpTest"
 # 122 = 121 + gp_test_offpage_drc.gd（ADR-43 / S4 往返校验五规则）。
 # 123 = 122 + gp_test_multiview.gd（W13-S6 / ADR-44 窗格布局纯模型与跨层一致性钉）。
 # 124 = 123 + gp_test_graph_binder.gd（2026-11-04 move_child 越界回归钉：敌意模型态同步）。
-const GP_EXPECTED_SUITES: int = 124
+# 125 = 124 + gp_test_offpage_store.gd（W12-P2/A2 GPOffPageStore 变更汇流口与信号收口）。
+# 126 = 125 + gp_test_view_host.gd（W12-P2/A1 GPViewHostModel 视图宿主纯决策模型）。
+# 127 = 126 + gp_test_offpage_resolver.gd（W12-P2/A3 GPOffPageResolver 显式上下文派生解析）。
+const GP_EXPECTED_SUITES: int = 127
 
 # Engine errors the legacy suites are *expected* to emit. GUT fails any test that leaves an
 # error unhandled, so these are marked handled explicitly (see _gpHandleExpectedErrors).

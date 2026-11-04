@@ -89,12 +89,12 @@ signal gpCrossSheetHistoryChanged()
 # W13-S8（用户需求 2026-11-03，第二种连接逻辑）：连接符正被拖**出**本画布、跨向另一窗格
 # —— 恰好拖着一枚跨图纸连接符、指针离开了本画布矩形。画布实时上报手势（全局鼠标位置），
 # 使宿主能在**另一**窗格里高亮落点目标；画布自身对窗格一无所知。
-signal gpCrossPaneDragUpdated(gpNodeId: String, gpGlobal: Vector2)
+signal gpCrossPaneDragUpdated(gpNodeId: String, gpScreen: Vector2)
 
 # The cross-pane drag was RELEASED: the host resolves the pane / node under the point and
 # either builds the link or discards the gesture.
 # 跨窗格拖拽**松手**：宿主解析该点下的窗格 / 图元，或建立连接、或丢弃手势。
-signal gpCrossPaneDropped(gpNodeId: String, gpGlobal: Vector2)
+signal gpCrossPaneDropped(gpNodeId: String, gpScreen: Vector2)
 
 # The cross-pane drag ended without a drop (ESC / tool reset) — clear the drop highlight.
 # 跨窗格拖拽未落点即结束（ESC / 工具复位）—— 清掉落点高亮。
@@ -956,6 +956,33 @@ func gpScreenFromWorld(w: Vector2) -> Vector2:
 
 func gpWorldFromScreen(gpS: Vector2) -> Vector2:
 	return gpViewController.gpWorldFromScreen(gpS)
+
+
+# A4 (W12 closure plan §4.4): THE single "is this SCREEN point on me" test. The pointer
+# position is converted through THIS canvas's own viewport screen transform (main window
+# pane and pop-out window share the same code path), then compared against the canvas
+# rect IN ITS OWN viewport — the old direct `get_global_rect().has_point(global)` compare
+# was silently wrong across viewports (D12: a pop-out canvas never matched, because its
+# "global" rect lives in the pop-out viewport while the point lived in the main one).
+# A4（W12 收口方案 §4.4）：「这个**屏幕**点是否在我身上」的**唯一**判定。指针位置经
+# **本**画布所在 viewport 的 screen transform 换算（主窗窗格与摘出窗口走**同一条**代码
+# 路径），再与本画布在**其自身** viewport 内的矩形比较 —— 旧的 `get_global_rect()
+# .has_point(global)` 直接比较在跨 viewport 时静默出错（D12：摘出画布永不命中，因其
+# 「全局」矩形住在弹窗 viewport 而点住在主窗 viewport）。
+func gpContainsScreenPoint(gpScreen: Vector2) -> bool:
+	var gpVp: Viewport = get_viewport()
+	if gpVp == null:
+		return false
+	var gpLocal: Vector2 = gpVp.get_screen_transform().affine_inverse() * gpScreen
+	return get_global_rect().has_point(gpLocal)
+
+
+# A4: the pointer as a SCREEN-space point (safe to hand across viewports — every canvas
+# can test it with gpContainsScreenPoint regardless of which window it lives in).
+# A4：以**屏幕**空间表示的指针位置（可安全跨 viewport 传递 —— 无论画布住在哪个窗口，
+# 都能用 gpContainsScreenPoint 判定它）。
+func gpScreenMouse() -> Vector2:
+	return get_viewport().get_screen_transform() * get_global_mouse_position()
 
 
 # ============================ drawing (background only) ============================

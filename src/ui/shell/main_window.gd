@@ -625,8 +625,13 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 		gpCanvas.gpJumpToPeerRequested.connect(_gpOnJumpToPeer)
 	if not gpCanvas.gpSyncToPeerRequested.is_connected(_gpOnSyncToPeer):
 		gpCanvas.gpSyncToPeerRequested.connect(_gpOnSyncToPeer)
-	if not gpCanvas.gpCrossSheetHistoryChanged.is_connected(gpCenter.gpRefreshOffPageContext):
-		gpCanvas.gpCrossSheetHistoryChanged.connect(gpCenter.gpRefreshOffPageContext)
+	if not gpCanvas.gpCrossSheetHistoryChanged.is_connected(gpCenter.gpOnCrossSheetHistory):
+		gpCanvas.gpCrossSheetHistoryChanged.connect(gpCenter.gpOnCrossSheetHistory)
+	# A2: inject the container link-store into THIS canvas's service, so every successful
+	# cross-sheet command ends with ONE gpTouch() and the store's signal drives refreshes.
+	# A2：把容器 link store 注入**本**画布的服务，使每条成功的跨图纸命令以一次 gpTouch()
+	# 收尾，由 store 信号统一驱动刷新。
+	gpCanvas.gpActions.gpLinkStore = gpCenter.gpLinkStore()
 	if not gpCanvas.gpCrossSheetDeleteRequested.is_connected(_gpOnCrossSheetDelete):
 		gpCanvas.gpCrossSheetDeleteRequested.connect(_gpOnCrossSheetDelete.bind(gpCanvas))
 	# Cross-sheet line-number propagation (user feedback 2026-11-04): when THIS sheet's
@@ -1060,9 +1065,10 @@ func _gpCreateCrossLink(gpCanvas: GPCanvas2D, gpFromRef: Dictionary, gpKind: Str
 		# 「edge.same_sheet」这样的裸键。
 		gpCanvas.gpReportRefusal(gpCanvas.gpActions.gpLastRefusal, "offpage.refuse_")
 		return ""
-	# The link table changed with NO model signal: republish the render snapshot.
-	# link 表的变化**没有**模型信号携带：重发渲染快照。
-	gpCenter.gpRefreshOffPageContext()
+	# The link table change is announced by the store's signal (A2): snapshot republish,
+	# dirty marks and repaints follow from there — no manual refresh here.
+	# link 表的变化由 store 信号通告（A2）：快照重发、脏标记与重绘都从那里跟随 —— 此处
+	# 不再手工刷新。
 	var gpTag: String = ""
 	for gpL in gpCenter.gpOffPageLinks:
 		if gpL.gpInstanceId == gpLinkId:
@@ -1181,14 +1187,16 @@ var _gpDragSrcNode: String = ""
 # A connector is being dragged across panes: highlight the node under the pointer in
 # whichever OTHER canvas is under it. The source canvas never highlights itself.
 # 连接符正被拖过窗格：在其下方的**另一块**画布中高亮指针下的图元。源画布永不高亮自己。
-func _gpOnCrossPaneDragUpdated(gpNodeId: String, gpGlobal: Vector2,
+func _gpOnCrossPaneDragUpdated(gpNodeId: String, gpScreen: Vector2,
 		gpSource: GPCanvas2D) -> void:
 	# D23: the source flag dims and the rubber band follows the pointer — the gesture is
 	# now VISIBLE on the source side too, not just as a rectangle on the target.
 	# D23：源旗标变暗、橡皮筋跟随指针 —— 手势在**源**一侧也可见，而不只是目标上的矩形。
 	_gpSetDragSourceFeedback(gpSource, gpNodeId, true)
-	_gpRubberUpdate(gpSource, gpNodeId, gpGlobal)
-	var gpTarget: GPCanvas2D = gpCenter.gpCanvasAtGlobalPoint(gpGlobal)
+	_gpRubberUpdate(gpSource, gpNodeId, gpScreen)
+	# A4: the drag point is SCREEN-space; the host lookup reads the same space.
+	# A4：拖拽点是**屏幕**空间；宿主查找读同一空间。
+	var gpTarget: GPCanvas2D = gpCenter.gpCanvasAtScreenPoint(gpScreen)
 	if gpTarget == gpSource:
 		gpTarget = null
 	_gpClearDragHighlight()
@@ -1214,11 +1222,13 @@ func _gpOnCrossPaneDragUpdated(gpNodeId: String, gpGlobal: Vector2,
 # same defaults the tools use.
 # 拖拽在一点上松手：解析目标图元，经**唯一**的共用创建路径建立连接。类型 / 信号随**连接符**
 # 的族别（管 / 信号），与工具的默认一致。
-func _gpOnCrossPaneDropped(gpNodeId: String, gpGlobal: Vector2, gpSource: GPCanvas2D) -> void:
+func _gpOnCrossPaneDropped(gpNodeId: String, gpScreen: Vector2, gpSource: GPCanvas2D) -> void:
 	_gpClearDragHighlight()
 	_gpRubberStop()
 	_gpSetDragSourceFeedback(gpSource, gpNodeId, false)
-	var gpTarget: GPCanvas2D = gpCenter.gpCanvasAtGlobalPoint(gpGlobal)
+	# A4: the drag point is SCREEN-space; the host lookup reads the same space.
+	# A4：拖拽点是**屏幕**空间；宿主查找读同一空间。
+	var gpTarget: GPCanvas2D = gpCenter.gpCanvasAtScreenPoint(gpScreen)
 	# Dropped OUTSIDE every view (canvas + popup): a deliberate cancel — stay silent.
 	# 落在所有视图（画布 + 弹窗）**之外**：刻意的取消 —— 保持沉默。
 	if gpTarget == null:
@@ -1336,14 +1346,17 @@ func _gpOnRubberDraw() -> void:
 
 # D23: refresh the rubber band from the source flag's global position to the pointer.
 # D23：把橡皮筋从源旗标的**全局**位置刷新到指针。
-func _gpRubberUpdate(gpSource: GPCanvas2D, gpNodeId: String, gpGlobal: Vector2) -> void:
+func _gpRubberUpdate(gpSource: GPCanvas2D, gpNodeId: String, gpScreen: Vector2) -> void:
 	if gpSource == null or gpSource.gpGraph == null:
 		return
 	var gpConn: GPPIDNode = gpSource.gpGraph.gpGetNode(gpNodeId)
 	if gpConn == null:
 		return
 	_gpRubberFrom = gpSource.get_global_transform() * gpSource.gpScreenFromWorld(gpConn.gpPosition)
-	_gpRubberTo = gpGlobal
+	# A4: the drag point arrives in SCREEN space; the overlay paints in the MAIN window's
+	# global space — convert through the main window's screen transform.
+	# A4：拖拽点以**屏幕**空间到达；覆盖层在**主窗**全局空间绘制 —— 经主窗 screen transform 换算。
+	_gpRubberTo = get_viewport().get_screen_transform().affine_inverse() * gpScreen
 	_gpRubberActive = true
 	_gpEnsureRubber().queue_redraw()
 
@@ -1391,7 +1404,8 @@ func _gpOnSyncToPeer(gpNodeId: String) -> void:
 			if (gpLocalEdge.gpAttrs as Dictionary).has(gpKey):
 				gpValues[gpKey] = gpLocalEdge.gpAttrs[gpKey]
 	if gpCanvas.gpActions.gpCrossSheetSync(gpLink, gpValues, gpEdges, gpPeerGraph):
-		gpCenter.gpRefreshOffPageContext()
+		# A2: the store signal already refreshed/dirtied both canvases.
+		# A2：store 信号已刷新并标脏两端画布。
 		gpSetState("offpage.sync_done", [])
 
 
@@ -1730,7 +1744,8 @@ func _gpOnCrossSheetDeleteConfirmed(gpPlans: Array[Dictionary], gpCanvas: GPCanv
 			continue
 		gpCanvas.gpActions.gpCrossSheetDelete(gpLink, [gpLocalId], [gpPeerId],
 			gpPeerGraph, gpCenter.gpOffPageLinks, gpLookup)
-	gpCenter.gpRefreshOffPageContext()
+	# A2: deletions were announced through the link store; nothing to refresh by hand.
+	# A2：删除已通过 link store 通告；无需手工刷新。
 	gpCanvas.gpEditFacade.gpSetSelection([])
 	gpSetState("offpage.del_done", [])
 
@@ -1758,7 +1773,8 @@ func _gpOnInspectorUnlink(gpLinkId: String) -> void:
 		return
 	if gpLocalCanvas.gpActions.gpUnlinkOffPage(gpLink, gpCenter.gpOffPageLinks,
 			gpLocalCanvas.gpGraph, gpPeerCanvas.gpGraph):
-		gpCenter.gpRefreshOffPageContext()
+		# A2: the store signal already refreshed/dirtied the canvases.
+		# A2：store 信号已刷新并标脏画布。
 		gpSetState("offpage.unlink_done", [])
 	else:
 		gpSetState("offpage.unlink_fail", [])
@@ -1822,8 +1838,9 @@ func _gpOnLinkAttrEdit(gpLinkId: String, gpKey: String, gpValue: String) -> void
 	for gpS in gpCenter.gpToSheets():
 		if gpS.gpId == gpPeerSheetId:
 			gpPeerGraph = gpS.gpGraph
-	if gpCanvas.gpActions.gpCrossSheetSync(gpLink, {gpKey: gpValue}, [], gpPeerGraph):
-		gpCenter.gpRefreshOffPageContext()
+	# A2: the store signal announces the in-place attr rewrite; nothing to refresh by hand.
+	# A2：store 信号通告原地属性改写；无需手工刷新。
+	gpCanvas.gpActions.gpCrossSheetSync(gpLink, {gpKey: gpValue}, [], gpPeerGraph)
 
 
 # Inspector sync push (S4-4): the LINK snapshot is the source; BOTH ends' edges receive it —
@@ -1855,7 +1872,8 @@ func _gpOnInspectorLinkSync(gpLinkId: String) -> void:
 	var gpEdges: Array[GPPIDEdge] = [_gpEdgeTouching(gpCanvas.gpGraph, gpLocalId),
 		_gpEdgeTouching(gpPeerGraph, gpPeerId)]
 	if gpCanvas.gpActions.gpCrossSheetSync(gpLink, gpValues, gpEdges, gpPeerGraph):
-		gpCenter.gpRefreshOffPageContext()
+		# A2: the store signal already refreshed/dirtied both canvases.
+		# A2：store 信号已刷新并标脏两端画布。
 		gpSetState("offpage.sync_done", [])
 
 
