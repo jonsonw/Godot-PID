@@ -337,6 +337,17 @@ func gpTestLegendInsideAboveBelow() -> void:
 		"the TARGET end's tag rides ABOVE the flag, derived through the index")
 	gpEq(str(gpGen.get("text_below", "")), "NAOH 32%",
 		"the inherited medium rides BELOW the flag")
+	# ADR-45 D2a (user feedback 2026-11-04): the top line is the PEER end's served tag, PER
+	# connector. The twin on sheet-2 shows what the A end serves — here the A end's sheet
+	# graph is absent from the rig, so the slot stays honestly BLANK (never a guess).
+	# ADR-45 D2a（2026-11-04 实机反馈）：上一行是**对端**所服务位号，**逐连接符**。sheet-2
+	# 上的孪生体显示 A 端所服务者 —— 本夹具中 A 端图纸缺席，槽位诚实地**留空**（绝不臆造）。
+	var gpTwin: Dictionary = GPSymbolGeneratorRegistry.gpGenerate(_gpDef(GP_ID_PIPE),
+		_gpConnectorNode("n2", "xlink-1"))
+	gpEq(str(gpTwin.get("text_above", "")), "",
+		"the twin's top line is its PEER (A) end's tag — unresolvable here, blank")
+	gpEq(str(gpTwin.get("text_below", "")), "NAOH 32%",
+		"the twin derives the same medium fallback / 孪生体派生同一介质回落")
 	# An unlinked connector keeps the three-slot SHAPE with nothing painted anywhere.
 	# 未连线的连接符仍保持三槽的**形状**，只是处处皆空。
 	var gpBare: Dictionary = GPSymbolGeneratorRegistry.gpGenerate(_gpDef(GP_ID_PIPE),

@@ -367,11 +367,11 @@ func _gpAssembleInspector() -> void:
 	gpInspector.gpEdgeAttrChanged.connect(gpSelCoord.gpOnEdgeAttrChanged)
 	gpInspector.gpLineAttrsRequested.connect(_gpOnInspectorLineAttrs)
 	gpInspector.gpLineRerenderRequested.connect(_gpOnInspectorRerenderLine)
-	# ADR-43 / S4-4: the connector's link section — edits and the sync push.
-	# ADR-43 / S4-4：连接符的 link 段 —— 编辑与同步推送。
+	# ADR-43 / S4-4: the connector's link section (2026-11-04: the contract fields and the
+	# sync button left the panel — line attrs live on the edges; the dropdown re-connects).
+	# ADR-43 / S4-4：连接符的 link 段（2026-11-04：契约字段与同步按钮离开面板 —— 管线属性
+	# 归边所有；下拉改为重连）。
 	gpInspector.gpLinksProvider = Callable(gpCenter, "gpOffPageLinksList")
-	gpInspector.gpLinkAttrEditRequested.connect(_gpOnLinkAttrEdit)
-	gpInspector.gpLinkSyncRequested.connect(_gpOnInspectorLinkSync)
 	# U3 action row (user feedback 2026-11-04): jump / unlink / delete.
 	# U3 动作行（用户反馈 2026-11-04）：跳转 / 断开 / 删除。
 	gpInspector.gpJumpToPeerRequested.connect(_gpOnJumpToPeer)
@@ -955,10 +955,57 @@ func _gpOnInspectorConnectPick(gpNodeId: String, gpSheetId: String) -> void:
 	var gpCanvas: GPCanvas2D = gpCenter.gpActiveCanvas()
 	if gpCanvas == null:
 		return
+	# RE-CONNECT (user feedback 2026-11-04): the pick can come from a LINKED connector's
+	# "跨图编号" dropdown. Break the old link FIRST (one undo step, both flags stay) — the
+	# creation path only accepts an UNLINKED connector (mode B), and skipping this would
+	# mint a duplicate connector + link. A cancelled dialog leaves the connector honestly
+	# unlinked; Ctrl+Z restores the old connection.
+	# **重连**（用户反馈 2026-11-04）：选择可能来自**已连接**连接符的「跨图编号」下拉。
+	# 先断开旧连接（一个撤销步、两面旗标保留）—— 创建路径只接受**未连接**连接符（模式 B），
+	# 跳过这步会铸出重复的连接符与 link。取消对话框则连接符诚实地回到未连接态；
+	# Ctrl+Z 恢复旧连接。
+	var gpNode: GPPIDNode = gpCanvas.gpGraph.gpGetNode(gpNodeId) \
+		if gpCanvas.gpGraph != null else null
+	var gpLinkId: String = str(gpNode.gpProps.get(GPOffPageLink.GP_KEY_LINK_ID, "")) \
+		if gpNode != null else ""
+	if gpLinkId != "":
+		if not _gpBreakLinkForReconnect(gpLinkId, gpCanvas):
+			return
 	_gpCrossPreselect = gpSheetId
 	gpCanvas.gpRequestCrossSheet(
 		{"node_id": gpNodeId, "port_id": GPSymbolPackOffpage.GP_PORT_NAME},
 		Vector2.ZERO, GPPIDEdge.GP_PROCESS, "")
+
+
+# The reconnect half-step: unlink THIS link through the SAME command the 断开 button uses
+# (both flags stay). The peer graph comes from the SHEET TABLE — a hidden (X-closed) peer
+# sheet must not block a reconnect. False = refused, nothing opened.
+# 重连的半步：经与「断开」按钮**同一条**命令断开本 link（两面旗标保留）。对端图取自
+# **图纸表** —— 对端图纸被 X 隐藏时不得阻断重连。假 = 被拒，不打开对话框。
+func _gpBreakLinkForReconnect(gpLinkId: String, gpCanvas: GPCanvas2D) -> bool:
+	var gpLink: GPOffPageLink = _gpLinkById(gpLinkId)
+	if gpLink == null or gpCanvas.gpActions == null or gpCanvas.gpGraph == null:
+		return false
+	var gpPeerSheetId: String = str(gpLink.gpB.get(GPOffPageLink.GP_KEY_SHEET, ""))
+	if str(gpLink.gpA.get(GPOffPageLink.GP_KEY_SHEET, "")) == gpCanvas.gpSheet.gpId:
+		gpPeerSheetId = str(gpLink.gpB.get(GPOffPageLink.GP_KEY_SHEET, ""))
+	else:
+		gpPeerSheetId = str(gpLink.gpA.get(GPOffPageLink.GP_KEY_SHEET, ""))
+	var gpPeerGraph: GPPIDGraph = null
+	for gpS in gpCenter.gpToSheets():
+		if gpS.gpId == gpPeerSheetId:
+			gpPeerGraph = gpS.gpGraph
+	if gpPeerGraph == null:
+		gpSetState("offpage.refuse_sheet_missing", [])
+		return false
+	if gpCanvas.gpActions.gpUnlinkOffPage(gpLink, gpCenter.gpOffPageLinks,
+			gpCanvas.gpGraph, gpPeerGraph):
+		# A2: the store signal already refreshed/dirtied the canvases.
+		# A2：store 信号已刷新并标脏画布。
+		gpSetState("offpage.unlink_done", [])
+		return true
+	gpSetState("offpage.unlink_fail", [])
+	return false
 
 
 # The user picked a target and confirmed. Resolve what the dialog cannot know (peer graph,
@@ -1833,75 +1880,6 @@ func _gpLinkById(gpLinkId: String) -> GPOffPageLink:
 		if gpL != null and gpL.gpInstanceId == gpLinkId:
 			return gpL
 	return null
-
-
-# Inspector link-attr edit (S4-4): commit the single field to the LINK as one undo step
-# (edges stay — the snapshot is the source of truth, the DRC reports the drift until synced).
-# 属性面板 link 属性编辑（S4-4）：单字段一次撤销步提交到 **link**（边不动 —— 快照是权威，
-# 未同步前的漂移由 DRC 报告）。
-func _gpOnLinkAttrEdit(gpLinkId: String, gpKey: String, gpValue: String) -> void:
-	var gpCanvas: GPCanvas2D = gpActiveCanvas()
-	var gpLink: GPOffPageLink = _gpLinkById(gpLinkId)
-	if gpCanvas == null or gpLink == null:
-		return
-	# D09: the reserved key "tag" is NOT a contract attr — it is the cross-sheet number,
-	# which lives on the link itself (not the snapshot) and takes GPSetLinkTagCommand.
-	# D09：保留键 "tag" **不是**契约属性 —— 它是跨图编号，存于 link 本体（而非快照），
-	# 走 GPSetLinkTagCommand。
-	if gpKey == "tag":
-		gpCanvas.gpActions.gpSetLinkTag(gpLink, gpValue)
-		return
-	# D03: resolve the peer graph so the command can dirty BOTH ends — the contract
-	# snapshot drives the peer flag's derived text, so the peer canvas redraws too.
-	# D03：解析对端图，使命令能把**两端**都标脏 —— 契约快照驱动对端旗标的派生文字，
-	# 对端画布也要随之重绘。
-	var gpLocalId: String = str(gpLink.gpA.get(GPOffPageLink.GP_KEY_NODE, ""))
-	if gpCanvas.gpGraph != null and gpCanvas.gpGraph.gpGetNode(gpLocalId) == null:
-		gpLocalId = str(gpLink.gpB.get(GPOffPageLink.GP_KEY_NODE, ""))
-	var gpPeerEnd: Dictionary = gpLink.gpB if str(gpLink.gpA.get(
-		GPOffPageLink.GP_KEY_NODE, "")) == gpLocalId else gpLink.gpA
-	var gpPeerSheetId: String = str(gpPeerEnd.get(GPOffPageLink.GP_KEY_SHEET, ""))
-	var gpPeerGraph: GPPIDGraph = null
-	for gpS in gpCenter.gpToSheets():
-		if gpS.gpId == gpPeerSheetId:
-			gpPeerGraph = gpS.gpGraph
-	# A2: the store signal announces the in-place attr rewrite; nothing to refresh by hand.
-	# A2：store 信号通告原地属性改写；无需手工刷新。
-	gpCanvas.gpActions.gpCrossSheetSync(gpLink, {gpKey: gpValue}, [], gpPeerGraph)
-
-
-# Inspector sync push (S4-4): the LINK snapshot is the source; BOTH ends' edges receive it —
-# exactly the repair the attr_mismatch rule proposes.
-# 属性面板同步推送（S4-4）：**link 快照**为源；两端的边都接收 —— 正是 attr_mismatch
-# 规则提出的修复。
-func _gpOnInspectorLinkSync(gpLinkId: String) -> void:
-	var gpCanvas: GPCanvas2D = gpActiveCanvas()
-	var gpLink: GPOffPageLink = _gpLinkById(gpLinkId)
-	if gpCanvas == null or gpLink == null or gpCanvas.gpGraph == null:
-		return
-	var gpValues: Dictionary = {}
-	for gpKey in GPOffPageLink.GP_CONTRACT_KEYS:
-		if (gpLink.gpAttrs as Dictionary).has(gpKey):
-			gpValues[gpKey] = gpLink.gpAttrs[gpKey]
-	if gpValues.is_empty():
-		return
-	var gpAId: String = str(gpLink.gpA.get(GPOffPageLink.GP_KEY_NODE, ""))
-	var gpBId: String = str(gpLink.gpB.get(GPOffPageLink.GP_KEY_NODE, ""))
-	var gpLocalId: String = gpAId if gpCanvas.gpGraph.gpGetNode(gpAId) != null else gpBId
-	var gpPeerId: String = gpBId if gpLocalId == gpAId else gpAId
-	var gpPeerEndSheetId: String = str((gpLink.gpB as Dictionary).get(
-		GPOffPageLink.GP_KEY_SHEET, "")) if gpPeerId == gpBId else str(
-		(gpLink.gpA as Dictionary).get(GPOffPageLink.GP_KEY_SHEET, ""))
-	var gpPeerGraph: GPPIDGraph = null
-	for gpS in gpCenter.gpToSheets():
-		if gpS.gpId == gpPeerEndSheetId:
-			gpPeerGraph = gpS.gpGraph
-	var gpEdges: Array[GPPIDEdge] = [_gpEdgeTouching(gpCanvas.gpGraph, gpLocalId),
-		_gpEdgeTouching(gpPeerGraph, gpPeerId)]
-	if gpCanvas.gpActions.gpCrossSheetSync(gpLink, gpValues, gpEdges, gpPeerGraph):
-		# A2: the store signal already refreshed/dirtied both canvases.
-		# A2：store 信号已刷新并标脏两端画布。
-		gpSetState("offpage.sync_done", [])
 
 
 # Peer sheet label for confirm dialogs: the end that is NOT the local sheet (D08: the old

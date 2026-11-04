@@ -21,11 +21,13 @@ extends RefCounted
 # The display CONTRACT this resolver pins is normative for ADR-45 (drafted alongside):
 #   * three states, never collapsed: unlinked (""), dangling ("?"), resolved (tag/number);
 #   * the target tag is DERIVED at read time (ADR-43 D3) — never a stored field;
-#   * both connectors of one link show the SAME target tag: the item the link points at on
-#     the B-end sheet.
+#   * each connector's top legend line is the PEER end's served tag (ADR-45 D2a, user
+#     feedback 2026-11-04): the source connector shows what the B end serves, the twin shows
+#     what the A end serves — "where the line comes from / where it goes".
 # 本解析钉住的**展示契约**对（同步起草的）ADR-45 具有规范性：三态永不合并；目标位号在
-# 读取期**推导**（ADR-43 D3），绝不是存储字段；一条 link 的两个连接符显示**同一个**目标
-# 位号 —— 即 link 在 B 端图纸上所指的那件东西。
+# 读取期**推导**（ADR-43 D3），绝不是存储字段；每个连接符的图例上一行是**其对端**所服务
+# 对象的位号（ADR-45 D2a，2026-11-04 实机反馈）：源端连接符显示 B 端所服务者，孪生体显示
+# A 端所服务者 —— 「线从哪台设备来 / 去往哪台设备」。
 #
 # Coding rule: every variable declares its type explicitly; all functions static & pure.
 # 编码规范：全变量显式类型；全部函数为静态纯函数。
@@ -37,15 +39,17 @@ extends RefCounted
 #   a_dangling      TRUE when the A end cannot be resolved in this context;
 #   b_dangling      same for the B end;
 #   peer_number     the B-end sheet's drawing number ("" when unknown — the A-view "peer");
-#   target_tag      the tag of the item the B end serves ("" when unresolvable — the flag's
-#                   top line; both connectors show the same one);
-#   medium          the contract medium (GPOffPageLink.GP_ATTR_MEDIUM);
+#   target_tag      the tag of the item the B end serves ("" when unresolvable — the LINK-
+#                   centric view reports read; per-connector display uses gpServedTagFor);
+#   medium          the DERIVED medium (ADR-45 D2b): the A end's served edge's "medium"
+#                   attribute, falling back to the link snapshot (old files);
 #   served          {"node_id": ...} of the item the B end serves, or null.
 # 解析**一条** link。[param gpNumbers] 为 {sheet_id: 图号}；[param gpGraphs] 为
 # {sheet_id: GPPIDGraph}。返回：a / b（link 自身端引用原样）；a_dangling / b_dangling
 #（该端在此上下文中无法解析时为真）；peer_number（B 端图纸号，未知为 ""）；target_tag
-#（B 端所服务对象的位号，无法解析为 "" —— 旗标上一行，两端同显）；medium（契约介质）；
-# served（B 端所服务对象的 {node_id}，无法解析为 null）。
+#（B 端所服务对象的位号，无法解析为 "" —— **link 中心**视角，报表/DRC 读它；逐连接符
+# 的展示走 gpServedTagFor）；medium（**派生**介质，ADR-45 D2b：A 端服务边的 medium 属性，
+# 回落 link 快照）；served（B 端所服务对象的 {node_id}，无法解析为 null）。
 static func gpResolve(gpLink: GPOffPageLink, gpNumbers: Dictionary,
 		gpGraphs: Dictionary) -> Dictionary:
 	if gpLink == null:
@@ -66,9 +70,72 @@ static func gpResolve(gpLink: GPOffPageLink, gpNumbers: Dictionary,
 		"b_dangling": gpBDangling,
 		"peer_number": gpPeerNo,
 		"target_tag": gpTargetTag,
-		"medium": str(gpLink.gpAttrs.get(GPOffPageLink.GP_ATTR_MEDIUM, "")),
+		"medium": gpMediumOf(gpLink, gpNumbers, gpGraphs),
 		"served": gpServed if not gpServed.is_empty() else null,
 	}
+
+
+# The tag of the item ONE end reference serves — the PER-CONNECTOR top legend line (ADR-45
+# D2a): a plain item serves itself, a connector (twin) serves the item across its first
+# non-connector edge, anything unresolvable serves nothing. Pure.
+# 某一**端引用**所服务对象的位号 —— **逐连接符**的图例上一行（ADR-45 D2a）：普通对象
+# 服务它自己、连接符（孪生体）服务横过它第一条非连接符边的对象、一切无法解析者服务空。
+# 纯函数。
+static func gpServedTagFor(gpRef: Dictionary, gpNumbers: Dictionary,
+		gpGraphs: Dictionary) -> String:
+	var gpServed: Dictionary = _gpServedOf(gpRef, gpGraphs)
+	if gpServed.is_empty():
+		return ""
+	return str(gpServed.get("tag", ""))
+
+
+# The DERIVED medium of one link (ADR-45 D2b, user feedback 2026-11-04): the A end's served
+# edge carries the live "medium" attribute — the source line the user actually edits — and
+# the link's seeded snapshot is only the FALLBACK for files created before derivation
+# existed. Deriving beats storing: a medium edited after creation now shows up without any
+# "sync" ritual. Pure.
+# 一条 link 的**派生**介质（ADR-45 D2b，2026-11-04 实机反馈）：A 端的服务边携带**活的**
+# medium 边属性 —— 用户真正编辑的那条源管线；link 的播种快照只是派生出现**之前**旧档的
+# 回落。派生胜于存储：创建后再改介质，旗标即刻跟上，无需任何「同步」仪式。纯函数。
+static func gpMediumOf(gpLink: GPOffPageLink, gpNumbers: Dictionary,
+		gpGraphs: Dictionary) -> String:
+	if gpLink == null:
+		return ""
+	var gpEdge: GPPIDEdge = _gpMediumEdgeOf(gpLink.gpA, gpGraphs)
+	if gpEdge != null:
+		var gpV: String = str(gpEdge.gpAttrs.get(GPOffPageLink.GP_ATTR_MEDIUM, "")).strip_edges()
+		if gpV != "":
+			return gpV
+	return str(gpLink.gpAttrs.get(GPOffPageLink.GP_ATTR_MEDIUM, "")).strip_edges()
+
+
+# The first edge hanging off ONE end's connector whose other end is not itself a connector —
+# the line whose attributes this end displays. {} -> null on anything unresolvable.
+# 某端连接符上挂着的第一条「对端不是连接符」的边 —— 即该端展示属性的那条线。一切无法
+# 解析者返回 null。
+static func _gpMediumEdgeOf(gpRef: Dictionary, gpGraphs: Dictionary) -> GPPIDEdge:
+	var gpSheetId: String = str(gpRef.get(GPOffPageLink.GP_KEY_SHEET, ""))
+	if gpSheetId == "":
+		return null
+	var gpGraph: GPPIDGraph = gpGraphs.get(gpSheetId) as GPPIDGraph
+	if gpGraph == null:
+		return null
+	var gpNodeId: String = str(gpRef.get(GPOffPageLink.GP_KEY_NODE, ""))
+	if gpNodeId == "":
+		return null
+	if gpGraph.gpGetNode(gpNodeId) == null:
+		return null
+	for gpE in gpGraph.gpEdges:
+		if gpE == null:
+			continue
+		var gpOtherId: String = _gpEdgeOtherNode(gpE, gpNodeId)
+		if gpOtherId == "":
+			continue
+		var gpOther: GPPIDNode = gpGraph.gpGetNode(gpOtherId)
+		if gpOther != null and not (gpOther.gpProps as Dictionary).has(
+				GPOffPageLink.GP_KEY_LINK_ID):
+			return gpE
+	return null
 
 
 # Whether ONE endpoint reference resolves in this context: its sheet must carry a graph AND

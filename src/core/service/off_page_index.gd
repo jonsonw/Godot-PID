@@ -205,17 +205,15 @@ static func gpRefTextFor(gpNode: GPPIDNode) -> String:
 	return gpNo if gpNo != "" else GP_UNRESOLVED_TEXT
 
 
-# The tag the link's TARGET end serves (user feedback 2026-11-03: the flag's top line). Both
-# connectors of one link show the SAME tag — the item the connection points at on the sheet
-# it goes to:
+# The tag the link's TARGET end serves — the LINK-CENTRIC view (reports / DRC read it from
+# the A perspective). Kept alongside gpPeerTagFor: for the A-end connector the two agree.
+# link **目标端**所服务的位号 —— **link 中心**视角（报表 / DRC 从 A 端视角读它）。与
+# gpPeerTagFor 并存：对 A 端连接符二者一致。
 #   * the B end is a plain item          -> its own tag;
 #   * the B end is a connector (the twin)-> the tag of the item across ITS edge;
 #   * anything unresolvable              -> "" (a blank slot, never a guess).
-# link **目标端**所服务的位号（用户反馈 2026-11-03：旗标上一行）。一条 link 的两个连接符显示
-# **同一个**位号 —— 连接所指向的、目标图纸上那台设备 / 仪表 / 管线：
-#   * B 端是普通对象 -> 它自己的位号；
-#   * B 端是连接符（孪生体）-> 横过它那条边后的对象位号；
-#   * 一切无法解析 -> ""（空槽位，绝不臆造）。
+#   * B 端是普通对象 -> 它自己的位号；B 端是连接符（孪生体）-> 横过它那条边后的对象位号；
+#     一切无法解析 -> ""（空槽位，绝不臆造）。
 static func gpTargetTagFor(gpNode: GPPIDNode) -> String:
 	if gpNode == null:
 		return ""
@@ -229,6 +227,41 @@ static func gpTargetTagFor(gpNode: GPPIDNode) -> String:
 	# UI **缓存壳**。语义只有一份 —— 渲染器、打印模型、DRC 与 W22 导出器共享它。
 	var gpOut: Dictionary = GPOffPageResolver.gpResolve(gpLink, _gpSheetNumbers, _gpGraphs)
 	return str(gpOut.get("target_tag", ""))
+
+
+# The tag of the item THIS connector's PEER end serves — the PER-CONNECTOR top legend line
+# (ADR-45 D2a, user feedback 2026-11-04): the source connector shows what the far sheet
+# receives, the twin shows where the line comes FROM (the source equipment / instrument
+# tag). The old "both ends show the same target tag" contract failed the real-machine
+# check: a reader of the TARGET sheet needs the SOURCE device's tag, not its own.
+# 本连接符**对端**所服务对象的位号 —— **逐连接符**的图例上一行（ADR-45 D2a，2026-11-04
+# 实机反馈）：源端连接符显示对端图纸接收什么、孪生体显示线**从哪台设备来**（源端设备 /
+# 仪表位号）。旧的「两端同显目标位号」契约未过实机验证：目标图的读图人需要的是**源端**
+# 设备位号，而不是自己这一侧的。
+static func gpPeerTagFor(gpNode: GPPIDNode) -> String:
+	if gpNode == null:
+		return ""
+	var gpLink: GPOffPageLink = gpLinkForNode(gpNode.gpInstanceId)
+	if gpLink == null:
+		return ""
+	var gpFar: Dictionary = gpPeerRefOf(gpLink, gpNode.gpInstanceId)
+	if gpFar.is_empty():
+		return ""
+	return GPOffPageResolver.gpServedTagFor(gpFar, _gpSheetNumbers, _gpGraphs)
+
+
+# The DERIVED medium of this connector's link (ADR-45 D2b): the A end's served edge carries
+# the LIVE attribute — a medium edited on the line after creation shows up without any
+# sync ritual; the link's seeded snapshot is only the old-file fallback.
+# 本连接符所在 link 的**派生**介质（ADR-45 D2b）：A 端服务边携带**活的**边属性 —— 创建后
+# 再改介质即刻跟上，无需同步仪式；link 播种快照只是旧档回落。
+static func gpMediumFor(gpNode: GPPIDNode) -> String:
+	if gpNode == null:
+		return ""
+	var gpLink: GPOffPageLink = gpLinkForNode(gpNode.gpInstanceId)
+	if gpLink == null:
+		return ""
+	return GPOffPageResolver.gpMediumOf(gpLink, _gpSheetNumbers, _gpGraphs)
 
 
 # ---- auto placement / 自动落位 ------------------------------------------

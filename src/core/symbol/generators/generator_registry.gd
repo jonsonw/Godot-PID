@@ -576,28 +576,35 @@ static func gpOffpageStateFor(gpRefText: String) -> String:
 # 生成旗标及其推导出的交叉编号文字。
 static func _gpGenerateOffpage(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> Dictionary:
 	var gpH: float = _gpOffpageBoxHeight(gpDef)
-	# TEXT LAYOUT (user feedback 2026-11-03, refined the same day): all three slots are
-	# DERIVED or INHERITED, none is hand-typed on the connector —
+	# TEXT LAYOUT (user feedback 2026-11-03; top-line contract revised 2026-11-04, ADR-45
+	# D2a/D2b): all three slots are DERIVED or INHERITED, none is hand-typed on the connector —
 	#   INSIDE the flag  — the peer drawing number (DERIVED, the three states below);
-	#   ABOVE the flag   — the TARGET end's tag (DERIVED through GPOffPageIndex: the item
-	#                      the link serves on the sheet it points at);
-	#   BELOW the flag   — the medium (INHERITED: copied from the source edge into the link
-	#                      at creation, GPCrossSheetCreateCommand).
+	#   ABOVE the flag   — the PEER end's served tag (DERIVED through GPOffPageIndex:
+	#                      per-connector — the twin shows the SOURCE equipment tag);
+	#   BELOW the flag   — the medium (DERIVED from the A end's served edge, the link
+	#                      snapshot only an old-file fallback).
 	# The renderer and the print model read the same three slots, so screen and paper cannot
 	# disagree. Empty slots paint nothing — the honest "not resolved yet".
-	# 文字版式（用户反馈 2026-11-03，同日细化）：三个槽位全部**推导或继承**，没有一个是在
-	# 连接符上手填的 —— **框内**：对端图纸号（**推导**，即下方三态）；**框上方**：**目标端**
-	# 位号（经 GPOffPageIndex 推导：link 所指图纸上被服务的那台设备 / 仪表 / 管线）；
-	# **框下方**：介质（**继承**：创建时从源边拷入 link，见 GPCrossSheetCreateCommand）。
-	# 渲染器与打印模型读**同一组**三个槽位，屏幕与纸面不可能分家。空槽不画 —— 诚实的
-	# 「尚未解析」。
+	# 文字版式（用户反馈 2026-11-03；上一行契约 2026-11-04 修订，ADR-45 D2a/D2b）：三个槽位
+	# 全部**推导或继承**，没有一个是在连接符上手填的 —— **框内**：对端图纸号（**推导**，即
+	# 下方三态）；**框上方**：**对端**所服务位号（经 GPOffPageIndex 推导：**逐连接符** ——
+	# 孪生体显示**源端**设备位号）；**框下方**：介质（从 A 端服务边**派生**，link 快照只是
+	# 旧档回落）。渲染器与打印模型读**同一组**三个槽位，屏幕与纸面不可能分家。空槽不画
+	# —— 诚实的「尚未解析」。
 	var gpTarget: String = ""
 	var gpMedium: String = ""
 	var gpLink: GPOffPageLink = GPOffPageIndex.gpLinkForNode(
 		gpNode.gpInstanceId if gpNode != null else "")
 	if gpLink != null:
-		gpMedium = str(gpLink.gpAttrs.get(GPOffPageLink.GP_ATTR_MEDIUM, ""))
-		gpTarget = GPOffPageIndex.gpTargetTagFor(gpNode)
+		# ADR-45 D2a/D2b (user feedback 2026-11-04): the top line is the PEER end's served
+		# tag — the source connector shows what the far sheet receives, the twin shows the
+		# SOURCE equipment tag (where the line comes from). The medium is DERIVED from the
+		# A end's served edge (live attribute), the link snapshot only an old-file fallback.
+		# ADR-45 D2a/D2b（2026-11-04 实机反馈）：上一行是**对端**所服务位号 —— 源端连接符
+		# 显示对端图纸接收什么、孪生体显示**源端**设备位号（线从哪台设备来）。介质从 A 端
+		# 服务边**派生**（活属性），link 快照只是旧档回落。
+		gpMedium = GPOffPageIndex.gpMediumFor(gpNode)
+		gpTarget = GPOffPageIndex.gpPeerTagFor(gpNode)
 	# The reference text: "" while unlinked (a blank flag is the honest look of "not connected
 	# yet"), "?" when the reference dangles, the tag or peer number once resolved. The DECISION
 	# lives in GPOffPageIndex so the S3 commands and the S4 rules read the same three states.

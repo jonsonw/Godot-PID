@@ -170,3 +170,85 @@ func gpTestIndexDelegatesToResolver() -> void:
 	gpOut = GPOffPageIndex.gpTargetTagFor(gpConnA)
 	gpEq(gpOut, "P-101", "index resolves through the resolver / 索引经 resolver 解析")
 	GPOffPageIndex.gpClear()
+
+
+# ---- ADR-45 D2a/D2b (user feedback 2026-11-04) ----
+# ---- 每端对端位号 + 介质读时派生（2026-11-04 实机反馈）----
+
+# PER-CONNECTOR top line: the PEER end's served tag. The A connector shows what the B end
+# serves; the twin shows what the A end serves — "where the line comes from / goes".
+# **逐连接符**的上一行：**对端**所服务位号。A 端连接符显示 B 端所服务者；孪生体显示
+# A 端所服务者 —— 「线从哪台设备来 / 去往哪台设备」。
+func gpTestServedTagIsPerEnd() -> void:
+	var gpR: Dictionary = _gpRig()
+	var gpG1: GPPIDGraph = gpR["g1"]
+	var gpG2: GPPIDGraph = gpR["g2"]
+	# A end: connector + a source device across its edge (the equipment the line comes from).
+	# A 端：连接符 + 横边后的源设备（线所来自的那台设备）。
+	var gpSrc: GPPIDNode = gpG1.gpNewNode("n-src", "PUMP001", "E-1001", Vector2(10, 60), {})
+	gpSrc.gpTag = "E-1001"
+	gpG1.gpAddNode(gpSrc)
+	gpG1.gpAddEdge(gpG1.gpNewEdge("e-src", "n-conn-a", "n-src"))
+	# B end: twin + edge to the served device.
+	# B 端：孪生体 + 到被服务设备的边。
+	var gpConnB: GPPIDNode = gpG2.gpNewNode("n-conn-b", GPSymbolPackOffpage.GP_ID_PIPE,
+		"CONN-B", Vector2(60, 60), {})
+	gpConnB.gpProps[GPOffPageLink.GP_KEY_LINK_ID] = "xlink-1"
+	gpG2.gpAddNode(gpConnB)
+	gpG2.gpAddEdge(gpG2.gpNewEdge("e-1", "n-conn-b", "n-dev"))
+	(gpR["link"] as GPOffPageLink).gpB = {"sheet_id": "sheet-2", "node_id": "n-conn-b",
+		"port_id": "in"}
+	var gpLink: GPOffPageLink = gpR["link"]
+	# served is a property of the END REF, not of the display: the A end serves the SOURCE
+	# device (what the TWIN displays), the B end serves the target device (what the SOURCE
+	# connector displays).
+	# served 是**端引用**的属性，不是展示的属性：A 端所服务者是源端设备（孪生体显示的就是
+	# 它），B 端所服务者为目标设备（源端连接符显示的就是它）。
+	gpEq(GPOffPageResolver.gpServedTagFor(gpLink.gpA, gpR["numbers"], gpR["graphs"]),
+		"E-1001", "the A end serves the source device — what the twin displays / A 端所服务者为源端设备 —— 孪生体显示它")
+	gpEq(GPOffPageResolver.gpServedTagFor(gpLink.gpB, gpR["numbers"], gpR["graphs"]),
+		"P-101", "the B end serves the target device — what the source connector displays / B 端所服务者为目标设备 —— 源端连接符显示它")
+	gpEq(GPOffPageResolver.gpServedTagFor({}, gpR["numbers"], gpR["graphs"]), "",
+		"an empty reference serves nothing / 空引用服务空")
+	# Index level: the per-connector entry agrees with the resolver, per end.
+	# 索引层：逐连接符入口与 resolver 一致，逐端成立。
+	GPOffPageIndex.gpSetContext([gpLink] as Array[GPOffPageLink], gpR["numbers"],
+		gpR["graphs"])
+	var gpConnA: GPPIDNode = gpG1.gpGetNode("n-conn-a")
+	gpEq(GPOffPageIndex.gpPeerTagFor(gpConnA), "P-101",
+		"index: A connector sees the far (B) tag / 索引：A 连接符见远端（B）位号")
+	gpEq(GPOffPageIndex.gpPeerTagFor(gpConnB), "E-1001",
+		"index: twin sees the far (A) tag — the source equipment / 索引：孪生体见远端（A）位号 —— 源端设备")
+	GPOffPageIndex.gpClear()
+
+
+# The medium is DERIVED from the A end's served edge (the live attribute), the link's seeded
+# snapshot only a fallback for files without the edge attribute.
+# 介质从 A 端服务边**派生**（活属性）；link 播种快照只是无边属性旧档的回落。
+func gpTestMediumDerivesFromSourceEdge() -> void:
+	var gpR: Dictionary = _gpRig()
+	var gpLink: GPOffPageLink = gpR["link"]
+	# No A-end edge yet: the snapshot fallback answers.
+	# A 端尚无边：快照回落作答。
+	gpEq(GPOffPageResolver.gpMediumOf(gpLink, gpR["numbers"], gpR["graphs"]), "水",
+		"without an edge the snapshot answers / 无边时由快照作答")
+	# The source line appears WITH its medium: the live edge attribute WINS over the stale
+	# snapshot — a medium edited after creation shows up with no sync ritual.
+	# 源管线带着介质出现：**活边属性胜过**陈旧快照 —— 创建后再改介质即刻跟上，无需同步仪式。
+	var gpG1: GPPIDGraph = gpR["g1"]
+	var gpSrc: GPPIDNode = gpG1.gpNewNode("n-src", "PUMP001", "E-1001", Vector2(10, 60), {})
+	gpSrc.gpTag = "E-1001"
+	gpG1.gpAddNode(gpSrc)
+	var gpLine: GPPIDEdge = gpG1.gpNewEdge("e-src", "n-conn-a", "n-src")
+	gpLine.gpAttrs[GPOffPageLink.GP_ATTR_MEDIUM] = "SLURRY 32%"
+	gpG1.gpAddEdge(gpLine)
+	gpEq(GPOffPageResolver.gpMediumOf(gpLink, gpR["numbers"], gpR["graphs"]), "SLURRY 32%",
+		"the live edge medium wins over the snapshot / 活边介质胜过快照")
+	# An edge without a medium falls back to the snapshot again.
+	# 无介质的边再次回落到快照。
+	gpLine.gpAttrs[GPOffPageLink.GP_ATTR_MEDIUM] = ""
+	gpEq(GPOffPageResolver.gpMediumOf(gpLink, gpR["numbers"], gpR["graphs"]), "水",
+		"an empty edge medium falls back / 空边介质回落快照")
+	# Null safety / 空安全。
+	gpEq(GPOffPageResolver.gpMediumOf(null, gpR["numbers"], gpR["graphs"]), "",
+		"a null link has no medium / null link 无介质")
