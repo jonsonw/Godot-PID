@@ -52,3 +52,27 @@ func gpTestRemoveWithEdges() -> void:
 	gpG.gpRemoveNodeWithEdges("n1")
 	gpCheck(gpG.gpNodes.size() == 1, "one node should remain")
 	gpCheck(gpG.gpEdges.size() == 0, "edge touching n1 should be removed")
+
+
+# Duplicate appends are refused (root cause of the 2026-11-04 move_child OOB: a duplicated
+# entry makes the render binder's paint order longer than its distinct view set).
+# 拒绝重复追加（2026-11-04 move_child 越界的根因：重复条目使渲染绑定器的绘制序
+# 长于其去重视图集）。
+func gpTestAddNodeRefusesDuplicates() -> void:
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	var gpN: GPPIDNode = gpG.gpNewNode("n1", "pump", "P-101")
+	gpCheck(gpG.gpAddNode(gpN), "first add of a fresh node succeeds")
+	# Same object twice.
+	# 同一对象追加两次。
+	gpCheck(not gpG.gpAddNode(gpN), "re-adding the SAME object is refused")
+	gpCheck(gpG.gpNodes.size() == 1, "and the list is unchanged")
+	# A different object claiming an occupied instance id is equally corrupting.
+	# 另一对象占用已占用的实例 id 同样是污染。
+	var gpClone: GPPIDNode = gpG.gpNewNode("n1", "pump", "P-101-COPY")
+	gpCheck(not gpG.gpAddNode(gpClone), "a second object with the same id is refused")
+	gpCheck(gpG.gpNodes.size() == 1, "still unchanged")
+	# Undo compatibility: after a REAL remove, re-adding the same object must work.
+	# 撤销兼容：真正删除之后，重加同一对象必须可行。
+	gpG.gpRemoveNode("n1")
+	gpCheck(gpG.gpAddNode(gpN), "re-add after remove succeeds (undo path)")
+	gpCheck(gpG.gpNodes.size() == 1, "and the node is back exactly once")

@@ -241,10 +241,34 @@ func gpNotifyChanged() -> void:
 	_gpNotifyChanged()
 
 
-func gpAddNode(gpNode: GPPIDNode) -> void:
+# Add a node object. A duplicate append — the SAME object already in the list, or a DIFFERENT
+# object reusing an instance id — is refused: a duplicated entry makes the render binder's
+# paint-order longer than its distinct view set and crashed move_child with an out-of-bounds
+# index (2026-11-04 user report). Returns false (with a push_warning naming the cause) instead
+# of corrupting the graph silently. Undo paths are unaffected: they always re-add AFTER the
+# matching remove, so the node is guaranteed absent at that point.
+# 添加节点对象。拒绝重复追加 —— 同一对象已在表中，或另一对象占用了同一实例 id：重复条目使
+# 渲染绑定器的绘制序长于其去重视图集，曾令 move_child 以越界下标崩溃（2026-11-04 用户报告）。
+# 返回 false（并 push_warning 说明原因）而非静默污染图结构。撤销路径不受影响：重加总发生在
+# 对应删除之后，此刻节点必然不在表中。
+func gpAddNode(gpNode: GPPIDNode) -> bool:
+	if gpNode == null:
+		return false
+	# One id, one node. This single check refuses BOTH hostile shapes — re-adding the SAME
+	# object (its id is owned by itself in the list) and a DIFFERENT object claiming an
+	# occupied id — because a duplicated entry makes the render binder's paint order longer
+	# than its distinct view set and crashed move_child with an out-of-bounds index
+	# (2026-11-04 user report).
+	# 一个 id 一个节点。这一条检查同时拒绝两种敌意形态 —— 重加**同一对象**（其 id 已被自己
+	# 占用）与另一对象抢占已占用 id —— 因为重复条目使渲染绑定器的绘制序长于其去重视图集，
+	# 曾令 move_child 以越界下标崩溃（2026-11-04 用户报告）。
+	if gpNode.gpInstanceId != "" and gpGetNode(gpNode.gpInstanceId) != null:
+		push_warning("GPGraph.gpAddNode: instance id already present — duplicate node refused")
+		return false
 	gpNodes.append(gpNode)
 	gpNodeAdded.emit(gpNode)
 	_gpNotifyChanged()
+	return true
 
 
 # Add an edge object to the graph.

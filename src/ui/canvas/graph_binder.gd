@@ -124,7 +124,14 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String,
 	var gpFresh: Dictionary = {}
 	for gpN in gpGraph.gpNodes:
 		var gpId: String = gpN.gpInstanceId
-		if gpId == "":
+		# One view per DISTINCT id per pass. The id->view cache is only written back at the END of
+		# this function, so without this guard a duplicate entry on the FIRST sync (empty cache)
+		# would create a SECOND view for the same id and orphan the first — a leaked view that no
+		# later sync tracks, frees, or repaints (2026-11-04 move_child OOB investigation).
+		# 每个**去重** id 每次同步恰一个视图。id→视图缓存要到本函数末尾才写回，若无此守卫，
+		# 首次同步（空缓存）遇到重复条目会为同一 id 建出**第二个**视图并使第一个沦为孤儿 ——
+		# 一个后续同步既不追踪、不释放也不重绘的泄漏视图（2026-11-04 move_child 越界排查）。
+		if gpId == "" or gpFresh.has(gpId):
 			continue
 		var gpV: GPSymbolView = null
 		if _gpSymbolViews.has(gpId):
@@ -218,9 +225,22 @@ func _gpSyncSymbolViews(gpSelection: Array[String], gpConnectFrom: String,
 	# 图元被压实到**靠前的**同级下标，从而让连线视图保持其既有的「画在图元之上」的关系。
 	if gpWorldRoot != null:
 		var gpAt: int = 0
+		# Defense in depth: one view is placed EXACTLY ONCE per sync. If the model ever carries a
+		# duplicate entry (same object appended twice, or two nodes sharing an id), the paint order
+		# would otherwise be longer than the distinct view set and move_child would run past the
+		# last valid sibling index (2026-11-04 user report). The model now refuses duplicate adds;
+		# this guard keeps the binder correct even if a future caller reintroduces one.
+		# 纵深防御：一个视图每次同步**只放置一次**。若模型再出现重复条目（同一对象被追加两次，
+		# 或两个节点共用一个 id），绘制序将长于去重视图集，move_child 会越过最后一个合法同级
+		# 下标（2026-11-04 用户报告）。模型现已拒绝重复添加；此守卫保证即使未来某调用方再引入
+		# 重复，绑定器依然正确。
+		var gpPlaced: Dictionary = {}
 		for gpId in _gpPaintOrder():
 			if not gpFresh.has(gpId):
 				continue
+			if gpPlaced.has(gpId):
+				continue
+			gpPlaced[gpId] = true
 			var gpView: GPSymbolView = gpFresh[gpId]
 			if gpView.get_index() != gpAt:
 				gpWorldRoot.move_child(gpView, gpAt)
