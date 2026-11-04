@@ -4,6 +4,11 @@ extends GPCommand
 # Set (or clear) one well-known attribute on an edge: dn / medium / spec / insulation /
 # 设置（或清除）边上的一个约定属性：dn / medium / spec / insulation / show_arrow / show_tag /
 #
+# A null gpValue means CLEAR the key (erase, not "store null") — used e.g. by the
+# cross-sheet inherit checkbox to drop attrs["tag_manual"] (user feedback 2026-11-04).
+# gpValue 为 null 表示**清除**该键（删除，而非存入 null）—— 例如跨图纸继承勾选框用它
+# 移除 attrs["tag_manual"]（用户反馈 2026-11-04）。
+#
 # Why one command for all of them / 为何用一个命令涵盖全部：
 # They differ only in key and value type, and the inspector must be able to revert each one
 # independently. A command per attribute would be seven near-identical files. The trade-off is
@@ -43,7 +48,17 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 		_gpOldValue = gpE.gpAttrs[gpKey]
 		if _gpSame(_gpOldValue, gpValue):
 			return false
-	gpE.gpAttrs[gpKey] = gpValue
+	if gpValue == null:
+		# null = clear. Erasing an absent key is a no-op that still reports success=false
+		# semantics via the pre-check above never having run — keep it simple: nothing to
+		# change means nothing was done.
+		# null = 清除。清除不存在的键无事可做 —— 上面的预检不会执行，简单处理：无可改动
+		# 即视为未做。
+		if not _gpHadKey:
+			return false
+		gpE.gpAttrs.erase(gpKey)
+	else:
+		gpE.gpAttrs[gpKey] = gpValue
 	gpCtx.gpGraph.gpNotifyChanged()
 	return true
 

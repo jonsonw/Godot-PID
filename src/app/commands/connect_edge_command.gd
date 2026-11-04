@@ -40,6 +40,16 @@ var gpSignalType: String = ""
 # 用户按住 Shift 绘制时为 false（直线而非正交）。
 var gpOrtho: bool = true
 
+# A PRE-ASSIGNED line number (cross-sheet continuation, user feedback 2026-11-04): when
+# non-empty and not already taken on the TARGET graph, it is used INSTEAD of minting — the
+# pipe drawn from the twin connector carries the source line's number (ADR-36 D1: the same
+# number on another sheet is the legitimate continuation case). Empty (or taken) falls back
+# to the normal mint, so a conflicting sheet never blocks the gesture.
+# 预先给定的管线号（跨图纸延续，用户反馈 2026-11-04）：非空且未在**目标图**上被占用时，
+# 直接采用而**不**铸新号 —— 从孪生连接符画出的管线继承源端编号（ADR-36 D1：同号出现在
+# 另一张图纸是合法的延续）。为空（或已被占用）时回落正常铸号，编号冲突绝不阻塞手势。
+var gpPresetTag: String = ""
+
 # Pre-computed MIDDLE waypoints (auto-routed). Empty = let GPEdgeRoute derive an L/Z/U path from
 # the two port normals, exactly as a hand-drawn pipe does. Set by GPEditService.gpConnectEdgeRouted().
 # 预先算好的中间折点（自动布线）。为空表示由 GPEdgeRoute 依两端口法线推导 L/Z/U 路径 ——
@@ -64,12 +74,14 @@ var _gpInsertAt: int = -1
 
 
 func _init(gpInFrom: Dictionary, gpInTo: Dictionary, gpInKind: String,
-		gpInSignalType: String = "", gpInOrtho: bool = true) -> void:
+		gpInSignalType: String = "", gpInOrtho: bool = true,
+		gpInPresetTag: String = "") -> void:
 	gpFromRef = gpInFrom.duplicate(true)
 	gpToRef = gpInTo.duplicate(true)
 	gpKind = gpInKind
 	gpSignalType = gpInSignalType
 	gpOrtho = gpInOrtho
+	gpPresetTag = gpInPresetTag
 	gpLabel = "绘制信号线" if gpInKind == GPPIDEdge.GP_SIGNAL else "绘制管道"
 
 
@@ -89,13 +101,22 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
  # 在命令内部铸管线号（见文件头：撤销不得烧号）。信号线按惯例不带线号，故为 ""。
 		var gpTag: String = ""
 		if gpKind != GPPIDEdge.GP_SIGNAL:
+			# Continuation first (user feedback 2026-11-04): an inherited number is not a
+			# mint — it consumes nothing and is checked only against the TARGET graph's
+			# occupancy (ADR-36 D1 makes cross-sheet repeats legal; an on-sheet repeat is
+			# still a conflict and falls back to minting).
+			# 延续优先（用户反馈 2026-11-04）：继承号不是铸号 —— 不消耗任何序号，且只对
+			# **目标图**的占用情况查重（ADR-36 D1 使跨图同号合法；同图同号仍是冲突，
+			# 此时回落铸号）。
+			if gpPresetTag != "" and not _gpTagTaken(gpCtx, gpPresetTag):
+				gpTag = gpPresetTag
 			# ADR-36: a line is numbered through its CLASS rule (the five-field designation),
 			# not by the legacy PL counter. Attributes are not known at this moment — the
 			# attribute panel fills them in and re-renders the SAME number, so the placeholder
 			# costs nothing.
 			# ADR-36：管线号走**类别**规则（五段代号），不再是旧的 PL 计数器。此刻还没有属性 ——
 			# 属性面板填完后会重渲染**同一个号**，故占位不消耗序号。
-			if gpCtx.gpTags != null:
+			elif gpCtx.gpTags != null:
 				gpTag = gpCtx.gpTags.gpNextTagForClass(GPProjectStandard.GP_CLASS_LINE)
 			else:
 				gpTag = GPTagGen.gpNextTag(gpCtx.gpGraph)
@@ -161,6 +182,17 @@ func _gpFindDuplicate(gpCtx: GPCommandContext) -> GPPIDEdge:
 		if _gpSameEnd(gpE.gpFromRef, gpFromRef) and _gpSameEnd(gpE.gpToRef, gpToRef):
 			return gpE
 	return null
+
+
+# Whether a line number is already occupied on the TARGET graph. Live scan (nodes and edges
+# share one table, ADR-36 D6) — deliberately NOT the shared tag registry: this command runs
+# with a registry whose graph binding/index belongs to ANOTHER sheet mid-gesture, and its
+# cached state would misreport the just-minted local number as "taken" here.
+# 管线号是否已被**目标图**占用。活体扫描（节点与边共表，ADR-36 D6）—— 刻意**不**走共享
+# 编号注册表：本命令执行中途，注册表的图绑定 / 索引属于**另一张**图纸，其缓存态会把刚铸出
+# 的本端号误判为「此处已被占用」。
+func _gpTagTaken(gpCtx: GPCommandContext, gpTag: String) -> bool:
+	return GPTagGen.gpIsTaken(gpCtx.gpGraph, gpTag, "")
 
 
 # End equality that treats port_id as a HINT, not a contract: a legacy edge with an empty

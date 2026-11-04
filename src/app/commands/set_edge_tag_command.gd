@@ -16,6 +16,15 @@ extends GPCommand
 var gpEdgeId: String = ""
 var gpNewTag: String = ""
 
+# True when the change was PROPAGATED from the source line of a cross-sheet link (user
+# feedback 2026-11-04): a propagated number is a continuation, not a deliberate hand choice,
+# so tag_manual must stay unset — the peer edge keeps FOLLOWING the source. Validation (line
+# rule + on-sheet uniqueness) is identical to a hand edit.
+# 为 true 时表示本次改号是**从跨图纸 link 的源端传播**而来（用户反馈 2026-11-04）：传播号
+# 是延续而非刻意的受选手选，故**不**置 tag_manual —— 对端边继续保持跟随源端。校验（线规则
+# 与本图查重）与手改完全一致。
+var gpPropagated: bool = false
+
 # Previous tag, captured at execute time so undo is exact.
 # 执行时捕获的原位号，使撤销精确。
 var _gpOldTag: String = ""
@@ -27,10 +36,11 @@ var gpRefusal: String = ""
 var gpRefusalDetail: String = ""
 
 
-func _init(gpInEdgeId: String, gpInNewTag: String) -> void:
+func _init(gpInEdgeId: String, gpInNewTag: String, gpInPropagated: bool = false) -> void:
 	gpEdgeId = gpInEdgeId
 	gpNewTag = gpInNewTag
-	gpLabel = "修改管线号"
+	gpPropagated = gpInPropagated
+	gpLabel = "联动改号" if gpInPropagated else "修改管线号"
 
 
 func gpExecute(gpCtx: GPCommandContext) -> bool:
@@ -57,8 +67,11 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 	_gpHadManual = bool(gpE.gpAttrs.get("tag_manual", false))
 	gpE.gpTag = gpNewTag
 	# A hand-typed number is a deliberate choice: remember it so renumbering leaves it alone.
-	# 手工输入的号是刻意选择：记住它，使重新编号时不碰它。
-	if gpNewTag != "":
+	# A PROPAGATED number is the opposite — it must keep following the source, so the flag
+	# stays untouched (undo still restores the exact prior state via _gpHadManual).
+	# 手工输入的号是刻意选择：记住它，使重新编号时不碰它。**传播**来的号正相反 —— 它必须
+	# 继续跟随源端，故标记保持不动（撤销仍经 _gpHadManual 精确还原先前状态）。
+	if gpNewTag != "" and not gpPropagated:
 		gpE.gpAttrs["tag_manual"] = true
 	gpCtx.gpGraph.gpNotifyChanged()
 	return true

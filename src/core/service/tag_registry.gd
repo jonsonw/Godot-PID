@@ -159,6 +159,16 @@ func gpStandardRef() -> GPProjectStandard:
 # 某位号是否已被 gpExceptUid 之外的对象占用，**跨整个工程**（每张图纸、节点与边 —— 一张表，
 # ADR-36 D6）。空位号永不算被占用。
 func gpIsTaken(gpTag: String, gpExceptUid: String = "") -> bool:
+	# The cached index spans the WHOLE project, so it is valid only for project scope. A
+	# sheet-scoped query (gpIsTakenOnSheet) must never see it — a number taken on another
+	# sheet is the legitimate continuation case (ADR-36 D1), and the stale cache would
+	# refuse exactly that.
+	# 缓存索引横跨**整个工程**，故仅对工程作用域有效。单图作用域的查询（gpIsTakenOnSheet）
+	# 绝不能看它 —— 别张图纸上的号是合法的延续（ADR-36 D1），陈旧缓存恰好会拒绝这种情况。
+	var gpNorm: String = gpNormalize(gpTag)
+	if gpNorm != "" and _gpUidByNorm.has(gpNorm):
+		if str(_gpUidByNorm[gpNorm]) != gpExceptUid:
+			return true
 	return _gpIsTakenIn(gpGraphs(), gpTag, gpExceptUid)
 
 
@@ -180,7 +190,19 @@ func gpIsTakenOnSheet(gpTag: String, gpGraphIn: GPPIDGraph = null,
 # 对**某个类别**的候选者而言某位号是否被占用 —— 所有铸号路径唯一的判断入口，故作用域规则只此一处。
 func gpIsTakenForClass(gpClass: String, gpTag: String, gpExceptUid: String = "") -> bool:
 	var gpStd: GPProjectStandard = gpStandardRef()
-	if gpStd != null and gpStd.gpScopeOf(gpClass) == GPProjectStandard.GP_SCOPE_SHEET:
+	var gpScope: String = GPProjectStandard.GP_SCOPE_PROJECT
+	if gpStd != null:
+		gpScope = gpStd.gpScopeOf(gpClass)
+	elif gpClass == GPProjectStandard.GP_CLASS_LINE:
+		# No materialised standard: the FACTORY default for lines is sheet scope
+		# (GPProjectStandard's gpLine, ADR-36 D1). Falling back to project scope here would
+		# refuse the legitimate cross-sheet continuation — exactly what the inherited
+		# line number is (user feedback 2026-11-04).
+		# 标准尚未物化：管线的**出厂**默认作用域是单图（GPProjectStandard 的 gpLine，
+		# ADR-36 D1）。此处若回落工程级，合法的跨图纸延续会被拒 —— 而继承来的管线号
+		# 恰恰就是这种延续（用户反馈 2026-11-04）。
+		gpScope = GPProjectStandard.GP_SCOPE_SHEET
+	if gpScope == GPProjectStandard.GP_SCOPE_SHEET:
 		return gpIsTakenOnSheet(gpTag, gpGraph, gpExceptUid)
 	return gpIsTaken(gpTag, gpExceptUid)
 
@@ -209,13 +231,14 @@ func gpOwnerOf(gpTag: String) -> String:
 # 在一组图中按归一化位号查找。索引只是快路径：图才是真相，故索引过期只会拖慢、绝不会放出重复位号。
 func _gpIsTakenIn(gpGraphsIn: Array[GPPIDGraph], gpTag: String,
 		gpExceptUid: String) -> bool:
+	# Pure LIVE scan of the given graphs — no cached index here. The cache is a
+	# project-wide structure; callers that scan ONE sheet (gpIsTakenOnSheet) would otherwise
+	# see other sheets' numbers as "taken here".
+	# 对给定图的**纯活体**扫描 —— 此处不查缓存索引。缓存是工程级结构；只扫**一张**图纸的
+	# 调用方（gpIsTakenOnSheet）若查它，就会把别张图纸的号误判为「本图已占用」。
 	var gpNorm: String = gpNormalize(gpTag)
 	if gpNorm == "":
 		return false
-	if _gpUidByNorm.has(gpNorm):
-		var gpKnownOwner: String = str(_gpUidByNorm[gpNorm])
-		if gpKnownOwner != gpExceptUid:
-			return true
 	for gpG in gpGraphsIn:
 		for gpN in gpG.gpNodes:
 			if gpN.gpInstanceId != gpExceptUid and gpNormalize(gpN.gpTag) == gpNorm:

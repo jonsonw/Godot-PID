@@ -929,6 +929,20 @@ func _gpCanvasOfTab(gpS: int) -> GPCanvas2D:
 	return gpTabs[gpS]["canvas"] as GPCanvas2D
 
 
+# The canvas showing the sheet with this id — regardless of WHERE it currently lives (a pane
+# or the popped-out window): the tab entry holds the SAME canvas instance either way. Used
+# by the shell to reach a peer sheet's edit service (cross-sheet tag propagation).
+# 显示该 id 图纸的画布 —— 无论它当前住在哪（窗格或摘出窗口）：tab 条目持有的都是**同一个**
+# 画布实例。供外壳触达对端图纸的编辑服务（跨图纸编号传播）。
+func gpCanvasForSheetId(gpSheetId: String) -> GPCanvas2D:
+	if gpSheetId == "":
+		return null
+	for gpT in gpTabs:
+		if str(gpT.get("id", "")) == gpSheetId:
+			return gpT.get("canvas") as GPCanvas2D
+	return null
+
+
 # Show sheet gpTabIdx in the ACTIVE pane (the tab bar's and gpAddTab's intent). This replaces
 # the old stack-only _gpShowOnly: in every mode "switching sheets" means "rebind the active
 # pane", and the uniqueness invariant empties whatever other pane showed it.

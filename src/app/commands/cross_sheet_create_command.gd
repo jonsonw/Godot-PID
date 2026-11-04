@@ -239,8 +239,13 @@ func gpExecute(gpCtx: GPCommandContext) -> bool:
 			gpPeerGraph.gpAddNode(_gpPeerNode)
 			var gpTwinRef: Dictionary = {"node_id": gpPeerId,
 				"port_id": GPSymbolPackOffpage.GP_PORT_CONT}
+			# INHERIT the source line's number (user feedback 2026-11-04): the continuation
+			# segment on the peer sheet carries the SAME line number, not a freshly minted
+			# one. An empty preset (signal lines, or no source line) mints as before.
+			# 继承源管线编号（用户反馈 2026-11-04）：对端图纸上的延续段携带**同一个**管线号，
+			# 而不是新铸一个。预设为空（信号线、或尚无源线）时照旧铸号。
 			_gpPeerConnect = GPConnectEdgeCommand.new(gpTwinRef, gpServedRef, gpKind,
-				gpSignalType, gpOrtho)
+				gpSignalType, gpOrtho, _gpSourceEdgeTag(gpCtx))
 			if not _gpPeerConnect.gpExecute(
 					GPCommandContext.new(gpPeerGraph, gpCtx.gpIds, gpCtx.gpTags)):
 				# Roll the WHOLE gesture back: the local half included — a refused peer edge
@@ -360,6 +365,40 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 
 # ============================ private ============================
 
+# The SOURCE line: the first edge touching the LOCAL connector. In mode A it is the edge the
+# command itself just drew into the connector; in mode B it is the pipeline that already
+# feeds the existing connector. Both are "the line the user connected FROM".
+# **源管线**：触及本端连接符的第一条边。模式 A 下是命令刚画进连接符的那条边；模式 B 下是
+# 已接入既有连接符的那根管线。两者都是「用户发起连接的那条线」。
+func _gpSourceEdge(gpCtx: GPCommandContext) -> GPPIDEdge:
+	if gpCtx == null or gpCtx.gpGraph == null:
+		return null
+	if _gpConnect != null and _gpConnect.gpCreatedId != "":
+		return gpCtx.gpGraph.gpGetEdge(_gpConnect.gpCreatedId)
+	var gpLocalId: String = str(_gpLink.gpA.get(GPOffPageLink.GP_KEY_NODE, "")) \
+		if _gpLink != null else gpExistingLocalNodeId
+	if gpLocalId == "":
+		return null
+	for gpE in gpCtx.gpGraph.gpEdges:
+		if gpE == null:
+			continue
+		if str(gpE.gpFromRef.get("node_id", "")) != gpLocalId \
+				and str(gpE.gpToRef.get("node_id", "")) != gpLocalId:
+			continue
+		return gpE
+	return null
+
+
+# The source line's number ("" for signal lines — they carry none by convention — or when
+# no source line exists yet).
+# 源管线的编号（信号线按惯例不带号、或尚无源线时为 ""）。
+func _gpSourceEdgeTag(gpCtx: GPCommandContext) -> String:
+	if gpKind == GPPIDEdge.GP_SIGNAL:
+		return ""
+	var gpE: GPPIDEdge = _gpSourceEdge(gpCtx)
+	return gpE.gpTag if gpE != null else ""
+
+
 # INHERIT the contract snapshot from the SOURCE line (user feedback 2026-11-03): the first
 # edge touching the local connector is that line; its contract attrs seed the link's
 # snapshot, and the sync command / DRC take it from there. Only keys the link does not carry
@@ -370,22 +409,15 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 func _gpInheritContractAttrs(gpCtx: GPCommandContext) -> void:
 	if gpCtx == null or gpCtx.gpGraph == null or _gpLink == null:
 		return
-	var gpLocalId: String = str(_gpLink.gpA.get(GPOffPageLink.GP_KEY_NODE, ""))
-	if gpLocalId == "":
+	var gpE: GPPIDEdge = _gpSourceEdge(gpCtx)
+	if gpE == null:
 		return
-	for gpE in gpCtx.gpGraph.gpEdges:
-		if gpE == null:
+	for gpKey in GPOffPageLink.GP_CONTRACT_KEYS:
+		var gpVal: String = str(gpE.gpAttrs.get(gpKey, "")).strip_edges()
+		if gpVal == "":
 			continue
-		if str(gpE.gpFromRef.get("node_id", "")) != gpLocalId \
-				and str(gpE.gpToRef.get("node_id", "")) != gpLocalId:
-			continue
-		for gpKey in GPOffPageLink.GP_CONTRACT_KEYS:
-			var gpVal: String = str(gpE.gpAttrs.get(gpKey, "")).strip_edges()
-			if gpVal == "":
-				continue
-			if str(_gpLink.gpAttrs.get(gpKey, "")).strip_edges() == "":
-				_gpLink.gpAttrs[gpKey] = gpVal
-		return
+		if str(_gpLink.gpAttrs.get(gpKey, "")).strip_edges() == "":
+			_gpLink.gpAttrs[gpKey] = gpVal
 
 
 # Undo the LOCAL half (mode A: the created edge + node; mode B: the stamp) — used when the

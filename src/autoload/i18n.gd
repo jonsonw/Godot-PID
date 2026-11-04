@@ -674,6 +674,12 @@ const GP_STRINGS: Dictionary = {
 	"offpage.sync_done":      { "zh": "契约属性已同步到对端", "en": "Contract attributes synced to the peer end" },
 	"offpage.jump_missing":   { "zh": "对端图纸未打开或已删除", "en": "The peer sheet is not open or was deleted" },
 	"offpage.status_created": { "zh": "跨图纸连接已创建（编号 %s）", "en": "Cross-sheet connection created (tag %s)" },
+	"offpage.insp_inherit":      { "zh": "继承源端编号", "en": "Inherit source line number" },
+	"offpage.insp_inherit_tip":  { "zh": "勾选：本段管线号跟随源端图纸，源端改号自动联动；取消勾选：本段编号独立（重编号亦跳过）。", "en": "Checked: this segment follows the source sheet's line number and re-syncs on source edits. Unchecked: this segment's number is independent (renumbering skips it too)." },
+	"offpage.inherit_done":      { "zh": "对端延续段管线号已联动：%s", "en": "Continuation segment line number synced: %s" },
+	"offpage.inherit_on":        { "zh": "已恢复继承源端编号（当前源端号：%s）", "en": "Inheriting the source line number again (current source tag: %s)" },
+	"offpage.inherit_off":       { "zh": "已取消继承：本段编号独立", "en": "Inheritance off: this segment's number is now independent" },
+	"offpage.inherit_fail":      { "zh": "对端管线号联动失败：%s", "en": "Peer line number sync failed: %s" },
 	# ---- D24: cross-sheet refusal reasons (machine keys from the create/sync commands;
 	# reported with the "offpage.refuse_" prefix — never shown as a bare key). ----
 	# ---- D24：跨图纸拒绝原因（创建 / 同步命令的机器键；经 "offpage.refuse_" 前缀上报，

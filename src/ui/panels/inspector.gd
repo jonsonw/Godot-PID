@@ -96,9 +96,21 @@ signal gpLinkSyncRequested(gpLinkId: String)
 # 了一张图纸。外壳把它路由进与右键菜单**同一条**画布手势，使连接对话框直接预选该图纸。
 signal gpConnectPickRequested(gpNodeId: String, gpSheetId: String)
 
+# Cross-sheet inherit checkbox on a B-side continuation edge (user feedback 2026-11-04):
+# the user switched "继承源端编号" on/off for this line segment.
+# B 端延续边上的跨图纸继承勾选框（用户反馈 2026-11-04）：用户对本线段开关了「继承源端编号」。
+signal gpEdgeInheritToggled(gpEdgeId: String, gpFollow: bool)
+
 # Container link-table provider (the panel owns no link table). Invalid = section hidden.
 # 容器 link 表来源（本面板不持有 link 表）。无效时整段隐藏。
 var gpLinksProvider: Callable = Callable()
+
+# Inherit-checkbox provider for the edge form; returns {"show": bool, "follow": bool}
+# (the shell resolves the link direction — the panel stays sheet-local). Invalid or
+# show=false = no checkbox row.
+# 边表单的继承勾选框来源；返回 {"show": bool, "follow": bool}（link 方向由外壳判定 ——
+# 面板保持单图纸）。无效或 show=false 时不渲染该行。
+var gpEdgeInheritProvider: Callable = Callable()
 
 # Sheets provider for the unlinked connector's peer-sheet dropdown; returns
 # {"sheets": Array[GPSheet], "current": String active sheet id}. Invalid = the dropdown
@@ -1001,6 +1013,22 @@ func gpShowEdge(gpEdge: GPPIDEdge) -> void:
 		gpEdge, true)
 	_gpAddEdgeSection("inspector.section.general", gpSections["general"] as Array[String],
 		gpEdge, false)
+	# Cross-sheet inherit checkbox (user feedback 2026-11-04): only on a B-side continuation
+	# (the shell decides via the provider), never on signal lines (they carry no line number).
+	# 跨图纸继承勾选框（用户反馈 2026-11-04）：仅在 B 端延续段显示（外壳经 provider 判定）；
+	# 信号线绝不显示（其不带管线号）。
+	var gpInherit: Dictionary = {}
+	if gpEdgeInheritProvider.is_valid() and gpEdge.gpKind != GPPIDEdge.GP_SIGNAL:
+		gpInherit = gpEdgeInheritProvider.call(gpEdge.gpInstanceId) as Dictionary
+	if bool(gpInherit.get("show", false)):
+		var gpInhRow: HBoxContainer = _gpFieldRow(I18n.gpTr("offpage.insp_inherit"))
+		gpInhRow.tooltip_text = I18n.gpTr("offpage.insp_inherit_tip")
+		var gpInhChk: CheckBox = CheckBox.new()
+		gpInhChk.button_pressed = bool(gpInherit.get("follow", false))
+		gpInhChk.size_flags_horizontal = SIZE_EXPAND_FILL
+		gpInhChk.toggled.connect(func(gpV: bool) -> void:
+			gpEdgeInheritToggled.emit(gpEdge.gpInstanceId, gpV))
+		gpInhRow.add_child(gpInhChk)
 
 
 # Field keys shown in the edge form for a given kind. SIGNAL edges hide the pipe-only

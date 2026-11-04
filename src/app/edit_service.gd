@@ -28,6 +28,13 @@ extends RefCounted
 # 每条命令拿到的依赖。所显示图变化时重建。
 var gpCtx: GPCommandContext = GPCommandContext.new()
 
+# Emitted after a line number edit COMMITTED (user feedback 2026-11-04): the shell listens
+# on every sheet's service to propagate the change to the cross-sheet continuation edge.
+# The service itself stays sheet-local — it knows nothing about links or peer sheets.
+# 管线号编辑**落账**后发射（用户反馈 2026-11-04）：外壳监听每张图纸的服务，把改动传播到
+# 跨图纸延续边。服务本身保持单图纸 —— 对 link 与对端一无所知。
+signal gpEdgeTagCommitted(gpEdgeId: String, gpOldTag: String, gpNewTag: String)
+
 # Undo/redo history for this document.
 # 本文档的撤销 / 重做历史。
 var gpStack: GPCommandStack = GPCommandStack.new()
@@ -716,13 +723,22 @@ func gpCrossSheetDelete(gpLink: GPOffPageLink, gpLocalNodeIds: Array[String],
 
 
 # Rename an edge's line number. / 修改一条边的管线号。
-func gpSetEdgeTag(gpEdgeId: String, gpTag: String) -> bool:
+func gpSetEdgeTag(gpEdgeId: String, gpTag: String, gpPropagated: bool = false) -> bool:
 	gpLastRefusal = ""
 	gpLastRefusalDetail = ""
 	if gpCtx.gpTags != null:
 		gpCtx.gpTags.gpGraph = gpCtx.gpGraph
-	var gpCmd: GPSetEdgeTagCommand = GPSetEdgeTagCommand.new(gpEdgeId, gpTag)
+	# Read the prior number BEFORE the command runs, so the commit signal can carry it
+	# (the shell uses the new value; the old one is for callers that want to compare).
+	# 在命令执行**前**读取原号，使落账信号能携带它（外壳用新值；原号供调用方比对）。
+	var gpOldTag: String = ""
+	var gpPrior: GPPIDEdge = gpCtx.gpGraph.gpGetEdge(gpEdgeId) if gpCtx.gpGraph != null \
+		else null
+	if gpPrior != null:
+		gpOldTag = gpPrior.gpTag
+	var gpCmd: GPSetEdgeTagCommand = GPSetEdgeTagCommand.new(gpEdgeId, gpTag, gpPropagated)
 	if gpStack.gpDo(gpCmd, gpCtx):
+		gpEdgeTagCommitted.emit(gpEdgeId, gpOldTag, gpPrior.gpTag)
 		return true
 	gpLastRefusal = gpCmd.gpRefusal
 	gpLastRefusalDetail = gpCmd.gpRefusalDetail

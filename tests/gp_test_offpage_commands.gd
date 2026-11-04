@@ -300,6 +300,169 @@ func gpTestMediumInheritsFromSourceLine() -> void:
 		"NAOH 32%", "the medium is inherited from the source line, not hand-typed")
 
 
+# The peer continuation edge INHERITS the source line's number (user feedback 2026-11-04):
+# mode B inherits the existing pipeline's tag; mode A inherits the tag the command itself
+# just minted on the local sheet. Same number on another sheet is the legitimate
+# continuation (ADR-36 D1).
+# 对端延续边**继承**源管线编号（用户反馈 2026-11-04）：模式 B 继承既有管线的号；模式 A
+# 继承命令刚在本图纸铸出的号。同号跨图是合法的延续（ADR-36 D1）。
+func gpTestPeerEdgeInheritsSourceTag() -> void:
+	# Mode B: the connector is already terminated by line e-0 carrying the number.
+	# 模式 B：连接符已被带号的管线 e-0 终结。
+	var gpRig: Dictionary = _gpRig()
+	var gpLocal: GPPIDGraph = gpRig["local"]
+	var gpConn: GPPIDNode = gpLocal.gpNewNode("c-1", GP_ID_PIPE, "", Vector2(20, 20), {})
+	gpLocal.gpAddNode(gpConn)
+	var gpLine: GPPIDEdge = gpLocal.gpNewEdge("e-0", "n1", "c-1")
+	gpLocal.gpAddEdge(gpLine)
+	gpLine.gpTag = "0101-PL-050-B1F-N"
+	var gpPeer: GPPIDGraph = gpRig["peer"]
+	var gpVessel: GPPIDNode = gpPeer.gpNewNode("v-1", "LTANK001", "T-101",
+		Vector2(400, 300), {})
+	gpPeer.gpAddNode(gpVessel)
+	var gpCmd: GPCrossSheetCreateCommand = GPCrossSheetCreateCommand.new(
+		{"node_id": "c-1", "port_id": "ref"}, GPPIDEdge.GP_PROCESS, "", Vector2.ZERO,
+		Vector2(50, 60), "sheet-1", "sheet-2", "7", gpPeer, gpRig["links"], true, "c-1",
+		{}, {"node_id": "v-1", "port_id": "p1"})
+	gpCheck(gpCmd.gpExecute(gpRig["ctx"]), "the mode B served gesture is accepted")
+	gpEq((gpPeer.gpEdges[0] as GPPIDEdge).gpTag, "0101-PL-050-B1F-N",
+		"the peer continuation edge carries the SOURCE line's number, not a minted one")
+	# Mode A: nothing pre-exists; the peer inherits the number minted for the local segment.
+	# 模式 A：一切尚不存在；对端继承本端段刚铸出的号。
+	var gpRig2: Dictionary = _gpRig()
+	var gpVessel2: GPPIDNode = (gpRig2["peer"] as GPPIDGraph).gpNewNode("v-1", "LTANK001",
+		"T-101", Vector2(400, 300), {})
+	(gpRig2["peer"] as GPPIDGraph).gpAddNode(gpVessel2)
+	var gpCmd2: GPCrossSheetCreateCommand = GPCrossSheetCreateCommand.new(
+		{"node_id": "n1", "port_id": "out"}, GPPIDEdge.GP_PROCESS, "", Vector2(30, 40),
+		Vector2(50, 60), "sheet-1", "sheet-2", "7", gpRig2["peer"], gpRig2["links"],
+		true, "", {}, {"node_id": "v-1", "port_id": "p1"})
+	gpCheck(gpCmd2.gpExecute(gpRig2["ctx"]), "the mode A served gesture is accepted")
+	var gpLocalTag: String = ((gpRig2["local"] as GPPIDGraph).gpEdges[0] as GPPIDEdge).gpTag
+	gpCheck(gpLocalTag != "", "the local segment minted a number")
+	gpEq(((gpRig2["peer"] as GPPIDGraph).gpEdges[0] as GPPIDEdge).gpTag, gpLocalTag,
+		"the peer continuation inherits the LOCAL segment's number in mode A too")
+	# Undo + redo keep the inherited number (redo re-adds the SAME edge object).
+	# 撤销 + 重做保持继承号（重做原样加回**同一个**边对象）。
+	var gpStack: GPCommandStack = GPCommandStack.new()
+	gpStack.gpDo(gpCmd2, gpRig2["ctx"])
+	gpStack.gpUndo(gpRig2["ctx"])
+	gpStack.gpRedo(gpRig2["ctx"])
+	gpEq(((gpRig2["peer"] as GPPIDGraph).gpEdges[0] as GPPIDEdge).gpTag, gpLocalTag,
+		"redo restores the inherited number, never a second mint")
+
+
+# A preset that is ALREADY taken on the peer sheet falls back to minting — the number
+# conflict never blocks the gesture (the DRC reports the duplicate afterwards).
+# 预设号已被对端图占用时回落铸号 —— 编号冲突绝不阻塞手势（重复由 DRC 事后报告）。
+func gpTestPresetFallsBackWhenTakenOnPeerSheet() -> void:
+	var gpRig: Dictionary = _gpRig()
+	var gpLocal: GPPIDGraph = gpRig["local"]
+	var gpConn: GPPIDNode = gpLocal.gpNewNode("c-1", GP_ID_PIPE, "", Vector2(20, 20), {})
+	gpLocal.gpAddNode(gpConn)
+	var gpLine: GPPIDEdge = gpLocal.gpNewEdge("e-0", "n1", "c-1")
+	gpLocal.gpAddEdge(gpLine)
+	gpLine.gpTag = "TAKEN-1"
+	# The peer sheet ALREADY has a pipe numbered TAKEN-1.
+	# 对端图纸上**已有**一根 TAKEN-1 的管线。
+	var gpPeer: GPPIDGraph = gpRig["peer"]
+	var gpVessel: GPPIDNode = gpPeer.gpNewNode("v-1", "LTANK001", "T-101",
+		Vector2(400, 300), {})
+	gpPeer.gpAddNode(gpVessel)
+	var gpOccupant: GPPIDEdge = gpPeer.gpNewEdge("e-x", "v-1", "v-1")
+	gpPeer.gpAddEdge(gpOccupant)
+	gpOccupant.gpTag = "TAKEN-1"
+	var gpCmd: GPCrossSheetCreateCommand = GPCrossSheetCreateCommand.new(
+		{"node_id": "c-1", "port_id": "ref"}, GPPIDEdge.GP_PROCESS, "", Vector2.ZERO,
+		Vector2(50, 60), "sheet-1", "sheet-2", "7", gpPeer, gpRig["links"], true, "c-1",
+		{}, {"node_id": "v-1", "port_id": "p1"})
+	gpCheck(gpCmd.gpExecute(gpRig["ctx"]), "the gesture is still accepted")
+	var gpNewTag: String = (gpPeer.gpEdges[1] as GPPIDEdge).gpTag
+	gpCheck(gpNewTag != "TAKEN-1",
+		"the new edge did not duplicate a number already on the peer sheet")
+	gpCheck(gpNewTag != "", "the fallback minted a number instead")
+
+
+# A PROPAGATED retag (cross-sheet continuation, user feedback 2026-11-04) changes the number
+# but never sets tag_manual — the edge keeps following; a hand edit still flags manual; and
+# undo restores the exact prior tag + flag state.
+# **传播**改号（跨图纸延续，用户反馈 2026-11-04）改号但**绝不**置 tag_manual —— 边继续
+# 跟随；手改仍然打标；撤销精确还原先前的号与标记状态。
+func gpTestPropagatedRetagKeepsFollowing() -> void:
+	var gpRig: Dictionary = _gpRig()
+	var gpLocal: GPPIDGraph = gpRig["local"]
+	var gpA: GPPIDNode = gpLocal.gpNewNode("a-1", "LTANK001", "T-1", Vector2.ZERO, {})
+	var gpB: GPPIDNode = gpLocal.gpNewNode("b-1", "LTANK001", "T-2", Vector2(90, 0), {})
+	gpLocal.gpAddNode(gpA)
+	gpLocal.gpAddNode(gpB)
+	var gpE: GPPIDEdge = gpLocal.gpNewEdge("e-1", "a-1", "b-1")
+	gpLocal.gpAddEdge(gpE)
+	gpE.gpTag = "OLD-1"
+	var gpCtx: GPCommandContext = gpRig["ctx"]
+	var gpStack: GPCommandStack = GPCommandStack.new()
+	# Propagated: tag changes, follow flag does NOT appear.
+	# 传播：号变了，跟随标记**不**出现。
+	var gpCmd: GPSetEdgeTagCommand = GPSetEdgeTagCommand.new("e-1", "NEW-1", true)
+	gpCheck(gpStack.gpDo(gpCmd, gpCtx), "the propagated retag commits")
+	gpEq(gpE.gpTag, "NEW-1", "the propagated number landed")
+	gpCheck(not bool(gpE.gpAttrs.get("tag_manual", false)),
+		"a propagated number never sets tag_manual — the edge keeps following")
+	gpStack.gpUndo(gpCtx)
+	gpEq(gpE.gpTag, "OLD-1", "undo restores the prior number")
+	gpCheck(not bool(gpE.gpAttrs.get("tag_manual", false)), "undo restores the flag state")
+	# A hand edit on the same edge still flags manual (the opt-out by editing).
+	# 同一条边上的手改仍然打标（通过编辑选择退出）。
+	var gpCmd2: GPSetEdgeTagCommand = GPSetEdgeTagCommand.new("e-1", "NEW-2")
+	gpCheck(gpStack.gpDo(gpCmd2, gpCtx), "the hand retag commits")
+	gpCheck(bool(gpE.gpAttrs.get("tag_manual", false)),
+		"a hand-typed number still sets tag_manual")
+	# A duplicate number on the SAME sheet is refused even when propagated (D1 only
+	# legalises cross-sheet repeats).
+	# 即使是传播，同图重号仍被拒（D1 只使跨图同号合法）。
+	var gpE2: GPPIDEdge = gpLocal.gpNewEdge("e-2", "a-1", "b-1")
+	gpLocal.gpAddEdge(gpE2)
+	gpE2.gpTag = "NEW-2"
+	var gpCmd3: GPSetEdgeTagCommand = GPSetEdgeTagCommand.new("e-1", "NEW-2", true)
+	gpCheck(not gpStack.gpDo(gpCmd3, gpCtx),
+		"a propagated retag onto a taken on-sheet number is refused")
+	gpEq(gpE.gpTag, "NEW-2", "the refused propagation left the number untouched")
+
+
+# The inherit checkbox rides on GPSetEdgeAttrCommand's "null = clear" contract (user
+# feedback 2026-11-04): erasing tag_manual resumes following, undo brings the flag back.
+# 继承勾选框搭乘 GPSetEdgeAttrCommand 的「null = 清除」契约（用户反馈 2026-11-04）：
+# 删除 tag_manual 即恢复跟随，撤销把标记带回来。
+func gpTestAttrEraseResumesFollowing() -> void:
+	var gpRig: Dictionary = _gpRig()
+	var gpLocal: GPPIDGraph = gpRig["local"]
+	var gpA: GPPIDNode = gpLocal.gpNewNode("a-1", "LTANK001", "T-1", Vector2.ZERO, {})
+	var gpB: GPPIDNode = gpLocal.gpNewNode("b-1", "LTANK001", "T-2", Vector2(90, 0), {})
+	gpLocal.gpAddNode(gpA)
+	gpLocal.gpAddNode(gpB)
+	var gpE: GPPIDEdge = gpLocal.gpNewEdge("e-1", "a-1", "b-1")
+	gpLocal.gpAddEdge(gpE)
+	var gpCtx: GPCommandContext = gpRig["ctx"]
+	var gpStack: GPCommandStack = GPCommandStack.new()
+	# Opt out: tag_manual = true. / 选择退出：tag_manual = true。
+	gpCheck(gpStack.gpDo(GPSetEdgeAttrCommand.new("e-1", "tag_manual", true), gpCtx),
+		"the opt-out attr edit commits")
+	gpCheck(bool(gpE.gpAttrs.get("tag_manual", false)), "the edge is manual now")
+	# Opt back in: null erases the key. / 重新加入：null 删除该键。
+	gpCheck(gpStack.gpDo(GPSetEdgeAttrCommand.new("e-1", "tag_manual", null), gpCtx),
+		"the opt-in erase commits")
+	gpCheck(not (gpE.gpAttrs as Dictionary).has("tag_manual"),
+		"the key is ERASED, not stored as false")
+	# Undo of the erase restores the flag. / 撤销删除恢复标记。
+	gpStack.gpUndo(gpCtx)
+	gpCheck(bool(gpE.gpAttrs.get("tag_manual", false)), "undo restores the manual flag")
+	# Erasing an absent key is a no-op, not a bogus undo entry.
+	# 删除不存在的键是无事可做，而非伪造撤销步。
+	gpStack.gpUndo(gpCtx) # drop the restored state back — now the key is absent again
+	gpCheck(not gpStack.gpDo(GPSetEdgeAttrCommand.new("e-1", "tag_manual", null), gpCtx),
+		"erasing an absent key reports no change")
+	gpCheck(not (gpE.gpAttrs as Dictionary).has("tag_manual"), "the key stays absent")
+
+
 # A served ref that names a GHOST node is refused with NOTHING created on either sheet.
 # 指向**幽灵**节点的服务对象被拒，两张图上什么都不建。
 func gpTestServedGhostRefusesCleanly() -> void:

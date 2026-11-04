@@ -379,6 +379,13 @@ func _gpAssembleInspector() -> void:
 		return {"sheets": gpCenter.gpToSheets(),
 			"current": gpCur.gpId if gpCur != null else ""}
 	gpInspector.gpConnectPickRequested.connect(_gpOnInspectorConnectPick)
+	# Cross-sheet inherit checkbox on the continuation edge (user feedback 2026-11-04):
+	# the shell computes visibility (B-side continuation only) and current follow state;
+	# the toggle lands back here.
+	# 延续边上的跨图纸继承勾选框（用户反馈 2026-11-04）：外壳计算可见性（仅 B 端延续段）
+	# 与当前跟随状态；开关动作落回此处。
+	gpInspector.gpEdgeInheritProvider = _gpEdgeInheritInfo
+	gpInspector.gpEdgeInheritToggled.connect(_gpOnEdgeInheritToggled)
 	# the panel owns no graph, so a symbol swap is announced and executed here.
 	# 面板不持有图，故「更换图元」在此被宣告并执行。
 	gpInspector.gpSymbolSwapRequested.connect(gpSymbolLibCoord.gpOnSymbolSwap)
@@ -617,6 +624,14 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 		gpCanvas.gpCrossSheetHistoryChanged.connect(gpCenter.gpRefreshOffPageContext)
 	if not gpCanvas.gpCrossSheetDeleteRequested.is_connected(_gpOnCrossSheetDelete):
 		gpCanvas.gpCrossSheetDeleteRequested.connect(_gpOnCrossSheetDelete.bind(gpCanvas))
+	# Cross-sheet line-number propagation (user feedback 2026-11-04): when THIS sheet's
+	# line number is committed, the shell forwards it to the continuation edge on the peer
+	# sheet. Bound per canvas so the SOURCE sheet is known without a second lookup.
+	# 跨图纸管线号传播（用户反馈 2026-11-04）：**本**图纸的管线号落账时，外壳把它转发到
+	# 对端图纸的延续边。逐画布绑定，无需二次查找即知**源**图纸。
+	var gpTagCb: Callable = Callable(self, "_gpOnEdgeTagCommitted").bind(gpCanvas)
+	if not gpCanvas.gpActions.gpEdgeTagCommitted.is_connected(gpTagCb):
+		gpCanvas.gpActions.gpEdgeTagCommitted.connect(gpTagCb)
 	# W13-S8 (user request 2026-11-03): the cross-pane drag-to-connect gesture — wired per
 	# canvas so the SOURCE canvas is known at drop time without a second lookup.
 	# W13-S8（用户需求 2026-11-03）：跨窗格拖拽连线手势 —— 逐画布接线，
@@ -1190,6 +1205,160 @@ func _gpOnSyncToPeer(gpNodeId: String) -> void:
 	if gpCanvas.gpActions.gpCrossSheetSync(gpLink, gpValues, gpEdges, gpPeerGraph):
 		gpCenter.gpRefreshOffPageContext()
 		gpSetState("offpage.sync_done", [])
+
+
+# A line number was committed on SOME sheet: propagate it to every cross-sheet continuation
+# edge that follows this sheet (the A side), unless the peer edge opted out
+# (attrs["tag_manual"], user feedback 2026-11-04). Refusals (rule / on-sheet duplicate) are
+# reported without blocking the source edit — the source sheet stays authoritative.
+# 某张图纸的管线号落账：把它传播到跟随本图纸（A 端）的每一条跨图纸延续边，除非对端边
+# 已选择退出（attrs["tag_manual"]，用户反馈 2026-11-04）。拒绝（规则 / 同图重号）只报告、
+# 不阻塞源端编辑 —— 源图纸始终是权威侧。
+func _gpOnEdgeTagCommitted(gpEdgeId: String, _gpOldTag: String, gpNewTag: String,
+		gpCanvas: GPCanvas2D) -> void:
+	if gpNewTag == "" or gpCanvas == null or gpCanvas.gpGraph == null:
+		return
+	var gpLocalSheetId: String = gpCanvas.gpSheet.gpId if gpCanvas.gpSheet != null else ""
+	if gpLocalSheetId == "":
+		return
+	for gpLink in gpCenter.gpOffPageLinks:
+		if gpLink == null:
+			continue
+		var gpA: Dictionary = gpLink.gpA
+		if str(gpA.get(GPOffPageLink.GP_KEY_SHEET, "")) != gpLocalSheetId:
+			continue
+		var gpANodeId: String = str(gpA.get(GPOffPageLink.GP_KEY_NODE, ""))
+		# The edited edge must be the line that feeds THIS link's A-end connector.
+		# 被改的边必须是接入本 link A 端连接符的那条线。
+		if not _gpEdgeTouchesNode(gpCanvas.gpGraph, gpEdgeId, gpANodeId):
+			continue
+		var gpPeer: Dictionary = GPOffPageIndex.gpPeerRefOf(gpLink, gpANodeId)
+		var gpPeerCanvas: GPCanvas2D = gpCenter.gpCanvasForSheetId(
+			str(gpPeer.get(GPOffPageLink.GP_KEY_SHEET, "")))
+		if gpPeerCanvas == null or gpPeerCanvas.gpGraph == null:
+			continue
+		var gpPeerEdge: GPPIDEdge = _gpEdgeTouching(gpPeerCanvas.gpGraph,
+			str(gpPeer.get(GPOffPageLink.GP_KEY_NODE, "")))
+		if gpPeerEdge == null:
+			continue
+		# Opted out (the ③ checkbox): the number is deliberate, never touched again.
+		# 已选择退出（③ 勾选框）：编号是刻意选择，此后绝不再碰。
+		if bool(gpPeerEdge.gpAttrs.get("tag_manual", false)):
+			continue
+		if gpPeerEdge.gpTag == gpNewTag:
+			continue
+		# The retag goes through the PEER sheet's own edit service: its undo stack, its
+		# dirty flag, its notify (B3). gpPropagated keeps the follow alive.
+		# 改号走**对端**图纸自己的编辑服务：它的撤销栈、它的脏标记、它的通知（B3）。
+		# gpPropagated 使跟随关系保持存活。
+		if gpPeerCanvas.gpActions.gpSetEdgeTag(gpPeerEdge.gpInstanceId, gpNewTag, true):
+			gpSetState("offpage.inherit_done", [gpNewTag])
+		else:
+			gpSetState("offpage.inherit_fail",
+				[I18n.gpTr(gpPeerCanvas.gpActions.gpLastRefusal)])
+
+
+# Visibility + follow state of the inherit checkbox for ONE edge: shown only on a B-side
+# continuation (the edge touching a link's B-end connector); the A side IS the authority and
+# has nothing to inherit. Pure glue over the container link table.
+# 单条边的继承勾选框可见性与跟随状态：仅在 B 端延续段（触及 link B 端连接符的边）显示；
+# A 端本身就是权威侧，无继承可言。容器 link 表之上的纯粘合。
+func _gpEdgeInheritInfo(gpEdgeId: String) -> Dictionary:
+	var gpOut: Dictionary = {"show": false, "follow": false}
+	for gpT in gpCenter.gpTabs:
+		var gpCanvas: GPCanvas2D = gpT.get("canvas") as GPCanvas2D
+		if gpCanvas == null or gpCanvas.gpGraph == null:
+			continue
+		var gpEdge: GPPIDEdge = gpCanvas.gpGraph.gpGetEdge(gpEdgeId)
+		if gpEdge == null:
+			continue
+		for gpLink in gpCenter.gpOffPageLinks:
+			if gpLink == null:
+				continue
+			var gpBNode: String = str(gpLink.gpB.get(GPOffPageLink.GP_KEY_NODE, ""))
+			if gpBNode != "" and _gpEdgeTouchesNode(gpCanvas.gpGraph, gpEdgeId, gpBNode):
+				gpOut["show"] = true
+				gpOut["follow"] = not bool(gpEdge.gpAttrs.get("tag_manual", false))
+				return gpOut
+	return gpOut
+
+
+# The checkbox toggled on a B-side continuation edge (user feedback 2026-11-04). Off: the
+# number becomes manual (tag_manual) and stops following. On: the flag is cleared and the
+# CURRENT source number is pulled immediately, so "re-follow" never leaves a stale number.
+# B 端延续边上的勾选框开关（用户反馈 2026-11-04）。取消：编号变为手选（tag_manual），
+# 停止跟随。勾选：清除标记并**立即**拉取当前源端编号 —— 「恢复跟随」绝不留下过期号。
+func _gpOnEdgeInheritToggled(gpEdgeId: String, gpFollow: bool) -> void:
+	var gpCanvas: GPCanvas2D = _gpCanvasOfEdgeId(gpEdgeId)
+	if gpCanvas == null or gpCanvas.gpGraph == null:
+		return
+	var gpEdge: GPPIDEdge = gpCanvas.gpGraph.gpGetEdge(gpEdgeId)
+	if gpEdge == null:
+		return
+	if not gpFollow:
+		gpCanvas.gpActions.gpSetEdgeAttr(gpEdgeId, "tag_manual", true)
+		gpSetState("offpage.inherit_off", [])
+		return
+	# Resume following: clear the flag (null = erase, per GPSetEdgeAttrCommand), then pull.
+	# 恢复跟随：清除标记（null = 删除，见 GPSetEdgeAttrCommand），然后拉取。
+	gpCanvas.gpActions.gpSetEdgeAttr(gpEdgeId, "tag_manual", null)
+	var gpLink: GPOffPageLink = _gpLinkForBSideEdge(gpCanvas.gpGraph, gpEdgeId)
+	var gpSrcTag: String = ""
+	if gpLink != null:
+		var gpBNode: String = str(gpLink.gpB.get(GPOffPageLink.GP_KEY_NODE, ""))
+		var gpPeer: Dictionary = GPOffPageIndex.gpPeerRefOf(gpLink, gpBNode)
+		var gpSrcCanvas: GPCanvas2D = gpCenter.gpCanvasForSheetId(
+			str(gpPeer.get(GPOffPageLink.GP_KEY_SHEET, "")))
+		if gpSrcCanvas != null and gpSrcCanvas.gpGraph != null:
+			var gpSrcEdge: GPPIDEdge = _gpEdgeTouching(gpSrcCanvas.gpGraph,
+				str(gpPeer.get(GPOffPageLink.GP_KEY_NODE, "")))
+			if gpSrcEdge != null:
+				gpSrcTag = gpSrcEdge.gpTag
+	if gpSrcTag == "" or gpEdge.gpTag == gpSrcTag:
+		gpSetState("offpage.inherit_on", [gpSrcTag])
+		return
+	if gpCanvas.gpActions.gpSetEdgeTag(gpEdgeId, gpSrcTag, true):
+		gpSetState("offpage.inherit_done", [gpSrcTag])
+	else:
+		gpSetState("offpage.inherit_fail", [I18n.gpTr(gpCanvas.gpActions.gpLastRefusal)])
+
+
+# The link whose B-end connector the edge feeds, or null.
+# 该边接入其 B 端连接符的 link，否则 null。
+func _gpLinkForBSideEdge(gpG: GPPIDGraph, gpEdgeId: String) -> GPOffPageLink:
+	if gpG == null:
+		return null
+	for gpLink in gpCenter.gpOffPageLinks:
+		if gpLink == null:
+			continue
+		var gpBNode: String = str(gpLink.gpB.get(GPOffPageLink.GP_KEY_NODE, ""))
+		if gpBNode != "" and _gpEdgeTouchesNode(gpG, gpEdgeId, gpBNode):
+			return gpLink
+	return null
+
+
+# The canvas whose graph holds this edge (tab scan; the sheet count is small).
+# 图中持有这条边的画布（扫描标签页；图纸数量很小）。
+func _gpCanvasOfEdgeId(gpEdgeId: String) -> GPCanvas2D:
+	for gpT in gpCenter.gpTabs:
+		var gpCanvas: GPCanvas2D = gpT.get("canvas") as GPCanvas2D
+		if gpCanvas == null or gpCanvas.gpGraph == null:
+			continue
+		if gpCanvas.gpGraph.gpGetEdge(gpEdgeId) != null:
+			return gpCanvas
+	return null
+
+
+# Whether the edge with this id touches the node with this id.
+# 该 id 的边是否触及该 id 的节点。
+static func _gpEdgeTouchesNode(gpG: GPPIDGraph, gpEdgeId: String, gpNodeId: String) -> bool:
+	if gpG == null or gpNodeId == "":
+		return false
+	var gpE: GPPIDEdge = gpG.gpGetEdge(gpEdgeId)
+	if gpE == null:
+		return false
+	return str(gpE.gpFromRef.get("node_id", "")) == gpNodeId \
+		or str(gpE.gpToRef.get("node_id", "")) == gpNodeId
 
 
 # Deletion case ① (ADR-43 §2.5): connectors are in the delete selection. Resolve each one's
