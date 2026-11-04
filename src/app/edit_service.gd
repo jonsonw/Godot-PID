@@ -658,6 +658,55 @@ func gpDeleteEdges(gpEdgeIds: Array[String]) -> bool:
 	return gpStack.gpDo(gpCmd, gpCtx)
 
 
+# ---- ADR-43 / S3: cross-sheet intents ----
+# ---- ADR-43 / S3：跨图纸意图 ----
+
+# Create a cross-sheet connection as ONE undoable step. Returns the new link's id, or ""
+# when the command refused (gpLastRefusal carries the reason, same contract as gpConnectEdge).
+# The peer graph and the LIVE link array are model dependencies, passed through to the
+# command; the service stays widget-free.
+# 一步创建跨图纸连接。返回新 link id；命令拒绝时返回 ""（gpLastRefusal 携带原因，
+# 契约与 gpConnectEdge 相同）。对端图与**活的** link 表是模型依赖，直通命令；
+# 服务本身不触碰控件。
+func gpCrossSheetCreate(gpFromRef: Dictionary, gpKind: String, gpSignalType: String,
+		gpOrtho: bool, gpLocalPos: Vector2, gpPeerPos: Vector2, gpLocalSheetId: String,
+		gpPeerSheetId: String, gpPeerNumber: String, gpPeerGraph: GPPIDGraph,
+		gpLinks: Array[GPOffPageLink], gpExistingLocalNodeId: String = "",
+		gpExistingPeerRef: Dictionary = {}, gpServedRef: Dictionary = {}) -> String:
+	var gpCmd: GPCrossSheetCreateCommand = GPCrossSheetCreateCommand.new(gpFromRef,
+		gpKind, gpSignalType, gpLocalPos, gpPeerPos, gpLocalSheetId, gpPeerSheetId,
+		gpPeerNumber, gpPeerGraph, gpLinks, gpOrtho, gpExistingLocalNodeId,
+		gpExistingPeerRef, gpServedRef)
+	if not gpStack.gpDo(gpCmd, gpCtx):
+		gpLastRefusal = gpCmd.gpRefusal
+		return ""
+	gpLastRefusal = ""
+	return gpCmd.gpCreatedLinkId
+
+
+# Sync a link's contract attributes to the peer end as ONE undoable step.
+# 一步把 link 的契约属性同步到对端。
+func gpCrossSheetSync(gpLink: GPOffPageLink, gpValues: Dictionary,
+		gpEdges: Array[GPPIDEdge]) -> bool:
+	var gpCmd: GPCrossSheetSyncCommand = GPCrossSheetSyncCommand.new(gpLink, gpValues,
+		gpEdges)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
+# Delete ONE cross-sheet connection ENTIRELY (link + both connectors + their edges) as ONE
+# undoable step — deletion case ① of ADR-43 §2.5. The caller has already confirmed.
+# 一步整删**一条**跨图纸连接（link + 两端连接符 + 其上的边）—— ADR-43 §2.5 删除情形①。
+# 调用方已完成确认。
+func gpCrossSheetDelete(gpLink: GPOffPageLink, gpLocalNodeIds: Array[String],
+		gpPeerNodeIds: Array[String], gpPeerGraph: GPPIDGraph,
+		gpLinks: Array[GPOffPageLink], gpDefLookup: Callable) -> bool:
+	if gpLink == null:
+		return false
+	var gpCmd: GPCrossSheetDeleteCommand = GPCrossSheetDeleteCommand.new(gpLink,
+		gpLocalNodeIds, gpPeerNodeIds, gpPeerGraph, gpLinks, gpDefLookup)
+	return gpStack.gpDo(gpCmd, gpCtx)
+
+
 # Rename an edge's line number. / 修改一条边的管线号。
 func gpSetEdgeTag(gpEdgeId: String, gpTag: String) -> bool:
 	gpLastRefusal = ""

@@ -586,6 +586,7 @@ func gpRedo() -> bool:
 	if not gpHost.gpActions.gpRedo():
 		return false
 	gpPruneSelection()
+	gpHost.gpCrossSheetHistoryChanged.emit()
 	return true
 
 # Undo the most recent user edit (Ctrl+Z). Returns false when there is nothing to undo.
@@ -599,6 +600,11 @@ func gpUndo() -> bool:
 	if not gpHost.gpActions.gpUndo():
 		return false
 	gpPruneSelection()
+	# ADR-43 / S3: an undone cross-sheet command removed the link from the container array —
+	# a change NO model signal carries, so the host republishes the render snapshot here.
+	# ADR-43 / S3：被撤销的跨图纸命令已把 link 从容器数组移除 —— 这一变化**没有**任何模型
+	# 信号携带，故宿主在此重发渲染快照。
+	gpHost.gpCrossSheetHistoryChanged.emit()
 	return true
 
 # Delete every selected node (with its attached edges), shape and selected edge in ONE undo step.
@@ -624,6 +630,24 @@ func gpRequestDeleteSelected() -> void:
 			continue
 		gpEdges.append(gpEid)
 	if gpNodes.is_empty() and gpShapes.is_empty() and gpEdges.is_empty():
+		return
+	# ADR-43 / S4 deletion case ①: a selection that includes CONNECTORS is not a plain delete —
+	# the whole cross-sheet connection (link + peer connector) must go with it, after a host
+	# confirmation. Delegate and stop; the plain path below stays for connector-less selections.
+	# ADR-43 / S4 删除情形①：选择集里含**连接符**时不是普通删除 —— 整条跨图纸连接
+	#（link + 对端连接符）必须随之删除，且先经宿主确认。交出请求并停止；下方普通路径
+	# 保留给不含连接符的选择集。
+	var gpConnectorIds: Array[String] = []
+	var gpLookup: Callable = gpHost.gpDefLookupCallable()
+	for gpNid in gpNodes:
+		var gpN: GPPIDNode = gpHost.gpGraph.gpGetNode(gpNid)
+		if gpN == null or str(gpN.gpProps.get(GPOffPageLink.GP_KEY_LINK_ID, "")) == "":
+			continue
+		var gpDef: GPSymbolDef = gpLookup.call(gpN.gpSymbolId) as GPSymbolDef
+		if gpDef != null and gpDef.gpCategory == "offpage":
+			gpConnectorIds.append(gpNid)
+	if not gpConnectorIds.is_empty():
+		gpHost.gpCrossSheetDeleteRequested.emit(gpConnectorIds)
 		return
 	# Nodes, shapes AND edges go in one request, so a mixed delete stays ONE undo step.
 	# 节点、图形与边同在一次请求中提交，故混合删除仍是一个撤销步。

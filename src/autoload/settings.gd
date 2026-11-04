@@ -139,6 +139,15 @@ var gpCanvasBg: String = "212830"
 # 图元库可见性表：符号 id -> true 表示用户经类目齿轮菜单取消勾选。持久化以在重启后保留。
 var gpPaletteHidden: Dictionary = {}
 
+# Multi-view LAYOUT MODE (ADR-44 D5, W13-S6): 1 = single, 2 = side-by-side, 3 = one large +
+# two small, 4 = 2x2. Only the MODE is a preference; the pane<->sheet bindings are session
+# state and NEVER reach the disk — a layout is how you LOOK at a document, not the document
+# (iron rule 74). Sanitized on load against GPPaneLayout's own validity check.
+# 多视图**布局模式**（ADR-44 D5，W13-S6）：1 = 单窗、2 = 左右二分、3 = 一大两小、4 = 2×2。
+# 只有**模式**算偏好；窗格与图纸的绑定是会话状态、绝不落盘 —— 布局是「怎么看文档」，
+# 不是文档本身（铁律 74）。载入时按 GPPaneLayout 自身的合法性检查净化。
+var gpLayoutMode: int = 1
+
 # Cached symbol font so the canvas can read it cheaply each frame.
 # 缓存的图元字体，供画布逐帧廉价读取。
 var gpSymbolFont: Font = null
@@ -278,6 +287,15 @@ func gpLoad() -> void:
 	gpBagFavorites = _gpSplitList(str(gpCfg.get_value("ui", "bag_favorites", "")))
 	gpBagRecents = _gpSplitList(str(gpCfg.get_value("ui", "bag_recents", "")))
 	gpPaletteHidden = gpCfg.get_value("ui", "palette_hidden", {})
+	# ⚠️ Layering: this AUTOLOAD may not reference the ui layer, so the valid range is a
+	# literal here; the test suite pins that the literal and GPPaneLayout's own validity
+	# table agree (cross-side pin, iron rule 86 style) — a hand-edited or stale value falls
+	# back to the single-pane default instead of breaking the first frame.
+	# ⚠️ 分层：本 **autoload** 不得引用 ui 层，故合法范围在此写字面量；由测试钉住该字面量与
+	# GPPaneLayout 自身的合法性表**一致**（跨侧钉，铁律 86 式）—— 手改过的或陈旧的值回落到
+	# 单窗默认，而不是弄坏第一帧。
+	var gpStoredMode: int = int(gpCfg.get_value("ui", "layout_mode", 1))
+	gpLayoutMode = gpStoredMode if gpStoredMode >= 1 and gpStoredMode <= 4 else 1
 
 
 # One-time migration to the mm-based drawing text height (v0.1 / plan Phase 0).
@@ -315,6 +333,7 @@ func gpSave() -> void:
 	gpCfg.set_value("ui", "bag_favorites", ",".join(gpBagFavorites))
 	gpCfg.set_value("ui", "bag_recents", ",".join(gpBagRecents))
 	gpCfg.set_value("ui", "palette_hidden", gpPaletteHidden)
+	gpCfg.set_value("ui", "layout_mode", gpLayoutMode)
 	gpCfg.set_value("symbol", "font_size", gpSymbolFontSize)
 	gpCfg.set_value("symbol", "font", gpSymbolFontKey)
 	gpCfg.set_value("pipe", "tag_rotate", gpPipeTagRotate)

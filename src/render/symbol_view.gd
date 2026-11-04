@@ -412,8 +412,7 @@ func gpDrawBody(gpCv: CanvasItem) -> void:
 			#（用户实测反馈 2026-10-17）。提示只画**状态色描边**：黄=选中、绿=连线源；
 			# 文字在任何状态下都保持完全可读。
 			gpCv.draw_rect(gpRect, gpFill, false, gpBorder)
-		_gpDrawTextLines(gpCv, gpRect, gpGen.get("text_lines", PackedStringArray()) as PackedStringArray,
-			gpScale)
+		_gpDrawTextLines(gpCv, gpRect, gpGen, gpScale)
 		# Stage 3: the grid generator ALSO returns its cell list — the same structure the hit
 		# test and the cell editor consume. Paint each non-empty cell's text inside its rect.
 		# 阶段 3：grid 生成器同时返回格子列表 —— 与命中测试、格子编辑器消费的同一份结构。
@@ -482,9 +481,24 @@ static func gpPortRadiusFor(gpSize: Vector2) -> float:
 # that machinery exists to prevent. Empty lines advance the pitch but paint nothing.
 # 行高沿用标签路径的设计像素机制（GPCanvasText.gpLabelFontFit + gpTextScale + gpDrawPos），
 # 故生成器文字在任何缩放下都不会发虚 —— 该机制正是为防这个缺陷而生。空行推进行距但不画。
-func _gpDrawTextLines(gpCv: CanvasItem, gpRect: Rect2, gpLines: PackedStringArray,
+#
+# [param gpGen] The WHOLE generator result, not just its lines: a generator may declare
+# "text_mm", an ABSOLUTE height for content whose size is bounded by the glyph rather than by
+# the user's tag preference (the off-page reference number, ADR-43 D3). Absent = the annotation
+# tier, i.e. exactly the previous behaviour. It may also declare "text_above" / "text_below"
+# (lines painted OUTSIDE the envelope — the off-page legend layout) and "text_center_u" (the
+# text column's centre in UNIT space, so text rides the glyph BODY, not the envelope centre).
+# [param gpGen] **整个**生成器结果，而非仅其文字行：生成器可声明 "text_mm"，为那些尺寸由字形
+# 本身（而非用户的位号偏好）定界的内容给出**绝对**字高（跨图纸交叉编号，ADR-43 D3）。缺省 =
+# 注释档，即此前的行为**完全**不变。还可声明 "text_above" / "text_below"（画在包络**外**的行
+# —— 跨图纸图例版式）与 "text_center_u"（文字列中心，单位空间 —— 文字跟着字形**主体**走，
+# 而非包络中心）。
+func _gpDrawTextLines(gpCv: CanvasItem, gpRect: Rect2, gpGen: Dictionary,
 		gpScale: float) -> void:
-	if gpLines.is_empty():
+	var gpLines: PackedStringArray = gpGen.get("text_lines", PackedStringArray()) as PackedStringArray
+	var gpAbove: String = str(gpGen.get("text_above", ""))
+	var gpBelow: String = str(gpGen.get("text_below", ""))
+	if gpLines.is_empty() and gpAbove == "" and gpBelow == "":
 		return
 	var gpFont: Font = ThemeDB.fallback_font
 	if gpStyle != null and gpStyle.gpSymbolFont != null:
@@ -496,14 +510,25 @@ func _gpDrawTextLines(gpCv: CanvasItem, gpRect: Rect2, gpLines: PackedStringArra
 	# A1 重定基（铁律 89）+ 用户实测反馈 2026-10-17：备注块文字与其余图面档一起搭 ×2 重定基
 	# —— 用户图元字号是**在管档**（A3 时代默认 3.0mm），注释文字按其**两倍**渲染
 	#（重定基图面上即 6.0mm）。取**比例**而非写死：设置项保持有意义。
-	var gpFontMM: float = _gpBaseFontMM() * GP_ANNOTATE_FONT_SCALE
+	# A generator that declares "text_mm" REPLACES this chain with an absolute height (see above).
+	# 声明了 "text_mm" 的生成器用绝对字高**替换**这条换算链（见上）。
+	var gpFontMM: float = float(gpGen.get("text_mm", _gpBaseFontMM() * GP_ANNOTATE_FONT_SCALE))
 	var gpFit: Vector2 = GPCanvasText.gpLabelFontFit(gpFontMM, gpCv)
 	var gpFontSz: int = int(gpFit.x)
 	# Line pitch in world mm: 1.5x the sheet height, the drafting default for stacked notes.
 	# 行距（世界 mm）：图面字高的 1.5 倍 —— 制图上堆叠备注的默认行距。
 	var gpPitch: float = gpFontMM * 1.5
 	var gpTotal: float = gpPitch * gpLines.size()
+	# Horizontal anchor: a generator that names "text_center_u" moves the column off the
+	# envelope centre, through the spec box's uniform fit — an adaptive body centred on ITSELF.
+	# 水平锚点：声明了 "text_center_u" 的生成器把文字列移出包络中心，经 spec 盒的均匀适配
+	# —— 自适应主体以**自身**为中心。
 	var gpCx: float = gpRect.get_center().x
+	var gpSpec: Dictionary = gpGen.get("spec", {}) as Dictionary
+	if gpSpec.has("box") and gpGen.has("text_center_u"):
+		var gpBox: Rect2 = GPSymbolGeometry.gpUnitBox(gpSpec)
+		var gpK: float = GPSymbolGeometry.gpFitScale(gpBox, gpRect.size)
+		gpCx += (float(gpGen["text_center_u"]) - gpBox.get_center().x) * gpK
 	var gpTop: float = gpRect.get_center().y - gpTotal * 0.5
 	var gpAscentMM: float = gpFont.get_ascent(gpFontSz) * gpFit.y / gpScale
 	# NOTE: every draw call here targets gpCv (the body item gpDrawBody paints through), so the
@@ -511,25 +536,72 @@ func _gpDrawTextLines(gpCv: CanvasItem, gpRect: Rect2, gpLines: PackedStringArra
 	# VIEW's own draw queue and leave the text unscaled.
 	# 注意：此处的所有绘制都以 gpCv 为目标（gpDrawBody 经它落笔），故绘制变换也必须设在
 	# gpCv 上 —— 设在 self 上只会改写**视图**自己的绘制队列，文字将不缩放。
-	gpCv.draw_set_transform(Vector2.ZERO, 0.0, GPCanvasText.gpTextScale(gpFit, gpScale))
+	# A FLIPPED connector (the target-sheet twin) draws inside an x-mirrored frame. The frame
+	# mirror and the text-transform mirror below CANCEL on positions (two mirrors compose to
+	# identity), which is exactly why the anchor is re-mirrored per line: the frame mirror
+	# alone would put the span on the mirrored body but mirror-image the glyphs; the
+	# counter-mirror alone would keep the glyphs upright but push the span to the unmirrored
+	# side. Anchor `-(cx) - W/2` + mirrored transform gives BOTH: span centred on the mirrored
+	# body, glyphs upright — matching the print model, whose text entities are upright by
+	# construction and whose positions go through the same flip.
+	# **翻转**的连接符（目标纸上的孪生体）在 x 镜像的坐标系内绘制。坐标系镜像与下方文字变换
+	# 的镜像在**位置**上相互抵消（两次镜像合成恒等）—— 这正是逐行把锚点再次镜像的原因：只有
+	# 坐标系镜像会把跨度放到镜像主体上、但字形反写；只有反镜像变换会保持字形正立、却把跨度推
+	# 到未镜像一侧。锚点 `-(cx) - W/2` + 镜像变换两者兼得：跨度居中于镜像后的主体、字形正立
+	# —— 与打印模型一致（其文字实体按构造正立、位置同样经翻转映射）。
+	var gpFlip: bool = gpNode != null and gpNode.gpFlipped
+	var gpTs: Vector2 = GPCanvasText.gpTextScale(gpFit, gpScale)
+	if gpFlip:
+		gpTs.x = -gpTs.x
+	gpCv.draw_set_transform(Vector2.ZERO, 0.0, gpTs)
 	for gpI in range(gpLines.size()):
 		var gpLine: String = gpLines[gpI]
 		# A blank line still consumes its pitch (it is real content) but paints nothing.
 		# 空行仍占其行距（它是真实内容）但不画任何东西。
 		if gpLine.strip_edges() == "":
 			continue
-		var gpWpx: float = gpFont.get_string_size(gpLine, HORIZONTAL_ALIGNMENT_LEFT, -1.0,
-			gpFontSz).x
-		var gpWmm: float = gpWpx * gpFit.y / gpScale
-		var gpCenterY: float = gpTop + gpPitch * (float(gpI) + 0.5)
-		var gpBaseY: float = gpCenterY + gpAscentMM * 0.5
-		var gpAt: Vector2 = GPCanvasText.gpDrawPos(
-			Vector2(gpCx - gpWmm * 0.5, gpBaseY), gpFit, gpScale)
-		gpCv.draw_string(gpFont, gpAt, gpLine, HORIZONTAL_ALIGNMENT_LEFT, -1.0, gpFontSz,
-			Color(0.9, 0.9, 0.9))
+		_gpDrawCenteredLine(gpCv, gpFont, gpFontSz, gpFit, gpScale, gpAscentMM, gpLine,
+			gpCx, gpTop + gpPitch * (float(gpI) + 0.5), gpFlip)
+	# The OUTSIDE slots: the description rides a quarter-line above the envelope's top edge,
+	# the medium the same below the bottom edge (the off-page legend layout). Their column is
+	# centred on the SAME anchor as the inside lines, so flag + captions read as one glyph.
+	# **外部**槽位：描述行悬在包络上缘之外四分之一行距处，介质行在下缘之外同一距离
+	#（跨图纸图例版式）。两列与框内文字共用**同一**水平锚，使旗标与注记读作一个字形。
+	if gpAbove != "":
+		_gpDrawCenteredLine(gpCv, gpFont, gpFontSz, gpFit, gpScale, gpAscentMM, gpAbove,
+			gpCx, gpRect.position.y - gpFontMM * 0.75, gpFlip)
+	if gpBelow != "":
+		_gpDrawCenteredLine(gpCv, gpFont, gpFontSz, gpFit, gpScale, gpAscentMM, gpBelow,
+			gpCx, gpRect.end.y + gpFontMM * 0.75, gpFlip)
 # Restore the identity so the port dots after this call are unaffected.
 # 复位为单位变换，使本次调用之后的端口圆点绘制不受影响。
 	gpCv.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+# One horizontally-centred text line at a given world-mm centre Y, through the SAME design-pixel
+# machinery as every other label (blur-proof at any zoom). Split out so the inside lines and the
+# above/below slots share one code path and cannot drift apart.
+# 在给定世界 mm 中心 Y 处画一行水平居中的文字，走与其余标签**同一**设计像素机制（任何缩放
+# 不发虚）。拆出来使框内行与上/下槽位共用一条代码路径，永不分家。
+# [param gpFlip] The caller draws inside an x-mirrored frame AND has already mirrored the text
+# transform; the two cancel on positions, so the anchor re-mirrors here (see the comment at the
+# call site for the algebra).
+# [param gpFlip] 调用方处于 x 镜像坐标系内**且**已镜像文字变换；二者在位置上相消，故锚点在此
+# 再次镜像（代数见调用处的注释）。
+func _gpDrawCenteredLine(gpCv: CanvasItem, gpFont: Font, gpFontSz: int, gpFit: Vector2,
+		gpScale: float, gpAscentMM: float, gpLine: String, gpCx: float,
+		gpCenterY: float, gpFlip: bool = false) -> void:
+	var gpWpx: float = gpFont.get_string_size(gpLine, HORIZONTAL_ALIGNMENT_LEFT, -1.0,
+		gpFontSz).x
+	var gpWmm: float = gpWpx * gpFit.y / gpScale
+	var gpBaseY: float = gpCenterY + gpAscentMM * 0.5
+	var gpAnchorX: float = gpCx - gpWmm * 0.5
+	if gpFlip:
+		gpAnchorX = -gpCx - gpWmm * 0.5
+	var gpAt: Vector2 = GPCanvasText.gpDrawPos(
+		Vector2(gpAnchorX, gpBaseY), gpFit, gpScale)
+	gpCv.draw_string(gpFont, gpAt, gpLine, HORIZONTAL_ALIGNMENT_LEFT, -1.0, gpFontSz,
+		Color(0.9, 0.9, 0.9))
 
 
 # Sheet-annotation cell text size cap (world mm): the reference table runs 6.5 mm rows

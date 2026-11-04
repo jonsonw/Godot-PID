@@ -122,11 +122,35 @@ static func gpAll() -> Array[GPDrcRule]:
 		func(s: GPDrcSnapshot, c: Dictionary) -> Array[GPFinding]:
 			return GPDRCRules.gpCheckFrame(s, c), "drc.frame_off", "drc.fix.frame_on"))
 
+	# ---- OFFPAGE (W12-S4, ADR-43): the container-level cross-sheet family. DESCRIPTORS ONLY —
+	# the runnable lives in GPOffPageAudit (it needs the whole container, not one sheet's
+	# snapshot) and is invoked by GPDrcEngine.gpRunProject when a link table is handed in.
+	# legacy=true so the per-sheet engine loop skips them (they would fire once per sheet
+	# otherwise). The gated placeholder "drc.topo.offpage_unpaired" is SUPERSEDED — the data
+	# model it was waiting for now exists.
+	# ---- OFFPAGE（W12-S4，ADR-43）：容器级跨图纸规则族。**仅描述符** —— 可执行体在
+	# GPOffPageAudit（它需要整个容器而非单图快照），由 GPDrcEngine.gpRunProject 在传入
+	# link 表时调用。legacy=true 使逐图引擎循环跳过（否则每张图都跑一遍）。此前等待数据
+	# 模型的 gated 占位「drc.topo.offpage_unpaired」被**取代**。
+	gpOut.append(GPDrcRule.gpMake("drc.offpage.orphan_link", "offpage", "error", 3, Callable(),
+		"drc.offpage.orphan_sheet", "drc.fix.offpage_repair_link", true))
+	gpOut.append(GPDrcRule.gpMake("drc.offpage.unpaired", "offpage", "error", 3, Callable(),
+		"drc.offpage.unpaired_link", "drc.fix.offpage_repair_link", true))
+	gpOut.append(GPDrcRule.gpMake("drc.offpage.attr_mismatch", "offpage", "warning", 3,
+		Callable(), "drc.offpage.attr_mismatch", "drc.fix.offpage_sync", true))
+	gpOut.append(GPDrcRule.gpMake("drc.offpage.kind_mismatch", "offpage", "error", 3,
+		Callable(), "drc.offpage.kind_port", "drc.fix.offpage_fix_kind", true))
+	gpOut.append(GPDrcRule.gpMake("drc.offpage.duplicate", "offpage", "warning", 3,
+		Callable(), "drc.offpage.duplicate", "drc.fix.offpage_merge", true))
+
 	# ---- gated checks (honest "needs a data model" entries) ----
 	gpOut.append(_gpR("drc.topo.loop_number", "topo", "warning", 2,
 		func(s: GPDrcSnapshot, c: Dictionary) -> Array[GPFinding]:
 			return GPDRCRules.gpCheckLoopNumber(s, c), "drc.loop_number", "drc.fix.fill_loop"))
-	gpOut.append(_gpGated("drc.topo.offpage_unpaired", "topo", "error", 2, "off-page connector model"))
+	# ("drc.topo.offpage_unpaired" removed W12-S4: superseded by the real drc.offpage.* family
+	# above — the off-page connector data model it was gated on now exists.)
+	#（「drc.topo.offpage_unpaired」于 W12-S4 移除：被上方真实的 drc.offpage.* 规则族取代
+	# —— 它所等待的跨图纸数据模型已经落地。）
 	gpOut.append(_gpGated("drc.topo.flow_direction", "topo", "warning", 3, "flow-arrow attribute"))
 	gpOut.append(_gpGated("drc.symbol.mount_part_props", "symbol", "warning", 2, "mounted-part schema"))
 	gpOut.append(_gpGated("drc.symbol.pack_version", "symbol", "info", 3, "pack fingerprint"))

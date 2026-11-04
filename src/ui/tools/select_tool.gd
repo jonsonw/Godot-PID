@@ -52,6 +52,15 @@ var _gpDragStartEdges: Dictionary = {}
 var _gpMarq: GPCanvasMarquee:
 	get: return gpCtx.gpState.gpMarquee
 
+# W13-S8 (user request 2026-11-03, second connection logic): while this holds a connector id,
+# the in-flight group drag has LEFT the canvas and became a CROSS-PANE connect gesture — the
+# positions are frozen at their origins and every motion is reported to the host, which
+# highlights drop targets in the other panes. "" = an ordinary in-canvas drag.
+# W13-S8（用户需求 2026-11-03，第二种连接逻辑）：此字段持有连接符 id 时，进行中的整组拖拽
+# 已经**离开**本画布、变为跨窗格连线手势 —— 位置冻结在起点，每次移动都上报宿主，由宿主在
+# 其它窗格高亮落点目标。"" = 普通的画布内拖拽。
+var _gpCrossPane: String = ""
+
 
 # True while a whole-selection group drag is in flight .
 # 整组拖拽进行中返回真。
@@ -62,6 +71,9 @@ func gpIsDragging() -> bool:
 # Abandon any in-flight group drag (canvas clear-selection path).
 # 放弃进行中的整组拖拽（画布清空选择路径）。
 func gpCancelDrag() -> void:
+	if _gpCrossPane != "" and gpCtx.gpCv != null:
+		gpCtx.gpCv.gpCrossPaneDragEnded.emit()
+	_gpCrossPane = ""
 	_gpDragId = ""
 	_gpDragOrigins.clear()
 	_gpPushOrigins.clear()
@@ -82,6 +94,39 @@ func gpCancel() -> bool:
 # Live-apply a group drag: replay every selected node from its start snapshot by the same delta, so
 func gpOnDragMove(gpScreen: Vector2) -> void:
 	var gpCv := gpCtx.gpCv
+	# W13-S8: the gesture already left the canvas — freeze the geometry and keep reporting.
+	# W13-S8：手势已经离开画布 —— 几何冻结，持续上报。
+	if _gpCrossPane != "":
+		gpCv.gpCrossPaneDragUpdated.emit(_gpCrossPane, gpCv.get_global_mouse_position())
+		return
+	# W13-S8 ARMING: dragging EXACTLY ONE off-page connector whose pointer just LEFT this
+	# canvas converts the move into a cross-pane connect. Everything else keeps dragging
+	# (a node dragged past the edge stays a move — that is the historical behaviour), and a
+	# connector dragged around INSIDE the canvas still moves freely: only leaving the canvas
+	# is the commitment.
+	# W13-S8 上膛：恰好拖**一枚**跨图纸连接符、且指针刚**离开**本画布 —— 移动手势转为跨窗格
+	# 连线。其余一切照常拖拽（图元拖出边界仍是移动 —— 历史行为不变），连接符在画布**内**
+	# 仍自由移动：只有离开画布才是承诺。
+	if _gpDragOrigins.size() == 1 \
+			and not Rect2(Vector2.ZERO, gpCv.size).has_point(gpScreen):
+		var gpConnId: String = _gpSingleConnectorId()
+		if gpConnId != "":
+			_gpCrossPane = gpConnId
+			# Rewind to the drag-start positions: the connector must NOT keep the partial
+			# in-canvas movement — the gesture is now "point at the other sheet", not "move".
+			# 回退到拖拽起点：连接符**不得**保留画布内的那段位移 —— 手势此刻是「指向另一张图」，
+			# 不是「移动」。
+			for gpId in _gpDragOrigins.keys():
+				var gpN: GPPIDNode = gpCv.gpGraph.gpGetNode(gpId)
+				if gpN != null:
+					gpN.gpPosition = (_gpDragOrigins[gpId] as Vector2)
+					var gpV: GPSymbolView = gpCv.gpBinder.gpGetSymbolView(gpId)
+					if gpV != null:
+						gpV.gpUpdateTransform()
+			gpCv.gpRedrawEdgesForNodes([gpConnId])
+			gpCv.queue_redraw()
+			gpCv.gpCrossPaneDragUpdated.emit(gpConnId, gpCv.get_global_mouse_position())
+			return
 	var gpDelta: Vector2 = gpCv.gpWorldFromScreen(gpScreen) - _gpDragStartWorld
 	var gpMoved: Array[String] = []
 	for gpId in _gpDragOrigins.keys():
@@ -557,6 +602,20 @@ func gpOnRelease(gpWorld: Vector2) -> bool:
 		gpCtx.gpFrameGrips.gpEndGripDrag()
 		gpCv.gpEmitStatus()
 		return true
+	# W13-S8: the cross-pane connect gesture ends here — report the drop and consume the
+	# release. The positions were frozen at the origins when the gesture armed, so the
+	# ordinary move-commit below must NOT run (it would fling the connector outside the
+	# sheet). Whether a link is built is the HOST's decision (it resolves the pane / node
+	# under the pointer); the connector stays exactly where it was.
+	# W13-S8：跨窗格连线手势在此结束 —— 上报落点并消费释放。上膛时位置已冻结在起点，
+	# 下方的普通移动提交**绝不能**再跑（那会把连接符甩出图纸）。是否建立连接由**宿主**
+	# 决定（它解析指针下的窗格 / 图元）；连接符原地不动。
+	if _gpCrossPane != "":
+		var gpDropped: String = _gpCrossPane
+		gpCrossPaneClear()
+		gpCv.gpCrossPaneDropped.emit(gpDropped, gpCv.get_global_mouse_position())
+		gpCv.gpEmitStatus()
+		return true
 	# Finish a marquee: gpFinish() reports whether the band was dragged far enough to be a real
 	# marquee; a press/release without movement is a plain click, already handled on press.
 	# gpFinish() 报告选框是否被拖到足以构成真正的框选；未产生位移的按下/释放只是普通单击。
@@ -721,6 +780,32 @@ func gpDrawOverlay(gpCv: CanvasItem) -> void:
 
 
 # ============================ private ============================
+
+# Clear the cross-pane state (and tell the canvas the gesture is over). Split from the emit
+# sites so the drop path and the cancel path cannot drift.
+# 清除跨窗格状态（并告知画布手势已结束）。与各发射点分开，使落点路径与取消路径不可能分家。
+func gpCrossPaneClear() -> void:
+	_gpCrossPane = ""
+	if gpCtx != null and gpCtx.gpCv != null:
+		gpCtx.gpCv.gpCrossPaneDragEnded.emit()
+
+
+# The dragged node's id when EXACTLY ONE node is dragged and it is an OFF-PAGE connector
+# ("" otherwise). The symbol ids are the pack's own — the same two constants the commands
+# and the DRC rules read, so the gesture can never disagree with the data layer about what
+# a connector is.
+# 恰好拖**一枚**节点且它是**跨图纸连接符**时返回其 id（否则 ""）。符号 id 取自包的常量 ——
+# 与命令、DRC 规则读的是**同一对**常量，故手势与数据层对「什么是连接符」永远一致。
+func _gpSingleConnectorId() -> String:
+	var gpCv := gpCtx.gpCv
+	for gpId in _gpDragOrigins.keys():
+		var gpN: GPPIDNode = gpCv.gpGraph.gpGetNode(gpId)
+		if gpN == null:
+			return ""
+		if gpN.gpSymbolId == GPSymbolPackOffpage.GP_ID_PIPE \
+				or gpN.gpSymbolId == GPSymbolPackOffpage.GP_ID_SIGNAL:
+			return gpId
+	return ""
 
 # GPCanvasMarquee so the band the user sees and the set that gets picked can never disagree.
 # 选中的集合永不会分歧。

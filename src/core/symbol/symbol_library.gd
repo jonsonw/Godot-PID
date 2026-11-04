@@ -150,6 +150,15 @@ static func _gpLoadAllPacks() -> Array[GPSymbolDef]:
 	for gpD in gpAnno:
 		gpD.gpBuiltin = true
 	gpOut.append_array(gpAnno)
+	# Off-page connectors (ADR-43 D3 / W12-S2): hand-written like the annotation templates, for
+	# the same reason — their reference text is derived at render time, which only a generator
+	# can feed to BOTH the canvas and the print model.
+	# 跨图纸连接符（ADR-43 D3 / W12-S2）：与注释模板一样手写，理由相同 —— 其交叉编号在渲染期
+	# 推导，只有生成器能同时喂给画布与打印模型。
+	var gpOffPage: Array[GPSymbolDef] = GPSymbolPackOffpage.gpDefs()
+	for gpD in gpOffPage:
+		gpD.gpBuiltin = true
+	gpOut.append_array(gpOffPage)
 	return gpOut
 
 

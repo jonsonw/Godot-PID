@@ -79,6 +79,34 @@ signal gpPropDeleteRequested(gpNodeId: String, gpKey: String)
 # GPDeleteShapesCommand。外壳把它路由到命令层，这正是「改图层可撤销」的来源。
 signal gpShapePropChanged(gpShapeIdx: int, gpField: String, gpValue)
 
+# ADR-43 / S4-4: one link-attr field was committed (link id, attr key, new value). The shell
+# routes this through GPCrossSheetSyncCommand (link-only) so the edit is one undo step.
+# ADR-43 / S4-4：一个 link 属性字段已提交（link id、属性键、新值）。外壳经
+# GPCrossSheetSyncCommand（仅 link）路由，使编辑成为一个撤销步。
+signal gpLinkAttrEditRequested(gpLinkId: String, gpKey: String, gpValue: String)
+
+# ADR-43 / S4-4: the user asked to push this link's contract snapshot to the peer end.
+# ADR-43 / S4-4：用户要求把本 link 的契约快照推送到对端。
+signal gpLinkSyncRequested(gpLinkId: String)
+
+# ADR-43 / S4-4 (user feedback 2026-11-03): on an UNLINKED connector the user picked a peer
+# sheet in the "对端图纸号" dropdown. The shell routes it through the same canvas gesture the
+# context menu uses, so the connect dialog opens PRESELECTED on that sheet.
+# ADR-43 / S4-4（用户反馈 2026-11-03）：未连线的连接符上，用户在「对端图纸号」下拉里选定
+# 了一张图纸。外壳把它路由进与右键菜单**同一条**画布手势，使连接对话框直接预选该图纸。
+signal gpConnectPickRequested(gpNodeId: String, gpSheetId: String)
+
+# Container link-table provider (the panel owns no link table). Invalid = section hidden.
+# 容器 link 表来源（本面板不持有 link 表）。无效时整段隐藏。
+var gpLinksProvider: Callable = Callable()
+
+# Sheets provider for the unlinked connector's peer-sheet dropdown; returns
+# {"sheets": Array[GPSheet], "current": String active sheet id}. Invalid = the dropdown
+# degrades to the placeholder with no options.
+# 未连线连接符的对端图纸下拉的图纸来源；返回 {"sheets": Array[GPSheet], "current": 当前
+# 图纸 id}。无效时下拉退化为无可选项的占位符。
+var gpSheetsProvider: Callable = Callable()
+
 # Key prefix for a multi-language name edit (e.g. "name:zh_CN").
 # 多语言名称编辑的键前缀（如 "name:zh_CN"）。
 const GP_NAME_PREFIX: String = "name:"
@@ -308,6 +336,118 @@ func _gpBuildNodeForm(gpDef: GPSymbolDef, gpNodes: Array[GPPIDNode]) -> void:
 			if gpCurrentNode != null:
 				gpCleanOrphansRequested.emit(gpCurrentNode.gpInstanceId))
 		gpFormRoot.add_child(gpBtn)
+	# ---- cross-sheet link section (ADR-43 S4-4) ----
+	# ---- 跨图纸连接段（ADR-43 S4-4）----
+	_gpAddLinkSection(gpDef, gpPrimary)
+
+
+# The off-page connector's link section: the derived peer number (read-only, the index owns
+# it), the two legend lines (equipment description / medium) and the contract snapshot, all
+# editable on the LINK (not the node), plus the sync button that pushes the snapshot to the
+# peer end. Edits are committed per field through gpLinkAttrEditRequested — the shell routes
+# them through GPCrossSheetSyncCommand so every keystroke-commit is one undo step.
+# 跨图纸连接符的 link 段：对端图纸号（只读，索引所有）、图例两行（设备描述 / 介质）与
+# 契约快照 —— 都编辑在 **link**（而非节点）上，外加把快照推送到对端的同步按钮。编辑逐字段
+# 经 gpLinkAttrEditRequested 提交 —— 外壳把它们路由进 GPCrossSheetSyncCommand，
+# 使每次提交都是一个撤销步。
+func _gpAddLinkSection(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> void:
+	if gpDef == null or gpNode == null or gpDef.gpCategory != "offpage":
+		return
+	if not gpLinksProvider.is_valid():
+		return
+	var gpLink: GPOffPageLink = null
+	for gpL in gpLinksProvider.call() as Array:
+		if gpL != null and gpL.gpInstanceId == str(gpNode.gpProps.get(
+				GPOffPageLink.GP_KEY_LINK_ID, "")):
+			gpLink = gpL
+			break
+	_gpAddHead(I18n.gpTr("offpage.insp_head"))
+	if gpLink == null:
+		# An unlinked connector: offer a PEER-SHEET dropdown (user feedback 2026-11-03 —
+		# the old blank read-only field offered no way forward). Picking a sheet emits
+		# gpConnectPickRequested; the shell opens the connect dialog preselected on it.
+		# 未连线的连接符：提供**对端图纸下拉**（用户反馈 2026-11-03 —— 原来的空白只读
+		# 字段无处下手）。选定图纸即发射 gpConnectPickRequested；外壳据此打开预选到该
+		# 图纸的连接对话框。
+		_gpAddPeerSheetPick(gpNode)
+		return
+	_gpAddTextField(I18n.gpTr("offpage.insp_ref"),
+		GPOffPageIndex.gpRefTextFor(gpNode), "", true)
+	# The TARGET end's tag is DERIVED through the index (user feedback 2026-11-03: the top
+	# line of the legend inherits the tag of the item the link serves) — read-only, like the
+	# reference. The contract keys follow as editable fields; the medium was seeded from the
+	# source line at creation and syncs from here.
+	# **目标端**位号经索引**推导**（用户反馈 2026-11-03：图例上一行自动继承 link 所服务对象的
+	# 位号）—— 与对端图号一样只读。其后是可编辑的契约字段；介质在创建时已从源管线播种，
+	# 由此处同步。
+	_gpAddTextField(I18n.gpTr("offpage.insp_target"),
+		GPOffPageIndex.gpTargetTagFor(gpNode), "", true)
+	for gpKey in GPOffPageLink.GP_CONTRACT_KEYS:
+		var gpK: String = gpKey
+		_gpAddLinkField(gpLink.gpInstanceId,
+			I18n.gpTr("offpage.insp_medium") if gpKey == GPOffPageLink.GP_ATTR_MEDIUM
+			else gpKey, str(gpLink.gpAttrs.get(gpKey, "")), gpK)
+	var gpSyncBtn: Button = Button.new()
+	gpSyncBtn.text = I18n.gpTr("offpage.insp_sync")
+	gpSyncBtn.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpSyncBtn.pressed.connect(func() -> void:
+		gpLinkSyncRequested.emit(gpLink.gpInstanceId))
+	gpFormRoot.add_child(gpSyncBtn)
+	_gpAddNote(I18n.gpTr("offpage.insp_sync_hint"))
+
+
+# The peer-sheet dropdown for an UNLINKED connector. Ordered by drawing number through the
+# SAME core helper the connect dialog uses, so the two pickers can never disagree. Item 0 is
+# a placeholder; picking a real sheet emits gpConnectPickRequested and snaps back, ready to
+# be rebuilt (the shell opens the dialog, the connector becomes linked, the section re-renders).
+# 未连线连接符的对端图纸下拉。经与连接对话框**同一个** core 助手按图号排序，两个选择器
+# 永不次序分家。第 0 项为占位符；选中真图纸即发射 gpConnectPickRequested 并弹回占位
+#（外壳随后打开对话框，连接符成为已连接，本段随之重渲染）。
+func _gpAddPeerSheetPick(gpNode: GPPIDNode) -> void:
+	var gpData: Dictionary = {}
+	if gpSheetsProvider.is_valid():
+		gpData = gpSheetsProvider.call() as Dictionary
+	var gpRaw: Array = gpData.get("sheets", []) as Array
+	var gpCurrent: String = str(gpData.get("current", ""))
+	var gpRow: HBoxContainer = _gpFieldRow(I18n.gpTr("offpage.insp_ref"))
+	var gpOpt: OptionButton = OptionButton.new()
+	gpOpt.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpOpt.add_item(I18n.gpTr("offpage.insp_pick_sheet"))
+	var gpOrdered: Array[GPSheet] = []
+	for gpV in gpRaw:
+		var gpS: GPSheet = gpV as GPSheet
+		if gpS != null and gpS.gpId != gpCurrent:
+			gpOrdered.append(gpS)
+	gpOrdered.sort_custom(GPOffPageIndex.gpSheetBefore)
+	var gpIds: Array[String] = []
+	for gpS in gpOrdered:
+		gpOpt.add_item(GPOffPageIndex.gpSheetLabel(gpS))
+		gpIds.append(gpS.gpId)
+	# No sibling sheet to offer? Keep the row honest: disabled placeholder, no dead choice.
+	# 没有可选的兄弟图纸？让这一行保持诚实：禁用的占位符，不给死选项。
+	gpOpt.disabled = gpIds.is_empty()
+	var gpNodeId: String = gpNode.gpInstanceId
+	gpOpt.item_selected.connect(func(gpIdx: int) -> void:
+		gpOpt.select(0)
+		if gpIdx > 0 and gpIdx - 1 < gpIds.size():
+			gpConnectPickRequested.emit(gpNodeId, gpIds[gpIdx - 1]))
+	gpRow.add_child(gpOpt)
+
+
+# One editable link-attr row. Commits on submit (Enter), so partial typing never lands in
+# the model.
+# 一行可编辑的 link 属性。提交发生在 text_submitted（回车），半截输入永不进模型。
+func _gpAddLinkField(gpLinkId: String, gpLabel: String, gpInitial: String,
+		gpKey: String) -> void:
+	var gpRow: HBoxContainer = _gpFieldRow(gpLabel)
+	var gpEdit: LineEdit = LineEdit.new()
+	gpEdit.size_flags_horizontal = SIZE_EXPAND_FILL
+	gpEdit.text = gpInitial
+	gpEdit.text_submitted.connect(func(gpV: String) -> void:
+		# The shell resolves the link by id — this panel owns no link table.
+		# 外壳按 id 解析 link —— 本面板不持有 link 表。
+		gpLinkAttrEditRequested.emit(gpLinkId, gpKey, gpV))
+	gpRow.add_child(gpEdit)
 
 
 # ============================ swap dropdown / 更换图元下拉 ============================

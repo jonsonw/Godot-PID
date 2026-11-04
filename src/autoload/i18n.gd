@@ -53,6 +53,10 @@ const GP_STRINGS: Dictionary = {
 	# ---- 注释类模板（GPSymbolAnnotationTemplates，Rev.3 阶段 2）----
 	"sym.text_multiline":	{ "zh": "多行文本", "en": "Multi-line Text" },
 	"sym.table_device_param":	{ "zh": "设备参数表", "en": "Equipment Data Table" },
+	# ---- off-page connectors (GPSymbolPackOffpage, ADR-43 D3 / W12-S2) ----
+	# ---- 跨图纸连接符（GPSymbolPackOffpage，ADR-43 D3 / W12-S2）----
+	"sym.offpage_pipe":	{ "zh": "跨图纸连接符（管道）", "en": "Off-Page Connector (Piping)" },
+	"sym.offpage_signal":	{ "zh": "跨图纸连接符（信号）", "en": "Off-Page Connector (Signal)" },
 	"canvas.ctx_table_ins_row":	{ "zh": "插入行", "en": "Insert Row" },
 	"canvas.ctx_table_del_row":	{ "zh": "删除行", "en": "Delete Row" },
 	"canvas.ctx_table_ins_col":	{ "zh": "插入列", "en": "Insert Column" },
@@ -138,6 +142,17 @@ const GP_STRINGS: Dictionary = {
 	"drc.edge_attrs_missing":      { "zh": "连线属性缺失：%s（缺 %s）", "en": "Line attributes missing: %s (missing %s)" },
 	"drc.sheet_sparse":            { "zh": "图面偏空：已用面积约 %d%%", "en": "Sheet looks sparse: about %d%% used" },
 	"drc.sheet_crowded":           { "zh": "图面偏挤：已用面积约 %d%%", "en": "Sheet looks crowded: about %d%% used" },
+	# ---- offpage family (W12-S4, ADR-43 §2.5) / 跨图纸规则族 ----
+	"drc.offpage.orphan_sheet":     { "zh": "跨图纸连接 %s 引用的图纸不存在：%s", "en": "Off-page link %s references a missing sheet: %s" },
+	"drc.offpage.orphan_node":      { "zh": "跨图纸连接 %s 引用的节点不存在：%s（图纸 %s）", "en": "Off-page link %s references a missing node: %s (sheet %s)" },
+	"drc.offpage.orphan_port":      { "zh": "跨图纸连接 %s 引用的端口不存在：%s（节点 %s）", "en": "Off-page link %s references a missing port: %s (node %s)" },
+	"drc.offpage.unpaired_link":    { "zh": "跨图纸连接 %s 的端点不是连接符：%s", "en": "Off-page link %s lands on a non-connector: %s" },
+	"drc.offpage.unpaired_stray":   { "zh": "连接符引用的跨图纸连接不存在或未包含它：%s（节点 %s）", "en": "Connector references a missing or non-membership link: %s (node %s)" },
+	"drc.offpage.attr_mismatch":    { "zh": "契约字段不一致 [%s]（%s）：link=%s，A 端=%s，B 端=%s", "en": "Contract field mismatch [%s] (%s): link=%s, A=%s, B=%s" },
+	"drc.offpage.attr_split":       { "zh": "同一端的多条连线属性不一致 [%s]（%s）：%s", "en": "Edges at one end disagree [%s] (%s): %s" },
+	"drc.offpage.kind_ends":        { "zh": "跨图纸连接 %s 两端类别不一致：%s ↔ %s", "en": "Off-page link %s joins mismatched connector kinds: %s ↔ %s" },
+	"drc.offpage.kind_port":        { "zh": "跨图纸连接 %s 的类别与端口不符：端口 %s，连接 %s", "en": "Off-page link %s contradicts its port: port %s, link %s" },
+	"drc.offpage.duplicate":        { "zh": "同一对端点存在多条跨图纸连接：%s 与 %s（%s ↔ %s）", "en": "Multiple links on the same endpoint pair: %s and %s (%s ↔ %s)" },
 	"drc.edge_ref_missing":         { "zh": "连线端点引用失效：%s（%s 端）", "en": "Line endpoint is dangling: %s (%s end)" },
 	"drc.edge_port_missing":        { "zh": "连线端口不存在：%s（%s / %s）", "en": "Line port does not exist: %s (%s / %s)" },
 	"drc.edge_port_type":           { "zh": "端口类型不匹配：%s（%s / %s 是 %s）", "en": "Port type mismatch: %s (%s / %s is %s)" },
@@ -179,6 +194,7 @@ const GP_STRINGS: Dictionary = {
 	"drc.family.tag":               { "zh": "位号", "en": "Tags" },
 	"drc.family.doc":              { "zh": "图签", "en": "Document" },
 	"drc.family.sem":               { "zh": "工艺语义", "en": "Semantics" },
+	"drc.family.offpage":           { "zh": "跨图纸连接", "en": "Off-Page Links" },
 	"drc.dialog_title":             { "zh": "DRC 校验", "en": "DRC check" },
 	"drc.dialog_close":             { "zh": "关闭", "en": "Close" },
 	"drc.repair_title":             { "zh": "DRC 修复计划", "en": "DRC repair plan" },
@@ -481,6 +497,10 @@ const GP_STRINGS: Dictionary = {
 	"heat":       { "zh": "换热器",   "en": "Heat Exchanger" },
 	"general":    { "zh": "通用",     "en": "General" },
 	"annotation": { "zh": "注释",     "en": "Annotation" },
+	# Off-page connectors get their own palette group (ADR-43): they are the only symbols whose
+	# meaning lives ACROSS sheets, so they must not be buried among the drawing symbols.
+	# 跨图纸连接符自成一组（ADR-43）：它们是唯一「含义横跨图纸」的图元，不能混在绘图图元里。
+	"offpage":    { "zh": "跨图纸连接符", "en": "Off-Page" },
 
 	# ---- main canvas interaction / 主画布交互 ----
 	"canvas.ctx_edit_symbol":  { "zh": "修改图元…", "en": "Modify Symbol…" },
@@ -575,6 +595,14 @@ const GP_STRINGS: Dictionary = {
 	"center.fullscreen":      { "zh": "全屏", "en": "Fullscreen" },
 	"center.fullscreen_exit": { "zh": "退出全屏", "en": "Exit fullscreen" },
 	"center.fullscreen_tip":  { "zh": "隐藏左右面板，绘图区占满窗口", "en": "Hide side panels, expand the canvas" },
+	"center.layout1_tip":     { "zh": "单窗", "en": "Single pane" },
+	"center.layout2_tip":     { "zh": "左右二分", "en": "Split side by side" },
+	"center.layout3_tip":     { "zh": "一大两小", "en": "One large + two small" },
+	"center.layout4_tip":     { "zh": "四宫格", "en": "2×2 grid" },
+	"center.pane_empty":      { "zh": "从上方标签或下拉选择图纸", "en": "Pick a sheet from the tab bar or the list" },
+	"center.popout_tip":      { "zh": "摘出到独立窗口（关闭窗口归位）", "en": "Pop out to its own window (close to return)" },
+	"center.popout_busy":     { "zh": "已有一块画布在独立窗口中", "en": "A canvas is already popped out" },
+	"offpage.drag_linked":    { "zh": "该连接符已建立跨图纸连接（同步/跳转请用右键菜单）", "en": "This connector already has a cross-sheet link (use the context menu to sync/jump)" },
 
 	"prop.edge":            { "zh": "连线", "en": "Connection" },
 	"edge.kind":            { "zh": "类型", "en": "Kind" },
@@ -626,6 +654,40 @@ const GP_STRINGS: Dictionary = {
 	# ---- generic dialog buttons ----
 	"dialog.ok":              { "zh": "确定", "en": "OK" },
 	"dialog.cancel":          { "zh": "取消", "en": "Cancel" },
+
+	# ---- cross-sheet connection (ADR-43 / S3) ----
+	"offpage.dlg_title":      { "zh": "跨图纸连接", "en": "Cross-Sheet Connection" },
+	"offpage.target_sheet":   { "zh": "目标图纸", "en": "Target sheet" },
+	"offpage.filter":         { "zh": "按位号过滤", "en": "Filter by tag" },
+	"offpage.target_item":    { "zh": "目标对象", "en": "Target item" },
+	"offpage.port":           { "zh": "端口", "en": "Port" },
+	"offpage.ok":             { "zh": "创建连接", "en": "Create connection" },
+	"offpage.ctx_connect":    { "zh": "连接到其他图纸…", "en": "Connect to another sheet…" },
+	"offpage.ctx_jump":       { "zh": "跳转到对端", "en": "Go to peer end" },
+	"offpage.ctx_sync":       { "zh": "同步属性到对端", "en": "Sync attributes to peer" },
+	"offpage.sync_done":      { "zh": "契约属性已同步到对端", "en": "Contract attributes synced to the peer end" },
+	"offpage.jump_missing":   { "zh": "对端图纸未打开或已删除", "en": "The peer sheet is not open or was deleted" },
+	"offpage.status_created": { "zh": "跨图纸连接已创建（编号 %s）", "en": "Cross-sheet connection created (tag %s)" },
+	# ---- S4 deletion cascade / 删除级联 ----
+	"offpage.del_title":      { "zh": "删除跨图纸连接", "en": "Delete Cross-Sheet Connection" },
+	"offpage.del_text":       { "zh": "删除连接符将删除**整条**跨图纸连接，对端图纸上的连接符将一并删除：\n%s",
+								"en": "Deleting the connector removes the WHOLE cross-sheet connection — the peer connector is deleted too:\n%s" },
+	"offpage.del_line":       { "zh": "· 连接 %s（对端图纸 %s）", "en": "· Link %s (peer sheet %s)" },
+	"offpage.del_done":       { "zh": "跨图纸连接已删除", "en": "Cross-sheet connection deleted" },
+	# ---- sheet-close cascade (case ③) / 关签级联（情形③）----
+	"offpage.close_title":    { "zh": "这张图纸上有跨图纸连接", "en": "This sheet carries cross-sheet links" },
+	"offpage.close_text":     { "zh": "关闭后，下列跨图纸连接将失效。确认删除这些连接吗？（对端图纸上的连接符保留，编号将显示为 ？）\n%s",
+								"en": "Closing invalidates these links. Delete them? (Peer connectors stay; their flags will show ?)\n%s" },
+	"offpage.peer_sheet":     { "zh": "对端图纸 %s", "en": "peer sheet %s" },
+	# ---- inspector section (S4-4) / 属性面板连接符段 ----
+	"offpage.insp_head":      { "zh": "跨图纸连接", "en": "Cross-Sheet Link" },
+	"offpage.insp_ref":       { "zh": "对端图纸号", "en": "Peer drawing no." },
+	"offpage.insp_pick_sheet": { "zh": "选择对端图纸…", "en": "Pick peer sheet…" },
+	"offpage.insp_target":    { "zh": "目标端位号", "en": "Target tag" },
+	"offpage.insp_medium":    { "zh": "介质", "en": "Medium" },
+	"offpage.insp_sync":      { "zh": "同步契约到对端", "en": "Sync contract to peer" },
+	"offpage.insp_sync_hint": { "zh": "修改 dn / 介质 / 规格 / 保温 / 信号类型后，点此把本端快照同步到对端。",
+								"en": "After editing dn / medium / spec / insulation / signal type, sync this end's snapshot to the peer." },
 	"dialog.unsaved_title":   { "zh": "未保存的更改", "en": "Unsaved Changes" },
 	"dialog.unsaved_text":    { "zh": "当前图纸有未保存的更改。关闭前要保存吗？",
 								"en": "This drawing has unsaved changes. Save before closing?" },

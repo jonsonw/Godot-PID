@@ -287,6 +287,13 @@ static func gpThumbKind(gpDef: GPSymbolDef) -> String:
 			return "grid"
 		"multiline":
 			return "multiline"
+		# The off-page connector's glyph is a generator spec like the table's, so it gets its
+		# own kind and draws the REAL spec — otherwise the two connectors would both fall to the
+		# plain grey rectangle, i.e. the exact defect reported for text-vs-table on 2026-10-17.
+		# 跨图纸连接符的字形与表格一样出自生成器规格，故有独立种类并绘制**真**规格 —— 否则两个连接符
+		# 都会落到普通灰矩形，正是 2026-10-17 就「文本 vs 表格」报告的那个缺陷。
+		"offpage":
+			return "offpage"
 		_:
 			return "fallback"
 
@@ -331,6 +338,8 @@ func _draw() -> void:
 			_gpDrawGridThumb(gpThumbRect, gpFill, gpStroke, gpBorder)
 		"multiline":
 			_gpDrawMultilineThumb(gpThumbRect, gpFill, gpStroke)
+		"offpage":
+			_gpDrawOffpageThumb(gpThumbRect, gpFill, gpStroke, gpBorder)
 		_:
 			draw_rect(gpThumbRect, gpFill, true)
 			draw_rect(gpThumbRect, gpStroke, false, gpBorder)
@@ -369,6 +378,69 @@ func _gpDrawGridThumb(gpRect: Rect2, gpFill: Color, gpStroke: Color, gpBorder: f
 	draw_rect(gpRect, gpFill, true)
 	draw_rect(gpRect, gpStroke, false, gpBorder)
 	GPSymbolPainter.gpDrawShape(self, gpSpec, gpRect, gpFill, gpContrastOn(gpFill), 1.0)
+
+
+# Off-page connector thumbnail: the REAL generator spec, drawn as line art in the category ink
+# and NOTHING else — the flag is line art on the canvas too, so a filled block here would show a
+# different symbol than the one that lands on the sheet. Both family members therefore stay
+# distinguishable at a glance (pennant vs both-ends-pointed hexagon), which the plain-rect
+# fallback could never do.
+# 跨图纸连接符缩略图：绘制**真**生成器规格，以类目墨色线绘，别无他物 —— 旗标在画布上也是线绘，
+# 此处若铺实心块，就与落到图纸上的那个图元不是同一个样子。故同族两个成员一眼可辨
+#（单向旗标 vs 两端尖六边形），而普通矩形兜底永远做不到这一点。
+# The fit box is the glyph's REAL path bounds, NOT the (much wider) authoring envelope: an
+# unlinked flag hugs a ~12 mm body inside a 96 mm envelope, and fitting the envelope would
+# shrink the pennant to a speck (user feedback 2026-11-03, second round). Re-boxing to the
+# path bounds makes the glyph fill the cell like every other symbol — the same normalization
+# a 60x102 vessel already enjoys.
+# 适配盒取字形的**真实路径边界**，而非（宽得多的）授权包络：未连线的旗标在 96mm 包络里
+# 只画约 12mm 的主体，按包络适配会把旗标缩成一个针尖（用户反馈 2026-11-03 第二轮）。
+# 按路径边界重定盒使字形像其它图元一样撑满格子 —— 与 60×102 容器早已享受的归一化相同。
+func _gpDrawOffpageThumb(gpRect: Rect2, gpFill: Color, gpStroke: Color, gpBorder: float) -> void:
+	var gpSpec: Dictionary = gpOffpageThumbSpec(gpDef)
+	if gpSpec.is_empty():
+		# Degraded generator: keep the old fallback so the tile never goes blank.
+		# 生成器退化：保持旧兜底，图块绝不空白。
+		draw_rect(gpRect, gpFill, true)
+		draw_rect(gpRect, gpStroke, false, gpBorder)
+		return
+	GPSymbolPainter.gpDrawShape(self, gpSpec, gpRect, gpFill, gpStroke, gpBorder)
+
+
+# PURE and therefore testable: the spec the off-page thumbnail actually draws — the real
+# generator spec RE-BOXED to the glyph's path bounds (see gpOffpageBodyBox). Keeping the
+# re-boxing here (not inline in _draw) means a test can pin that the thumbnail really fits
+# the body and not the envelope — the wiring itself, not just the helper.
+# **纯**函数因此可测：跨图纸缩略图**实际**绘制的 spec —— 真·生成器 spec **重定盒**到字形的
+# 路径边界（见 gpOffpageBodyBox）。把重定盒放在此处（而非 _draw 内联）使测试能钉住「缩略图
+# 真的按主体而非包络适配」—— 钉的是**接线本身**，而不只是助手函数。
+static func gpOffpageThumbSpec(gpDef: GPSymbolDef) -> Dictionary:
+	var gpSpec: Dictionary = GPSymbolGeneratorRegistry.gpGenerate(gpDef,
+		GPPIDNode.new()).get("spec", {}) as Dictionary
+	if gpSpec.is_empty():
+		return {}
+	var gpBody: Rect2 = gpOffpageBodyBox(gpSpec)
+	if gpBody.size.x > 0.001 and gpBody.size.y > 0.001:
+		gpSpec["box"] = [gpBody.position.x, gpBody.position.y, gpBody.size.x, gpBody.size.y]
+	return gpSpec
+
+
+# The union bounds of a spec's paths, as a Rect2 in the spec's unit space. Pure so tests can
+# pin it without a scene tree; the painter then uniform-fits THIS box instead of the envelope.
+# spec 路径的并集边界，spec 单位空间中的 Rect2。纯函数使测试无需场景树即可钉住；
+# 绘制器随后均匀适配的是**这个**盒，而非包络。
+static func gpOffpageBodyBox(gpSpec: Dictionary) -> Rect2:
+	var gpLo: Vector2 = Vector2(INF, INF)
+	var gpHi: Vector2 = Vector2(-INF, -INF)
+	for gpPath in gpSpec.get("paths", []) as Array:
+		for gpPt in (gpPath as Dictionary).get("pts", []) as Array:
+			var gpP: Array = gpPt as Array
+			var gpV: Vector2 = Vector2(float(gpP[0]), float(gpP[1]))
+			gpLo = gpLo.min(gpV)
+			gpHi = gpHi.max(gpV)
+	if gpLo.x > gpHi.x or gpLo.y > gpHi.y:
+		return Rect2()
+	return Rect2(gpLo, gpHi - gpLo)
 
 
 # Multiline-text thumbnail: a LANDSCAPE filled rectangle with the literal "123" centered

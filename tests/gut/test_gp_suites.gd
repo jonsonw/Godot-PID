@@ -85,7 +85,11 @@ const GP_METHOD_PREFIX: String = "gpTest"
 # 114 = 113 + gp_test_standard_package.gd（ADR-36 / B 标准包与导入差异）。
 # 115 = 114 + gp_test_tag_audit.gd（ADR-36 / C 工程级审计、导出闸门与回导匹配）。
 # 118 = 117 + gp_test_architecture.gd（B06 core→render 静态扫描）。
-const GP_EXPECTED_SUITES: int = 118
+# 119 = 118 + gp_test_offpage_link.gd（ADR-43 / S1 跨图纸连接模型与容器读写）。
+# 120 = 119 + gp_test_offpage_symbol.gd（ADR-43 / S2 连接符图元与对端图纸号推导渲染）。
+# 122 = 121 + gp_test_offpage_drc.gd（ADR-43 / S4 往返校验五规则）。
+# 123 = 122 + gp_test_multiview.gd（W13-S6 / ADR-44 窗格布局纯模型与跨层一致性钉）。
+const GP_EXPECTED_SUITES: int = 123
 
 # Engine errors the legacy suites are *expected* to emit. GUT fails any test that leaves an
 # error unhandled, so these are marked handled explicitly (see _gpHandleExpectedErrors).

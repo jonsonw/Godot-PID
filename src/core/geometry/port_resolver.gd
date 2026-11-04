@@ -31,7 +31,8 @@ extends RefCounted
 static func gpPortLocalOriented(gpDef: GPSymbolDef, gpNode: GPPIDNode, gpPort: GPPort) -> Vector2:
 	if gpNode == null:
 		return Vector2.ZERO
-	return gpPortLocalInFrame(gpDef, gpPort, gpNode.gpFlipped, gpNode.gpRotationDeg)
+	return gpPortLocalInFrame(gpDef, gpPort, gpNode.gpFlipped, gpNode.gpRotationDeg,
+		_gpOverrideLocal(gpDef, gpNode, gpPort))
 
 
 # Outward normal of a port in world direction (unit length, or ZERO when the port declares none).
@@ -56,16 +57,38 @@ static func gpPortDirOriented(gpNode: GPPIDNode, gpPort: GPPort) -> Vector2:
 
 # Local (node-centered) port offset under an EXPLICIT frame.
 # 在**显式**坐标系下，端口相对节点中心的本地偏移。
+# [param gpLocalBase] Optional pre-resolved local offset replacing the def default — the
+# per-instance generator override (the off-page continuation port rides the adaptive body's
+# tip). Callers that have no node context pass null and keep the exact def behaviour.
+# [param gpLocalBase] 可选的、预先解析的本地偏移，替换 def 默认值 —— 即逐实例的生成器覆盖
+#（跨图纸续接端口贴着自适应主体的旗尖）。没有节点上下文的调用方传 null，行为与 def 完全一致。
 static func gpPortLocalInFrame(gpDef: GPSymbolDef, gpPort: GPPort, gpFlipped: bool,
-		gpRotDeg: float) -> Vector2:
+		gpRotDeg: float, gpLocalBase: Variant = null) -> Vector2:
 	if gpDef == null or gpPort == null:
 		return Vector2.ZERO
-	var gpL: Vector2 = gpDef.gpPortLocal(gpPort)
+	var gpL: Vector2 = gpLocalBase if gpLocalBase != null else gpDef.gpPortLocal(gpPort)
 	if gpFlipped:
 		gpL.x = -gpL.x
 	if not is_zero_approx(gpRotDeg):
 		gpL = gpL.rotated(deg_to_rad(gpRotDeg))
 	return gpL
+
+
+# The generator's per-instance local offset for this port, or null when it declares none.
+# A generator override REPLACES the def's nominal unit position (same envelope, same algebra:
+# (unit - centre) * size), so the resolved port lands on the DRAWN geometry, not on a nominal
+# edge the glyph may not reach.
+# 生成器对该端口的逐实例本地偏移；未声明时为 null。生成器覆盖**替换** def 的标称单位位置
+#（同一包络、同一代数：(unit - 中心) * 尺寸），故解析出的端口落在**画出的**几何上，
+# 而不是字形未必到达的标称边缘上。
+static func _gpOverrideLocal(gpDef: GPSymbolDef, gpNode: GPPIDNode, gpPort: GPPort) -> Variant:
+	if gpDef == null or gpNode == null or gpPort == null:
+		return null
+	var gpUnits: Dictionary = GPSymbolGeneratorRegistry.gpPortUnitOverrides(gpDef, gpNode)
+	if gpUnits.is_empty() or not (gpUnits as Dictionary).has(gpPort.gpName):
+		return null
+	var gpUnit: Vector2 = gpUnits[gpPort.gpName]
+	return (gpUnit - Vector2(0.5, 0.5)) * gpDef.gpDefaultSize
 
 
 # Outward port normal under an EXPLICIT frame, normalized (ZERO stays ZERO).
@@ -113,7 +136,7 @@ static func gpPortWorld(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpDef: GPSym
 		return Vector2.ZERO
 	if not gpNode.gpIsMounted():
 		return gpNode.gpPosition + gpPortLocalInFrame(gpDef, gpPort, gpNode.gpFlipped,
-			gpNode.gpRotationDeg)
+			gpNode.gpRotationDeg, _gpOverrideLocal(gpDef, gpNode, gpPort))
 	var gpFrame: Dictionary = gpNodeFrame(gpGraph, gpDefLookup, gpNode)
 	return (gpFrame["origin"] as Vector2) + gpPortLocalInFrame(gpDef, gpPort,
 		bool(gpFrame["flipped"]), float(gpFrame["rot_deg"]))

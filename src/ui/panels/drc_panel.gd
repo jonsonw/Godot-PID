@@ -50,6 +50,10 @@ var _gpFindings: Array[GPFinding] = []
 var _gpProjectMode: CheckBox = null
 var _gpSheetsProvider: Callable = Callable()
 
+# Container link-table provider for the off-page audit (W12-S4).
+# 容器 link 表来源，供跨图纸审计用（W12-S4）。
+var _gpLinksProvider: Callable = Callable()
+
 var _gpSummary: Label = null
 var _gpList: VBoxContainer = null
 var _gpScroll: ScrollContainer = null
@@ -150,6 +154,14 @@ func gpSetSheetsProvider(gpProvider: Callable) -> void:
 	_gpSheetsProvider = gpProvider
 
 
+# Install the container link-table provider for the off-page audit (W12-S4). Optional: an
+# invalid provider just runs the project audit without the cross-sheet rules.
+# 安装容器 link 表来源，供跨图纸审计使用（W12-S4）。可选：无效来源只是不带跨图纸规则
+# 跑工程审计。
+func gpSetLinksProvider(gpProvider: Callable) -> void:
+	_gpLinksProvider = gpProvider
+
+
 # Refresh static text after a locale change.
 # 语言切换后刷新静态文字。
 func gpRefreshText() -> void:
@@ -185,7 +197,10 @@ func gpRun() -> void:
 	if _gpProjectMode != null and _gpProjectMode.button_pressed and _gpSheetsProvider.is_valid():
 		var gpSheets: Array = _gpSheetsProvider.call()
 		var gpStd: GPProjectStandard = _gpCanvas.gpGraph.gpStandard
-		_gpFindings = GPDrcEngine.gpRunProject(gpSheets, _gpCanvas.gpDefs, gpStd)
+		var gpLinks: Array[GPOffPageLink] = []
+		if _gpLinksProvider.is_valid():
+			gpLinks = _gpLinksProvider.call() as Array[GPOffPageLink]
+		_gpFindings = GPDrcEngine.gpRunProject(gpSheets, _gpCanvas.gpDefs, gpStd, gpLinks)
 	else:
 		_gpFindings = GPDrcEngine.gpRunSheet(_gpCanvas.gpGraph, _gpCanvas.gpSheet,
 			_gpCanvas.gpDefs, _gpCanvas.gpGraph.gpStandard)
@@ -281,7 +296,7 @@ func _gpRebuildRows() -> void:
 		return
 	# Group by family in a fixed order; within a family keep the engine's deterministic order.
 	# 按固定族序分组；族内保留引擎的确定性顺序。
-	var gpFamilies: Array[String] = ["layout", "topo", "symbol", "tag", "doc", "sem"]
+	var gpFamilies: Array[String] = ["layout", "topo", "symbol", "tag", "doc", "sem", "offpage"]
 	for gpFamily in gpFamilies:
 		var gpRows: Array[GPFinding] = []
 		for gpF in gpShown:

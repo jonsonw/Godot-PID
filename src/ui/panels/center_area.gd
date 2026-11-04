@@ -44,6 +44,54 @@ var gpTabs: Array[Dictionary] = []
 # 当前活动图纸在 gpTabs 中的下标（空时为 -1）。
 var gpActive: int = -1
 
+# --- W13 multi-view (ADR-44) ----------------------------------------------
+# The current layout mode (GPPaneLayout constants). Only the MODE persists (Settings);
+# the bindings below are session state.
+# 当前布局模式（GPPaneLayout 常量）。只有**模式**持久化（Settings）；以下绑定是会话状态。
+var gpLayoutMode: int = GPPaneLayout.GP_SINGLE
+
+# The panes of the current layout, left-to-right / top-to-bottom.
+# 当前布局的窗格，自左向右 / 自上而下。
+var _gpPanes: Array[GPCanvasPane] = []
+
+# Pane i shows tab _gpPaneSheets[i] (GPPaneLayout.GP_EMPTY = empty pane). THE binding
+# invariant (ADR-44 D2): a sheet index appears at most once.
+# 窗格 i 显示标签 _gpPaneSheets[i]（GPPaneLayout.GP_EMPTY = 空窗格）。**绑定不变量**
+#（ADR-44 D2）：一个图纸下标至多出现一次。
+var _gpPaneSheets: Array[int] = []
+
+# The pane the docks serve (ADR-44 D4: focus decides).
+# 侧栏服务的窗格（ADR-44 D4：焦点决定）。
+var _gpActivePane: int = 0
+
+# The layout container inside gpBody; rebuilt on every mode switch.
+# gpBody 内的布局容器；每次切换模式重建。
+var _gpLayoutRoot: Control = null
+
+# The embedded pop-out window (W13-S7) and the sheet tab it currently hosts (-1 = none).
+# 嵌入式摘出窗口（W13-S7）与其当前承载的图纸标签（-1 = 无）。
+var _gpPopWin: Window = null
+var _gpPopSheet: int = GPPaneLayout.GP_EMPTY
+# The pane that popped the canvas out (its preferential home on return).
+# 摘出画布的窗格（归位时的优先去处）。
+var _gpPopPane: int = 0
+
+# Guards: while loading sheets the tab-changed signal must not re-bind panes (the load
+# assigns them once at the end); while the tab bar is synced FROM the pane state, the
+# tab-changed handler must not bounce back.
+# 护栏：载入图纸期间 tab 变化信号**不得**重绑窗格（载入在末尾一次性指派）；
+# 从窗格状态反向同步标签栏时，tab 变化处理器**不得**回弹。
+var _gpLoading: bool = false
+var _gpTabSyncing: bool = false
+
+# Container-level cross-sheet off-page links (ADR-43). Links reference TWO sheets, so they
+# are owned HERE — next to gpTabs, never inside any single sheet's graph. file_coordinator
+# fills this on load and reads it on save; S3/S4 (commands, DRC) reach it the same way.
+# 容器级跨图纸 Off-Page 连接（ADR-43）。link 两端各引用一张图纸，故归属**此处** ——
+# 与 gpTabs 并列，绝不放进任何单张图纸的 graph。file_coordinator 载入时填充、保存时读取；
+# S3/S4（命令与 DRC）经同一路径访问。
+var gpOffPageLinks: Array[GPOffPageLink] = []
+
 # The PROJECT's numbering standard shared by every tab (ADR-36). Null until something asks
 # for it, so a project that never numbers anything still saves no `tag_rules` key.
 # 全部标签页共享的**工程**编号标准（ADR-36）。在被索取之前为 null，故从不编号的工程
@@ -88,6 +136,13 @@ func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_STOP
 	add_child(_gpBuildHeader())
 	gpBody = _gpBuildBody()
+	# W13-S6 (ADR-44): restore the persisted layout mode, then build the pane tree. The
+	# default (and every invalid stored value) is the historical single-pane look.
+	# W13-S6（ADR-44）：恢复持久化的布局模式，然后构建窗格树。默认（及一切非法存值）
+	# 是历史上的单窗外观。
+	var gpStored: int = Settings.gpLayoutMode
+	gpLayoutMode = gpStored if GPPaneLayout.gpIsValid(gpStored) else GPPaneLayout.GP_SINGLE
+	_gpRebuildLayout()
 	# Keep the static header tooltips in sync with the locale.
 	# 让头部静态文字（按钮提示）随语言同步。
 	I18n.gpLocaleChanged.connect(_gpOnLocale)
@@ -108,11 +163,33 @@ func _gpBuildHeader() -> HBoxContainer:
 	gpHeader.add_child(_gpBuildTabBar())
 	gpHeader.add_child(_gpBuildAddButton())
 	gpHeader.add_child(_gpBuildFullscreenButton())
+	gpHeader.add_child(_gpBuildLayoutButtons())
 	# (No spacer needed: the tab band itself EXPANDs, so "+" and the fullscreen
 	# button ride at the band's right end — "+" adapts right as tabs are added.)
 	# （无需占位：tab 色带自身 EXPAND，「+」与全屏按钮贴在色带右端 ——
 	# 新增图纸时「+」自适应右移。）
 	return gpHeader
+
+
+# The four layout-mode buttons (ADR-44 D1). Toggle-like: the current mode keeps the accent
+# plate, so the mode stays visible without text.
+# 四个布局模式按钮（ADR-44 D1）。类切换：当前模式保持 accent 色块，无文字也能看清模式。
+func _gpBuildLayoutButtons() -> HBoxContainer:
+	var gpRow: HBoxContainer = HBoxContainer.new()
+	gpRow.add_theme_constant_override("separation", 2)
+	var gpSpecs: Array = [
+		[GPPaneLayout.GP_SINGLE, "center.layout1_tip", "res://assets/icons/layout1.svg"],
+		[GPPaneLayout.GP_SIDE, "center.layout2_tip", "res://assets/icons/layout2.svg"],
+		[GPPaneLayout.GP_BIG2, "center.layout3_tip", "res://assets/icons/layout3.svg"],
+		[GPPaneLayout.GP_GRID, "center.layout4_tip", "res://assets/icons/layout4.svg"],
+	]
+	for gpS in gpSpecs:
+		var gpBtn: Button = _gpMakeIconButton(str(gpS[1]), str(gpS[2]))
+		var gpMode: int = int(gpS[0])
+		gpBtn.pressed.connect(func() -> void: gpSetLayoutMode(gpMode))
+		gpBtn.set_meta("gp_layout_mode", gpMode)
+		gpRow.add_child(gpBtn)
+	return gpRow
 
 
 # The sheet tab band, styled to mirror the right inspector's tabs.
@@ -143,9 +220,9 @@ func _gpBuildTabBar() -> TabBar:
 	gpTabSel.border_width_bottom = 1
 	gpTabBar.add_theme_stylebox_override("tab_selected", gpTabSel)
 	gpTabBar.add_theme_constant_override("side_margin", 0)
-	# Show a close button only on the active tab (TabBar.CLOSE_BUTTON_SHOW_ACTIVE == 1).
-	# 仅在活动标签上显示关闭按钮（TabBar.CLOSE_BUTTON_SHOW_ACTIVE == 1）。
-	gpTabBar.tab_close_display_policy = 1
+	# Show a close button only on the active tab (enum value 1, probed via ClassDB).
+	# 仅在活动标签上显示关闭按钮（枚举值 1，已经 ClassDB 探针核实）。
+	gpTabBar.tab_close_display_policy = TabBar.CLOSE_BUTTON_SHOW_ACTIVE_ONLY
 	gpTabBar.focus_mode = Control.FOCUS_NONE
 	gpTabBar.tab_changed.connect(_gpOnTabChanged)
 	gpTabBar.tab_close_pressed.connect(_gpOnTabClose)
@@ -185,11 +262,11 @@ func _gpPlateStyles() -> Array:
 	gpPlate.set_content_margin_all(4.0)
 	var gpHover: StyleBoxFlat = gpPlate.duplicate() as StyleBoxFlat
 	gpHover.bg_color = GPChromeStyle.GP_SPLIT_HI
-	var gpActive: StyleBoxFlat = gpPlate.duplicate() as StyleBoxFlat
-	gpActive.bg_color = Color(0.129, 0.165, 0.204)
-	gpActive.border_color = GPChromeStyle.GP_ACCENT
-	gpActive.border_width_bottom = 1
-	return [[ "normal", gpPlate ], [ "hover", gpHover ], [ "pressed", gpActive ]]
+	var gpPlateActive: StyleBoxFlat = gpPlate.duplicate() as StyleBoxFlat
+	gpPlateActive.bg_color = Color(0.129, 0.165, 0.204)
+	gpPlateActive.border_color = GPChromeStyle.GP_ACCENT
+	gpPlateActive.border_width_bottom = 1
+	return [[ "normal", gpPlate ], [ "hover", gpHover ], [ "pressed", gpPlateActive ]]
 
 
 # A header icon button on a rounded plate, slightly lighter than the dock; hover brightens it —
@@ -236,6 +313,12 @@ func _gpBuildBody() -> Control:
 	gpBodyOut.size_flags_horizontal = SIZE_EXPAND_FILL
 	gpBodyOut.size_flags_vertical = SIZE_EXPAND_FILL
 	add_child(gpBodyOut)
+	# The layout container (W13-S6): the pane tree lives HERE; gpBodyOut only paints the
+	# canvas tint behind it.
+	# 布局容器（W13-S6）：窗格树住在这里；gpBodyOut 只在其后绘制画布色。
+	_gpLayoutRoot = Control.new()
+	_gpLayoutRoot.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	gpBodyOut.add_child(_gpLayoutRoot)
 	gpBodyOut.draw.connect(_gpDrawBodyBg)
 	gpBodyOut.resized.connect(gpBodyOut.queue_redraw)
 	gpBodyOut.queue_redraw()
@@ -300,11 +383,15 @@ func gpActivateSheet(gpSheetId: String) -> bool:
 		if gpSheet == null:
 			continue
 		if gpSheet.gpId == gpSheetId or gpSheet.gpName == gpSheetId:
-			if gpTabBar.current_tab == gpI:
-				_gpShowOnly(gpI)
-				gpActiveChanged.emit()
-			else:
-				gpTabBar.current_tab = gpI
+			# W13 (ADR-44): "activate" = show in the ACTIVE pane (the DRC jump lands where
+			# the user is looking). The tab bar follows; the handler keeps them in step.
+			# W13（ADR-44）：「激活」= 在**活动**窗格中显示（DRC 跳转落在用户正看着的地方）。
+			# 标签栏跟随；处理器保持二者一致。
+			_gpBindActivePane(gpI)
+			_gpTabSyncing = true
+			gpTabBar.current_tab = gpI
+			_gpTabSyncing = false
+			gpActiveChanged.emit()
 			return true
 	return false
 
@@ -317,6 +404,85 @@ func gpSetActiveGraph(gpNewGraph: GPPIDGraph) -> void:
 	gpTabs[gpActive]["graph"] = gpNewGraph
 	var gpC: GPCanvas2D = gpTabs[gpActive]["canvas"]
 	gpC.gpGraph = gpNewGraph
+
+
+# Install the container-level link table (ADR-43). THE way to set it: it also re-publishes the
+# render snapshot, so a connector's derived reference never lags the data it derives from.
+# 安装容器级连接表（ADR-43）。这是设置它的**唯一**途径：它同时重新发布渲染快照，使连接符推导出的
+# 交叉编号永不落后于它所依据的数据。
+func gpSetOffPageLinks(gpLinks: Array[GPOffPageLink]) -> void:
+	gpOffPageLinks = gpLinks
+	gpRefreshOffPageContext()
+
+
+# Publish {sheet_id: drawing number} + the link table to GPOffPageIndex, then repaint every symbol
+# view so the flags re-resolve their reference text (ADR-43 D3: the text is derived at render time,
+# so nothing repaints by itself when the DATA behind it changes).
+# 把 {sheet_id: 图号} 与 link 表发布给 GPOffPageIndex，然后重绘全部图元视图，使旗标重新解析其
+# 交叉编号（ADR-43 D3：文字在渲染期推导，故其背后的**数据**变化时不会有任何东西自动重绘）。
+# Called after any change to the tab list, a sheet's number or the link table. Cheap on purpose
+# (a dictionary rebuild + a repaint): the alternative — a change notification per touched sheet —
+# would be a second source of "when is the snapshot valid", and this one cannot silently drift.
+# 在标签列表、某张图纸的图号或 link 表变化后调用。刻意保持廉价（重建一个字典 + 一次重绘）：
+# 另一条路是为每张受影响的图纸做变更通知，那会多出一个「快照何时有效」的判定来源，而本方案不可能
+# 悄悄脱节。
+func gpRefreshOffPageContext() -> void:
+	var gpNumbers: Dictionary = {}
+	var gpGraphs: Dictionary = {}
+	var gpIdx: int = 0
+	for gpTabRaw in gpTabs:
+		gpIdx += 1
+		var gpSheet: GPSheet = (gpTabRaw as Dictionary).get("sheet") as GPSheet
+		if gpSheet == null:
+			continue
+		# ADR-43 D4 reads the DRAWING NUMBER; a project that never ran the numbering standard has
+		# none, and a flag reading "?" on every sheet of a perfectly valid drawing would be a
+		# worse answer than the sheet's position ("see sheet 3"). The number therefore wins, and
+		# the 1-based tab position is only the fallback — it never enters the document.
+		# ADR-43 D4 取**图号**；从未运行编号标准的工程没有图号，而在一张完全有效的图纸上每面旗标都
+		# 显示「?」，比显示图纸位置（「见第 3 张图」）更糟。故图号优先，1 起的标签位置仅作回落 ——
+		# 它绝不进入文档。
+		var gpNo: String = gpSheet.gpNumber.strip_edges()
+		gpNumbers[gpSheet.gpId] = gpNo if gpNo != "" else str(gpIdx)
+		# The graphs ride along so DERIVED texts can reach the TARGET end's tag (user feedback
+		# 2026-11-03) — same by-reference snapshot as the link table.
+		# 图随快照一同下发，使**推导**文字能够到**目标端**位号（用户反馈 2026-11-03）
+		# —— 与 link 表同一份按引用快照。
+		gpGraphs[gpSheet.gpId] = gpSheet.gpGraph
+	GPOffPageIndex.gpSetContext(gpOffPageLinks, gpNumbers, gpGraphs)
+	for gpTabRaw in gpTabs:
+		var gpC: GPCanvas2D = (gpTabRaw as Dictionary).get("canvas") as GPCanvas2D
+		if gpC != null and is_instance_valid(gpC):
+			gpC.gpRefreshSymbolViews()
+			gpC.queue_redraw()
+
+
+# ADR-43 / S3: jump to the PEER end of the link a connector stands for — switch to the
+# peer sheet's tab and select the peer connector. Navigation is deliberately NOT an
+# undoable command: it changes nothing in any document.
+# ADR-43 / S3：跳转到连接符所在 link 的**对端** —— 切到对端图纸的标签页并选中对端连接符。
+# 导航刻意**不是**可撤销命令：它不改动任何文档。
+func gpJumpToPeerConnector(gpNodeId: String) -> bool:
+	var gpLink: GPOffPageLink = GPOffPageIndex.gpLinkForNode(gpNodeId)
+	if gpLink == null:
+		return false
+	var gpPeer: Dictionary = GPOffPageIndex.gpPeerRefOf(gpLink, gpNodeId)
+	var gpSheetId: String = str(gpPeer.get(GPOffPageLink.GP_KEY_SHEET, ""))
+	var gpPeerNode: String = str(gpPeer.get(GPOffPageLink.GP_KEY_NODE, ""))
+	if gpSheetId == "" or gpPeerNode == "":
+		return false
+	if not gpActivateSheet(gpSheetId):
+		return false
+	var gpC: GPCanvas2D = gpActiveCanvas()
+	if gpC != null:
+		gpC.gpSetSelection([gpPeerNode])
+	return true
+
+
+# The LIVE link table (same array the commands mutate — providers share identity, never copy).
+# **活的** link 表（与命令改写的是同一个数组 —— 来源共享身份，绝不复制）。
+func gpOffPageLinksList() -> Array[GPOffPageLink]:
+	return gpOffPageLinks
 
 
 # Every open tab as a persistable GPSheet, in tab order.
@@ -349,10 +515,16 @@ func gpToSheets() -> Array[GPSheet]:
 # 先拆除既有画布：保留它们会留下持有「已不属于本工程」的图的孤立 GPCanvas2D 节点 ——
 # 看不见，但仍在接收重绘、仍占着内存。
 func gpLoadSheets(gpSheets: Array) -> void:
+	# W13: if a canvas is popped out, the window must come home first — the incoming sheets
+	# bring their own canvases and the old ones die below.
+	# W13：若有画布被摘出，窗口必须先归位 —— 即将载入的图纸自带画布，旧画布在下方释放。
+	if _gpPopSheet != GPPaneLayout.GP_EMPTY:
+		_gpOnPopClosed()
 	for gpTab in gpTabs:
 		var gpC: GPCanvas2D = gpTab["canvas"]
 		if gpC != null and is_instance_valid(gpC):
-			gpBody.remove_child(gpC)
+			if gpC.get_parent() != null:
+				gpC.get_parent().remove_child(gpC)
 			gpC.queue_free()
 	gpTabs.clear()
 	gpTabBar.clear_tabs()
@@ -362,17 +534,40 @@ func gpLoadSheets(gpSheets: Array) -> void:
 	# first sheet of the incoming file seeds its own (ADR-36).
 	# 换了工程就换了约定：丢掉旧的共享标准，让载入文件的第一张图纸播下自己的（ADR-36）。
 	gpProjectStandard = null
-	var gpI: int = 0
+	# W13: while the sheets stream in, the tab-changed signal must NOT rebind panes — the
+	# assignment happens ONCE below (pane i gets sheet i, the ADR-44 default reading order).
+	# W13：图纸流入期间，tab 变化信号**不得**重绑窗格 —— 指派在下方**一次性**完成
+	#（窗格 i 得到图纸 i，ADR-44 的默认阅读顺序）。
+	_gpLoading = true
+	_gpPaneSheets = []
+	for gpI in range(GPPaneLayout.gpPaneCount(gpLayoutMode)):
+		_gpPaneSheets.append(GPPaneLayout.GP_EMPTY)
 	for gpS in gpSheets:
 		var gpSheet: GPSheet = gpS as GPSheet
 		if gpSheet == null:
 			continue
 		gpSheetSeq += 1
 		_gpAddTabWith(gpSheet.gpName, gpSheet.gpId, gpSheet.gpGraph, gpSheet)
-		gpI += 1
+	_gpLoading = false
+	# Pane i <- sheet i (clamped to the pane count; extra sheets stay reachable via the
+	# tab bar / pickers, which is the D2-correct way to see them).
+	# 窗格 i <- 图纸 i（收窄到窗格数；多出的图纸经标签栏 / 选择器仍可达 —— 那正是
+	# D2 正确的查看方式）。
+	for gpI in range(_gpPanes.size()):
+		var gpS: int = gpI if gpI < gpTabs.size() else GPPaneLayout.GP_EMPTY
+		_gpPaneSheets = GPPaneLayout.gpBind(_gpPaneSheets, gpI, gpS)
+		_gpAttachPane(gpI, _gpPaneSheets[gpI])
+	_gpActivePane = 0
+	_gpSyncActiveTab()
+	_gpFillPickers()
+	_gpRestylePanes()
 	# One final pass: while loading, each tab's list was still incomplete.
 	# 最后再推一次：载入过程中每次拿到的列表都还不完整。
 	gpSyncProjectGraphs()
+	# Sheet numbers and the tab list changed; the off-page flags derive their reference from both.
+	# 图号与标签列表都变了；跨图纸旗标正是从这两者推导其交叉编号。
+	gpRefreshOffPageContext()
+	gpActiveChanged.emit()
 
 
 # Push a new symbol-definition set to every sheet's canvas (e.g. after exporting
@@ -450,6 +645,9 @@ func gpRenumberSheets() -> void:
 			gpSheet.gpApplyProjectInfo(gpStd)
 			gpTabBar.set_tab_title(gpI, _gpTabTitleOf(gpSheet))
 		gpI += 1
+	# Renumbering rewrites the very numbers the off-page flags display.
+	# 重编号改写的正是跨图纸旗标所显示的号。
+	gpRefreshOffPageContext()
 
 
 # Apply one project standard to every tab (B: the dialog edits a copy, then hands it over once).
@@ -470,6 +668,10 @@ func gpApplyStandard(gpStd: GPProjectStandard) -> void:
 			_gpEnsureSheetIdentity(gpSheetOne)
 			gpTabBar.set_tab_title(gpI, _gpTabTitleOf(gpSheetOne))
 		gpI += 1
+	# Applying a standard can mint drawing numbers for sheets that had none (see
+	# _gpEnsureSheetIdentity), which changes what every off-page flag displays.
+	# 套用标准会给原本没有图号的图纸铸号（见 _gpEnsureSheetIdentity），从而改变每个跨图纸旗标显示的内容。
+	gpRefreshOffPageContext()
 
 
 func gpSyncProjectGraphs() -> void:
@@ -521,38 +723,386 @@ func _gpAddTabWith(gpTitle: String, gpId: String = "", gpGraphIn: GPPIDGraph = n
 	# Hand the sheet to the canvas so its frame renderer knows the size and title block.
 	# 把图纸交给画布，使其图框渲染器知道图幅与标题栏。
 	gpCanvas.gpSetSheet(gpSheet)
-	gpBody.add_child(gpCanvas)
-	# Fill the body: the canvas is a plain Control child, so anchor it to the full rect.
-	# 填满画布体：画布是普通 Control 子节点，故锚定到全矩形。
-	gpCanvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	gpCanvas.visible = false
+	# W13 (ADR-44): the canvas is NO longer a hidden child of gpBody waiting for its turn —
+	# it lives unparented until a pane (or the pop-out window) takes it. Visibility is the
+	# pane's business now.
+	# W13（ADR-44）：画布**不再**是 gpBody 下等待轮候的隐藏子节点 —— 在窗格（或摘出窗口）
+	# 认领它之前它没有父节点。可见性从此归窗格管。
 	var gpTab: Dictionary = {"id": gpId, "title": gpTitle, "graph": gpGraph, "canvas": gpCanvas,
 		"sheet": gpSheet}
 	gpTabs.append(gpTab)
 	gpTabBar.add_tab(_gpTabTitleOf(gpSheet))
 	var gpIdx: int = gpTabs.size() - 1
-	gpTabBar.current_tab = gpIdx
-	_gpShowOnly(gpIdx)
 	gpSyncProjectGraphs()
 	gpOnCanvasReady.emit(gpCanvas)
+	# W13: route the new sheet into the ACTIVE pane via the tab bar (one code path with a
+	# user click); during a project load the pane assignment happens once at the end.
+	# W13：新图纸经标签栏路由进**活动**窗格（与用户点击同一条路径）；工程载入期间窗格指派
+	# 在末尾一次性完成。
+	if _gpLoading:
+		_gpTabSyncing = true
+		gpTabBar.current_tab = gpIdx
+		_gpTabSyncing = false
+	else:
+		gpTabBar.current_tab = gpIdx
+	gpActiveChanged.emit()
+	# The tab list grew (or a whole project was just loaded): the off-page flags derive their
+	# reference from {sheet_id: number}, so the snapshot must follow every change to it.
+	# 标签列表增长（或整个工程刚载入）：跨图纸旗标从 {sheet_id: 图号} 推导其交叉编号，
+	# 故快照必须跟随它的每一次变化。
+	gpRefreshOffPageContext()
+
+
+# ==================== W13 multi-view layout (ADR-44) ====================
+# ==================== W13 多视图布局（ADR-44）====================
+
+# Switch the layout mode. Only the MODE persists (Settings); the pane<->sheet bindings are
+# session state, rebuilt around the SAME canvas instances (ADR-44 D1: no view node is ever
+# recreated by a layout switch).
+# 切换布局模式。只有**模式**持久化（Settings）；窗格与图纸的绑定是会话状态，围绕**同一批**
+# 画布实例重建（ADR-44 D1：切换布局绝不重建任何视图节点）。
+func gpSetLayoutMode(gpMode: int) -> void:
+	if not GPPaneLayout.gpIsValid(gpMode) or gpMode == gpLayoutMode:
+		return
+	gpLayoutMode = gpMode
+	Settings.gpLayoutMode = gpMode
+	Settings.gpSave()
+	_gpRebuildLayout()
+
+
+# Tear the old pane tree down (detaching — never freeing — the canvases) and build the new
+# one around the same instances.
+# 拆除旧窗格树（只**摘下**、绝不释放画布），围绕同一批实例建新的。
+func _gpRebuildLayout() -> void:
+	var gpKeep: int = gpActive
+	for gpP in _gpPanes:
+		if is_instance_valid(gpP):
+			gpP.gpDetachCanvas()
+	if _gpLayoutRoot != null and is_instance_valid(_gpLayoutRoot):
+		for gpC in _gpLayoutRoot.get_children():
+			_gpLayoutRoot.remove_child(gpC)
+			gpC.queue_free()
+	_gpPanes.clear()
+	var gpCount: int = GPPaneLayout.gpPaneCount(gpLayoutMode)
+	_gpPaneSheets = GPPaneLayout.gpResized(_gpPaneSheets, gpCount, gpKeep)
+	# Same refill contract as closing a tab: no sheet may vanish from view while a pane
+	# seat exists — gpResized alone can leave orphan bindings when the mode shrinks, and
+	# a blank pane next to an invisible sheet reads exactly like the reported "blank
+	# canvas after a layout switch". The popped-out sheet stays excluded (the window and
+	# a pane would fight over the same canvas).
+	# 与关签同一份回填契约：只要还有窗格座位，就不许有图纸从视野里消失 —— 模式收窄时
+	# 仅 gpResized 会留下孤儿绑定，「空窗格 + 不可见图纸」读起来正是用户报告的
+	# 「切换布局后画布空白」。已摘出的图纸照旧排除（窗口与窗格会争抢同一块画布）。
+	_gpPaneSheets = GPPaneLayout.gpRefill(_gpPaneSheets, gpTabs.size(), _gpPopSheet)
+	_gpBuildLayoutTree(gpLayoutMode)
+	_gpActivePane = clampi(_gpActivePane, 0, gpCount - 1)
+	for gpI in range(_gpPanes.size()):
+		_gpAttachPane(gpI, _gpPaneSheets[gpI])
+	_gpSyncActiveTab()
+	_gpFillPickers()
+	_gpRestylePanes()
+
+
+# The pane tree per mode (ADR-44 D1: nested SPLIT containers — a GridContainer has no
+# draggable dividers, which the plan requires).
+# 每种模式的窗格树（ADR-44 D1：嵌套 **split** 容器 —— GridContainer 没有可拖动的分隔条，
+# 而这是方案的硬要求）。
+# ⚠️ The layout root is a PLAIN Control, and a plain Control does NOT manage its children's
+# rects — size flags are ignored there. The TOP node of every mode must therefore anchor
+# itself to the full rect, or the whole pane tree collapses to its minimum size (one
+# 56×22 header strip with a dark void below): the reported "blank canvas after a layout
+# switch". Deeper nodes live inside split Containers, where size flags DO work.
+# ⚠️ 布局根是**普通** Control，而普通 Control **不**管理子节点矩形 —— size flags 在此被无视。
+# 故每种模式的**顶层**节点必须自行锚定满矩形，否则整棵窗格树塌缩到最小尺寸（只剩一条
+# 56×22 的头部细条、下方一片黑）：即用户报告的「切换布局后画布空白」。更深层节点住在
+# split 容器里，size flags 在那里才生效。
+func _gpBuildLayoutTree(gpMode: int) -> void:
+	var gpTop: Control = null
+	match gpMode:
+		GPPaneLayout.GP_SINGLE:
+			gpTop = _gpMakePane()
+		GPPaneLayout.GP_SIDE:
+			var gpSplit: HSplitContainer = HSplitContainer.new()
+			gpSplit.size_flags_horizontal = SIZE_EXPAND_FILL
+			gpSplit.size_flags_vertical = SIZE_EXPAND_FILL
+			gpSplit.add_child(_gpMakePane())
+			gpSplit.add_child(_gpMakePane())
+			gpTop = gpSplit
+		GPPaneLayout.GP_BIG2:
+			# One large pane + two stacked small ones (the plan's "1 big, 2 usable small").
+			# 一大窗格 + 上下两小格（方案里的「1 大 2 小可用」）。
+			var gpSplit: HSplitContainer = HSplitContainer.new()
+			gpSplit.size_flags_horizontal = SIZE_EXPAND_FILL
+			gpSplit.size_flags_vertical = SIZE_EXPAND_FILL
+			gpSplit.add_child(_gpMakePane())
+			var gpRight: VSplitContainer = VSplitContainer.new()
+			gpRight.size_flags_horizontal = SIZE_EXPAND_FILL
+			gpRight.size_flags_vertical = SIZE_EXPAND_FILL
+			gpRight.add_child(_gpMakePane())
+			gpRight.add_child(_gpMakePane())
+			gpSplit.add_child(gpRight)
+			gpTop = gpSplit
+		GPPaneLayout.GP_GRID:
+			var gpSplit: HSplitContainer = HSplitContainer.new()
+			gpSplit.size_flags_horizontal = SIZE_EXPAND_FILL
+			gpSplit.size_flags_vertical = SIZE_EXPAND_FILL
+			var gpTopHalf: VSplitContainer = VSplitContainer.new()
+			var gpBottom: VSplitContainer = VSplitContainer.new()
+			for gpHalf: VSplitContainer in [gpTopHalf, gpBottom]:
+				gpHalf.size_flags_horizontal = SIZE_EXPAND_FILL
+				gpHalf.size_flags_vertical = SIZE_EXPAND_FILL
+				gpHalf.add_child(_gpMakePane())
+				gpHalf.add_child(_gpMakePane())
+			gpSplit.add_child(gpTopHalf)
+			gpSplit.add_child(gpBottom)
+			gpTop = gpSplit
+	if gpTop != null:
+		_gpLayoutRoot.add_child(gpTop)
+		gpTop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+
+# One pane, wired to the center area's handlers.
+# 一个窗格，接好中间区的各处理器。
+func _gpMakePane() -> GPCanvasPane:
+	var gpPane: GPCanvasPane = GPCanvasPane.new()
+	gpPane.gpSheetPicked.connect(_gpOnPanePick)
+	gpPane.gpPaneFocused.connect(_gpOnPaneFocused)
+	gpPane.gpPopoutRequested.connect(gpPopoutPane)
+	_gpPanes.append(gpPane)
+	return gpPane
+
+
+# Bind pane gpPaneIdx to sheet tab gpSheetIdx (GP_EMPTY = detach only). The canvas keeps its
+# whole view state — reparenting must not reset a single scroll or zoom.
+# 把窗格 gpPaneIdx 绑到图纸标签 gpSheetIdx（GP_EMPTY = 仅摘下）。画布保留全部视图状态 ——
+# reparent 不许弄丢任何滚转或缩放。
+func _gpAttachPane(gpPaneIdx: int, gpSheetIdx: int) -> void:
+	if gpPaneIdx < 0 or gpPaneIdx >= _gpPanes.size():
+		return
+	var gpPane: GPCanvasPane = _gpPanes[gpPaneIdx]
+	gpPane.gpAttachCanvas(_gpCanvasOfTab(gpSheetIdx))
+	gpPane.gpSheetIdx = gpSheetIdx
+
+
+# The canvas of sheet tab gpS (null when out of range or empty).
+# 图纸标签 gpS 的画布（越界或空时为 null）。
+func _gpCanvasOfTab(gpS: int) -> GPCanvas2D:
+	if gpS < 0 or gpS >= gpTabs.size():
+		return null
+	return gpTabs[gpS]["canvas"] as GPCanvas2D
+
+
+# Show sheet gpTabIdx in the ACTIVE pane (the tab bar's and gpAddTab's intent). This replaces
+# the old stack-only _gpShowOnly: in every mode "switching sheets" means "rebind the active
+# pane", and the uniqueness invariant empties whatever other pane showed it.
+# 在**活动**窗格中显示图纸 gpTabIdx（标签栏与 gpAddTab 的意图）。它取代旧的单窗 _gpShowOnly：
+# 在任何模式下「切换图纸」都意味着「重绑活动窗格」，唯一性不变量会清空其它显示它的窗格。
+func _gpBindActivePane(gpTabIdx: int) -> void:
+	if gpTabIdx < 0 or gpTabIdx >= gpTabs.size():
+		gpActive = -1
+		return
+	_gpPaneSheets = GPPaneLayout.gpBind(_gpPaneSheets, _gpActivePane, gpTabIdx)
+	_gpAttachPane(_gpActivePane, gpTabIdx)
+	gpActive = gpTabIdx
+	_gpFillPickers()
+	_gpRestylePanes()
+
+
+# A pane's canvas gained focus (ADR-44 D4): THIS pane becomes the one the docks serve. If its
+# sheet differs from the current active tab, the active tab follows — the tab bar selection
+# is kept in sync WITHOUT re-triggering the binding (the sheet is already where it belongs).
+# 某窗格的画布获得焦点（ADR-44 D4）：**本窗格**成为侧栏服务的窗格。若其图纸与当前活动标签
+# 不同，活动标签跟随 —— 标签栏选择被同步，但**不**重新触发绑定（图纸已经在它该在的地方）。
+func _gpOnPaneFocused(gpPane: GPCanvasPane) -> void:
+	var gpIdx: int = _gpPanes.find(gpPane)
+	if gpIdx < 0:
+		return
+	_gpActivePane = gpIdx
+	_gpRestylePanes()
+	var gpS: int = _gpPaneSheets[gpIdx]
+	if gpS != gpActive and gpS >= 0:
+		gpActive = gpS
+		_gpTabSyncing = true
+		gpTabBar.current_tab = gpS
+		_gpTabSyncing = false
+		gpActiveChanged.emit()
+
+
+# A pane's picker chose a sheet: rebind THIS pane (the uniqueness invariant empties the pane
+# that showed it before), and make the pane active — the user just aimed at it.
+# 某窗格的选择器选定了图纸：重绑**本窗格**（唯一性不变量会清空原先显示它的窗格），并把它
+# 设为活动窗格 —— 用户刚刚瞄准了它。
+func _gpOnPanePick(gpPane: GPCanvasPane, gpSheetIdx: int) -> void:
+	var gpIdx: int = _gpPanes.find(gpPane)
+	if gpIdx < 0 or gpSheetIdx < 0 or gpSheetIdx >= gpTabs.size():
+		return
+	_gpActivePane = gpIdx
+	_gpPaneSheets = GPPaneLayout.gpBind(_gpPaneSheets, gpIdx, gpSheetIdx)
+	_gpAttachPane(gpIdx, gpSheetIdx)
+	gpActive = gpSheetIdx
+	_gpTabSyncing = true
+	gpTabBar.current_tab = gpSheetIdx
+	_gpTabSyncing = false
+	_gpFillPickers()
+	_gpRestylePanes()
 	gpActiveChanged.emit()
 
 
-# Show only the sheet at gpIdx; hide the rest.
-# 仅显示 gpIdx 处的图纸，隐藏其余。
-func _gpShowOnly(gpIdx: int) -> void:
-	for gpI in range(gpTabs.size()):
-		var gpC: GPCanvas2D = gpTabs[gpI]["canvas"]
-		gpC.visible = (gpI == gpIdx)
-	gpActive = gpIdx
+# Keep the ACTIVE TAB in step with the active pane's sheet (called from the layout engine).
+# 让**活动标签**跟随活动窗格的图纸（由布局引擎调用）。
+func _gpSyncActiveTab() -> void:
+	var gpS: int = _gpPaneSheets[_gpActivePane] if _gpActivePane < _gpPaneSheets.size() \
+		else GPPaneLayout.GP_EMPTY
+	gpActive = gpS
+	if gpS >= 0 and gpTabBar.current_tab != gpS:
+		_gpTabSyncing = true
+		gpTabBar.current_tab = gpS
+		_gpTabSyncing = false
 
 
-# Active tab changed via the tab bar: switch the visible canvas and notify the host.
-# 通过标签栏切换活动页：切换可见画布并通知宿主。
+# Accent underline on the active pane only.
+# 仅活动窗格佩戴 accent 底线。
+func _gpRestylePanes() -> void:
+	for gpI in range(_gpPanes.size()):
+		_gpPanes[gpI].gpActive = (gpI == _gpActivePane)
+
+
+# The picker of every pane: all sheets, own entry selected, entries held by OTHER panes (or
+# living in the pop-out window) disabled — the D2 invariant made visible.
+# 每个窗格的选择器：列出全部图纸，选中自己的，被**其它**窗格占用（或已在摘出窗口中）的
+# 条目禁用 —— 让 D2 不变量可见。
+func _gpFillPickers() -> void:
+	for gpI in range(_gpPanes.size()):
+		var gpPane: GPCanvasPane = _gpPanes[gpI]
+		gpPane.gpPick.clear()
+		var gpSel: int = -1
+		for gpS in range(gpTabs.size()):
+			var gpTitle: String = str(gpTabs[gpS].get("title", ""))
+			gpPane.gpPick.add_item(gpTitle)
+			if gpS == gpPane.gpSheetIdx:
+				gpSel = gpS
+			# Another pane's sheet (or the popped-out one) is not bindable here.
+			# 其它窗格的图纸（或已摘出的那张）在此不可绑定。
+			if _gpPaneSheets.has(gpS) and gpS != gpPane.gpSheetIdx:
+				gpPane.gpPick.set_item_disabled(gpPane.gpPick.item_count - 1, true)
+			elif gpS == _gpPopSheet:
+				gpPane.gpPick.set_item_disabled(gpPane.gpPick.item_count - 1, true)
+		if gpSel >= 0:
+			gpPane.gpPick.select(gpSel)
+
+
+# The canvas under a GLOBAL point, for cross-pane gestures (W13-S8 drag-to-connect). The
+# popped-out window counts too — it is as much a view of a sheet as any pane.
+# 全局点下的画布，供跨窗格手势使用（W13-S8 拖拽连线）。摘出窗口同样算数 —— 它与任何窗格
+# 一样是某张图纸的一个视图。
+func gpCanvasAtGlobalPoint(gpGlobal: Vector2) -> GPCanvas2D:
+	for gpP in _gpPanes:
+		var gpCv: GPCanvas2D = gpP.gpCanvas()
+		if gpCv != null and gpCv.get_global_rect().has_point(gpGlobal):
+			return gpCv
+	if _gpPopWin != null and is_instance_valid(_gpPopWin) and _gpPopSheet >= 0:
+		var gpCv: GPCanvas2D = _gpCanvasOfTab(_gpPopSheet)
+		if gpCv != null and gpCv.get_global_rect().has_point(gpGlobal):
+			return gpCv
+	return null
+
+
+# ---- pop-out (W13-S7, ADR-44 D3: EMBEDDED window — one code path on every platform) ----
+# ---- 摘出（W13-S7，ADR-44 D3：**嵌入式**窗口 —— 所有平台同一条代码路径）----
+
+# Pop the pane's canvas out into an embedded Window. The pane goes empty (the picker stays
+# honest by disabling the popped sheet); closing the window returns the canvas HERE first.
+# 把窗格画布摘出到嵌入式 Window。窗格变空（选择器禁用已摘出的图纸以保持诚实）；
+# 关闭窗口时画布优先归位**此处**。
+func gpPopoutPane(gpPane: GPCanvasPane) -> void:
+	var gpIdx: int = _gpPanes.find(gpPane)
+	if gpIdx < 0 or _gpPopSheet != GPPaneLayout.GP_EMPTY:
+		return
+	var gpSheetIdx: int = _gpPaneSheets[gpIdx]
+	var gpCv: GPCanvas2D = gpPane.gpDetachCanvas()
+	if gpCv == null:
+		return
+	_gpPopPane = gpIdx
+	_gpPopSheet = gpSheetIdx
+	_gpPaneSheets[gpIdx] = GPPaneLayout.GP_EMPTY
+	gpPane.gpSheetIdx = GPPaneLayout.GP_EMPTY
+	if _gpPopWin == null or not is_instance_valid(_gpPopWin):
+		_gpPopWin = Window.new()
+		# The window hosts ONLY the canvas (ADR-44 D3): no menus, no docks — the main window
+		# keeps every tool and all context.
+		# 窗口只承载画布（ADR-44 D3）：无菜单、无停靠栏 —— 主窗保留全部工具与上下文。
+		_gpPopWin.close_requested.connect(_gpOnPopClosed)
+		_gpPopWin.min_size = Vector2i(480, 320)
+		add_child(_gpPopWin)
+	_gpPopWin.title = str(gpTabs[gpSheetIdx].get("title", ""))
+	_gpPopWin.add_child(gpCv)
+	gpCv.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# A click inside the popup must still make its sheet the ACTIVE one (the docks serve it),
+	# even though the canvas no longer sits in a pane.
+	# 弹窗内点击仍须使其图纸成为**活动**图纸（侧栏服务它），尽管画布已不在窗格中。
+	if not gpCv.focus_entered.is_connected(_gpOnPopFocused):
+		gpCv.focus_entered.connect(_gpOnPopFocused)
+	_gpPopWin.popup_centered(Vector2i(960, 640))
+	_gpFillPickers()
+
+
+# The popped-out canvas gained focus: its sheet becomes the active tab (no rebind — the
+# sheet is in the window, not in a pane).
+# 被摘出的画布获得焦点：其图纸成为活动标签（**不**重绑 —— 图纸在窗口里，不在窗格中）。
+func _gpOnPopFocused() -> void:
+	if _gpPopSheet < 0 or _gpPopSheet >= gpTabs.size():
+		return
+	if gpActive != _gpPopSheet:
+		gpActive = _gpPopSheet
+		_gpTabSyncing = true
+		gpTabBar.current_tab = _gpPopSheet
+		_gpTabSyncing = false
+		gpActiveChanged.emit()
+
+
+# The pop-out window closed: return the canvas to its preferential pane (the one that popped
+# it; if the layout changed meanwhile, the first pane that can take it). The sheet is NOT
+# shown anywhere else in the meantime, so the bind cannot violate D2.
+# 摘出窗口被关闭：画布归位到优先窗格（摘出它的那个；期间布局若变过，则退而求第一个能收的
+# 窗格）。期间该图纸未在别处显示，故绑定不可能违反 D2。
+func _gpOnPopClosed() -> void:
+	if _gpPopSheet == GPPaneLayout.GP_EMPTY:
+		return
+	var gpCv: GPCanvas2D = _gpCanvasOfTab(_gpPopSheet)
+	var gpSheetIdx: int = _gpPopSheet
+	if _gpPopWin != null and is_instance_valid(_gpPopWin) and gpCv != null \
+			and gpCv.get_parent() == _gpPopWin:
+		_gpPopWin.remove_child(gpCv)
+	# The focus route back into the popup handler must die with the popup state.
+	# 指回弹窗处理器的焦点路由必须随弹窗状态一同消亡。
+	if gpCv != null and gpCv.focus_entered.is_connected(_gpOnPopFocused):
+		gpCv.focus_entered.disconnect(_gpOnPopFocused)
+	_gpPopSheet = GPPaneLayout.GP_EMPTY
+	if gpCv == null:
+		_gpFillPickers()
+		return
+	var gpHome: int = _gpPopPane if _gpPopPane < _gpPanes.size() else 0
+	_gpPaneSheets = GPPaneLayout.gpBind(_gpPaneSheets, gpHome, gpSheetIdx)
+	_gpAttachPane(gpHome, gpSheetIdx)
+	if _gpActivePane == gpHome and gpActive != gpSheetIdx:
+		gpActive = gpSheetIdx
+		_gpTabSyncing = true
+		gpTabBar.current_tab = gpSheetIdx
+		_gpTabSyncing = false
+		gpActiveChanged.emit()
+	_gpFillPickers()
+	_gpRestylePanes()
+
+
+# Active tab changed via the tab bar (a click, or a programmatic sync): show that sheet in
+# the ACTIVE pane and notify the host.
+# 通过标签栏切换活动页（点击或程序同步）：在**活动**窗格中显示该图纸并通知宿主。
 func _gpOnTabChanged(gpIdx: int) -> void:
+	if _gpTabSyncing or _gpLoading:
+		return
 	if gpIdx < 0 or gpIdx >= gpTabs.size():
 		return
-	_gpShowOnly(gpIdx)
+	_gpBindActivePane(gpIdx)
 	gpActiveChanged.emit()
 
 
@@ -563,16 +1113,122 @@ func _gpOnTabClose(gpIdx: int) -> void:
 		return
 	var gpTab: Dictionary = gpTabs[gpIdx]
 	var gpC: GPCanvas2D = gpTab["canvas"]
-	gpBody.remove_child(gpC)
+	# ADR-43 / S4 deletion case ③: closing a sheet invalidates every link ending on it.
+	# NEVER silently — list the affected links, get an explicit confirmation, delete the
+	# links, then close. The PEER connectors survive (their flags will show "?" and the
+	# unpaired rule reports the repair), because the peer drawing must not lose objects
+	# out from under the user.
+	# ADR-43 / S4 删除情形③：关闭图纸会让落在其上的每条 link 失效。**绝不静默** ——
+	# 列出受影响连接、取得明确确认、删除这些 link，然后关签。**对端连接符保留**
+	#（旗标显示 "？"，unpaired 规则提示修复）—— 不能让对端图纸上的对象凭空消失。
+	var gpSheetId: String = gpC.gpSheet.gpId if gpC.gpSheet != null else ""
+	var gpAffected: Array[GPOffPageLink] = []
+	for gpL in gpOffPageLinks:
+		if gpL == null:
+			continue
+		if str(gpL.gpA.get(GPOffPageLink.GP_KEY_SHEET, "")) == gpSheetId \
+				or str(gpL.gpB.get(GPOffPageLink.GP_KEY_SHEET, "")) == gpSheetId:
+			gpAffected.append(gpL)
+	if gpAffected.size() > 0:
+		_gpConfirmSheetClose(gpIdx, gpAffected)
+		return
+	_gpCloseTabNow(gpIdx)
+
+
+# The confirmation for case ③: one line per affected link; only an explicit OK deletes them.
+# 情形③的确认框：每条受影响 link 一行；只有明确的「确定」才删除。
+func _gpConfirmSheetClose(gpIdx: int, gpAffected: Array[GPOffPageLink]) -> void:
+	var gpLines: String = ""
+	for gpL in gpAffected:
+		var gpTag: String = gpL.gpTag if gpL.gpTag != "" else gpL.gpInstanceId
+		var gpPeerId: String = str(gpL.gpB.get(GPOffPageLink.GP_KEY_SHEET, ""))
+		if str(gpL.gpB.get(GPOffPageLink.GP_KEY_SHEET, "")) == _gpSheetIdAt(gpIdx):
+			gpPeerId = str(gpL.gpA.get(GPOffPageLink.GP_KEY_SHEET, ""))
+		gpLines += I18n.gpTr("offpage.del_line") % [gpTag,
+			I18n.gpTr("offpage.peer_sheet") % _gpSheetLabelOf(gpPeerId)] + "\n"
+	var gpDlg: ConfirmationDialog = ConfirmationDialog.new()
+	gpDlg.title = I18n.gpTr("offpage.close_title")
+	gpDlg.dialog_text = I18n.gpTr("offpage.close_text") % [gpLines.strip_edges()]
+	gpDlg.ok_button_text = I18n.gpTr("dialog.ok")
+	gpDlg.cancel_button_text = I18n.gpTr("dialog.cancel")
+	add_child(gpDlg)
+	gpDlg.confirmed.connect(func() -> void:
+		for gpL in gpAffected:
+			gpOffPageLinks.erase(gpL)
+		gpRefreshOffPageContext()
+		_gpCloseTabNow(gpIdx)
+		gpDlg.queue_free())
+	gpDlg.canceled.connect(gpDlg.queue_free)
+	gpDlg.popup_centered()
+
+
+# The sheet id of the tab at gpIdx ("" when out of range).
+# 下标 gpIdx 处标签页的图纸 id（越界为 ""）。
+func _gpSheetIdAt(gpIdx: int) -> String:
+	if gpIdx < 0 or gpIdx >= gpTabs.size():
+		return ""
+	var gpC: GPCanvas2D = gpTabs[gpIdx]["canvas"] as GPCanvas2D
+	return gpC.gpSheet.gpId if gpC.gpSheet != null else ""
+
+
+# A human label for a sheet id: its tab name (the number rides the name's prefix); a missing
+# sheet degrades to "?" — honest, like the flags.
+# 图纸 id 的人类标签：标签名（图号含在名字里）；找不到时降级为 "？" —— 与旗标一样诚实。
+func _gpSheetLabelOf(gpSheetId: String) -> String:
+	for gpI in range(gpTabs.size()):
+		if _gpSheetIdAt(gpI) == gpSheetId:
+			return str(gpTabs[gpI].get("title", gpSheetId))
+	return GPOffPageIndex.GP_UNRESOLVED_TEXT
+
+
+func _gpCloseTabNow(gpIdx: int) -> void:
+	var gpTab: Dictionary = gpTabs[gpIdx]
+	var gpC: GPCanvas2D = gpTab["canvas"]
+	# W13: the canvas may live in a pane host or in the pop-out window — detach from wherever
+	# it actually is. If THIS sheet was the popped-out one, drop the window with it.
+	# W13：画布可能住在窗格承载区或摘出窗口里 —— 从**实际所在处**摘下。若被关的正是
+	# 已摘出的那张，窗口随之撤下。
+	if _gpPopSheet == gpIdx and _gpPopWin != null and is_instance_valid(_gpPopWin):
+		_gpPopWin.remove_child(gpC)
+		_gpPopSheet = GPPaneLayout.GP_EMPTY
+	if gpC.get_parent() != null:
+		gpC.get_parent().remove_child(gpC)
 	gpC.queue_free()
 	gpTabs.remove_at(gpIdx)
 	gpTabBar.remove_tab(gpIdx)
-	# Keep the active index valid and re-show the correct canvas.
-	# 保持活动下标合法并重新显示对应画布。
+	# Keep the binding invariant: panes that showed this sheet go empty, later sheets shift
+	# down one slot, then the empty panes refill from the sheets nothing shows.
+	# 保持绑定不变量：显示该图纸的窗格变空，其后的图纸整体前移一位，空窗格再从「无人显示的
+	# 图纸」里回填。
+	_gpPaneSheets = GPPaneLayout.gpAfterTabRemoved(_gpPaneSheets, gpIdx)
+	_gpPaneSheets = GPPaneLayout.gpRefill(_gpPaneSheets, gpTabs.size(), _gpPopSheet)
+	for gpI in range(_gpPanes.size()):
+		_gpAttachPane(gpI, _gpPaneSheets[gpI])
 	var gpNew: int = mini(gpIdx, gpTabs.size() - 1)
-	gpTabBar.current_tab = gpNew
-	_gpShowOnly(gpNew)
+	# Prefer to keep the ACTIVE PANE showing something sensible; the tab bar follows it.
+	# 优先让**活动窗格**显示合理内容；标签栏跟随它。
+	# (Renamed gpActiveSheet -> gpPaneSheet: the old name shadowed the _gpActiveSheet()
+	# method and read as "the active sheet", which it is not — it is the sheet bound to
+	# the active pane. / 旧名遮蔽了 _gpActiveSheet() 方法且语义误导——它是活动**窗格**绑的图纸。)
+	var gpPaneSheet: int = _gpPaneSheets[_gpActivePane] \
+		if _gpActivePane < _gpPaneSheets.size() else GPPaneLayout.GP_EMPTY
+	if gpPaneSheet < 0 and gpTabs.size() > 0:
+		_gpPaneSheets = GPPaneLayout.gpBind(_gpPaneSheets, _gpActivePane, gpNew)
+		_gpAttachPane(_gpActivePane, gpNew)
+		gpPaneSheet = gpNew
+	gpActive = gpPaneSheet
+	if gpPaneSheet >= 0:
+		_gpTabSyncing = true
+		gpTabBar.current_tab = gpPaneSheet
+		_gpTabSyncing = false
 	gpSyncProjectGraphs()
+	# Closing a sheet shifts every later tab's fallback number and, in S4, invalidates the links
+	# that ended on it — republish now so the surviving flags stop pointing into nothing.
+	# 关闭一张图纸会改变其后所有标签的回落编号，且在 S4 中会让落在该图上的 link 失效 ——
+	# 立即重新发布，使存活的旗标不再指向空处。
+	gpRefreshOffPageContext()
+	_gpFillPickers()
+	_gpRestylePanes()
 	gpActiveChanged.emit()
 
 
@@ -618,8 +1274,13 @@ func _gpMakeCloseIcon(gpSize: int) -> Texture2D:
 # 双击标签带即在对应标签上启动行内 LineEdit。回车提交、Esc 或失焦取消；重命名同时
 # 更新标签标题、图纸记录与 GPSheet 名称，保存/重载后仍保留。
 func _gpOnTabBarInput(gpEvent: InputEvent) -> void:
-	if gpEvent is InputEventMouseButton and gpEvent.pressed and gpEvent.double_click \
-			and int(gpEvent.button_index) == int(MOUSE_BUTTON_LEFT):
+	# GDScript does not narrow the `is` operand inside a compound condition, so cast once
+	# first — this also removes the UNSAFE_PROPERTY_ACCESS warnings.
+	# GDScript 不会在复合条件里收窄 `is` 的操作数类型，所以先做一次 cast —— 同时消除
+	# UNSAFE_PROPERTY_ACCESS 警告。
+	var gpMb: InputEventMouseButton = gpEvent as InputEventMouseButton
+	if gpMb != null and gpMb.pressed and gpMb.double_click \
+			and gpMb.button_index == MOUSE_BUTTON_LEFT:
 		var gpIdx: int = gpTabBar.get_tab_idx_at_point(gpTabBar.get_local_mouse_position())
 		if gpIdx >= 0:
 			_gpBeginRename(gpIdx)
@@ -656,7 +1317,9 @@ func _gpBeginRename(gpIdx: int) -> void:
 # While the editor is open, Escape cancels the rename (commits nothing).
 # 编辑器打开期间，Esc 取消重命名（不提交）。
 func _gpOnRenameGuiInput(gpEvent: InputEvent) -> void:
-	if gpEvent is InputEventKey and gpEvent.pressed and int(gpEvent.keycode) == int(KEY_ESCAPE):
+	# Same narrowing rule as _gpOnTabBarInput. / 与 _gpOnTabBarInput 同一条收窄规则。
+	var gpKey: InputEventKey = gpEvent as InputEventKey
+	if gpKey != null and gpKey.pressed and gpKey.keycode == KEY_ESCAPE:
 		_gpEndRename(false)
 
 

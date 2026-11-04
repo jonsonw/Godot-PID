@@ -367,6 +367,18 @@ func _gpAssembleInspector() -> void:
 	gpInspector.gpEdgeAttrChanged.connect(gpSelCoord.gpOnEdgeAttrChanged)
 	gpInspector.gpLineAttrsRequested.connect(_gpOnInspectorLineAttrs)
 	gpInspector.gpLineRerenderRequested.connect(_gpOnInspectorRerenderLine)
+	# ADR-43 / S4-4: the connector's link section — edits and the sync push.
+	# ADR-43 / S4-4：连接符的 link 段 —— 编辑与同步推送。
+	gpInspector.gpLinksProvider = Callable(gpCenter, "gpOffPageLinksList")
+	gpInspector.gpLinkAttrEditRequested.connect(_gpOnLinkAttrEdit)
+	gpInspector.gpLinkSyncRequested.connect(_gpOnInspectorLinkSync)
+	# The peer-sheet dropdown's data source + the pick hand-off (user feedback 2026-11-03).
+	# 对端图纸下拉的数据源与选择移交（用户反馈 2026-11-03）。
+	gpInspector.gpSheetsProvider = func() -> Dictionary:
+		var gpCur: GPSheet = gpCenter.gpActiveSheet()
+		return {"sheets": gpCenter.gpToSheets(),
+			"current": gpCur.gpId if gpCur != null else ""}
+	gpInspector.gpConnectPickRequested.connect(_gpOnInspectorConnectPick)
 	# the panel owns no graph, so a symbol swap is announced and executed here.
 	# 面板不持有图，故「更换图元」在此被宣告并执行。
 	gpInspector.gpSymbolSwapRequested.connect(gpSymbolLibCoord.gpOnSymbolSwap)
@@ -591,6 +603,30 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 	var gpLineCb: Callable = Callable(self, "_gpOnLineCreated").bind(gpCanvas)
 	if not gpCanvas.gpLineCreated.is_connected(gpLineCb):
 		gpCanvas.gpLineCreated.connect(gpLineCb)
+	# ADR-43 / S3: cross-sheet gestures, peer navigation / sync, and history settle — each
+	# wired per canvas so the dialog and the snapshot always target the RIGHT sheet.
+	# ADR-43 / S3：跨图纸手势、对端跳转 / 同步与历史落定 —— 逐画布接线，
+	# 使对话框与快照永远作用于**正确的**那张图纸。
+	if not gpCanvas.gpCrossSheetRequested.is_connected(_gpOnCrossSheetRequested):
+		gpCanvas.gpCrossSheetRequested.connect(_gpOnCrossSheetRequested.bind(gpCanvas))
+	if not gpCanvas.gpJumpToPeerRequested.is_connected(_gpOnJumpToPeer):
+		gpCanvas.gpJumpToPeerRequested.connect(_gpOnJumpToPeer)
+	if not gpCanvas.gpSyncToPeerRequested.is_connected(_gpOnSyncToPeer):
+		gpCanvas.gpSyncToPeerRequested.connect(_gpOnSyncToPeer)
+	if not gpCanvas.gpCrossSheetHistoryChanged.is_connected(gpCenter.gpRefreshOffPageContext):
+		gpCanvas.gpCrossSheetHistoryChanged.connect(gpCenter.gpRefreshOffPageContext)
+	if not gpCanvas.gpCrossSheetDeleteRequested.is_connected(_gpOnCrossSheetDelete):
+		gpCanvas.gpCrossSheetDeleteRequested.connect(_gpOnCrossSheetDelete.bind(gpCanvas))
+	# W13-S8 (user request 2026-11-03): the cross-pane drag-to-connect gesture — wired per
+	# canvas so the SOURCE canvas is known at drop time without a second lookup.
+	# W13-S8（用户需求 2026-11-03）：跨窗格拖拽连线手势 —— 逐画布接线，
+	# 使落点时刻无需二次查找即知**源**画布。
+	if not gpCanvas.gpCrossPaneDragUpdated.is_connected(_gpOnCrossPaneDragUpdated):
+		gpCanvas.gpCrossPaneDragUpdated.connect(_gpOnCrossPaneDragUpdated.bind(gpCanvas))
+	if not gpCanvas.gpCrossPaneDropped.is_connected(_gpOnCrossPaneDropped):
+		gpCanvas.gpCrossPaneDropped.connect(_gpOnCrossPaneDropped.bind(gpCanvas))
+	if not gpCanvas.gpCrossPaneDragEnded.is_connected(_gpOnCrossPaneDragEnded):
+		gpCanvas.gpCrossPaneDragEnded.connect(_gpOnCrossPaneDragEnded)
 	# fire the toolbar sync twice, so it is intentionally not connected here.
 	# 故此处有意不再连接。
 	# A brand-new sheet has an empty undo stack: make the 编辑 menu agree with it right away.
@@ -738,6 +774,7 @@ func _gpAssembleDrc() -> void:
 	# ADR-36 C: "whole project" mode needs every sheet; the shell owns the tab bar.
 	# ADR-36 C：「全工程」模式需要每张图纸；标签栏归外壳所有。
 	gpDrcPanel.gpSetSheetsProvider(Callable(self, "_gpDrcSheets"))
+	gpDrcPanel.gpSetLinksProvider(Callable(self, "_gpDrcLinks"))
 	_gpBindDrc()
 
 
@@ -819,12 +856,455 @@ func _gpOpenLineAttrs(gpCanvas: GPCanvas2D, gpEdgeId: String, gpRule: GPTagRule,
 	gpDlg.gpShowFor(gpEdge, gpRule, gpStd)
 
 
+# ---- ADR-43 / S3: cross-sheet connection ----
+# ---- ADR-43 / S3：跨图纸连接 ----
+
+# Lazily created "cross-sheet connection" dialog. Deliberately UNTYPED: annotating would
+# pull the dialog into the startup dependency graph (same rule as _gpOpenLineAttrs).
+# 惰性创建的「跨图纸连接」对话框。刻意不写类型：标注会把对话框拉进启动依赖图
+#（与 _gpOpenLineAttrs 同一规则）。
+var _gpOffPageDialog = null
+
+# The gesture waiting for the dialog's answer: which canvas, which source ref, where.
+# 等待对话框回答的手势：哪块画布、哪个源端、落点在哪。
+var _gpCrossPending: Dictionary = {}
+
+# One-shot sheet preselect, set when the inspector's peer-sheet dropdown routes a pick here.
+# 一次性图纸预选，属性面板的对端图纸下拉把选择路由进来时设置。
+var _gpCrossPreselect: String = ""
+
+
+# A line was dropped out of frame, or an existing connector asked for a peer: open the
+# dialog for the CURRENT sheet list. The canvas stays a pure requester.
+# 一条线落出图框，或既有连接符请求对端：为**当前**图纸列表打开对话框。
+# 画布保持纯请求者身份。
+func _gpOnCrossSheetRequested(gpFromRef: Dictionary, gpWorld: Vector2, gpKind: String,
+		gpSignalType: String, gpCanvas: GPCanvas2D) -> void:
+	var gpPre: String = _gpCrossPreselect
+	_gpCrossPreselect = ""
+	_gpCrossPending = {"canvas": gpCanvas, "from_ref": gpFromRef, "world": gpWorld,
+		"kind": gpKind, "signal_type": gpSignalType, "preselect": gpPre}
+	if _gpOffPageDialog == null:
+		_gpOffPageDialog = (load("res://src/ui/dialogs/off_page_connect_dialog.gd")
+			as GDScript).new()
+		add_child(_gpOffPageDialog)
+		_gpOffPageDialog.gpConnectChosen.connect(_gpOnCrossSheetChosen)
+	var gpActive: GPSheet = gpCenter.gpActiveSheet()
+	_gpOffPageDialog.gpSetup(gpCenter.gpToSheets(), gpDefs,
+		gpActive.gpId if gpActive != null else "", gpPre)
+
+
+# The inspector's peer-sheet dropdown picked a sheet for an UNLINKED connector: route the
+# pick through the VERY same canvas gesture the context menu uses (one code path into the
+# dialog and, behind it, the command), with the sheet handed over as a preselect.
+# 属性面板的对端图纸下拉为未连线连接符选定了一张图纸：把该选择路由进与右键菜单
+# **完全相同**的画布手势（进入对话框乃至其后的命令只有**一条**代码路径），图纸以预选
+# 形式移交。
+func _gpOnInspectorConnectPick(gpNodeId: String, gpSheetId: String) -> void:
+	var gpCanvas: GPCanvas2D = gpCenter.gpActiveCanvas()
+	if gpCanvas == null:
+		return
+	_gpCrossPreselect = gpSheetId
+	gpCanvas.gpRequestCrossSheet(
+		{"node_id": gpNodeId, "port_id": GPSymbolPackOffpage.GP_PORT_NAME},
+		Vector2.ZERO, GPPIDEdge.GP_PROCESS, "")
+
+
+# The user picked a target and confirmed. Resolve what the dialog cannot know (peer graph,
+# drawing number) and hand the WHOLE gesture to the shared creation helper below.
+# 用户选定目标并确认。解析对话框无法知晓的事实（对端图、图号），把整个手势交给下方的
+# 共用创建助手。
+func _gpOnCrossSheetChosen(gpTarget: Dictionary) -> void:
+	var gpCanvas: GPCanvas2D = _gpCrossPending.get("canvas")
+	if gpCanvas == null or gpTarget.is_empty():
+		return
+	_gpCreateCrossLink(gpCanvas, _gpCrossPending.get("from_ref", {}),
+		str(_gpCrossPending.get("kind", GPPIDEdge.GP_PROCESS)),
+		str(_gpCrossPending.get("signal_type", "")),
+		_gpCrossPending.get("world", Vector2.ZERO),
+		str(gpTarget.get("sheet_id", "")),
+		{"node_id": str(gpTarget.get("node_id", "")),
+			"port_id": str(gpTarget.get("port_id", ""))})
+
+
+# THE one creation path for a cross-sheet link, shared by the dialog flow and the W13-S8
+# cross-pane drag. Resolves the sheet-level facts (peer sheet, drawing number, twin landing
+# slot), decides mode A/B from the fromRef node, runs the command, republishes the render
+# snapshot and reports the result. Returns the link id ("" = refused).
+# 跨图纸 link 的**唯一**创建路径，对话框流程与 W13-S8 跨窗格拖拽共用。解析图纸级事实
+#（对端图、图号、孪生体落位槽）、按 fromRef 节点判定模式 A/B、执行命令、重发渲染快照并
+# 报告结果。返回 link id（"" = 被拒）。
+func _gpCreateCrossLink(gpCanvas: GPCanvas2D, gpFromRef: Dictionary, gpKind: String,
+		gpSignalType: String, gpWorld: Vector2, gpPeerSheetId: String,
+		gpServed: Dictionary) -> String:
+	if gpCanvas == null or gpCanvas.gpActions == null or gpFromRef.is_empty():
+		return ""
+	# The LOCAL sheet is the one the SOURCE CANVAS shows — never "whatever tab is active":
+	# with multi-view (W13) the two can differ the moment a second pane takes focus.
+	# **本端图纸**是**源画布**所显示的那张 —— 绝不是「当前哪个标签活动」：多视图（W13）下
+	# 一旦第二窗格获焦，二者就可能不同。
+	var gpLocalSheet: GPSheet = gpCanvas.gpSheet
+	if gpLocalSheet == null or gpPeerSheetId == "" or gpPeerSheetId == gpLocalSheet.gpId:
+		return ""
+	var gpPeerSheet: GPSheet = null
+	for gpS in gpCenter.gpToSheets():
+		if gpS.gpId == gpPeerSheetId:
+			gpPeerSheet = gpS
+	if gpPeerSheet == null or gpPeerSheet.gpGraph == null:
+		return ""
+	# The twin lands in the peer sheet's LEFT connector column (user feedback 2026-11-03:
+	# always on the left, stacked top-down) — never at a bare drop point, and never as a
+	# child of the target item.
+	# 孪生体落在对端图纸**左侧的连接符列**（用户反馈 2026-11-03：永远在左侧、自上而下堆叠）
+	# —— 绝不落在裸落点上，也绝不成为目标对象的子件。
+	var gpEnv: Vector2 = GPSymbolCategories.gpSizeFor(GPSymbolPackOffpage.GP_CATEGORY)
+	var gpPeerPos: Vector2 = GPOffPageIndex.gpNextLeftSlot(gpPeerSheet.gpGraph,
+		GPFrameGeometry.gpFrameRect(gpPeerSheet), gpEnv,
+		[GPSymbolPackOffpage.GP_ID_PIPE, GPSymbolPackOffpage.GP_ID_SIGNAL])
+	# The pick is the item the twin serves — but only a node that REALLY exists there (a
+	# stale pick degrades to a bare twin, exactly as the dialog path always did).
+	# 所选即孪生体要**服务**的对象 —— 但只认对端图上**真实存在**的节点（陈旧所选退化为
+	# 裸孪生体，与对话框路径的既有行为完全一致）。
+	var gpServedFinal: Dictionary = {}
+	if not gpServed.is_empty() \
+			and gpPeerSheet.gpGraph.gpGetNode(str(gpServed.get("node_id", ""))) != null:
+		gpServedFinal = gpServed
+	# MODE B when the gesture started ON an unlinked connector: the link attaches to it and
+	# no local node is created.
+	# 手势始于**未连接的连接符**时走模式 B：link 直接挂它，不新建本端节点。
+	var gpExistingLocal: String = ""
+	var gpSourceId: String = str(gpFromRef.get("node_id", ""))
+	var gpSource: GPPIDNode = gpCanvas.gpGraph.gpGetNode(gpSourceId) if gpSourceId != "" else null
+	var gpSourceIsConnector: bool = gpSource != null \
+		and (gpSource.gpSymbolId == GPSymbolPackOffpage.GP_ID_PIPE \
+			or gpSource.gpSymbolId == GPSymbolPackOffpage.GP_ID_SIGNAL) \
+		and str(gpSource.gpProps.get(GPOffPageLink.GP_KEY_LINK_ID, "")) == ""
+	if gpSourceIsConnector:
+		gpExistingLocal = gpSourceId
+	var gpLinkId: String = gpCanvas.gpActions.gpCrossSheetCreate(gpFromRef, gpKind,
+		gpSignalType, true, gpWorld, gpPeerPos, gpLocalSheet.gpId, gpPeerSheetId,
+		gpPeerSheet.gpNumber, gpPeerSheet.gpGraph, gpCenter.gpOffPageLinks,
+		gpExistingLocal, {}, gpServedFinal)
+	if gpLinkId == "":
+		gpCanvas.gpReportRefusal(gpCanvas.gpActions.gpLastRefusal)
+		return ""
+	# The link table changed with NO model signal: republish the render snapshot.
+	# link 表的变化**没有**模型信号携带：重发渲染快照。
+	gpCenter.gpRefreshOffPageContext()
+	var gpTag: String = ""
+	for gpL in gpCenter.gpOffPageLinks:
+		if gpL.gpInstanceId == gpLinkId:
+			gpTag = gpL.gpTag
+	gpSetState("offpage.status_created", [gpTag])
+	return gpLinkId
+
+
+# ---- W13-S8: cross-pane drag-to-connect (the SECOND connection logic) ----
+# ---- W13-S8：跨窗格拖拽连线（第二种连接逻辑）----
+
+# The canvas currently showing a drop highlight, and the highlighted node ("" = none).
+# 当前显示落点高亮的画布，与被高亮的图元（"" = 无）。
+var _gpDragHlCanvas: GPCanvas2D = null
+var _gpDragHlNode: String = ""
+
+
+# A connector is being dragged across panes: highlight the node under the pointer in
+# whichever OTHER canvas is under it. The source canvas never highlights itself.
+# 连接符正被拖过窗格：在其下方的**另一块**画布中高亮指针下的图元。源画布永不高亮自己。
+func _gpOnCrossPaneDragUpdated(gpNodeId: String, gpGlobal: Vector2,
+		gpSource: GPCanvas2D) -> void:
+	var gpTarget: GPCanvas2D = gpCenter.gpCanvasAtGlobalPoint(gpGlobal)
+	if gpTarget == gpSource:
+		gpTarget = null
+	_gpClearDragHighlight()
+	if gpTarget == null:
+		return
+	var gpWorld: Vector2 = gpTarget.gpWorldFromScreen(gpTarget.get_local_mouse_position())
+	var gpHit: String = gpTarget.gpHitTest(gpWorld)
+	# Same-sheet targets are refused by the creation helper anyway; refusing the HIGHLIGHT
+	# too keeps what you see (an accent box) and what you get (a link) in agreement.
+	# 同图纸目标本就会被创建助手拒绝；高亮同样拒绝，使「看到的」（accent 框）与「得到的」
+	#（一条连接）始终一致。
+	if gpHit != "" and gpTarget.gpSheet != null and gpSource.gpSheet != null \
+			and gpTarget.gpSheet.gpId == gpSource.gpSheet.gpId:
+		return
+	_gpDragHlCanvas = gpTarget
+	_gpDragHlNode = gpHit
+	if gpHit != "":
+		gpTarget.gpSetDropHighlight(gpHit)
+
+
+# The drag was released over a point: resolve the target node and build the link through the
+# ONE shared creation path. Kind/signal follow the CONNECTOR's family (pipe vs signal), the
+# same defaults the tools use.
+# 拖拽在一点上松手：解析目标图元，经**唯一**的共用创建路径建立连接。类型 / 信号随**连接符**
+# 的族别（管 / 信号），与工具的默认一致。
+func _gpOnCrossPaneDropped(gpNodeId: String, gpGlobal: Vector2, gpSource: GPCanvas2D) -> void:
+	_gpClearDragHighlight()
+	var gpTarget: GPCanvas2D = gpCenter.gpCanvasAtGlobalPoint(gpGlobal)
+	if gpTarget == null or gpTarget == gpSource:
+		return
+	var gpSrcSheet: GPSheet = gpSource.gpSheet
+	var gpTgtSheet: GPSheet = gpTarget.gpSheet
+	if gpSrcSheet == null or gpTgtSheet == null or gpSrcSheet.gpId == gpTgtSheet.gpId:
+		return
+	var gpConn: GPPIDNode = gpSource.gpGraph.gpGetNode(gpNodeId)
+	if gpConn == null:
+		return
+	# An ALREADY-LINKED connector cannot start a second link by dragging — the context menu's
+	# sync/jump actions own that state. Say so instead of minting a surprise twin at (0,0).
+	# **已连接**的连接符不能靠拖拽再起一条 link —— 该状态归右键菜单的同步 / 跳转所有。
+	# 明说，而不是在 (0,0) 悄悄铸一个意外的孪生体。
+	if str(gpConn.gpProps.get(GPOffPageLink.GP_KEY_LINK_ID, "")) != "":
+		gpSetState("offpage.drag_linked", [])
+		return
+	var gpWorld: Vector2 = gpTarget.gpWorldFromScreen(gpTarget.get_local_mouse_position())
+	var gpHit: String = gpTarget.gpHitTest(gpWorld)
+	if gpHit == "":
+		return
+	var gpKind: String = GPPIDEdge.GP_PROCESS
+	var gpSignalType: String = ""
+	if gpConn.gpSymbolId == GPSymbolPackOffpage.GP_ID_SIGNAL:
+		gpKind = GPPIDEdge.GP_SIGNAL
+		gpSignalType = "ELECTRIC"
+	# The drop node is what the twin serves; its port is the def's FIRST (the dialog stays
+	# the place for a considered port choice — the drag is the quick gesture).
+	# 落点图元即孪生体的服务对象；端口取定义的**第一个**（深思的端口选择留给对话框 ——
+	# 拖拽是快速手势）。
+	var gpPort: String = ""
+	var gpHitNode: GPPIDNode = gpTarget.gpGraph.gpGetNode(gpHit)
+	var gpHitDef: GPSymbolDef = gpTarget.gpDefFor(gpHitNode.gpSymbolId) if gpHitNode != null else null
+	if gpHitDef != null and not gpHitDef.gpPorts.is_empty():
+		gpPort = gpHitDef.gpPorts[0].gpName
+	_gpCreateCrossLink(gpSource,
+		{"node_id": gpNodeId, "port_id": GPSymbolPackOffpage.GP_PORT_NAME},
+		gpKind, gpSignalType, Vector2.ZERO, gpTgtSheet.gpId,
+		{"node_id": gpHit, "port_id": gpPort})
+
+
+# The gesture ended without a drop (ESC): clear the highlight.
+# 手势未落点即结束（ESC）：清除高亮。
+func _gpOnCrossPaneDragEnded() -> void:
+	_gpClearDragHighlight()
+
+
+# Clear the drop highlight (idempotent).
+# 清除落点高亮（幂等）。
+func _gpClearDragHighlight() -> void:
+	if _gpDragHlCanvas != null and is_instance_valid(_gpDragHlCanvas):
+		_gpDragHlCanvas.gpSetDropHighlight("")
+	_gpDragHlCanvas = null
+	_gpDragHlNode = ""
+
+
+# Navigation: switch to the peer sheet and select the peer connector.
+# 导航：切到对端图纸并选中对端连接符。
+func _gpOnJumpToPeer(gpNodeId: String) -> void:
+	if not gpCenter.gpJumpToPeerConnector(gpNodeId):
+		gpSetState("offpage.jump_missing", [])
+
+
+# "Sync to peer": make the PEER end match THIS end, through the link's contract snapshot,
+# as one undoable step. Reading the values from the local edge keeps one rule: the local
+# sheet is where the edit happened.
+# 「同步到对端」：经 link 的契约快照让**对端**与本端一致，一步可撤销。值取自本端边
+# 保持了单一规则：编辑发生在本端图纸。
+func _gpOnSyncToPeer(gpNodeId: String) -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	if gpCanvas == null or gpCanvas.gpGraph == null:
+		return
+	var gpLink: GPOffPageLink = GPOffPageIndex.gpLinkForNode(gpNodeId)
+	if gpLink == null:
+		return
+	var gpLocalEdge: GPPIDEdge = _gpEdgeTouching(gpCanvas.gpGraph, gpNodeId)
+	var gpPeer: Dictionary = GPOffPageIndex.gpPeerRefOf(gpLink, gpNodeId)
+	var gpPeerGraph: GPPIDGraph = null
+	for gpS in gpCenter.gpToSheets():
+		if gpS.gpId == str(gpPeer.get(GPOffPageLink.GP_KEY_SHEET, "")):
+			gpPeerGraph = gpS.gpGraph
+	var gpPeerEdge: GPPIDEdge = _gpEdgeTouching(gpPeerGraph,
+		str(gpPeer.get(GPOffPageLink.GP_KEY_NODE, "")))
+	var gpEdges: Array[GPPIDEdge] = [gpLocalEdge, gpPeerEdge]
+	var gpValues: Dictionary = {}
+	if gpLocalEdge != null:
+		for gpKey in GPCrossSheetSyncCommand.GP_CONTRACT_KEYS:
+			if (gpLocalEdge.gpAttrs as Dictionary).has(gpKey):
+				gpValues[gpKey] = gpLocalEdge.gpAttrs[gpKey]
+	if gpCanvas.gpActions.gpCrossSheetSync(gpLink, gpValues, gpEdges):
+		gpCenter.gpRefreshOffPageContext()
+		gpSetState("offpage.sync_done", [])
+
+
+# Deletion case ① (ADR-43 §2.5): connectors are in the delete selection. Resolve each one's
+# link + peer, show ONE confirmation naming the peer sheets, then cascade the whole
+# connection in one command per link. Connectors WITHOUT a resolvable link fall back to the
+# plain delete — a dangling flag is a local object, nothing to cascade.
+# 删除情形①（ADR-43 §2.5）：删除选择集中出现了连接符。解析每个的 link 与对端，
+# 弹**一个**确认框列出对端图纸，确认后每条 link 一个命令级联删除。解析不出 link 的
+# 连接符回退普通删除 —— 悬空旗标是本地对象，无级联可言。
+func _gpOnCrossSheetDelete(gpConnectorIds: Array[String], gpCanvas: GPCanvas2D) -> void:
+	if gpCanvas == null or gpCanvas.gpGraph == null:
+		return
+	var gpPlans: Array[Dictionary] = []
+	var gpDangling: Array[String] = []
+	for gpNid in gpConnectorIds:
+		var gpN: GPPIDNode = gpCanvas.gpGraph.gpGetNode(gpNid)
+		if gpN == null:
+			continue
+		var gpLink: GPOffPageLink = null
+		for gpL in gpCenter.gpOffPageLinks:
+			if gpL != null and gpL.gpInstanceId == str(gpN.gpProps.get(
+					GPOffPageLink.GP_KEY_LINK_ID, "")):
+				gpLink = gpL
+				break
+		if gpLink == null:
+			gpDangling.append(gpNid)
+			continue
+		gpPlans.append({"link": gpLink, "local": gpNid})
+	if gpDangling.size() > 0:
+		gpCanvas.gpActions.gpDeleteSelection(gpDangling, [], [],
+			gpCanvas.gpDefLookupCallable())
+	if gpPlans.is_empty():
+		return
+	# One line per link: tag + peer sheet label (number, else tab name).
+	# 每 link 一行：编号 + 对端图纸标签（图号，否则标签名）。
+	var gpLines: String = ""
+	for gpPlan in gpPlans:
+		var gpLink: GPOffPageLink = gpPlan["link"] as GPOffPageLink
+		gpLines += I18n.gpTr("offpage.del_line") % [_gpLinkTag(gpLink),
+			_gpPeerSheetLabel(gpLink)] + "\n"
+	var gpDlg: ConfirmationDialog = ConfirmationDialog.new()
+	gpDlg.title = I18n.gpTr("offpage.del_title")
+	gpDlg.dialog_text = I18n.gpTr("offpage.del_text") % [gpLines.strip_edges()]
+	gpDlg.ok_button_text = I18n.gpTr("dialog.ok")
+	gpDlg.cancel_button_text = I18n.gpTr("dialog.cancel")
+	add_child(gpDlg)
+	gpDlg.confirmed.connect(_gpOnCrossSheetDeleteConfirmed.bind(gpPlans, gpCanvas))
+	gpDlg.canceled.connect(gpDlg.queue_free)
+	gpDlg.popup_centered()
+
+
+# The confirmed half: run one cascade command per link, then refresh the snapshot.
+# 确认后的半步：每条 link 一个级联命令，然后刷新快照。
+func _gpOnCrossSheetDeleteConfirmed(gpPlans: Array[Dictionary], gpCanvas: GPCanvas2D) -> void:
+	var gpLookup: Callable = gpCanvas.gpDefLookupCallable()
+	for gpPlan in gpPlans:
+		var gpLink: GPOffPageLink = gpPlan["link"] as GPOffPageLink
+		var gpLocalId: String = str(gpPlan["local"])
+		var gpPeerRef: Dictionary = GPOffPageIndex.gpPeerRefOf(gpLink, gpLocalId)
+		var gpPeerId: String = str(gpPeerRef.get(GPOffPageLink.GP_KEY_NODE, ""))
+		var gpPeerGraph: GPPIDGraph = null
+		for gpS in gpCenter.gpToSheets():
+			if gpS.gpId == str(gpPeerRef.get(GPOffPageLink.GP_KEY_SHEET, "")):
+				gpPeerGraph = gpS.gpGraph
+		if gpPeerGraph == null or gpPeerId == "":
+			continue
+		gpCanvas.gpActions.gpCrossSheetDelete(gpLink, [gpLocalId], [gpPeerId],
+			gpPeerGraph, gpCenter.gpOffPageLinks, gpLookup)
+	gpCenter.gpRefreshOffPageContext()
+	gpCanvas.gpEditFacade.gpSetSelection([])
+	gpSetState("offpage.del_done", [])
+
+
+# The tag for display: the manual tag when set, else the instance id.
+# 显示用编号：有手改编号用编号，否则用实例 id。
+static func _gpLinkTag(gpLink: GPOffPageLink) -> String:
+	return gpLink.gpTag if gpLink.gpTag != "" else gpLink.gpInstanceId
+
+
+# The link with this instance id in the container table, or null.
+# 容器表中该实例 id 的 link，否则 null。
+func _gpLinkById(gpLinkId: String) -> GPOffPageLink:
+	for gpL in gpCenter.gpOffPageLinks:
+		if gpL != null and gpL.gpInstanceId == gpLinkId:
+			return gpL
+	return null
+
+
+# Inspector link-attr edit (S4-4): commit the single field to the LINK as one undo step
+# (edges stay — the snapshot is the source of truth, the DRC reports the drift until synced).
+# 属性面板 link 属性编辑（S4-4）：单字段一次撤销步提交到 **link**（边不动 —— 快照是权威，
+# 未同步前的漂移由 DRC 报告）。
+func _gpOnLinkAttrEdit(gpLinkId: String, gpKey: String, gpValue: String) -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	var gpLink: GPOffPageLink = _gpLinkById(gpLinkId)
+	if gpCanvas == null or gpLink == null:
+		return
+	if gpCanvas.gpActions.gpCrossSheetSync(gpLink, {gpKey: gpValue}, []):
+		gpCenter.gpRefreshOffPageContext()
+
+
+# Inspector sync push (S4-4): the LINK snapshot is the source; BOTH ends' edges receive it —
+# exactly the repair the attr_mismatch rule proposes.
+# 属性面板同步推送（S4-4）：**link 快照**为源；两端的边都接收 —— 正是 attr_mismatch
+# 规则提出的修复。
+func _gpOnInspectorLinkSync(gpLinkId: String) -> void:
+	var gpCanvas: GPCanvas2D = gpActiveCanvas()
+	var gpLink: GPOffPageLink = _gpLinkById(gpLinkId)
+	if gpCanvas == null or gpLink == null or gpCanvas.gpGraph == null:
+		return
+	var gpValues: Dictionary = {}
+	for gpKey in GPOffPageLink.GP_CONTRACT_KEYS:
+		if (gpLink.gpAttrs as Dictionary).has(gpKey):
+			gpValues[gpKey] = gpLink.gpAttrs[gpKey]
+	if gpValues.is_empty():
+		return
+	var gpAId: String = str(gpLink.gpA.get(GPOffPageLink.GP_KEY_NODE, ""))
+	var gpBId: String = str(gpLink.gpB.get(GPOffPageLink.GP_KEY_NODE, ""))
+	var gpLocalId: String = gpAId if gpCanvas.gpGraph.gpGetNode(gpAId) != null else gpBId
+	var gpPeerId: String = gpBId if gpLocalId == gpAId else gpAId
+	var gpPeerEndSheetId: String = str((gpLink.gpB as Dictionary).get(
+		GPOffPageLink.GP_KEY_SHEET, "")) if gpPeerId == gpBId else str(
+		(gpLink.gpA as Dictionary).get(GPOffPageLink.GP_KEY_SHEET, ""))
+	var gpPeerGraph: GPPIDGraph = null
+	for gpS in gpCenter.gpToSheets():
+		if gpS.gpId == gpPeerEndSheetId:
+			gpPeerGraph = gpS.gpGraph
+	var gpEdges: Array[GPPIDEdge] = [_gpEdgeTouching(gpCanvas.gpGraph, gpLocalId),
+		_gpEdgeTouching(gpPeerGraph, gpPeerId)]
+	if gpCanvas.gpActions.gpCrossSheetSync(gpLink, gpValues, gpEdges):
+		gpCenter.gpRefreshOffPageContext()
+		gpSetState("offpage.sync_done", [])
+
+
+# Peer sheet label for confirm dialogs: its number, else its tab name, else "?".
+# 确认框里的对端图纸标签：图号，否则标签名，否则 "?"。
+func _gpPeerSheetLabel(gpLink: GPOffPageLink) -> String:
+	for gpEnd in [gpLink.gpA, gpLink.gpB]:
+		var gpSheetId: String = str((gpEnd as Dictionary).get(GPOffPageLink.GP_KEY_SHEET, ""))
+		for gpS in gpCenter.gpToSheets():
+			if gpS.gpId == gpSheetId:
+				return gpS.gpNumber if gpS.gpNumber != "" else gpS.gpName
+	return GPOffPageIndex.GP_UNRESOLVED_TEXT
+
+
+# The first edge that touches a node, or null. Good enough for a contract sync: a connector
+# has at most one line INTO it on each sheet.
+# 触及某节点的第一条边，否则 null。对契约同步足够：一只连接符在每张图纸上至多有一条接入线。
+static func _gpEdgeTouching(gpG: GPPIDGraph, gpNodeId: String) -> GPPIDEdge:
+	if gpG == null or gpNodeId == "":
+		return null
+	for gpE in gpG.gpEdges:
+		if str(gpE.gpFromRef.get("node_id", "")) == gpNodeId \
+				or str(gpE.gpToRef.get("node_id", "")) == gpNodeId:
+			return gpE
+	return null
+
+
 # All sheets, for the DRC's whole-project mode (and the export gate's equivalent check).
 # 全部图纸，供 DRC 全工程模式（以及导出闸门的等价检查）使用。
 func _gpDrcSheets() -> Array:
 	if gpCenter == null:
 		return []
 	return gpCenter.gpToSheets()
+
+
+# Container link table for the DRC off-page audit (W12-S4).
+# 供 DRC 跨图纸审计用的容器 link 表（W12-S4）。
+func _gpDrcLinks() -> Array[GPOffPageLink]:
+	if gpCenter == null:
+		return []
+	return gpCenter.gpOffPageLinks
 
 
 # Bind the DRC panel to the active canvas (called wherever the outline is bound, too).
@@ -885,7 +1365,8 @@ func gpShowDrcDialog() -> void:
 		gpDrcDialog.name = "DrcDialog"
 		add_child(gpDrcDialog)
 		gpDrcDialog.gpFindingActivated.connect(_gpOnDrcFindingFromDialog)
-	gpDrcDialog.gpOpenFor(gpActiveCanvas(), Callable(self, "_gpDrcSheets"))
+	gpDrcDialog.gpOpenFor(gpActiveCanvas(), Callable(self, "_gpDrcSheets"),
+		Callable(self, "_gpDrcLinks"))
 
 
 # A row in the DOCK panel: locate + select, but do NOT switch tabs (the user may be reading the

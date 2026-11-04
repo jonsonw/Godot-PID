@@ -17,8 +17,13 @@ extends RefCounted
 #（显式不画的兜底）。此后新增生成器种类再也不必触碰 symbol_view。
 #
 # Output contract / 输出契约：
-#   "spec"       : a GPSymbolPainter shape spec ({paths,circles,rects,box}) — {} = no vector art.
-#   "text_lines" : PackedStringArray of lines the view paints inside the envelope.
+#   "spec"          : a GPSymbolPainter shape spec ({paths,circles,rects,box}) — {} = no vector art.
+#   "text_lines"    : PackedStringArray of lines the view paints inside the envelope.
+#   "text_above"    : optional line painted ABOVE the envelope (off-page legend layout).
+#   "text_below"    : optional line painted BELOW the envelope (off-page legend layout).
+#   "text_center_u" : optional text-column centre in UNIT space — text rides the glyph body,
+#                     not the envelope centre (the adaptive off-page body).
+#   "text_mm"       : optional ABSOLUTE text height (see the off-page / table generators).
 # Generators are PURE: same (def, node) -> same output, no I/O, no caching.
 # 生成器是纯函数：同一 (def, node) -> 同一输出，无 I/O、无缓存。
 #
@@ -70,6 +75,8 @@ static func gpGenerate(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> Dictionary:
 			return _gpGenerateMultiline(gpNode)
 		"grid":
 			return _gpGenerateGrid(gpDef, gpNode)
+		"offpage":
+			return _gpGenerateOffpage(gpDef, gpNode)
 	return gpEmpty
 
 
@@ -484,3 +491,235 @@ static func _gpGenerateMultiline(gpNode: GPPIDNode) -> Dictionary:
 	if gpRaw == "":
 		return {"spec": {}, "text_lines": PackedStringArray()}
 	return {"spec": {}, "text_lines": gpRaw.split("\n") as PackedStringArray}
+
+
+# ---------------------------------------------------------------- off-page connector (W12-S2)
+# ---------------------------------------------------------------- 跨图纸连接符（W12-S2）
+#
+# GENERATOR:offpage — the Off-Page connector flag (ADR-43 D3). Two jobs, and they are the reason
+# this is a generator rather than a static glyph:
+#   1. the SILHOUETTE, chosen from the definition's PORT PURPOSE (NOZZLE -> one-way pennant,
+#      SIGNAL -> both-ends-pointed hexagon). Data-driven on purpose: decision D3 forbids id lists
+#      in renderers, so the pack's port type is the ONLY switch;
+#   2. the TEXT, which is the peer drawing number DERIVED through GPOffPageIndex — never a stored
+#      property (that is the whole point of D3: anchors are stored, the RELATION is derived).
+# GENERATOR:offpage —— 跨图纸连接符旗标（ADR-43 D3）。两件事，也正是它必须是生成器而不是静态
+# 字形的原因：
+#   1. **轮廓**，由定义的**端口用途**选出（NOZZLE → 单向旗标，SIGNAL → 两端尖的六边形）。
+#      刻意数据驱动：决策 D3 禁止渲染器出现 id 名单，故图元包的端口类型是**唯一**开关；
+#   2. **文字**，即经 GPOffPageIndex **推导**出的对端图纸号 —— 绝不是存储属性（这正是 D3 的全部
+#      意义：锚点存储，**关系**推导）。
+#
+# The text height is declared by this generator ("text_mm") because it is bounded by the small
+# flag, not by the user's tag preference — see GPTextRole.GP_OFFPAGE_REF_MM.
+# 字高由本生成器声明（"text_mm"），因为它由小旗标的尺寸定界，而非由用户的位号偏好 —— 见
+# GPTextRole.GP_OFFPAGE_REF_MM。
+
+# Fraction of the BODY width where the pennant's point starts (the flat body ends here). The
+# body — not the envelope — is what the flag draws (see _gpOffpageBodyWidth).
+# 旗标尖部起始处占**主体**宽度的比例（平直段到此为止）。主体 —— 而非包络 —— 才是旗标画出的
+# 范围（见 _gpOffpageBodyWidth）。
+const GP_OFFPAGE_FLAT_RATIO: float = 0.70
+
+# Fraction of the BODY width where the signal hexagon's point starts, on BOTH ends.
+# 信号六边形两端的尖部起始比例（占主体宽度）。
+const GP_OFFPAGE_NOTCH_RATIO: float = 0.24
+
+# The unit-space width every off-page glyph is authored against. The HEIGHT is derived from the
+# definition's envelope aspect (see _gpOffpageBoxHeight), so the uniform fit lands the glyph
+# exactly on the envelope and the port on the drawn edge, for ANY envelope shape. The outline
+# itself is authored NARROWER (left-anchored) when the reference text is short — the box stays
+# full so the fit, the port edge and every consumer's mapping are untouched.
+# 跨图纸字形所依的单位空间宽度。**高度**由定义的包络长宽比推导（见 _gpOffpageBoxHeight），故均匀
+# 适配后字形恰好贴合包络、端口恰好落在画出的边上 —— 对**任何**包络形状皆然。当编号文字较短时，
+# 轮廓本身按**左锚定**画得更窄 —— 盒保持全宽，使适配、端口边缘与所有消费方的映射都不受影响。
+const GP_OFFPAGE_BOX_W: float = 100.0
+
+# Horizontal breathing room (mm) added around the reference text inside the flag body.
+# Scales with the reference height (0.3x it) so the proportion survives size changes.
+# 旗标主体内、交叉编号文字四周的水平留白（mm）。随编号字高缩放（其 0.3 倍），比例不随尺寸漂移。
+const GP_OFFPAGE_PAD_MM: float = 2.4
+
+# The narrowest flag body (mm) — what an EMPTY (unlinked) connector still draws, so a bare
+# pennant never collapses into a sliver. 12.0 = 1.5x the reference height: at the doubled
+# 8 mm text it sits just under a typical "3-1" reference (~13 mm), so the adaptive property
+# stays visible on ordinary short numbers too.
+# 旗标主体的最小宽度（mm）—— 空白（未连线）连接符也至少画这么宽，光杆旗标绝不细成一缕。
+# 12.0 = 编号字高的 1.5 倍：在翻倍后的 8mm 字高下恰在典型 "3-1" 编号（约 13mm）之下，
+# 使自适应性质对常见的短编号也看得见。
+const GP_OFFPAGE_MIN_BODY_MM: float = 12.0
+
+
+# Generate the flag + its derived reference text.
+# 生成旗标及其推导出的交叉编号文字。
+static func _gpGenerateOffpage(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> Dictionary:
+	var gpH: float = _gpOffpageBoxHeight(gpDef)
+	# TEXT LAYOUT (user feedback 2026-11-03, refined the same day): all three slots are
+	# DERIVED or INHERITED, none is hand-typed on the connector —
+	#   INSIDE the flag  — the peer drawing number (DERIVED, the three states below);
+	#   ABOVE the flag   — the TARGET end's tag (DERIVED through GPOffPageIndex: the item
+	#                      the link serves on the sheet it points at);
+	#   BELOW the flag   — the medium (INHERITED: copied from the source edge into the link
+	#                      at creation, GPCrossSheetCreateCommand).
+	# The renderer and the print model read the same three slots, so screen and paper cannot
+	# disagree. Empty slots paint nothing — the honest "not resolved yet".
+	# 文字版式（用户反馈 2026-11-03，同日细化）：三个槽位全部**推导或继承**，没有一个是在
+	# 连接符上手填的 —— **框内**：对端图纸号（**推导**，即下方三态）；**框上方**：**目标端**
+	# 位号（经 GPOffPageIndex 推导：link 所指图纸上被服务的那台设备 / 仪表 / 管线）；
+	# **框下方**：介质（**继承**：创建时从源边拷入 link，见 GPCrossSheetCreateCommand）。
+	# 渲染器与打印模型读**同一组**三个槽位，屏幕与纸面不可能分家。空槽不画 —— 诚实的
+	# 「尚未解析」。
+	var gpTarget: String = ""
+	var gpMedium: String = ""
+	var gpLink: GPOffPageLink = GPOffPageIndex.gpLinkForNode(
+		gpNode.gpInstanceId if gpNode != null else "")
+	if gpLink != null:
+		gpMedium = str(gpLink.gpAttrs.get(GPOffPageLink.GP_ATTR_MEDIUM, ""))
+		gpTarget = GPOffPageIndex.gpTargetTagFor(gpNode)
+	# The reference text: "" while unlinked (a blank flag is the honest look of "not connected
+	# yet"), "?" when the reference dangles, the tag or peer number once resolved. The DECISION
+	# lives in GPOffPageIndex so the S3 commands and the S4 rules read the same three states.
+	# 交叉编号文字：未连线时为 ""（空白旗标正是「尚未连接」的诚实样子），引用悬空时为 "?"，
+	# 已解析时为 tag 或对端图号。判定放在 GPOffPageIndex，使 S3 命令与 S4 规则读到**同一组**三态。
+	var gpRef: String = GPOffPageIndex.gpRefTextFor(gpNode)
+	# ADAPTIVE BODY WIDTH (user feedback 2026-11-03): the flag hugs the text it carries —
+	# height ~1.25x the reference text height (the envelope's job), width driven by the text.
+	# 宽度自适应（用户反馈 2026-11-03）：旗标紧贴所载文字 —— 高度约 1.25 倍编号字高（由包络
+	# 保证），宽度由文字驱动。
+	var gpBodyW: float = _gpOffpageBodyWidth(gpDef, gpRef)
+	var gpPaths: Array = _gpOffpagePaths(gpH, gpBodyW, _gpIsSignalConnector(gpDef))
+	# MIRRORED TWIN (user feedback 2026-11-03): a connector standing on the TARGET sheet is
+	# authored with gpFlipped = true — the BODY's own flip transform mirrors the glyph (flat
+	# face + port land on the RIGHT, pennant pointing back off-page) and mirrors the text
+	# POSITIONS with it, while the view counter-mirrors the text GLYPHS so they stay readable
+	# (see GPSymbolView._gpDrawTextLines). The generator therefore stays FLIP-AGNOSTIC: one
+	# output for both orientations, exactly one mirroring, no double mirror.
+	# 镜像孪生体（用户反馈 2026-11-03）：立在**目标**图纸上的连接符以 gpFlipped = true 创建
+	# —— body 自带的翻转变换把字形镜像（平直面 + 端口落在**右**缘、旗尖指回图外），并连带镜像
+	# 文字**位置**；视图再对文字**字形**做反向镜像使其保持可读（见 GPSymbolView 的
+	# _gpDrawTextLines）。故生成器对翻转**无感**：两种朝向一份输出、恰好一次镜像、绝不双重。
+	return {
+		"spec": {"paths": gpPaths, "box": [0.0, 0.0, GP_OFFPAGE_BOX_W, gpH]},
+		"text_lines": PackedStringArray([gpRef]),
+		"text_above": gpTarget,
+		"text_below": gpMedium,
+		# Where the text column is centred, in UNIT space (the body's midpoint). The view maps
+		# it through the spec box's uniform fit, so the text rides the BODY, not the envelope.
+		# 文字列的中心，单位空间（主体中点）。视图经 spec 盒的均匀适配映射它，文字跟着**主体**
+		# 而非包络走。
+		"text_center_u": gpBodyW * 0.5,
+		"text_mm": GPTextRole.GP_OFFPAGE_REF_MM,
+	}
+
+
+# PER-INSTANCE port position overrides, NORMALIZED on the def's envelope (0..1). The ONE hook
+# GPPortResolver reads; every consumer of a port position (edge ends, port dots, snap, grips,
+# DRC snapshot, DEXPI import) picks the override up from there, so the continuation port can
+# ride the ADAPTIVE body's tip for any reference width. Returns {} when the generator declares
+# no override — today only the off-page "cont" port moves; "ref" stays on the drawn left edge.
+# 逐实例的端口位置覆盖，按定义包络**归一化**（0..1）。这是 GPPortResolver 读取的**唯一**钩子；
+# 端口位置的每个消费方（边端点、端口圆点、吸附、抓取点、DRC 快照、DEXPI 导入）都从这里取
+# 覆盖值，使续接端口在任何编号宽度下都贴着**自适应**主体的旗尖。生成器未声明覆盖时返回 {}
+# —— 今天只有跨图纸的 "cont" 端口会动；"ref" 恒在画出的左缘上。
+static func gpPortUnitOverrides(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> Dictionary:
+	if gpDef == null or gpNode == null:
+		return {}
+	if gpGeneratorId(gpDef.gpGeometrySource) != "offpage":
+		return {}
+	# The body's tip, as a fraction of the envelope width. The body spans [0, gpBodyW] of the
+	# unit box, and the unit box maps 1:1 onto the envelope — the SAME mapping the spec box
+	# gives every other consumer, so the port and the drawn tip cannot disagree.
+	# 主体的旗尖，占包络宽度的比例。主体横跨单位盒的 [0, gpBodyW]，而单位盒与包络一一映射
+	# —— 与 spec 盒给其它消费方的是**同一**映射，故端口与画出的旗尖不可能不一致。
+	var gpBodyW: float = _gpOffpageBodyWidth(gpDef, GPOffPageIndex.gpRefTextFor(gpNode))
+	return {GPSymbolPackOffpage.GP_PORT_CONT:
+		Vector2(gpBodyW / GP_OFFPAGE_BOX_W, 0.5)}
+
+
+# The flag body's width in unit space, derived from the reference text it must hug. The unit box
+# stays FULL width so the uniform fit is unchanged; the body just occupies the left part of it,
+# which keeps the port (at unit x=0) on drawn geometry for every consumer.
+# 旗标主体在单位空间中的宽度，由它要紧贴的编号文字推导。单位盒保持**全宽**使均匀适配不变；
+# 主体只占其左侧一部分 —— 这保证了端口（单位 x=0）在所有消费方都落在画出的几何上。
+static func _gpOffpageBodyWidth(gpDef: GPSymbolDef, gpRef: String) -> float:
+	var gpEnvW: float = GP_OFFPAGE_BOX_W
+	if gpDef != null and gpDef.gpDefaultSize.x > 0.001:
+		gpEnvW = gpDef.gpDefaultSize.x
+	var gpNeed: float = _gpRefTextWidthMM(gpRef) + GP_OFFPAGE_PAD_MM
+	var gpMin: float = GP_OFFPAGE_MIN_BODY_MM * GP_OFFPAGE_BOX_W / gpEnvW
+	return clampf(gpNeed * GP_OFFPAGE_BOX_W / gpEnvW, gpMin, GP_OFFPAGE_BOX_W)
+
+
+# A font-free width estimate of the reference text, in mm at the declared reference height.
+# Per-character classes: full-width (CJK) 1.0, narrow punctuation/digits-of-honour 0.35,
+# lowercase 0.52, everything else (digits, upper) 0.62 — generous enough that a flag is never
+# caught clipping its own number. The PDF/DXF writer measures the REAL font; this estimate only
+# sizes geometry, and erring wide is the safe direction.
+# 编号文字的无字体宽度估算（按声明字高，单位 mm）。逐字符分类：全角（中日韩）1.0、窄标点与
+# 「1」类窄数字 0.35、小写 0.52、其余（数字、大写）0.62 —— 宁宽勿窄，旗标绝不裁掉自己的编号。
+# PDF/DXF 写出器量的是**真**字体；本估算只为几何定尺寸，偏宽是安全方向。
+static func _gpRefTextWidthMM(gpS: String) -> float:
+	var gpW: float = 0.0
+	for gpC in gpS:
+		if gpC.unicode_at(0) >= 0x2E80:
+			gpW += 1.0
+		elif gpC in [".", ",", "-", ":", ";", " ", "'", "1", "i", "j", "l", "I", "(", ")", "/"]:
+			gpW += 0.35
+		elif gpC != gpC.to_upper():
+			gpW += 0.52
+		else:
+			gpW += 0.62
+	return gpW * GPTextRole.GP_OFFPAGE_REF_MM
+
+
+# Whether this connector carries SIGNALs (as opposed to process piping). The port purpose is the
+# single discriminator — no symbol-id list anywhere.
+# 本连接符承载的是**信号**（而非工艺管道）吗。端口用途是唯一判据 —— 代码里没有任何符号 id 名单。
+static func _gpIsSignalConnector(gpDef: GPSymbolDef) -> bool:
+	if gpDef == null:
+		return false
+	return not gpDef.gpPortsOfType(GPPort.GP_SIGNAL).is_empty()
+
+
+# Unit-space box height for this definition, derived from its envelope aspect so that
+# min(envelope.x / 100, envelope.y / H) == envelope.x / 100: the glyph then fills the envelope
+# exactly and its left edge — where the port sits — is the envelope's left edge.
+# 本定义的单位空间盒高，由包络长宽比推导，使 min(包络.x/100, 包络.y/H) == 包络.x/100：字形因此
+# 恰好填满包络，其左边缘（端口所在）即包络左边缘。
+# A degenerate or missing size falls back to the square box, i.e. the pre-derivation behaviour.
+# 尺寸退化或缺失时回落到方盒，即推导引入之前的行为。
+static func _gpOffpageBoxHeight(gpDef: GPSymbolDef) -> float:
+	if gpDef == null:
+		return GP_OFFPAGE_BOX_W
+	var gpW: float = maxf(gpDef.gpDefaultSize.x, 0.001)
+	var gpS: float = maxf(gpDef.gpDefaultSize.y, 0.001)
+	return clampf(GP_OFFPAGE_BOX_W * gpS / gpW, 1.0, 1000.0)
+
+
+# The outline, as closed polylines in unit space (the last point repeats the first — the painter
+# draws polylines and does NOT close them for us).
+# 轮廓，单位空间中的闭合折线（末点复写首点 —— 绘制器只画折线，不会替我们闭合）。
+# The LEFT edge is a full-height vertical in both variants, so the port at (0, 0.5) lands exactly
+# on drawn geometry rather than in empty space. The body spans [0, gpBodyW] — LEFT-ANCHORED,
+# because the pipe arrives at the flag's left edge and the flag grows rightward only as far as
+# its text needs (adaptive body width, see _gpOffpageBodyWidth).
+# 两个变体的**左**边都是整高竖线，故位于 (0, 0.5) 的端口恰好落在画出的几何上，而不是空白处。
+# 主体横跨 [0, gpBodyW] —— **左锚定**：管线从旗标左缘接入，旗标只向右长到文字所需的宽度
+#（自适应主体宽，见 _gpOffpageBodyWidth）。
+static func _gpOffpagePaths(gpH: float, gpBodyW: float, gpIsSignal: bool) -> Array:
+	var gpMid: float = gpH * 0.5
+	if gpIsSignal:
+		# Both ends pointed: "the signal goes somewhere and comes from somewhere" — visually
+		# distinct from the one-way pennant at a glance, which is the only job of the silhouette.
+		# 两端皆尖：「信号去往别处、也来自别处」—— 一眼即可与单向旗标区分，这就是轮廓的全部职责。
+		var gpN: float = gpBodyW * GP_OFFPAGE_NOTCH_RATIO
+		var gpFar: float = gpBodyW - gpN
+		return [{"pts": [
+			[0.0, gpMid], [gpN, 0.0], [gpFar, 0.0], [gpBodyW, gpMid],
+			[gpFar, gpH], [gpN, gpH], [0.0, gpMid],
+		]}]
+	var gpKnee: float = gpBodyW * GP_OFFPAGE_FLAT_RATIO
+	return [{"pts": [
+		[0.0, 0.0], [gpKnee, 0.0], [gpBodyW, gpMid], [gpKnee, gpH], [0.0, gpH],
+		[0.0, 0.0],
+	]}]

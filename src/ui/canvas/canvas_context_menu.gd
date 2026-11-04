@@ -57,6 +57,12 @@ const GP_CTX_AUTO_CONNECT: int = 27
 # 故固定 id 保持连续、无需重新编号。
 const GP_CTX_ATTACH: int = 28
 const GP_CTX_DETACH: int = 29
+# ADR-43 / S3 cross-sheet actions on an OFF-PAGE CONNECTOR (parked far above every other
+# block so nothing has to be renumbered).
+# ADR-43 / S3 对**跨图纸连接符**的动作（号段远高于其它块，无需重排任何既有 id）。
+const GP_CTX_CROSS_CONNECT: int = 30
+const GP_CTX_JUMP_PEER: int = 31
+const GP_CTX_SYNC_PEER: int = 32
 # One action id per candidate part type in the dynamic "添加附件 ▶" submenu. Parked far above every
 # other block so a dynamically built list can never collide with a fixed id, however long it grows.
 # 「添加附件 ▶」动态子菜单中每种候选部件各占一个动作 id。取值远高于其它号段，
@@ -334,6 +340,17 @@ func _gpBuildMenuItems(gpMenu: PopupMenu, gpNodeHit: String) -> void:
 			gpMenu.add_item(I18n.gpTr("canvas.ctx_table_del_row"), GP_CTX_TABLE_DEL_ROW)
 			gpMenu.add_item(I18n.gpTr("canvas.ctx_table_ins_col"), GP_CTX_TABLE_INS_COL)
 			gpMenu.add_item(I18n.gpTr("canvas.ctx_table_del_col"), GP_CTX_TABLE_DEL_COL)
+		# ADR-43 / S3: cross-sheet actions exist ONLY on an off-page connector, and the two
+		# states are mutually exclusive: an unlinked connector can CREATE a connection; a
+		# linked one can JUMP to / SYNC with its peer.
+		# ADR-43 / S3：跨图纸动作**只**存在于跨图纸连接符上，且两态互斥：
+		# 未连接的连接符可以创建连接；已连接的可以跳转对端 / 同步对端。
+		if gpNodeHit != "" and _gpIsOffpageConnector(gpNodeHit):
+			if _gpConnectorLinked(gpNodeHit):
+				gpMenu.add_item(I18n.gpTr("offpage.ctx_jump"), GP_CTX_JUMP_PEER)
+				gpMenu.add_item(I18n.gpTr("offpage.ctx_sync"), GP_CTX_SYNC_PEER)
+			else:
+				gpMenu.add_item(I18n.gpTr("offpage.ctx_connect"), GP_CTX_CROSS_CONNECT)
 	# Delete applies to either shapes or nodes.
 	# 删除可同时作用于图形或图元。
 	var gpCanDelete: bool = gpNodeCtx or (not gpCv.gpShapeSel.is_empty())
@@ -402,6 +419,33 @@ func _gpPendingLine() -> Object:
 	if gpTool == null or not gpTool.has_method("gpIsPending"):
 		return null
 	return gpTool if bool(gpTool.gpIsPending()) else null
+
+
+# Whether the hit node is an OFF-PAGE CONNECTOR: one of the two builtin ids, or any node
+# whose props already carry a link id (a user-pack connector proves itself that way).
+# 命中节点是否为跨图纸**连接符**：两个内置 id 之一，或 props 已带 link id 的节点
+#（用户包连接符以此自证身份）。
+func _gpIsOffpageConnector(gpNodeId: String) -> bool:
+	if gpCv.gpGraph == null:
+		return false
+	var gpN: GPPIDNode = gpCv.gpGraph.gpGetNode(gpNodeId)
+	if gpN == null:
+		return false
+	if gpN.gpSymbolId == GPSymbolPackOffpage.GP_ID_PIPE \
+			or gpN.gpSymbolId == GPSymbolPackOffpage.GP_ID_SIGNAL:
+		return true
+	return (gpN.gpProps as Dictionary).has(GPOffPageLink.GP_KEY_LINK_ID)
+
+
+# Whether the hit connector already carries a LIVE link (props stamp). A stamp without a
+# link row is a DRC matter (S4), not a menu matter.
+# 命中连接符是否已挂着**存活** link（props 盖章）。有章无行属 DRC（S4）的管辖，
+# 不归菜单管。
+func _gpConnectorLinked(gpNodeId: String) -> bool:
+	if gpCv.gpGraph == null:
+		return false
+	var gpN: GPPIDNode = gpCv.gpGraph.gpGetNode(gpNodeId)
+	return gpN != null and str(gpN.gpProps.get(GPOffPageLink.GP_KEY_LINK_ID, "")) != ""
 
 
 # Two-item menu for a half-drawn line: finish with a note, or drop the draft.
@@ -564,6 +608,18 @@ func gpOnContext(gpId: int) -> void:
 			gpCv.gpSetMode(GPMode.GP_SELECT if gpCv.gpMode == GPMode.GP_CONNECT else GPMode.GP_CONNECT)
 			gpCv.gpConnectFrom = ""
 			gpCv.queue_redraw()
+		GP_CTX_CROSS_CONNECT:
+			# ADR-43 / S3, path 2: an existing unlinked connector asks for a peer. The ref
+			# names the connector and its ref port; the world point is unused in this mode.
+			# ADR-43 / S3，路径 2：既有未连接连接符请求对端。引用指明连接符与 ref 端口；
+			# 世界坐标点在此模式下不使用。
+			gpCv.gpRequestCrossSheet(
+				{"node_id": _gpCtxHit, "port_id": GPSymbolPackOffpage.GP_PORT_NAME},
+				Vector2.ZERO, GPPIDEdge.GP_PROCESS, "")
+		GP_CTX_JUMP_PEER:
+			gpCv.gpJumpToPeerRequested.emit(_gpCtxHit)
+		GP_CTX_SYNC_PEER:
+			gpCv.gpSyncToPeerRequested.emit(_gpCtxHit)
 		GP_CTX_DELETE_EDGE:
 			gpCv.gpActions.gpDeleteEdges([_gpCtxEdge])
 			gpCv.gpEdgeSel.clear()

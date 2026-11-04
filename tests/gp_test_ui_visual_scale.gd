@@ -951,6 +951,60 @@ func gpTestPaletteThumbKinds() -> void:
 		"格网 spec 至少含外框 + 一条分隔线 / grid spec carries border + separators")
 
 
+# Off-page thumbnail re-boxing (user feedback 2026-11-03, 2nd round: the connector tiles were
+# a speck). The thumb fits the glyph's REAL path bounds, not the 96 mm authoring envelope —
+# so the empty flag (a ~12 mm body inside the envelope) still fills its cell like every other
+# symbol. The pin derives the "smaller than the envelope" side from the DEFINITION's envelope,
+# never from a literal.
+# 跨图纸缩略图重定盒（用户反馈 2026-11-03 第二轮：连接符图块小如针尖）。缩略图按字形的
+# **真实路径边界**适配，而非 96mm 授权包络 —— 于是空旗标（包络内约 12mm 的主体）也像
+# 其它图元一样撑满格子。「小于包络」一侧的期望值从**定义的包络**推导，绝不回显字面量。
+func gpTestOffpageThumbFitsTheBodyNotTheEnvelope() -> void:
+	var gpFlag: GPSymbolDef = null
+	for gpD in GPSymbolLibrary.gpDefaultDefs():
+		if gpD.gpId == "LOFFPAGE001":
+			gpFlag = gpD
+	gpCheck(gpFlag != null, "探针：默认库应含跨图纸连接符定义 / default library has the connector def")
+	if gpFlag == null:
+		return
+	var gpBare: GPPIDNode = GPPIDNode.new()
+	var gpSpec: Dictionary = GPSymbolGeneratorRegistry.gpGenerate(gpFlag, gpBare).get("spec", {}) as Dictionary
+	gpCheck(not gpSpec.is_empty(), "裸节点的连接符 spec 必须非空 / bare-node connector spec non-empty")
+	var gpBody: Rect2 = GPSymbolPaletteItem.gpOffpageBodyBox(gpSpec)
+	gpCheck(gpBody.size.x > 0.001 and gpBody.size.y > 0.001,
+		"主体盒非空 / the body box is non-empty")
+	gpCheck(gpBody.size.x < float(gpFlag.gpDefaultSize.x) * 0.5,
+		("空旗标主体远窄于包络（%.1f < 包络 %.0f 的一半）——这正是重定盒要修的针尖缺陷 / "
+		+ "the empty body is far narrower than the envelope — the speck defect re-boxing fixes")
+		% [gpBody.size.x, gpFlag.gpDefaultSize.x])
+	# THE WIRING ITSELF: the spec the thumbnail draws must carry the re-boxed bounds, not the
+	# authoring envelope — pinned here so dropping the re-box turns this red (proven by
+	# injection, 2026-11-03).
+	# **接线本身**：缩略图绘制的 spec 必须携带重定盒后的边界，而非授权包络 —— 钉在此处，
+	# 撤掉重定盒本条即红（2026-11-03 已用注入证明）。
+	var gpThumb: Dictionary = GPSymbolPaletteItem.gpOffpageThumbSpec(gpFlag)
+	gpCheck(not gpThumb.is_empty(), "缩略图 spec 非空 / the thumbnail spec is non-empty")
+	var gpRawBox: Rect2 = GPSymbolGeometry.gpUnitBox(gpSpec)
+	var gpThumbBox: Rect2 = GPSymbolGeometry.gpUnitBox(gpThumb)
+	gpApprox(gpThumbBox.position.x, gpBody.position.x, 0.001,
+		"缩略图盒 x = 主体边界 x / thumbnail box x = body bounds x")
+	gpApprox(gpThumbBox.size.x, gpBody.size.x, 0.001,
+		"缩略图盒宽 = 主体宽（非包络宽）/ thumbnail box width = body width, not envelope width")
+	gpApprox(gpThumbBox.size.y, gpBody.size.y, 0.001,
+		"缩略图盒高 = 主体高 / thumbnail box height = body height")
+	gpCheck(gpThumbBox.size.x < gpRawBox.size.x * 0.5,
+		"缩略图盒显著小于原始包络盒 / the thumbnail box is far smaller than the raw envelope box")
+	# The re-boxed bounds must COVER every path point (the fit may not crop the glyph).
+	# 重定盒的边界必须**覆盖**每个路径点（适配不得裁掉字形）。
+	var gpCovered: bool = true
+	for gpPath in gpSpec.get("paths", []) as Array:
+		for gpPt in (gpPath as Dictionary).get("pts", []) as Array:
+			var gpV: Vector2 = Vector2(float((gpPt as Array)[0]), float((gpPt as Array)[1]))
+			if not gpBody.grow(0.001).has_point(gpV):
+				gpCovered = false
+	gpCheck(gpCovered, "主体盒覆盖全部路径点 / the body box covers every path point")
+
+
 # Contrast ink for filled thumbnails (user feedback 2026-10-17: the "123" digits shared
 # the fill's colour family and vanished against it; the table lines also sat on no
 # backing). Pin: dark ink on light fills, near-white ink on dark fills, and the ink is

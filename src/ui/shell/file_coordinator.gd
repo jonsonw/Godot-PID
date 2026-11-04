@@ -417,7 +417,8 @@ func gpWriteProject(gpPath: String, gpIsAuto: bool = false) -> void:
 	var gpSheets: Array = gpHost.gpCenter.gpToSheets()
 	var gpWriteResult: GPIOResult
 	if gpSheets.size() > 1:
-		gpWriteResult = GPProjectIO.gpWriteSheetsResult(gpSheets, gpFilePath)
+		gpWriteResult = GPProjectIO.gpWriteSheetsResult(gpSheets, gpFilePath,
+			gpHost.gpCenter.gpOffPageLinks)
 	else:
 		# A single-sheet archive keeps the v2 shape, which has NO sheets[] section — so the
 		# tab title must be stamped into meta["title"], or the migration chain reconstructs
@@ -475,15 +476,17 @@ func gpReadProject(gpPath: String) -> void:
 	# file comes back as a one-element list, so there is no special case.
 	# 以**图纸**为单位读取，而非读成一张图：v3 文件可能含多页，
 	# 即便 v1/v2 文件也返回单元素列表，故无特例分支。
-	# GPIOResult distinguishes a missing file from malformed JSON, and gpReadSheets() keeps
-	# that taxonomy (io.open_failed vs io.parse_failed).
-	# GPIOResult 区分「文件缺失」与「JSON 损坏」，gpReadSheets() 保持该分类
-	# （io.open_failed 与 io.parse_failed）。
-	var gpSheetsResult: GPIOResult = GPProjectIO.gpReadSheets(gpPath)
+	# GPIOResult distinguishes a missing file from malformed JSON, and gpReadSheetsWithLinks()
+	# keeps that taxonomy (io.open_failed vs io.parse_failed). The payload carries BOTH the
+	# sheets and the container-level off-page links (ADR-43).
+	# GPIOResult 区分「文件缺失」与「JSON 损坏」，gpReadSheetsWithLinks() 保持该分类
+	# （io.open_failed 与 io.parse_failed）。载荷同时携带图纸与容器级跨图纸连接（ADR-43）。
+	var gpSheetsResult: GPIOResult = GPProjectIO.gpReadSheetsWithLinks(gpPath)
 	if not gpSheetsResult.gpIsOk():
 		gpHost.gpSetState("status.load_fail", [gpPath])
 		return
-	var gpSheets: Array = gpSheetsResult.gpPayload as Array
+	var gpPayload: Dictionary = gpSheetsResult.gpPayload as Dictionary
+	var gpSheets: Array = gpPayload.get("sheets", []) as Array
 	if gpSheets.is_empty():
 		gpHost.gpSetState("status.load_fail", [gpPath])
 		return
@@ -493,6 +496,19 @@ func gpReadProject(gpPath: String) -> void:
 	# 重建**每个**标签页，而不只是活动页：一个多图纸文件若其余图纸被静默丢弃，
 	# 在工程师打印那张缺页之前看起来一切正常。
 	gpHost.gpCenter.gpLoadSheets(gpSheets)
+	# ADR-43: install the container-level links AFTER the tabs are rebuilt (S3/S4 commands
+	# and DRC read them through gpCenter). Defensive re-typing: the payload array is already
+	# typed, but a future payload change must not crash the shell here.
+	# ADR-43：在标签页重建**之后**安装容器级连接（S3/S4 命令与 DRC 经 gpCenter 读取）。
+	# 防御性重铸类型：载荷数组本已带类型，但将来载荷变化不得让外壳在此崩溃。
+	var gpLinksNew: Array[GPOffPageLink] = []
+	var gpLinksRaw: Variant = gpPayload.get("links", null)
+	if gpLinksRaw is Array:
+		for gpL in gpLinksRaw as Array:
+			var gpModel: GPOffPageLink = gpL as GPOffPageLink
+			if gpModel != null:
+				gpLinksNew.append(gpModel)
+	gpHost.gpCenter.gpSetOffPageLinks(gpLinksNew)
 	gpHost.gpActiveCanvas().gpGraph = gpNewGraph
 	# swap the active document in the manager (resets dirty, announces the change on the bus).
 	# 在管理器中切换当前文档（重置脏标记并总线通告变更）。

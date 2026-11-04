@@ -57,6 +57,49 @@ signal gpMakeSymbolRequested(gpDraft: Dictionary)
 # 粘贴或复制管线**不**发出（副本不该用对话框打断粘贴）。
 signal gpLineCreated(gpEdgeId: String)
 
+# ADR-43 / S3: the user dropped a line's far end OUTSIDE the drawing frame (or asked an
+# existing connector to connect) — the host decides whether the "cross-sheet connection"
+# dialog opens. The canvas itself knows nothing about sheets' siblings.
+# ADR-43 / S3：用户把线的远端落在图框**之外**（或请求既有连接符连接）—— 由宿主决定是否
+# 打开「跨图纸连接」对话框。画布自身对兄弟图纸一无所知。
+signal gpCrossSheetRequested(gpFromRef: Dictionary, gpWorld: Vector2, gpKind: String,
+	gpSignalType: String)
+
+# ADR-43 / S3: the user asked a connector to jump to / sync with its peer end.
+# ADR-43 / S3：用户请求某连接符跳转到对端 / 与对端同步。
+signal gpJumpToPeerRequested(gpNodeId: String)
+signal gpSyncToPeerRequested(gpNodeId: String)
+
+# ADR-43 / S4 deletion case ①: the user pressed Delete on one or more CONNECTORS — the host
+# must confirm, then cascade the whole connection (link + peer connector) in one command.
+# ADR-43 / S4 删除情形①：用户对**连接符**按下了删除 —— 宿主先确认，再以单个命令级联删除
+# 整条连接（link + 对端连接符）。
+signal gpCrossSheetDeleteRequested(gpConnectorIds: Array[String])
+
+# ADR-43 / S3: an undo/redo just settled; it may have changed the container link table,
+# whose change NO model signal carries — the host republishes the render snapshot here.
+# ADR-43 / S3：一次撤销 / 重做刚落定；它可能改了容器 link 表，而这一变化**没有任何**
+# 模型信号携带 —— 宿主在此重发渲染快照。
+signal gpCrossSheetHistoryChanged()
+
+# W13-S8 (user request 2026-11-03, second connection logic): a connector is being dragged
+# ACROSS panes — the pointer left this canvas while dragging exactly one off-page connector.
+# The canvas reports the gesture live (global mouse position) so the host can highlight the
+# drop target in ANOTHER pane; it knows nothing about panes itself.
+# W13-S8（用户需求 2026-11-03，第二种连接逻辑）：连接符正被拖**出**本画布、跨向另一窗格
+# —— 恰好拖着一枚跨图纸连接符、指针离开了本画布矩形。画布实时上报手势（全局鼠标位置），
+# 使宿主能在**另一**窗格里高亮落点目标；画布自身对窗格一无所知。
+signal gpCrossPaneDragUpdated(gpNodeId: String, gpGlobal: Vector2)
+
+# The cross-pane drag was RELEASED: the host resolves the pane / node under the point and
+# either builds the link or discards the gesture.
+# 跨窗格拖拽**松手**：宿主解析该点下的窗格 / 图元，或建立连接、或丢弃手势。
+signal gpCrossPaneDropped(gpNodeId: String, gpGlobal: Vector2)
+
+# The cross-pane drag ended without a drop (ESC / tool reset) — clear the drop highlight.
+# 跨窗格拖拽未落点即结束（ESC / 工具复位）—— 清掉落点高亮。
+signal gpCrossPaneDragEnded()
+
 # (Minimum marquee drag distance now lives on GPCanvasMarquee.GP_MIN_DRAG, next to the
 # window/crossing rule it belongs with.)
 # （框选最小拖拽距离现位于 GPCanvasMarquee.GP_MIN_DRAG，与它所属的窗口/交叉规则放在一起。）
@@ -938,6 +981,41 @@ func _draw() -> void:
 	# 端点锚点位于最上层：它们是图纸上最小、最需要精确点中的目标，绝不能被橡皮筋或管线遮住。
 	if gpPortOps != null:
 		gpPortOps.gpDrawPorts(self)
+	# W13-S8: the cross-pane drop highlight — an accent rect around the target node's envelope.
+	# Painted LAST (above everything) and in a RESET transform, so the zoom can neither blur
+	# it nor scale it away: it is a pointing affordance, not drawing geometry.
+	# W13-S8：跨窗格落点高亮 —— 目标图元包络四周的 accent 矩形。**最后**绘制（盖在一切之上）
+	# 且在复位变换下绘制，缩放既不能糊掉它也不能把它缩没：它是「指着用」的可及性图形，
+	# 不是图纸几何。
+	if _gpDropHighlight != "" and gpGraph != null:
+		var gpN: GPPIDNode = gpGraph.gpGetNode(_gpDropHighlight)
+		if gpN != null:
+			var gpR: Rect2 = gpNodeRect(gpN.gpInstanceId)
+			var gpA: Vector2 = gpScreenFromWorld(gpR.position)
+			var gpB: Vector2 = gpScreenFromWorld(gpR.end)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			draw_rect(Rect2(gpA, (gpB - gpA).abs()).grow(3.0), GP_DROP_HL_COLOR, false, 2.0)
+
+
+# The accent colour of the cross-pane drop highlight (W13-S8). Warm and unmistakable against
+# the blue-grey sheet palette.
+# 跨窗格落点高亮的 accent 色（W13-S8）。在蓝灰图纸配色上温暖且无法误认。
+const GP_DROP_HL_COLOR: Color = Color(1.0, 0.62, 0.20, 0.9)
+
+# The node currently highlighted as a cross-pane DROP TARGET ("" = none). The HOST sets it
+# while a connector is dragged over another pane; this canvas only paints and forgets.
+# 当前被高亮为跨窗格落点目标的图元（"" = 无）。连接符拖过另一窗格时由**宿主**设置；
+# 本画布只负责画与清除。
+var _gpDropHighlight: String = ""
+
+
+# Set / clear the drop highlight (idempotent; no repaint when unchanged).
+# 设置 / 清除落点高亮（幂等；未变化时不重绘）。
+func gpSetDropHighlight(gpNodeId: String) -> void:
+	if _gpDropHighlight == gpNodeId:
+		return
+	_gpDropHighlight = gpNodeId
+	queue_redraw()
 
 
 # The background overlay paint (grid / shapes / grips / marquee / connect-preview) now lives in
@@ -1822,6 +1900,15 @@ func gpHitEdge(gpWorld: Vector2) -> String:
 
 func gpReportRefusal(gpKey: String) -> void:
 	gpEditFacade.gpReportRefusal(gpKey)
+
+
+# ADR-43 / S3: forward a cross-sheet gesture to the host. Thin on purpose: the canvas has no
+# opinion about sibling sheets, it only transports the request.
+# ADR-43 / S3：把跨图纸手势转发给宿主。刻意保持单薄：画布对兄弟图纸没有意见，
+# 只负责传递请求。
+func gpRequestCrossSheet(gpFromRef: Dictionary, gpWorld: Vector2, gpKind: String,
+		gpSignalType: String) -> void:
+	gpCrossSheetRequested.emit(gpFromRef, gpWorld, gpKind, gpSignalType)
 
 
 # ============================ context menu ============================

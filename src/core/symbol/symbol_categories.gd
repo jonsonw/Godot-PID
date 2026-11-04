@@ -36,6 +36,24 @@ const GP_NOMINAL: Dictionary = {
 	"instrument": Vector2(22, 22),
 	"heat": Vector2(32, 24),
 	"general": Vector2(24, 24),
+	# Off-page connector flag (ADR-43 D3, W12-S2). Authored at the A1 scale directly (not rebased
+	# from an A3 measurement — this symbol has no C01 twin to measure). User feedback 2026-11-03,
+	# second round: the sheet glyph was STILL too small — doubled outright (48x5 -> 96x10), the
+	# reference height doubling with it (GPTextRole.GP_OFFPAGE_REF_MM 4 -> 8), which keeps the
+	# defining proportion of flag height = 1.25x text height. The height is therefore simply the
+	# reference text plus ~1/4 of itself. The WIDTH is adaptive per node (the generator hugs the
+	# text); 96 mm is the widest flag the envelope allows. The palette thumbnail normalises by
+	# the envelope, so the aspect-preserving doubling leaves the LIBRARY display unchanged —
+	# only the sheet glyph grew (the library convention "one size in the palette" is untouched).
+	# The 1.25x ratio is pinned cross-side in gp_test_offpage_symbol.gd.
+	# 跨图纸连接符旗标（ADR-43 D3，W12-S2）。直接按 A1 尺度定值（**不自** A3 实测翻倍 —— 本图元在
+	# C01 里没有可测的对应字形）。用户反馈 2026-11-03 第二轮：图面字形**仍**太小 —— 直接翻倍
+	#（48×5 → 96×10），编号字高随之翻倍（GPTextRole.GP_OFFPAGE_REF_MM 4 → 8），保持「旗标高 =
+	# 编号字高 1.25 倍」的定义性比例，故高度就是编号字高加约四分之一。宽度逐节点自适应
+	#（生成器紧贴文字）；96mm 是包络允许的最宽旗标。图元库缩略图按包络归一化，等比翻倍后
+	# **库内显示不变** —— 变大的只是图面字形（「图元库内大小一致」的约定原封不动）。
+	# 1.25 倍比例在 gp_test_offpage_symbol.gd 中从两侧交叉钉死。
+	"offpage": Vector2(96, 10),
 }
 
 # Fallback envelope for unknown categories, in millimetres.
@@ -70,6 +88,17 @@ const GP_STD_PORTS: Dictionary = {
 	"instrument": [
 		{"name": "proc", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
 		{"name": "sig", "pos": [0.5, 0.0], "dir": [0, -1], "type": "SIGNAL"},
+	],
+	# Off-page connector: the inbound "ref" on the face the line enters from, plus the
+	# outbound "cont" toward the served item (the generator overrides its position per
+	# instance so it rides the adaptive body's tip). The purpose is the PROCESS variant
+	# here; the signal variant overrides it in GP_PORT_OVERRIDES below.
+	# 跨图纸连接符：入站 "ref" 在管线进入的一面，外加朝向被服务对象的出站 "cont"
+	#（生成器逐实例覆盖其位置，使其贴着自适应主体的旗尖）。此处给的是工艺变体；信号变体
+	# 在下方 GP_PORT_OVERRIDES 中覆盖。
+	"offpage": [
+		{"name": "ref", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "cont", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
 	],
 }
 
@@ -165,6 +194,21 @@ const GP_PORT_OVERRIDES: Dictionary = {
 		{"name": "bottom", "pos": [0.5, 1.0], "dir": [0, 1], "type": "NOZZLE"},
 		{"name": "left", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
 		{"name": "right", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+	],
+	# ---- Off-Page 连接符（ADR-43 D3，W12-S2；手写包，不经生成器）----
+	# 与 GPSymbolPackOffpage 互为镜像：包自带端口，本表使「按类别新建的用户连接符」与内置同族
+	# 图元行为一致（工艺变体接管道、信号变体只接信号线）。
+	# ---- Off-page connectors (ADR-43 D3, W12-S2; hand-written pack, not generated) ----
+	# Mirrors GPSymbolPackOffpage. The pack carries its own ports; this table keeps a user
+	# connector created from the category behaving like its built-in twin (NOZZLE takes pipes,
+	# SIGNAL takes signal lines only).
+	"LOFFPAGE001": [
+		{"name": "ref", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "NOZZLE"},
+		{"name": "cont", "pos": [1.0, 0.5], "dir": [1, 0], "type": "NOZZLE"},
+	],
+	"LOFFPAGE002": [
+		{"name": "ref", "pos": [0.0, 0.5], "dir": [-1, 0], "type": "SIGNAL"},
+		{"name": "cont", "pos": [1.0, 0.5], "dir": [1, 0], "type": "SIGNAL"},
 	],
 }
 

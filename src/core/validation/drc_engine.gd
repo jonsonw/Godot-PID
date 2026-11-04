@@ -66,8 +66,14 @@ static func gpFinalize(gpFindings: Array[GPFinding],
 
 # Run every sheet + project-wide audits.
 # 跑全部图纸 + 工程级审计。
+# `gpLinks` turns on the container-level off-page audit (W12-S4); it is OPTIONAL so existing
+# sheet-only callers keep their exact behaviour, and callers passing a SHEET SUBSET must leave
+# it empty (the audit decides "missing" against the sheet list it is given).
+# `gpLinks` 打开容器级跨图纸审计（W12-S4）；参数可选，既有仅图纸调用方行为不变；传
+# **图纸子集**的调用方必须留空（审计以收到的图纸清单为「存在」基准）。
 static func gpRunProject(gpSheets: Array, gpDefs: Array[GPSymbolDef] = [],
-		gpStd: GPProjectStandard = null) -> Array[GPFinding]:
+		gpStd: GPProjectStandard = null,
+		gpLinks: Array[GPOffPageLink] = []) -> Array[GPFinding]:
 	var gpOut: Array[GPFinding] = []
 	var gpCfg: Dictionary = gpStd.gpValidationConfig() if gpStd != null \
 		else GPDRCConfig.gpDefaults()
@@ -82,6 +88,12 @@ static func gpRunProject(gpSheets: Array, gpDefs: Array[GPSymbolDef] = [],
 	for gpF in GPTagAudit.gpRun(gpSheets, gpDefs, gpStd):
 		if gpF != null and _gpAdoptProject(gpF, gpCfg, gpSheets):
 			gpOut.append(gpF)
+	# Container off-page audit (ADR-43 §2.5): only when a link table was handed in.
+	# 容器跨图纸审计（ADR-43 §2.5）：仅在传入 link 表时执行。
+	if not gpLinks.is_empty():
+		for gpF2 in GPOffPageAudit.gpRun(gpSheets, gpLinks, gpDefs):
+			if gpF2 != null and _gpAdoptProject(gpF2, gpCfg, gpSheets):
+				gpOut.append(gpF2)
 	# Sheet-number uniqueness is a project property.
 	_gpSheetNumberDuplicates(gpSheets, gpCfg, gpOut)
 	GPDRCConfig.gpApplyWaivers(gpOut, gpCfg)

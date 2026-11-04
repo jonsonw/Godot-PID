@@ -95,6 +95,22 @@ func gpOnPress(gpWorld: Vector2, gpShift: bool, gpDouble: bool) -> bool:
 		_gpReset()
 		gpCv.queue_redraw()
 		return true
+	# ADR-43 / S3: dropping the far end OUTSIDE the frame is not a dangling end — it is the
+	# gesture "this line continues on ANOTHER sheet". Only a bound start can continue (a
+	# connection from nothing would reference a line on neither sheet); the host opens the
+	# dialog and the COMMAND layer does the rest.
+	# ADR-43 / S3：远端落在图框**之外**不是悬空端 —— 它是「这条线在**另一张**图上续接」的
+	# 手势。只有已绑定的起点才能续接（无源之连在两张图上都没有可引用的线）；对话框由宿主
+	# 打开，其余由命令层完成。
+	var gpStartRef: Dictionary = _gpRefFrom(_gpStart)
+	var gpEndRef: Dictionary = _gpRefFrom(gpSnap)
+	if str(gpStartRef.get("node_id", "")) != "" \
+			and str(gpEndRef.get("node_id", "")) == "" and _gpOutsideFrame(gpWorld):
+		gpCv.gpRequestCrossSheet(gpStartRef, gpWorld, _gpKind(), _gpDefaultSignalType())
+		_gpReset()
+		gpCv.queue_redraw()
+		gpCv.gpEmitStatus()
+		return true
 	var gpId: String = gpCv.gpRequestConnectEdge(_gpRefFrom(_gpStart), _gpRefFrom(gpSnap),
 		_gpKind(), _gpDefaultSignalType(), SnapState.gpOrthoEnabled and not gpShift)
 	if gpId == "":
@@ -259,6 +275,18 @@ func _gpRefFrom(gpSnap: Dictionary) -> Dictionary:
 		var gpP: Vector2 = gpSnap.get("pos", Vector2.ZERO)
 		return {"node_id": "", "port_id": "", "point": [gpP.x, gpP.y]}
 	return {"node_id": gpNodeId, "port_id": str(gpSnap.get("port_id", ""))}
+
+
+# Whether a world point lies OUTSIDE the sheet's drawing frame — the "continue on another
+# sheet" gesture (ADR-43 / S3). No sheet means "never" (a sheetless canvas has no frame to
+# leave).
+# 世界坐标点是否落在图纸图框**之外** —— 即「在另一张图上续接」的手势（ADR-43 / S3）。
+# 无图纸时恒为 false（没有图纸就没有可离开的图框）。
+func _gpOutsideFrame(gpWorld: Vector2) -> bool:
+	var gpSheet: GPSheet = gpCtx.gpCv.gpSheet
+	if gpSheet == null:
+		return false
+	return not GPFrameGeometry.gpFrameRect(gpSheet).has_point(gpWorld)
 
 
 # Reject the pairs that have no meaning on a P&ID. Returns "" when the pair is acceptable,

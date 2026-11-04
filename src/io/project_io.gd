@@ -86,7 +86,7 @@ static func gpReadProject(gpPath: String) -> GPPIDGraph:
 # graph, because that is where GPPIDGraph keeps it today.
 # 工程级数据（meta / tag_rules / 内嵌图元包）取自**第一张**图纸的图，
 # 因为 GPPIDGraph 目前就是把它存在那里的。
-static func gpWriteSheets(gpSheets: Array, gpPath: String) -> int:
+static func gpWriteSheets(gpSheets: Array, gpPath: String, gpLinks: Array = []) -> int:
 	if gpSheets.is_empty():
 		return FAILED
 	var gpFilePath: String = gpEnsurePidExt(gpPath)
@@ -113,6 +113,33 @@ static func gpWriteSheets(gpSheets: Array, gpPath: String) -> int:
 	gpOut["sheets"] = gpSheetsOut
 	gpOut["kind"] = GPSchemaMigrate.GP_KIND_PROJECT
 	gpOut["meta"]["sheets"] = gpSheetsOut.size()
+	# ADR-43: container-level cross-sheet links go out under the HISTORIC "cross_links" key
+	# (reserved by the multi-document era; the migration chain preserves it). The key is
+	# written ONLY when links exist, and the array is sorted by id so repeated saves are
+	# byte-stable. A single-sheet project can never carry a VALID link (both ends would sit
+	# in one sheet), so the caller passing an empty array here is the normal path.
+	# ADR-43：容器级跨图纸连接写入历史预留键 "cross_links"（多文档时代预留、迁移链已保全）。
+	# 键仅在确有连接时写出，且数组按 id 排序使重复保存字节稳定。单图纸工程不可能有**合法**
+	# link（两端会同处一张图），调用方传空数组即常规路径。
+	if not gpLinks.is_empty():
+		# Sort the MODEL objects first (the comparator is typed for GPOffPageLink), THEN
+		# serialise. Sorting the dict array instead fails the comparator's Object typing —
+		# GUT caught it as "Cannot convert argument 1 from Dictionary to Object" and the
+		# sort silently never happened.
+		# 先对**模型对象**排序（比较器的形参类型是 GPOffPageLink），再序列化。
+		# 若直接排字典数组，比较器的 Object 形参失配 —— GUT 以
+		# 「Cannot convert argument 1 from Dictionary to Object」抓到，且排序静默失效。
+		var gpModels: Array[GPOffPageLink] = []
+		for gpL in gpLinks:
+			var gpModel: GPOffPageLink = gpL as GPOffPageLink
+			if gpModel != null:
+				gpModels.append(gpModel)
+		if not gpModels.is_empty():
+			gpModels.sort_custom(GPOffPageLink.gpCompareId)
+			var gpLinksOut: Array = []
+			for gpModel in gpModels:
+				gpLinksOut.append(gpModel.gpToDict())
+			gpOut["cross_links"] = gpLinksOut
 	var gpWrite: GPIOResult = GPAtomicFile.gpWriteJsonAtomic(gpFilePath, gpOut)
 	if not gpWrite.gpIsOk():
 		return FAILED
@@ -120,25 +147,29 @@ static func gpWriteSheets(gpSheets: Array, gpPath: String) -> int:
 
 
 # Result-typed variant of gpWriteSheets(). / gpWriteSheets() 的结果类型版本。
-static func gpWriteSheetsResult(gpSheets: Array, gpPath: String) -> GPIOResult:
-	var gpErr: int = gpWriteSheets(gpSheets, gpPath)
+static func gpWriteSheetsResult(gpSheets: Array, gpPath: String, gpLinks: Array = []) -> GPIOResult:
+	var gpErr: int = gpWriteSheets(gpSheets, gpPath, gpLinks)
 	if gpErr != OK:
 		return GPIOResult.gpFailure("io.write_failed", "status.save_fail", gpPath)
 	return GPIOResult.gpSuccess("io.saved", gpPath)
 
 
-# Read a project as a list of sheets. Works for v1/v2/v3 alike: a single-sheet archive
-# comes back as a ONE-element array, so callers need no special case.
-# 把工程读成图纸列表。对 v1/v2/v3 一视同仁：单图纸存档返回**单元素**数组，
-# 故调用方无需特例分支。
-static func gpReadSheets(gpPath: String) -> GPIOResult:
+# Read a project as a list of sheets PLUS the container-level off-page links (ADR-43).
+# Works for v1/v2/v3 alike: a single-sheet archive comes back as a ONE-element sheet array
+# and an EMPTY link array, so callers need no special case. Historic {from_doc,...}
+# cross_links entries are read-tolerated as skipped (ADR-43 D2).
+# 把工程读成「图纸列表 + 容器级跨图纸连接」（ADR-43）。对 v1/v2/v3 一视同仁：单图纸存档
+# 返回**单元素**图纸数组与**空**连接数组，调用方无需特例分支。历史 {from_doc,…} 形状的
+# cross_links 读取时容忍跳过（ADR-43 D2）。
+static func gpReadSheetsWithLinks(gpPath: String) -> GPIOResult:
 	var gpRead: GPIOResult = GPProjectImport.gpReadArchive(gpPath)
 	if not gpRead.gpIsOk():
 		return gpRead
 	var gpV3: Dictionary = gpRead.gpPayload as Dictionary
 	if gpV3.is_empty():
 		GPSymbolLibrary.gpSetDocSizeScale(1.0)
-		return GPIOResult.gpSuccessWith([GPSheet.gpNew("sheet-1", "", 0)], "io.loaded", gpPath)
+		return GPIOResult.gpSuccessWith(
+			{"sheets": [GPSheet.gpNew("sheet-1", "", 0)], "links": []}, "io.loaded", gpPath)
 	# P0-5: set the shared library's symbol scale BEFORE any sheet / user pack is rebuilt.
 	# The previous document may have left a legacy 0.5 active; registering this archive's
 	# packs against the wrong scale would double-shrink (or double-grow) them.
@@ -195,7 +226,40 @@ static func gpReadSheets(gpPath: String) -> GPIOResult:
 					gpSheetObj.gpAssignNumber(gpStd.gpSheetNumberFor(gpNoIdx + 1))
 				gpSheetObj.gpApplyProjectInfo(gpStd)
 			gpNoIdx += 1
-	return GPIOResult.gpSuccessWith(gpSheetsOut, "io.loaded", gpPath)
+	# ADR-43: rebuild the container-level links. Only the NEW record shape enters the
+	# model; historic shape entries are skipped (and stay untouched on disk until the
+	# next save, which rebuilds the container from models — the same policy as every
+	# other project-level section).
+	# ADR-43：重建容器级连接。仅新记录形状进入模型；历史形状条目跳过（磁盘上原样保留，
+	# 直到下一次保存按模型重建容器 —— 与其他工程级数据段同一策略）。
+	var gpLinksOut: Array[GPOffPageLink] = []
+	# Typed as Variant then guarded: a hand-edited file may carry cross_links as a dict or
+	# scalar, and `null as Array` would crash the loop below instead of degrading.
+	# 以 Variant 读取并加守卫：手改文件可能把 cross_links 写成字典或标量，
+	# `null as Array` 会让下面的循环崩溃而非优雅降级。
+	var gpRawLinks: Variant = gpV3.get("cross_links", null)
+	if gpRawLinks is Array:
+		for gpRaw in gpRawLinks as Array:
+			if not (gpRaw is Dictionary):
+				continue
+			var gpLink: GPOffPageLink = GPOffPageLink.gpFromDict(gpRaw as Dictionary)
+			if gpLink != null:
+				gpLinksOut.append(gpLink)
+	return GPIOResult.gpSuccessWith({"sheets": gpSheetsOut, "links": gpLinksOut},
+		"io.loaded", gpPath)
+
+
+# Backward-compatible wrapper: sheets only. / 兼容包装：仅图纸列表。
+# Kept for callers that do not care about links (and for older tests); new shell code
+# should call gpReadSheetsWithLinks() so links are not silently dropped.
+# 供不关心连接的调用方（及既有测试）使用；新的外壳代码应调 gpReadSheetsWithLinks()，
+# 否则连接会被静默丢弃。
+static func gpReadSheets(gpPath: String) -> GPIOResult:
+	var gpRead: GPIOResult = gpReadSheetsWithLinks(gpPath)
+	if not gpRead.gpIsOk():
+		return gpRead
+	var gpPayload: Dictionary = gpRead.gpPayload as Dictionary
+	return GPIOResult.gpSuccessWith(gpPayload.get("sheets", []), "io.loaded", gpPath)
 
 
 # Result-typed variant of gpReadProject(): distinguishes "file missing/unreadable" from

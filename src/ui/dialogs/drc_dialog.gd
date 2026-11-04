@@ -25,6 +25,10 @@ const GP_MAX_LOGICAL: Vector2i = Vector2i(980, 760)
 
 var _gpCanvas: GPCanvas2D = null
 var _gpSheetsProvider: Callable = Callable()
+
+# Container link-table provider for the off-page audit (W12-S4).
+# 容器 link 表来源，供跨图纸审计用（W12-S4）。
+var _gpLinksProvider: Callable = Callable()
 var _gpFindings: Array[GPFinding] = []
 var _gpSheetNames: Dictionary = {}
 
@@ -130,11 +134,13 @@ func _gpBuild() -> void:
 
 # Open for a canvas / sheet provider. Re-runs on every open so the list is never stale.
 # 为某画布 / 图纸来源打开。每次打开都重跑，故列表绝不会过期。
-func gpOpenFor(gpCanvas: GPCanvas2D, gpSheetsProvider: Callable = Callable()) -> void:
+func gpOpenFor(gpCanvas: GPCanvas2D, gpSheetsProvider: Callable = Callable(),
+		gpLinksProvider: Callable = Callable()) -> void:
 	if _gpList == null:
 		_gpBuild()
 	_gpCanvas = gpCanvas
 	_gpSheetsProvider = gpSheetsProvider
+	_gpLinksProvider = gpLinksProvider
 	gpRun()
 	var gpHost: Window = get_parent().get_window() if get_parent() != null else null
 	GPWindowFit.gpPopupContentFitted(self, gpHost, GP_MIN_LOGICAL, GP_MAX_LOGICAL)
@@ -156,8 +162,11 @@ func gpRun() -> void:
 			var gpSheet: GPSheet = gpSheetRaw as GPSheet
 			if gpSheet != null:
 				_gpSheetNames[gpSheet.gpId] = gpSheet.gpName
+		var gpLinks: Array[GPOffPageLink] = []
+		if _gpLinksProvider.is_valid():
+			gpLinks = _gpLinksProvider.call() as Array[GPOffPageLink]
 		_gpFindings = GPDrcEngine.gpRunProject(gpSheets, _gpCanvas.gpDefs,
-			_gpCanvas.gpGraph.gpStandard)
+			_gpCanvas.gpGraph.gpStandard, gpLinks)
 	else:
 		_gpFindings = GPDrcEngine.gpRunSheet(_gpCanvas.gpGraph, _gpCanvas.gpSheet,
 			_gpCanvas.gpDefs, _gpCanvas.gpGraph.gpStandard)

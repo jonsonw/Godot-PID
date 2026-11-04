@@ -298,25 +298,50 @@ static func gpGlyphEntities(gpSpec: Dictionary, gpSize: Vector2, gpWT: Dictionar
 
 
 # Generator text lines: centred in the envelope, pitch 1.5x the sheet height — the SAME
-# layout _gpDrawTextLines paints, expressed as centred text entities.
+# layout _gpDrawTextLines paints, expressed as centred text entities. A generator may also
+# declare "text_above" / "text_below" (slots painted OUTSIDE the envelope — the off-page
+# legend layout) and "text_center_u" (the text column's centre in UNIT space, so text rides
+# the glyph BODY, not the envelope centre) — both mirrored from the renderer, formula for
+# formula, so screen and paper cannot disagree.
 # 生成器文字行：包络内居中、行距为图面字高 1.5 倍 —— 与 _gpDrawTextLines 画出的
-# 同一版式，表达为居中文字实体。
+# 同一版式，表达为居中文字实体。生成器还可声明 "text_above" / "text_below"（画在包络
+# **外**的槽位 —— 跨图纸图例版式）与 "text_center_u"（文字列中心，单位空间 —— 文字跟着
+# 字形**主体**走）—— 均从渲染器逐式镜像，屏幕与纸面不可能分家。
 static func gpGeneratorTexts(gpGen: Dictionary, gpNode: GPPIDNode, gpSize: Vector2,
 		gpWT: Dictionary, gpOut: Array[Dictionary]) -> void:
 	if gpGen.is_empty():
 		return
 	var gpLines: PackedStringArray = gpGen.get("text_lines", PackedStringArray()) as PackedStringArray
-	if not gpLines.is_empty():
+	var gpAbove: String = str(gpGen.get("text_above", ""))
+	var gpBelow: String = str(gpGen.get("text_below", ""))
+	# NO early return here: a generator may carry ONLY cells (the grid tables) — the cells
+	# block below must run even when no text slot is declared.
+	# 此处**不能**提前返回：生成器可能只带 cells（grid 表格）—— 未声明任何文字槽位时
+	# 下面的格子块也必须执行。
+	if not gpLines.is_empty() or gpAbove != "" or gpBelow != "":
 		# GPTextRole's mirrored tier (the render layer's GPSymbolView keeps its own literal;
 		# a test pins the two equal — core may not reference render).
 		# GPTextRole 的镜像档（render 层的 GPSymbolView 保留自己的字面量；由测试钉住二者
 		# 相等 —— core 不能引用 render）。
-		var gpMM: float = GPTextRole.GP_INLINE_TAG_MM * GPTextRole.GP_ANNOTATE_SCALE
+		# A generator may declare "text_mm": an ABSOLUTE height for content bounded by the glyph
+		# rather than by the user's tag preference (the off-page reference number, ADR-43 D3).
+		# The CANVAS reads the same key, so screen and paper cannot disagree on it.
+		# 生成器可声明 "text_mm"：为尺寸由字形（而非用户位号偏好）定界的内容给出**绝对**字高
+		#（跨图纸交叉编号，ADR-43 D3）。**画布**读同一个键，故屏幕与纸面在此不可能不一致。
+		var gpMM: float = float(gpGen.get("text_mm",
+			GPTextRole.GP_INLINE_TAG_MM * GPTextRole.GP_ANNOTATE_SCALE))
 		var gpPitch: float = gpMM * 1.5
 		var gpTotal: float = gpPitch * gpLines.size()
-		# Centred on the envelope centre = the local origin (same rect as the renderer's).
-		# 以包络中心 = 本地原点为中心（与渲染器同一矩形）。
+		# Centred on the envelope centre = the local origin (same rect as the renderer's). A
+		# generator that names "text_center_u" moves the column off the centre, through the spec
+		# box's uniform fit — the SAME mapping the renderer applies, mirrored here.
+		# 以包络中心 = 本地原点为中心（与渲染器同一矩形）。声明了 "text_center_u" 的生成器把
+		# 文字列移出中心，经 spec 盒的均匀适配 —— 与渲染器**同一**映射，逐式镜像于此。
 		var gpCx: float = 0.0
+		var gpSpec: Dictionary = gpGen.get("spec", {}) as Dictionary
+		if gpSpec.has("box") and gpGen.has("text_center_u"):
+			var gpBox: Rect2 = GPSymbolGeometry.gpUnitBox(gpSpec)
+			gpCx = (float(gpGen["text_center_u"]) - gpBox.get_center().x) * GPSymbolGeometry.gpFitScale(gpBox, gpSize)
 		var gpTop: float = -gpTotal * 0.5
 		for gpI in range(gpLines.size()):
 			var gpLine: String = gpLines[gpI]
@@ -326,6 +351,16 @@ static func gpGeneratorTexts(gpGen: Dictionary, gpNode: GPPIDNode, gpSize: Vecto
 			# "at" 是本行行距单元的**中心**，水平居中。
 			gpPushText(gpOut, _gpToWorld(Vector2(gpCx, gpTop + gpPitch * (float(gpI) + 0.5)), gpWT),
 				gpLine, gpMM, "c", GP_LAYER_ANNOTATION, GP_VALIGN_MIDDLE)
+		# The OUTSIDE slots, at the same quarter-line offsets the renderer paints: description
+		# above the top edge, medium below the bottom edge, both centred on the SAME column.
+		# **外部**槽位，与渲染器同一的四分之一行距偏移：描述在上缘之外、介质在下缘之外，
+		# 二者共用**同一**文字列。
+		if gpAbove != "":
+			gpPushText(gpOut, _gpToWorld(Vector2(gpCx, -gpSize.y * 0.5 - gpMM * 0.75), gpWT),
+				gpAbove, gpMM, "c", GP_LAYER_ANNOTATION, GP_VALIGN_MIDDLE)
+		if gpBelow != "":
+			gpPushText(gpOut, _gpToWorld(Vector2(gpCx, gpSize.y * 0.5 + gpMM * 0.75), gpWT),
+				gpBelow, gpMM, "c", GP_LAYER_ANNOTATION, GP_VALIGN_MIDDLE)
 	# Grid cells: the SAME cell rects the hit-test and the editor consume (local mm); the text
 	# lives in the node's props under the CELL KEY (the stage-3 contract), left-aligned with
 	# the 1 mm padding and the row-clamped height.
@@ -337,9 +372,9 @@ static func gpGeneratorTexts(gpGen: Dictionary, gpNode: GPPIDNode, gpSize: Vecto
 		var gpS: String = str(gpNode.gpProps.get(str(gpCell["key"]), ""))
 		if gpS.strip_edges() == "":
 			continue
-		var gpMM: float = minf(GPTextRole.GP_CELL_TEXT_MM, gpR.size.y * 0.62)
+		var gpCellMM: float = minf(GPTextRole.GP_CELL_TEXT_MM, gpR.size.y * 0.62)
 		gpPushText(gpOut, _gpToWorld(gpR.position + Vector2(1.0, gpR.size.y * 0.5), gpWT),
-			gpS, gpMM, "l", GP_LAYER_ANNOTATION, GP_VALIGN_MIDDLE)
+			gpS, gpCellMM, "l", GP_LAYER_ANNOTATION, GP_VALIGN_MIDDLE)
 
 
 # The tag: placed by the SAME pure placement the canvas uses, oriented flip-then-rotate

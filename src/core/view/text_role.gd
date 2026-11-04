@@ -83,6 +83,21 @@ const GP_FRAME_GRID_MM: float = 2.85
 const GP_ANNOTATE_SCALE: float = 2.0
 const GP_CELL_TEXT_MM: float = 4.4
 
+# Cross-reference number inside an off-page connector flag (ADR-43 D3, W12-S2).
+# 跨图纸连接符旗标内的交叉编号字高（ADR-43 D3，W12-S2）。
+# WHY AN ABSOLUTE VALUE AND NOT A MULTIPLE OF THE SETTING / 为何是绝对值而非设置的倍数：
+# the number must FIT INSIDE the flag, so its height is bounded by the ENVELOPE, not by the
+# user's tag preference — exactly the grid table's cell-text situation (GP_CELL_TEXT_MM).
+# 8.0 mm is the ×2 the user asked for on 2026-11-03 ("the connector on the sheet is too small —
+# at least double it"): the envelope doubled with it (96x10), keeping the defining proportion
+# of flag height = 1.25x text height. Both the canvas and the print model read THIS value, so
+# screen and paper agree by construction instead of by a mirrored literal.
+# 该号必须**塞进**旗标，故其高度由**包络**定界，而非由用户的位号偏好 —— 与表格格子字高
+#（GP_CELL_TEXT_MM）完全同一情形。8.0mm 是用户 2026-11-03 要求的 ×2（「图面上的连接符太小了
+# —— 至少扩大一倍」）：包络随之翻倍（96×10），保持「旗标高 = 编号字高 1.25 倍」的定义性比例。
+# 画布与打印模型都读**此处**，故屏幕与纸面**按构造**一致，而非靠一份镜像字面量。
+const GP_OFFPAGE_REF_MM: float = 8.0
+
 # Categories whose tag is an EQUIPMENT tag, i.e. the 4.5 mm tier.
 # 其位号属于**设备位号**（4.5mm 档）的类别。
 # C01 draws the vessel (T4750), the exchangers (H1007/H1008) and the pumps (P4711/P4712) at
@@ -97,7 +112,7 @@ const GP_EQUIPMENT_CATEGORIES: Array = ["tank", "heat", "pump"]
 # slope, insulation), all annotated at 3.0 mm like the valve labels next to them.
 # "general" 覆盖 C01 包中的在管管件（三通、异径管、接管嘴、盲板、人孔、坡度、保温），其标注与紧邻的
 # 阀门标注同为 3.0mm。
-const GP_INLINE_CATEGORIES: Array = ["valve", "instrument", "general"]
+const GP_INLINE_CATEGORIES: Array = ["valve", "instrument", "general", "offpage"]
 
 # Equipment tier divided by in-line tier: 4.5 / 3.0. The scale the standard prescribes BETWEEN
 # the two tiers, kept as a named constant so the ratio (not just the endpoints) is pinned.
