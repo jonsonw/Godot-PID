@@ -674,11 +674,12 @@ const GP_STRINGS: Dictionary = {
 	"offpage.sync_done":      { "zh": "契约属性已同步到对端", "en": "Contract attributes synced to the peer end" },
 	"offpage.jump_missing":   { "zh": "对端图纸未打开或已删除", "en": "The peer sheet is not open or was deleted" },
 	"offpage.status_created": { "zh": "跨图纸连接已创建（编号 %s）", "en": "Cross-sheet connection created (tag %s)" },
-	"offpage.insp_inherit":      { "zh": "继承源端编号", "en": "Inherit source line number" },
-	"offpage.insp_inherit_tip":  { "zh": "勾选：本段管线号跟随源端图纸，源端改号自动联动；取消勾选：本段编号独立（重编号亦跳过）。", "en": "Checked: this segment follows the source sheet's line number and re-syncs on source edits. Unchecked: this segment's number is independent (renumbering skips it too)." },
+	"offpage.insp_inherit":      { "zh": "继承源端属性", "en": "Inherit source attributes" },
+	"offpage.insp_inherit_tip":  { "zh": "勾选：本段显示源端的编号与全部管线属性（介质、管径等），只读，源端修改后自动联动；取消勾选：先快照源端当前值，之后本段可独立修改（重编号亦跳过）。", "en": "Checked: this segment shows the source's number and all line attributes (medium, diameter, ...) read-only and re-syncs on source edits. Unchecked: the source's current values are snapshotted first, then this segment is independently editable (renumbering skips it too)." },
 	"offpage.inherit_done":      { "zh": "对端延续段管线号已联动：%s", "en": "Continuation segment line number synced: %s" },
-	"offpage.inherit_on":        { "zh": "已恢复继承源端编号（当前源端号：%s）", "en": "Inheriting the source line number again (current source tag: %s)" },
-	"offpage.inherit_off":       { "zh": "已取消继承：本段编号独立", "en": "Inheritance off: this segment's number is now independent" },
+	"offpage.attr_inherit_done": { "zh": "对端延续段属性已联动：%s", "en": "Continuation segment attributes synced: %s" },
+	"offpage.inherit_on":        { "zh": "已恢复继承源端属性（当前源端号：%s）", "en": "Inheriting the source attributes again (current source tag: %s)" },
+	"offpage.inherit_off":       { "zh": "已取消继承：已快照源端当前值，本段编号与属性独立", "en": "Inheritance off: source values snapshotted; this segment's number and attributes are now independent" },
 	"offpage.inherit_fail":      { "zh": "对端管线号联动失败：%s", "en": "Peer line number sync failed: %s" },
 	# ---- D24: cross-sheet refusal reasons (machine keys from the create/sync commands;
 	# reported with the "offpage.refuse_" prefix — never shown as a bare key). ----

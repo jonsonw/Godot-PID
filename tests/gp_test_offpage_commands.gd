@@ -827,3 +827,123 @@ func gpTestDeleteRefusesAMissingLink() -> void:
 		"a link that is no longer in the table refuses to cascade")
 	gpCheck((gpRig["peer"] as GPPIDGraph).gpGetNode(gpPeerId) != null,
 		"and the peer connector is untouched")
+
+
+# ---- full-attribute inherit (user feedback 2026-11-04, round 2) ----
+# ---- 全属性继承（用户反馈 2026-11-04 第二轮）----
+
+# The inheritable key set: every engineering attribute EXCEPT the number (it follows via the
+# dedicated tag path) and the drawing-local ones (kind / signal type / arrow / tag
+# visibility belong to each sheet).
+# 可继承键集合：除编号（走专用编号通道）与绘图本地项（类型 / 信号类型 / 箭头 / 号显隐
+# 属于每张图纸）外的全部工程属性。
+func gpTestInheritKeysExcludeTagAndDrawingLocals() -> void:
+	var gpG: GPPIDGraph = _gpGraph()
+	var gpE: GPPIDEdge = gpG.gpNewEdge("e-1", "n1", "n2")
+	gpE.gpAttrs["dn"] = "50"
+	var gpKeys: Array[String] = GPInspector.gpEdgeInheritKeys(gpE, null)
+	gpCheck(gpKeys.has("dn") and gpKeys.has("medium") and gpKeys.has("spec") \
+		and gpKeys.has("insulation"), "the pipe identity fields are inheritable")
+	gpCheck(gpKeys.has("design_pressure") and gpKeys.has("design_temp"),
+		"the general engineering defaults are inheritable")
+	gpCheck(not gpKeys.has("tag"),
+		"the number follows the dedicated tag path, never this set")
+	gpCheck(not gpKeys.has("kind") and not gpKeys.has("show_arrow") \
+		and not gpKeys.has("show_tag") and not gpKeys.has("signal_type"),
+		"drawing-local keys never inherit")
+	# An imported / project-standard extra attribute is inheritable too ("all properties").
+	# 导入 / 项目标准的额外属性同样可继承（「所有属性」）。
+	gpE.gpAttrs["pipe_class"] = "B1F"
+	gpCheck(GPInspector.gpEdgeInheritKeys(gpE, null).has("pipe_class"),
+		"an extra edge attribute is inheritable too")
+	# A signal line carries no pipeline attributes: nothing to inherit.
+	# 信号线不带管线属性：无可继承。
+	var gpSig: GPPIDEdge = gpG.gpNewEdge("e-2", "n1", "n2")
+	gpSig.gpKind = GPPIDEdge.GP_SIGNAL
+	gpCheck(GPInspector.gpEdgeInheritKeys(gpSig, null).is_empty(),
+		"a signal edge inherits nothing")
+
+
+# The batch blind-write is ONE undo step for the whole block: execute, undo, redo each move
+# ALL keys together, and an identical write refuses (no empty undo step stacked).
+# 批量盲写对整个属性块是**一个**撤销步：执行、撤销、重做都让**全部**键一起动，且相同值
+# 写入被拒（不压入空转撤销步）。
+func gpTestBatchAttrsIsOneUndoStep() -> void:
+	var gpG: GPPIDGraph = _gpGraph()
+	var gpE: GPPIDEdge = gpG.gpNewEdge("e-1", "n1", "n2")
+	gpG.gpAddEdge(gpE)
+	gpE.gpAttrs["dn"] = "50"
+	gpE.gpAttrs["medium"] = "W"
+	var gpCtx: GPCommandContext = GPCommandContext.new(gpG, GPIdGen.new())
+	var gpCmd: GPSetEdgeAttrsCommand = GPSetEdgeAttrsCommand.new("e-1",
+		{"dn": "80", "spec": "B1F", "medium": null})
+	gpCheck(gpCmd.gpExecute(gpCtx), "the batch executes")
+	gpEq(str(gpE.gpAttrs.get("dn", "")), "80", "an existing key is overwritten")
+	gpEq(str(gpE.gpAttrs.get("spec", "")), "B1F", "a new key is created")
+	gpCheck(not gpE.gpAttrs.has("medium"), "null clears the key (single-key contract)")
+	gpCmd.gpUndo(gpCtx)
+	gpEq(str(gpE.gpAttrs.get("dn", "")), "50", "undo restores the overwritten key")
+	gpCheck(not gpE.gpAttrs.has("spec"), "undo erases the key the batch created")
+	gpEq(str(gpE.gpAttrs.get("medium", "")), "W", "undo restores the cleared key")
+	gpCmd.gpRedo(gpCtx)
+	gpEq(str(gpE.gpAttrs.get("dn", "")), "80", "redo replays the same writes")
+	gpCheck(not gpE.gpAttrs.has("medium"), "redo clears again")
+	var gpNoop: GPSetEdgeAttrsCommand = GPSetEdgeAttrsCommand.new("e-1", {"dn": "80"})
+	gpCheck(not gpNoop.gpExecute(gpCtx), "an identical write refuses, no empty step")
+	# Undo after a refused no-op restores the SAME state, not a half-synced one.
+	# 被拒的空转之后撤销恢复的仍是**同一**状态，而不是「同步了一半」。
+	gpNoop.gpUndo(gpCtx)
+	gpEq(str(gpE.gpAttrs.get("dn", "")), "80", "undo after a refused write changes nothing")
+	gpEq(str(gpE.gpAttrs.get("spec", "")), "B1F",
+		"and the created key survives the refused write")
+
+
+# Execute / undo / redo each notify the graph exactly once (B3), like every other command.
+# 执行 / 撤销 / 重做各恰好通知图一次（B3），与其它命令一致。
+func gpTestBatchAttrsNotifiesOncePerStep() -> void:
+	var gpG: GPPIDGraph = _gpGraph()
+	var gpE: GPPIDEdge = gpG.gpNewEdge("e-1", "n1", "n2")
+	gpG.gpAddEdge(gpE)
+	var gpHits: Array[int] = [0]
+	gpG.gpGraphChanged.connect(func() -> void: gpHits[0] += 1)
+	var gpCtx: GPCommandContext = GPCommandContext.new(gpG, GPIdGen.new())
+	var gpCmd: GPSetEdgeAttrsCommand = GPSetEdgeAttrsCommand.new("e-1", {"dn": "80"})
+	gpCheck(gpCmd.gpExecute(gpCtx), "the batch executes")
+	gpEq(gpHits[0], 1, "execute notifies exactly once")
+	gpCmd.gpUndo(gpCtx)
+	gpEq(gpHits[0], 2, "undo notifies too (B3)")
+	gpCmd.gpRedo(gpCtx)
+	gpEq(gpHits[0], 3, "redo notifies too")
+
+
+# The batch write is the propagation's own DOWNSTREAM end: it must never emit
+# gpEdgeAttrsCommitted, or each propagated write would fan out again and never terminate.
+# The inspector path emits exactly once with the non-number keys.
+# 批量写入是传播自身的**下游端**：绝不 emit gpEdgeAttrsCommitted，否则每次传播写入都会再次
+# 扇出、永不收敛。属性面板路径则恰好发射一次，且只带非编号键。
+func gpTestBatchServiceWriteIsSilentInspectorPathEmits() -> void:
+	var gpG: GPPIDGraph = _gpGraph()
+	var gpE: GPPIDEdge = gpG.gpNewEdge("e-1", "n1", "n2")
+	gpG.gpAddEdge(gpE)
+	gpE.gpAttrs["dn"] = "80"
+	var gpSvc: GPEditService = GPEditService.new()
+	gpSvc.gpBindGraph(gpG, GPIdGen.new())
+	var gpHits: Array[int] = [0]
+	var gpLastKeys: Array = [null]
+	gpSvc.gpEdgeAttrsCommitted.connect(func(_gpId: String, gpKeys: Array[String]) -> void:
+		gpHits[0] += 1
+		gpLastKeys[0] = gpKeys)
+	gpCheck(gpSvc.gpSetEdgeAttrs("e-1", {"dn": "100", "spec": "B1F"}),
+		"the batch write succeeds")
+	gpEq(gpHits[0], 0, "the batch write emits NOTHING (recursion pin)")
+	gpCheck(gpSvc.gpApplyLineAttr("e-1", "dn", "150"), "the inspector path applies")
+	gpEq(gpHits[0], 1, "the inspector path emits exactly once")
+	var gpKeys: Array[String] = gpLastKeys[0] as Array[String]
+	gpCheck(gpKeys.size() == 1 and gpKeys[0] == "dn",
+		"the emission names the attribute, never \"tag\"")
+	gpCheck(gpSvc.gpSetEdgeAttr("e-1", "design_pressure", "1.0"),
+		"the single blind write succeeds")
+	gpEq(gpHits[0], 2, "the single blind write emits once too")
+	gpKeys = gpLastKeys[0] as Array[String]
+	gpCheck(gpKeys.size() == 1 and gpKeys[0] == "design_pressure",
+		"the single emission names its key")

@@ -35,6 +35,16 @@ var gpCtx: GPCommandContext = GPCommandContext.new()
 # 跨图纸延续边。服务本身保持单图纸 —— 对 link 与对端一无所知。
 signal gpEdgeTagCommitted(gpEdgeId: String, gpOldTag: String, gpNewTag: String)
 
+# Emitted after LINE ATTRIBUTES committed (user feedback 2026-11-04, round 2): the shell
+# listens on every sheet's service to propagate them to the followed continuation edge.
+# "tag" is never listed — a number edit goes out through gpEdgeTagCommitted instead. The
+# batch blind-write gpSetEdgeAttrs (the propagation's own downstream write) does NOT emit,
+# so a propagated write can never fan out again.
+# 管线**属性**落账后发射（用户反馈 2026-11-04 第二轮）：外壳监听每张图纸的服务，把它们传播
+# 到跟随中的延续边。"tag" 永不出现在列表里 —— 编号编辑经 gpEdgeTagCommitted 出场。批量盲写
+# gpSetEdgeAttrs（传播自身的下游写入）**不**发射，故传播写入绝不会再扇出。
+signal gpEdgeAttrsCommitted(gpEdgeId: String, gpKeys: Array[String])
+
 # Undo/redo history for this document.
 # 本文档的撤销 / 重做历史。
 var gpStack: GPCommandStack = GPCommandStack.new()
@@ -766,6 +776,16 @@ func gpApplyLineAttrs(gpEdgeId: String, gpAttrs: Dictionary) -> bool:
 		gpCtx.gpGraph.gpAdoptStandard(gpCtx.gpTags.gpStandard)
 	var gpCmd: GPSetLineAttrsCommand = GPSetLineAttrsCommand.new(gpEdgeId, gpAttrs)
 	if gpStack.gpDo(gpCmd, gpCtx):
+		# Report the non-number keys; the re-rendered number already went out (or will go
+		# out) through gpEdgeTagCommitted on the tag path.
+		# 报告非编号键；重渲染后的号已经（或将要）经编号路径的 gpEdgeTagCommitted 出场。
+		var gpKeys: Array[String] = []
+		for gpKeyRaw in gpAttrs.keys():
+			var gpK: String = str(gpKeyRaw)
+			if gpK != "tag":
+				gpKeys.append(gpK)
+		if not gpKeys.is_empty():
+			gpEdgeAttrsCommitted.emit(gpEdgeId, gpKeys)
 		return true
 	gpLastRefusal = gpCmd.gpRefusal
 	gpLastRefusalDetail = gpCmd.gpRefusalDetail
@@ -787,6 +807,21 @@ func gpApplyLineAttr(gpEdgeId: String, gpKey: String, gpValue: Variant) -> bool:
 # 设置一个约定属性（dn / medium / spec / insulation / show_arrow / show_tag / …）。
 func gpSetEdgeAttr(gpEdgeId: String, gpKey: String, gpValue: Variant) -> bool:
 	var gpCmd: GPSetEdgeAttrCommand = GPSetEdgeAttrCommand.new(gpEdgeId, gpKey, gpValue)
+	if gpStack.gpDo(gpCmd, gpCtx):
+		if gpKey != "tag":
+			var gpKeys: Array[String] = [gpKey]
+			gpEdgeAttrsCommitted.emit(gpEdgeId, gpKeys)
+		return true
+	return false
+
+
+# Blind-write SEVERAL edge attributes as ONE undo step (GPSetEdgeAttrsCommand). This is the
+# cross-sheet inherit propagation's own write path, so it deliberately does NOT emit
+# gpEdgeAttrsCommitted — a propagated write must never fan out again.
+# 一个撤销步内盲写**多条**边属性（GPSetEdgeAttrsCommand）。这是跨图纸继承传播自身的写入路径，
+# 故刻意**不**发射 gpEdgeAttrsCommitted —— 传播写入绝不能再扇出。
+func gpSetEdgeAttrs(gpEdgeId: String, gpValues: Dictionary) -> bool:
+	var gpCmd: GPSetEdgeAttrsCommand = GPSetEdgeAttrsCommand.new(gpEdgeId, gpValues)
 	return gpStack.gpDo(gpCmd, gpCtx)
 
 
