@@ -203,3 +203,44 @@ func gpTestPasteOrphanBecomesTopLevel() -> void:
 	gpCmd.gpExecute(_gpCtx(gpB))
 	gpEq(gpB.gpNodes.size(), 1, "子件仍粘贴 / the child is pasted")
 	gpEq(gpB.gpNodes[0].gpParentUid, "", "宿主缺失时降为顶层 / an absent host makes it top-level")
+
+
+func gpTestCopyStripsLinkIdFromConnector() -> void:
+	# D11: a copied connector is pasted as an UNCONNECTED connector — the clipboard must not
+	# carry link_id, or the paste becomes a "ghost flag" showing the real peer number.
+	# D11：复制出的连接符粘贴后是**未连接**连接符 —— 剪贴板不得携带 link_id，否则粘贴出的
+	# 是显示真实对端编号的「幽灵旗标」。
+	_gpClearClipboard()
+	var gpG: GPPIDGraph = _gpGraphA()
+	# Turn n1 into a cross-sheet connector (props carry the link binding).
+	# 把 n1 变成跨图纸连接符（props 携带 link 绑定）。
+	var gpN1: GPPIDNode = gpG.gpGetNode("n1")
+	gpN1.gpProps[GPOffPageLink.GP_KEY_LINK_ID] = "offpg-0001"
+	var gpSvc: GPEditService = GPEditService.new()
+	gpSvc.gpBindGraph(gpG, GPIdGen.new(), null)
+	# 2 nodes + the edge between them = 3 captured objects.
+	# 2 节点 + 其间连线 = 3 个捕获对象。
+	gpEq(gpSvc.gpCopySelection(["n1", "n2"], []), 3, "two nodes + edge copied / 复制两节点与连线")
+	gpEq(gpSvc.gpLastCopyStrippedLinks, 1, "one connector stripped / 剥离一枚连接符")
+	var gpCopied: Dictionary = GPClipboard.gpNodes()[0] as Dictionary
+	var gpProps: Dictionary = gpCopied.get("props", {}) as Dictionary
+	gpCheck(not gpProps.has(GPOffPageLink.GP_KEY_LINK_ID),
+		"clipboard node has no link_id / 剪贴板节点无 link_id")
+	# The SOURCE is untouched: stripping is a clipboard-only value semantics.
+	# **源对象不动**：剥离只是剪贴板层面的值语义。
+	gpEq(str(gpN1.gpProps.get(GPOffPageLink.GP_KEY_LINK_ID, "")), "offpg-0001",
+		"source keeps its link / 源连接符保留连接")
+	# And a paste of that payload produces a node without link_id too.
+	# 且该载荷粘贴出的节点同样无 link_id。
+	var gpB: GPPIDGraph = GPPIDGraph.new()
+	var gpCmd: GPPasteClipboardCommand = GPPasteClipboardCommand.new(
+		GPClipboard.gpNodes(), GPClipboard.gpEdges(), GPClipboard.gpShapes())
+	gpCmd.gpExecute(_gpCtx(gpB))
+	gpEq(gpB.gpNodes.size(), 2, "two nodes pasted / 粘贴两个节点")
+	var gpPastedProps: Dictionary = gpB.gpNodes[0].gpProps as Dictionary
+	gpCheck(not gpPastedProps.has(GPOffPageLink.GP_KEY_LINK_ID),
+		"pasted node has no link_id / 粘贴节点无 link_id")
+	# A plain (non-connector) copy reports zero strips.
+	# 普通（非连接符）复制报告零剥离。
+	gpSvc.gpCopySelection(["n2"], [])
+	gpEq(gpSvc.gpLastCopyStrippedLinks, 0, "plain copy strips nothing / 普通复制零剥离")

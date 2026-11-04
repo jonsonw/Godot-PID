@@ -299,6 +299,43 @@ func gpTestMediumInheritsFromSourceLine() -> void:
 	gpEq(str((gpRig["links"][0] as GPOffPageLink).gpAttrs.get("medium", "")),
 		"NAOH 32%", "the medium is inherited from the source line, not hand-typed")
 
+# D19: the source line is PORT-DIRECTED — the inbound "ref" edge is the source even when a
+# "cont" edge sits EARLIER in the array (the old "first touching edge" rule would have
+# inherited from the wrong line on a Y-connected connector).
+# D19：源管线**按端口定向** —— 即使 cont 口边在数组里**更靠前**，入站 ref 边才是源
+#（旧的「第一条触及边」规则会让 Y 形接法的连接符从错误的线上继承）。
+func gpTestSourceEdgeIsPortDirected() -> void:
+	var gpRig: Dictionary = _gpRig()
+	var gpLocal: GPPIDGraph = gpRig["local"]
+	var gpConn: GPPIDNode = gpLocal.gpNewNode("c-1", GP_ID_PIPE, "", Vector2(20, 20), {})
+	gpLocal.gpAddNode(gpConn)
+	# The WRONG source first: a continuation-port edge, earliest in the array.
+	# 错误的源在前：cont 口边，数组最早。
+	var gpCont: GPPIDEdge = gpLocal.gpNewEdgeEx("e-c",
+		{"node_id": "c-1", "port_id": "cont"}, {"node_id": "nX", "port_id": "p1"},
+		GPPIDEdge.GP_PROCESS, "", "")
+	gpLocal.gpAddEdge(gpCont)
+	gpCont.gpAttrs["medium"] = "WRONG-SOURCE"
+	# The RIGHT source second: the inbound ref edge.
+	# 正确的源在后：入站 ref 边。
+	var gpRef: GPPIDEdge = gpLocal.gpNewEdgeEx("e-r",
+		{"node_id": "n1", "port_id": "p1"}, {"node_id": "c-1", "port_id": "ref"},
+		GPPIDEdge.GP_PROCESS, "", "")
+	gpLocal.gpAddEdge(gpRef)
+	gpRef.gpAttrs["medium"] = "NAOH 32%"
+	var gpPeer: GPPIDGraph = gpRig["peer"]
+	var gpVessel: GPPIDNode = gpPeer.gpNewNode("v-1", "LTANK001", "T-101",
+		Vector2(400, 300), {})
+	gpPeer.gpAddNode(gpVessel)
+	var gpCmd: GPCrossSheetCreateCommand = GPCrossSheetCreateCommand.new(
+		{"node_id": "c-1", "port_id": "ref"}, GPPIDEdge.GP_PROCESS, "", Vector2.ZERO,
+		Vector2(50, 60), "sheet-1", "sheet-2", "7", gpPeer, gpRig["links"], true, "c-1",
+		{}, {"node_id": "v-1", "port_id": "p1"})
+	gpCheck(gpCmd.gpExecute(gpRig["ctx"]), "the mode B served gesture is accepted")
+	gpEq(str((gpRig["links"][0] as GPOffPageLink).gpAttrs.get("medium", "")),
+		"NAOH 32%", "the REF-port edge is the source regardless of array order / "
+		+ "不论数组顺序，ref 口边才是源")
+
 
 # The peer continuation edge INHERITS the source line's number (user feedback 2026-11-04):
 # mode B inherits the existing pipeline's tag; mode A inherits the tag the command itself
@@ -489,14 +526,25 @@ func gpTestServedGhostRefusesCleanly() -> void:
 func gpTestLeftColumnStacksTopDown() -> void:
 	var gpFrame: Rect2 = Rect2(0, 0, 841, 594)
 	var gpEnv: Vector2 = Vector2(96, 10)
-	var gpIds: Array[String] = [GP_ID_PIPE, GP_ID_SIGNAL]
-	var gpFirst: Vector2 = GPOffPageIndex.gpNextLeftSlot(null, gpFrame, gpEnv, gpIds)
+	# D16: the member test is the CATEGORY predicate now (a def lookup callable in the shell;
+	# here the default library's own defs), so a custom/derived connector stacks as well.
+	# D16：成员判定改走**类别**判谓（外壳里是 def 查找 Callable；此处用默认符号库的 def），
+	# 自定义/派生连接符同样参与堆叠。
+	var gpDefs: Array[GPSymbolDef] = GPSymbolLibrary.gpDefaultDefs()
+	var gpLookup: Callable = func(gpSymId: String) -> GPSymbolDef:
+		for gpD in gpDefs:
+			if gpD != null and gpD.gpId == gpSymId:
+				return gpD
+		return null
+	var gpIsConn: Callable = func(gpN: GPPIDNode) -> bool:
+		return GPOffPageIndex.gpIsConnectorNode(gpN, gpLookup)
+	var gpFirst: Vector2 = GPOffPageIndex.gpNextLeftSlot(null, gpFrame, gpEnv, gpIsConn)
 	gpCheck(gpFirst.x < gpEnv.x * 2.0, "the column hugs the frame's left edge")
 	gpCheck(gpFirst.y < gpEnv.y * 3.0, "an empty column starts near the top")
 	var gpG: GPPIDGraph = GPPIDGraph.new()
 	gpG.gpAddNode(gpG.gpNewNode("c1", GP_ID_PIPE, "", Vector2(gpFirst.x, gpFirst.y), {}))
 	gpG.gpAddNode(gpG.gpNewNode("c2", GP_ID_PIPE, "", Vector2(700, 100), {}))
-	var gpNext: Vector2 = GPOffPageIndex.gpNextLeftSlot(gpG, gpFrame, gpEnv, gpIds)
+	var gpNext: Vector2 = GPOffPageIndex.gpNextLeftSlot(gpG, gpFrame, gpEnv, gpIsConn)
 	gpCheck(gpNext.y > gpFirst.y + gpEnv.y * 2.0,
 		"the next slot sits below the lowest column member")
 	gpCheck(absf(gpNext.x - gpFirst.x) < 0.001, "the column keeps its x")
@@ -1023,3 +1071,92 @@ func gpTestUnlinkRefusesAMissingLink() -> void:
 		"a link no longer in the table refuses to unlink")
 	gpCheck(gpLocalGraph.gpGetNode(str(gpLink.gpA.get(GPOffPageLink.GP_KEY_NODE, ""))) != null,
 		"and the local flag keeps its link reference")
+
+
+# D16: a USER-PACK connector (no builtin id, no def in the default library) still stacks in
+# the left column when its props carry link_id — the props prove the role.
+# D16：**用户包**连接符（非内置 id、默认库无 def）只要 props 带 link_id 就参与左列堆叠
+# —— props 证明身份。
+func gpTestUserPackConnectorStacks() -> void:
+	var gpFrame: Rect2 = Rect2(0, 0, 841, 594)
+	var gpEnv: Vector2 = Vector2(96, 10)
+	var gpDefs: Array[GPSymbolDef] = GPSymbolLibrary.gpDefaultDefs()
+	var gpLookup: Callable = func(gpSymId: String) -> GPSymbolDef:
+		for gpD in gpDefs:
+			if gpD != null and gpD.gpId == gpSymId:
+				return gpD
+		return null
+	var gpIsConn: Callable = func(gpN: GPPIDNode) -> bool:
+		return GPOffPageIndex.gpIsConnectorNode(gpN, gpLookup)
+	var gpFirst: Vector2 = GPOffPageIndex.gpNextLeftSlot(null, gpFrame, gpEnv, gpIsConn)
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	var gpUser: GPPIDNode = gpG.gpNewNode("u1", "EUSRCUSTCONN", "",
+		Vector2(gpFirst.x, gpFirst.y), {})
+	gpUser.gpProps[GPOffPageLink.GP_KEY_LINK_ID] = "xlink-1"
+	gpG.gpAddNode(gpUser)
+	var gpNext: Vector2 = GPOffPageIndex.gpNextLeftSlot(gpG, gpFrame, gpEnv, gpIsConn)
+	gpCheck(gpNext.y > gpFirst.y + gpEnv.y * 2.0,
+		"a user-pack connector dictates the stacking / 用户包连接符参与堆叠")
+	# And WITHOUT the props claim (and no def) it is not a column member.
+	# 而无 props 声称（且无 def）时不是列成员。
+	var gpG2: GPPIDGraph = GPPIDGraph.new()
+	gpG2.gpAddNode(gpG2.gpNewNode("u2", "EUSRCUSTCONN", "",
+		Vector2(gpFirst.x, gpFirst.y), {}))
+	var gpNext2: Vector2 = GPOffPageIndex.gpNextLeftSlot(gpG2, gpFrame, gpEnv, gpIsConn)
+	gpCheck(absf(gpNext2.y - (gpFrame.position.y + gpEnv.y * 1.5)) < 0.001,
+		"a def-less, claim-less symbol is ignored / 无定义无声称的符号被忽略")
+
+
+# D17 (R4): the FULL snap — the drop point picks the nearest frame edge, and the flag lands
+# in THAT side's connector column/row (same stacking family as the left column), never at
+# the drop point itself.
+# D17（R4）：**完整吸附** —— 松手点只选最近的图框边，旗标落进**该边**的连接符列/行
+#（与左列同一套堆叠家族），绝不落在松手点本身。
+func gpTestSnapSlotPicksNearestEdge() -> void:
+	var gpFrame: Rect2 = Rect2(0, 0, 841, 594)
+	var gpEnv: Vector2 = Vector2(96, 10)
+	var gpDefs: Array[GPSymbolDef] = GPSymbolLibrary.gpDefaultDefs()
+	var gpLookup: Callable = func(gpSymId: String) -> GPSymbolDef:
+		for gpD in gpDefs:
+			if gpD != null and gpD.gpId == gpSymId:
+				return gpD
+		return null
+	var gpIsConn: Callable = func(gpN: GPPIDNode) -> bool:
+		return GPOffPageIndex.gpIsConnectorNode(gpN, gpLookup)
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	# Nearest-edge choice: a drop far to the RIGHT snaps into the right column.
+	# 最近边选择：图框右侧远处的松手点吸附进**右**列。
+	var gpRight: Vector2 = GPOffPageIndex.gpSnapSlotFor(Vector2(900, 300), gpG,
+		gpFrame, gpEnv, gpIsConn)
+	gpCheck(absf(gpRight.x - (gpFrame.end.x - gpEnv.x * 0.55)) < 0.001,
+		"the right drop hugs the frame's right edge / 右侧松手贴右缘")
+	gpCheck(absf(gpRight.y - (gpFrame.position.y + gpEnv.y * 1.5)) < 0.001,
+		"an empty right column starts near the top / 空右列从顶部附近起排")
+	# A drop above the frame snaps into the top ROW (stacks along +x).
+	# 图框上方的松手点吸附进**上**行（沿 +x 堆叠）。
+	var gpTop: Vector2 = GPOffPageIndex.gpSnapSlotFor(Vector2(400, -50), gpG,
+		gpFrame, gpEnv, gpIsConn)
+	gpCheck(absf(gpTop.y - (gpFrame.position.y + gpEnv.y * 0.55)) < 0.001,
+		"the top drop hugs the frame's top edge / 上方松手贴上缘")
+	gpCheck(absf(gpTop.x - (gpFrame.position.x + gpEnv.x * 1.5)) < 0.001,
+		"an empty top row starts near the left / 空上行从左侧附近起排")
+	# Stacking: a member in the right column pushes the next slot DOWN by the pitch.
+	# 堆叠：右列已有成员时，下一槽位按行距下移。
+	gpG.gpAddNode(gpG.gpNewNode("c1", GP_ID_PIPE, "", Vector2(gpRight.x, gpRight.y), {}))
+	var gpRight2: Vector2 = GPOffPageIndex.gpSnapSlotFor(Vector2(900, 300), gpG,
+		gpFrame, gpEnv, gpIsConn)
+	gpCheck(absf(gpRight2.y - (gpRight.y + gpEnv.y * 3.0)) < 0.001,
+		"the next right slot stacks 3 envelopes down / 右列下一槽下移 3 倍包络")
+	# A member parked in the LEFT band never dictates the RIGHT column.
+	# 停在**左**带的成员不支配**右**列。
+	var gpG2: GPPIDGraph = GPPIDGraph.new()
+	gpG2.gpAddNode(gpG2.gpNewNode("c2", GP_ID_PIPE, "",
+		Vector2(gpFrame.position.x + gpEnv.x * 0.55, gpFrame.position.y + 50.0), {}))
+	var gpRight3: Vector2 = GPOffPageIndex.gpSnapSlotFor(Vector2(900, 300), gpG2,
+		gpFrame, gpEnv, gpIsConn)
+	gpCheck(absf(gpRight3.y - (gpFrame.position.y + gpEnv.y * 1.5)) < 0.001,
+		"a left-band member does not stack the right column / 左带成员不堆叠右列")
+	# Print-safety: EVERY snapped slot lies INSIDE the frame (no off-paper prints).
+	# 打印安全：**每个**吸附槽位都在图框**内**（绝无出纸打印）。
+	for gpSlot in [gpRight, gpTop, gpRight2, gpRight3]:
+		gpCheck(gpFrame.has_point(gpSlot), "the slot is inside the frame / 槽位在图框内")

@@ -403,6 +403,18 @@ func _gpAddLinkSection(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> void:
 	# 由此处同步。
 	_gpAddTextField(I18n.gpTr("offpage.insp_target"),
 		GPOffPageIndex.gpTargetTagFor(gpNode), "", true)
+	# D09 (user feedback 2026-11-04): the cross-sheet number becomes EDITABLE — ADR-43 D4
+	# promised "auto-numbered + hand-editable". The row commits through the same attr-edit
+	# channel with the reserved key "tag"; the shell routes it to GPSetLinkTagCommand. The
+	# status suffix keeps the honest 自动/手改 state visible (renumber skips manual).
+	# D09（用户反馈 2026-11-04）：跨图编号开放**编辑** —— ADR-43 D4 承诺的「自动编号 +
+	# 允许手工改」。该行走同一属性提交通道，用保留键 "tag"；外壳路由进 GPSetLinkTagCommand。
+	# 状态后缀让「自动/手改」保持可见（重编号跳过手改）。
+	var gpManual: bool = bool(gpLink.gpAttrs.get("tag_manual", false))
+	_gpAddLinkField(gpLink.gpInstanceId, I18n.gpTr("offpage.insp_tag")
+		+ ("（%s）" % I18n.gpTr("offpage.insp_tag_manual") if gpManual
+			else "（%s）" % I18n.gpTr("offpage.insp_tag_auto")),
+		gpLink.gpTag, "tag")
 	for gpKey in GPOffPageLink.GP_CONTRACT_KEYS:
 		var gpK: String = gpKey
 		_gpAddLinkField(gpLink.gpInstanceId,

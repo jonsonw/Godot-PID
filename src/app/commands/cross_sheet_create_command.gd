@@ -365,11 +365,17 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 
 # ============================ private ============================
 
-# The SOURCE line: the first edge touching the LOCAL connector. In mode A it is the edge the
-# command itself just drew into the connector; in mode B it is the pipeline that already
-# feeds the existing connector. Both are "the line the user connected FROM".
-# **源管线**：触及本端连接符的第一条边。模式 A 下是命令刚画进连接符的那条边；模式 B 下是
-# 已接入既有连接符的那根管线。两者都是「用户发起连接的那条线」。
+# The SOURCE line: the edge feeding the LOCAL connector. In mode A it is the edge the command
+# itself just drew into the connector; in mode B it is the pipeline that already feeds the
+# existing connector. D19 (2026-11-04): PORT-DIRECTED — the inbound "ref" port wins (that is
+# where the line the user connected FROM enters); a connector with several ref edges gets the
+# first in array order (deterministic), and the attr_split DRC rule is what reports the
+# disagreement such a Y deserves. The any-port fallback only serves user-pack connectors
+# whose ports do not follow the builtin vocabulary.
+# **源管线**：接入本端连接符的那条边。模式 A 下是命令刚画进连接符的边；模式 B 下是已接入
+# 既有连接符的管线。D19（2026-11-04）：**按端口定向** —— 入站「ref」口优先（用户接入的线
+# 正是从这里进来）；多条 ref 边时按数组顺序取第一条（确定性），这种 Y 形接法的分歧由
+# attr_split DRC 规则报告。任意端口回落仅服务于端口不走内置词表的用户包连接符。
 func _gpSourceEdge(gpCtx: GPCommandContext) -> GPPIDEdge:
 	if gpCtx == null or gpCtx.gpGraph == null:
 		return null
@@ -379,14 +385,25 @@ func _gpSourceEdge(gpCtx: GPCommandContext) -> GPPIDEdge:
 		if _gpLink != null else gpExistingLocalNodeId
 	if gpLocalId == "":
 		return null
+	var gpAny: GPPIDEdge = null
 	for gpE in gpCtx.gpGraph.gpEdges:
 		if gpE == null:
 			continue
-		if str(gpE.gpFromRef.get("node_id", "")) != gpLocalId \
-				and str(gpE.gpToRef.get("node_id", "")) != gpLocalId:
+		var gpFromN: String = str(gpE.gpFromRef.get("node_id", ""))
+		var gpToN: String = str(gpE.gpToRef.get("node_id", ""))
+		if gpFromN != gpLocalId and gpToN != gpLocalId:
 			continue
-		return gpE
-	return null
+		# Inbound ref wins; remember the first ANY-port edge as the fallback.
+		# 入站 ref 优先；同时记住第一条任意端口边作回落。
+		var gpAtRef: bool = (gpFromN == gpLocalId \
+				and str(gpE.gpFromRef.get("port_id", "")) == GPSymbolPackOffpage.GP_PORT_NAME) \
+			or (gpToN == gpLocalId \
+				and str(gpE.gpToRef.get("port_id", "")) == GPSymbolPackOffpage.GP_PORT_NAME)
+		if gpAtRef:
+			return gpE
+		if gpAny == null:
+			gpAny = gpE
+	return gpAny
 
 
 # The source line's number ("" for signal lines — they carry none by convention — or when

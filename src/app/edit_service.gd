@@ -69,6 +69,13 @@ var gpLastRefusal: String = ""
 # 与 gpLastRefusal 配套的人类明细（如「第 3 段（管线号）：应为 4 位数字」）。
 var gpLastRefusalDetail: String = ""
 
+# How many cross-sheet connectors the most recent gpCopySelection() had their link_id STRIPPED
+# from (D11): a pasted copy must be an UNCONNECTED connector — it never inherits the original's
+# cross-drawing link. The UI surfaces this as a status note.
+# 最近一次 gpCopySelection() 里被**剥离** link_id 的跨图纸连接符数量（D11）：粘贴出的副本必须是
+# **未连接**连接符 —— 绝不继承原件的跨图纸连接。UI 把它作为状态提示呈现。
+var gpLastCopyStrippedLinks: int = 0
+
 # Old->new mapping produced by the most recent gpRenumberTags(), so the shell can offer the
 # audit CSV. Empty when no renumbering has run.
 # 最近一次 gpRenumberTags() 产生的「旧→新」映射，供外壳提供对照表 CSV。
@@ -774,6 +781,20 @@ func gpUnlinkOffPage(gpLink: GPOffPageLink, gpLinks: Array[GPOffPageLink],
 	return gpOk
 
 
+# D09: hand-edit a link's cross-sheet number — one undo step, attrs["tag_manual"] set so
+# sheet renumbering skips a deliberate choice. The store touch announces it to every host.
+# D09：手改 link 的跨图编号 —— 一个撤销步，置 attrs["tag_manual"] 使图纸重编号跳过
+# 刻意选择。store touch 把变更通告给所有宿主。
+func gpSetLinkTag(gpLink: GPOffPageLink, gpNewTag: String) -> bool:
+	if gpLink == null:
+		return false
+	var gpCmd: GPSetLinkTagCommand = GPSetLinkTagCommand.new(gpLink, gpNewTag)
+	var gpOk: bool = gpStack.gpDo(gpCmd, gpCtx)
+	if gpOk and gpLinkStore != null:
+		gpLinkStore.gpTouch("link_tag")
+	return gpOk
+
+
 # Rename an edge's line number. / 修改一条边的管线号。
 func gpSetEdgeTag(gpEdgeId: String, gpTag: String, gpPropagated: bool = false) -> bool:
 	gpLastRefusal = ""
@@ -978,10 +999,24 @@ func gpCopySelection(gpNodeIds: Array[String], gpShapeIdxs: Array[int]) -> int:
 			if not (gpUid in gpIds):
 				gpIds.append(gpUid)
 	var gpNodes: Array = []
+	gpLastCopyStrippedLinks = 0
 	for gpId in gpIds:
 		var gpN: GPPIDNode = gpCtx.gpGraph.gpGetNode(gpId)
 		if gpN != null:
-			gpNodes.append(gpN.gpToDict())
+			var gpD: Dictionary = gpN.gpToDict()
+			# D11: a copied connector must NOT carry its cross-sheet link — the paste is a
+			# fresh, UNCONNECTED connector. Keeping link_id would make a "ghost flag" that
+			# shows the real peer number, cannot jump/sync, and survives deleting the
+			# original. Strip it here (the single capture point for both copy paths).
+			# D11：被复制的连接符**不得**携带它的跨图纸连接 —— 粘贴出的应是一枚**未连接**的
+			# 新连接符。保留 link_id 会造出「幽灵旗标」：显示真实对端编号、无法跳转/同步、
+			# 且删除原件后仍不消失。在此剥离（两条复制路径唯一的捕获点）。
+			var gpProps: Dictionary = gpD.get("props", {}) as Dictionary
+			if gpProps.has(GPOffPageLink.GP_KEY_LINK_ID):
+				gpProps.erase(GPOffPageLink.GP_KEY_LINK_ID)
+				gpD["props"] = gpProps
+				gpLastCopyStrippedLinks += 1
+			gpNodes.append(gpD)
 	var gpSeen: Dictionary = {}
 	for gpId in gpIds:
 		gpSeen[gpId] = true

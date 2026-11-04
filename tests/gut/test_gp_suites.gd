@@ -93,7 +93,8 @@ const GP_METHOD_PREFIX: String = "gpTest"
 # 125 = 124 + gp_test_offpage_store.gd（W12-P2/A2 GPOffPageStore 变更汇流口与信号收口）。
 # 126 = 125 + gp_test_view_host.gd（W12-P2/A1 GPViewHostModel 视图宿主纯决策模型）。
 # 127 = 126 + gp_test_offpage_resolver.gd（W12-P2/A3 GPOffPageResolver 显式上下文派生解析）。
-const GP_EXPECTED_SUITES: int = 127
+# 128 = 127 + gp_test_offpage_report.gd（W12-P3/U5 GPOffPageReport 跨图纸连接报表）。
+const GP_EXPECTED_SUITES: int = 128
 
 # Engine errors the legacy suites are *expected* to emit. GUT fails any test that leaves an
 # error unhandled, so these are marked handled explicitly (see _gpHandleExpectedErrors).

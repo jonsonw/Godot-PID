@@ -1021,9 +1021,16 @@ func _gpCreateCrossLink(gpCanvas: GPCanvas2D, gpFromRef: Dictionary, gpKind: Str
 	# 孪生体落在对端图纸**左侧的连接符列**（用户反馈 2026-11-03：永远在左侧、自上而下堆叠）
 	# —— 绝不落在裸落点上，也绝不成为目标对象的子件。
 	var gpEnv: Vector2 = GPSymbolCategories.gpSizeFor(GPSymbolPackOffpage.GP_CATEGORY)
+	# D16: the column member test is the CATEGORY predicate (user-pack connectors stack too),
+	# not a builtin symbol-id list. The shell's own def lookup covers user packs.
+	# D16：列成员判定走**类别**判谓（用户包连接符同样参与堆叠），而非内置符号 id 名单。
+	# 外壳自带的 def 查找覆盖用户包。
+	var gpPeerLookup: Callable = func(gpSymId: String) -> GPSymbolDef:
+		return gpDefFor(gpSymId)
 	var gpPeerPos: Vector2 = GPOffPageIndex.gpNextLeftSlot(gpPeerSheet.gpGraph,
 		GPFrameGeometry.gpFrameRect(gpPeerSheet), gpEnv,
-		[GPSymbolPackOffpage.GP_ID_PIPE, GPSymbolPackOffpage.GP_ID_SIGNAL])
+		func(gpN: GPPIDNode) -> bool:
+			return GPOffPageIndex.gpIsConnectorNode(gpN, gpPeerLookup))
 	# The pick is the item the twin serves — but only a node that REALLY exists there (a
 	# stale pick degrades to a bare twin, exactly as the dialog path always did).
 	# 所选即孪生体要**服务**的对象 —— 但只认对端图上**真实存在**的节点（陈旧所选退化为
@@ -1055,7 +1062,7 @@ func _gpCreateCrossLink(gpCanvas: GPCanvas2D, gpFromRef: Dictionary, gpKind: Str
 		if gpKind == GPPIDEdge.GP_SIGNAL and gpSignalType == "":
 			gpSignalType = "ELECTRIC"
 	var gpLinkId: String = gpCanvas.gpActions.gpCrossSheetCreate(gpFromRef, gpKind,
-		gpSignalType, true, _gpClampIntoFrame(gpWorld, gpLocalSheet, gpEnv), gpPeerPos,
+		gpSignalType, true, _gpSnapLocalFlag(gpWorld, gpLocalSheet, gpEnv), gpPeerPos,
 		gpLocalSheet.gpId, gpPeerSheetId, gpPeerSheet.gpNumber, gpPeerSheet.gpGraph,
 		gpCenter.gpOffPageLinks, gpExistingLocal, {}, gpServedFinal)
 	if gpLinkId == "":
@@ -1140,9 +1147,22 @@ func _gpKindForConnector(gpNode: GPPIDNode) -> String:
 # point as outside the frame — clamp the local flag into the frame rect (pad = half an
 # offpage envelope) so it can never print off-paper. The full edge-snapping stays in P3
 # (R4); mode B (existing local connector) never consumes this position.
-# D17 最小止血（用户反馈 2026-11-04）：出图框手势的松手点**定义上**就在图框外 —— 把本端
-# 旗标钳进图框矩形（内边距 = 半个离页连接符包络），绝无打印出纸的可能。完整吸附留在 P3
-#（R4）；模式 B（本端既有连接符）不消费该位置。
+# D17 完整吸附（2026-11-04，R4）：出图框手势的松手点**只决定走向哪一侧** —— 本端旗标吸附
+# 进最近图框边的连接符列/行（与对端左列同一套堆叠家族），绝不落在松手点上。退化情形
+#（无图框）回落到钳制。模式 B（本端既有连接符）不消费该位置。
+func _gpSnapLocalFlag(gpWorld: Vector2, gpSheet: GPSheet, gpEnv: Vector2) -> Vector2:
+	if gpSheet == null or gpSheet.gpGraph == null:
+		return _gpClampIntoFrame(gpWorld, gpSheet, gpEnv)
+	var gpLookup: Callable = func(gpSymId: String) -> GPSymbolDef:
+		return gpDefFor(gpSymId)
+	return GPOffPageIndex.gpSnapSlotFor(gpWorld, gpSheet.gpGraph,
+		GPFrameGeometry.gpFrameRect(gpSheet), gpEnv,
+		func(gpN: GPPIDNode) -> bool:
+			return GPOffPageIndex.gpIsConnectorNode(gpN, gpLookup))
+
+
+# D17 最小止血的几何钳制（保留为退化回路与模式 B 语义兜底）：把本端旗标钳进图框矩形
+#（内边距 = 半个离页连接符包络）。
 func _gpClampIntoFrame(gpWorld: Vector2, gpSheet: GPSheet, gpEnv: Vector2) -> Vector2:
 	if gpSheet == null:
 		return gpWorld
@@ -1823,6 +1843,13 @@ func _gpOnLinkAttrEdit(gpLinkId: String, gpKey: String, gpValue: String) -> void
 	var gpCanvas: GPCanvas2D = gpActiveCanvas()
 	var gpLink: GPOffPageLink = _gpLinkById(gpLinkId)
 	if gpCanvas == null or gpLink == null:
+		return
+	# D09: the reserved key "tag" is NOT a contract attr — it is the cross-sheet number,
+	# which lives on the link itself (not the snapshot) and takes GPSetLinkTagCommand.
+	# D09：保留键 "tag" **不是**契约属性 —— 它是跨图编号，存于 link 本体（而非快照），
+	# 走 GPSetLinkTagCommand。
+	if gpKey == "tag":
+		gpCanvas.gpActions.gpSetLinkTag(gpLink, gpValue)
 		return
 	# D03: resolve the peer graph so the command can dirty BOTH ends — the contract
 	# snapshot drives the peer flag's derived text, so the peer canvas redraws too.

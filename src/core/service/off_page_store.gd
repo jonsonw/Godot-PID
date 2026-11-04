@@ -86,3 +86,27 @@ func gpReplaceAll(gpList: Array[GPOffPageLink]) -> void:
 ## 跳过通知，属违反契约。
 func gpTouch(gpReason: String = "attr") -> void:
 	gpChanged.emit(gpReason)
+
+
+## D09: re-mint every NON-manual link tag after a sheet renumber, as
+## "<peer (B) sheet number>-<seq>" — the same convention the create command uses. A link
+## whose attrs carry tag_manual is a deliberate hand choice and is skipped (identical to
+## edge renumbering). Pure over the link array + the {sheet_id -> number} map; returns the
+## number of tags actually rewritten.
+## D09：图纸重编号后重铸**非手改**的 link 编号，形如「<对端(B)图号>-<序号>」—— 与创建
+## 命令同一惯例。attrs 带 tag_manual 的 link 是刻意的手改选择，跳过（与边重编号一致）。
+## 对 link 数组 + {sheet_id -> 图号} 映射的纯函数；返回实际重写的编号数。
+static func gpRenumberTags(gpLinks: Array[GPOffPageLink], gpNumbers: Dictionary) -> int:
+	var gpCount: int = 0
+	var gpSeq: int = 0
+	for gpL in gpLinks:
+		gpSeq += 1
+		if gpL == null or bool(gpL.gpAttrs.get("tag_manual", false)):
+			continue
+		var gpPeerId: String = str(gpL.gpB.get(GPOffPageLink.GP_KEY_SHEET, ""))
+		var gpPeerNum: String = str(gpNumbers.get(gpPeerId, ""))
+		var gpWant: String = (gpPeerNum + "-" + str(gpSeq)) if gpPeerNum != "" else str(gpSeq)
+		if gpWant != gpL.gpTag:
+			gpL.gpTag = gpWant
+			gpCount += 1
+	return gpCount

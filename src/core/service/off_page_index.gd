@@ -246,24 +246,107 @@ static func gpTargetTagFor(gpNode: GPPIDNode) -> String:
 #   * y —— 已在列中的**最低**连接符之下（自上而下堆叠）；空列从图框顶部附近起排。
 # 用户停在列**外**的旗标不参与堆叠 —— 这一列属于自动落位家族。
 static func gpNextLeftSlot(gpGraph: GPPIDGraph, gpFrame: Rect2, gpEnv: Vector2,
-		gpConnectorIds: Array[String]) -> Vector2:
+		gpIsConnector: Callable) -> Vector2:
+	return gpNextEdgeSlot(gpGraph, gpFrame, gpEnv, gpIsConnector, "left")
+
+
+# D17 (2026-11-04, R4): the drop point picks the NEAREST frame edge, and the local flag snaps
+# into THAT edge's connector column/row — same stacking family as the left column. The drop
+# point only decides WHICH side; it never places the flag itself (no outside-the-frame
+# prints, no flags sitting on the frame line).
+# D17（2026-11-04，R4）：松手点只选**最近的图框边**，本端旗标吸附进**该边**的连接符
+# 列/行 —— 与左列同一套堆叠家族。松手点只决定走向哪一侧；旗标本身绝不落在松手点上
+#（杜绝出纸打印、杜绝压线旗标）。
+static func gpSnapSlotFor(gpWorld: Vector2, gpGraph: GPPIDGraph, gpFrame: Rect2,
+		gpEnv: Vector2, gpIsConnector: Callable) -> Vector2:
+	if gpFrame.size == Vector2.ZERO:
+		return gpWorld
+	var gpSides: Array = [
+		{"side": "left", "d": absf(gpWorld.x - gpFrame.position.x)},
+		{"side": "right", "d": absf(gpWorld.x - gpFrame.end.x)},
+		{"side": "top", "d": absf(gpWorld.y - gpFrame.position.y)},
+		{"side": "bottom", "d": absf(gpWorld.y - gpFrame.end.y)},
+	]
+	gpSides.sort_custom(func(gpA: Dictionary, gpB: Dictionary) -> bool:
+		return float(gpA["d"]) < float(gpB["d"]))
+	return gpNextEdgeSlot(gpGraph, gpFrame, gpEnv, gpIsConnector, str(gpSides[0]["side"]))
+
+
+# The next free slot ON ONE FRAME SIDE. Pure geometry + graph scan:
+#   * vertical sides (left/right) — a fixed column hugging the edge, stacking TOP-DOWN below
+#     the lowest member already in that side's band;
+#   * horizontal sides (top/bottom) — a fixed row, stacking LEFT-TO-RIGHT after the
+#     rightmost member in the band.
+# 某一条图框边上的下一个空槽位。纯几何 + 图扫描：
+#   * 竖边（左/右）—— 紧贴边缘的固定列，在该侧带内的**最低**成员之下自上而下堆叠；
+#   * 横边（上/下）—— 固定行，在该侧带内**最右**成员之右自左向右堆叠。
+static func gpNextEdgeSlot(gpGraph: GPPIDGraph, gpFrame: Rect2, gpEnv: Vector2,
+		gpIsConnector: Callable, gpSide: String) -> Vector2:
 	if gpFrame.size == Vector2.ZERO or gpEnv.x <= 0.0 or gpEnv.y <= 0.0:
 		return Vector2.ZERO
-	var gpColX: float = gpFrame.position.x + gpEnv.x * 0.55
-	var gpBandRight: float = gpFrame.position.x + gpFrame.size.x * 0.3
-	var gpBottom: float = -1e9
+	var gpVertical: bool = gpSide == "left" or gpSide == "right"
+	var gpColX: float = 0.0
+	var gpRowY: float = 0.0
+	var gpBandFar: float = 0.0
+	if gpSide == "left":
+		gpColX = gpFrame.position.x + gpEnv.x * 0.55
+		gpBandFar = gpFrame.position.x + gpFrame.size.x * 0.3
+	elif gpSide == "right":
+		gpColX = gpFrame.end.x - gpEnv.x * 0.55
+		gpBandFar = gpFrame.end.x - gpFrame.size.x * 0.3
+	elif gpSide == "top":
+		gpRowY = gpFrame.position.y + gpEnv.y * 0.55
+		gpBandFar = gpFrame.position.y + gpFrame.size.y * 0.3
+	else:
+		gpRowY = gpFrame.end.y - gpEnv.y * 0.55
+		gpBandFar = gpFrame.end.y - gpFrame.size.y * 0.3
+	var gpFar: float = -1e9
 	var gpHas: bool = false
 	if gpGraph != null:
 		for gpN in gpGraph.gpNodes:
-			if gpN == null or not gpConnectorIds.has(gpN.gpSymbolId):
+			# D16 (2026-11-04): the column member test is the PREDICATE the caller hands in —
+			# "def category == offpage" (+ the props-link_id fallback for user-pack
+			# connectors), NOT a builtin symbol-id list. A custom/derived connector now
+			# stacks instead of overlapping.
+			# D16（2026-11-04）：列成员判定交给调用方注入的**判谓** —— 「def 类别 == offpage」
+			#（外加用户包连接符的 props-link_id 兜底），而非内置符号 id 名单。自定义/派生
+			# 连接符从此参与堆叠而不是相互重叠。
+			if gpN == null or not bool(gpIsConnector.call(gpN)):
 				continue
-			if gpN.gpPosition.x > gpBandRight:
+			# A member of THIS side's band only; a flag parked elsewhere never dictates it.
+			# 只算**本侧**带内的成员；停在别处的旗标不参与。
+			var gpInBand: bool = (gpN.gpPosition.x <= gpBandFar) if gpSide == "left" \
+				else (gpN.gpPosition.x >= gpBandFar) if gpSide == "right" \
+				else (gpN.gpPosition.y <= gpBandFar) if gpSide == "top" \
+				else (gpN.gpPosition.y >= gpBandFar)
+			if not gpInBand:
 				continue
 			gpHas = true
-			gpBottom = maxf(gpBottom, gpN.gpPosition.y)
+			# Vertical sides stack along Y (below the lowest); horizontal sides along X.
+			# 竖边沿 Y 堆叠（最低者之下）；横边沿 X 堆叠。
+			gpFar = maxf(gpFar, gpN.gpPosition.y if gpVertical else gpN.gpPosition.x)
 	if not gpHas:
-		return Vector2(gpColX, gpFrame.position.y + gpEnv.y * 1.5)
+		if gpVertical:
+			return Vector2(gpColX, gpFrame.position.y + gpEnv.y * 1.5)
+		return Vector2(gpFrame.position.x + gpEnv.x * 1.5, gpRowY)
 	# Pitch = 3 envelope heights: the glyph itself plus clearance for the ABOVE/BELOW legend
 	# slots, which reach ~1 text height beyond the envelope on each side.
 	# 行距 = 3 倍包络高：字形本身，加上 / 下**图例槽位**的净空 —— 它们各自越出包络约一个字高。
-	return Vector2(gpColX, gpBottom + gpEnv.y * 3.0)
+	if gpVertical:
+		return Vector2(gpColX, gpFar + gpEnv.y * 3.0)
+	return Vector2(gpFar + gpEnv.x * 3.0, gpRowY)
+
+
+# The SHARED connector predicate (D16): a node is a column member when its definition says
+# category "offpage", or — for a user-pack symbol without a def — when its props carry a
+# link_id (the props prove the role, the same rule the create command applies).
+# 共享的连接符判谓（D16）：定义类别为 "offpage" 即列成员；无定义的用户包符号以 props 里的
+# link_id 兜底（props 证明身份 —— 与创建命令同一条规则）。
+static func gpIsConnectorNode(gpNode: GPPIDNode, gpDefLookup: Callable) -> bool:
+	if gpNode == null:
+		return false
+	if gpDefLookup.is_valid():
+		var gpDef: GPSymbolDef = gpDefLookup.call(gpNode.gpSymbolId) as GPSymbolDef
+		if gpDef != null:
+			return gpDef.gpCategory == "offpage"
+	return (gpNode.gpProps as Dictionary).has(GPOffPageLink.GP_KEY_LINK_ID)

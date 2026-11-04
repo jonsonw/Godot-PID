@@ -396,8 +396,15 @@ func gpRequestSetEndNote(gpEdgeId: String, gpIsFrom: bool, gpText: String) -> bo
 func gpRequestCopySelected() -> int:
 	if gpHost.gpGraph == null:
 		return 0
-	return gpHost.gpActions.gpCopySelection(gpHost.gpSelection.duplicate(),
+	var gpCount: int = gpHost.gpActions.gpCopySelection(gpHost.gpSelection.duplicate(),
 		gpHost.gpShapeSel.duplicate())
+	# D11: tell the user the copy will NOT carry the cross-sheet link — the honest semantics
+	# are "an unconnected connector", and silence would read like the link WAS copied.
+	# D11：告知用户副本**不会**携带跨图纸连接 —— 诚实语义是「一枚未连接的连接符」，
+	# 沉默会被读成「连接也一并复制了」。
+	if gpHost.gpActions.gpLastCopyStrippedLinks > 0:
+		gpReportRefusal("copy_link_stripped", "offpage.")
+	return gpCount
 
 
 # Paste the clipboard into the active sheet and select the pasted nodes (A6).

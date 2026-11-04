@@ -142,6 +142,15 @@ static func gpAll() -> Array[GPDrcRule]:
 		Callable(), "drc.offpage.kind_port", "drc.fix.offpage_fix_kind", true))
 	gpOut.append(GPDrcRule.gpMake("drc.offpage.duplicate", "offpage", "warning", 3,
 		Callable(), "drc.offpage.duplicate", "drc.fix.offpage_merge", true))
+	# D10 (2026-11-04): the two rules that give the K03 checklist its data — a dangling END
+	# (the connector's referenced port has no edge; WARNING, mid-edit legal) and GHOST
+	# membership (a connector claims a link that does not list it; ERROR).
+	# D10（2026-11-04）：给 K03 清单提供数据的两条规则 —— 悬空端（连接符被引用端口上没有边；
+	# WARNING，编辑中间态合法）与幽灵成员（连接符声称一条不认得它的 link；ERROR）。
+	gpOut.append(GPDrcRule.gpMake("drc.offpage.dangling_end", "offpage", "warning", 3,
+		Callable(), "drc.offpage.dangling_end", "drc.fix.offpage_connect_line", true))
+	gpOut.append(GPDrcRule.gpMake("drc.offpage.membership", "offpage", "error", 3,
+		Callable(), "drc.offpage.membership", "drc.fix.offpage_repair_link", true))
 
 	# ---- gated checks (honest "needs a data model" entries) ----
 	gpOut.append(_gpR("drc.topo.loop_number", "topo", "warning", 2,

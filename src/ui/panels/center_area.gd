@@ -753,6 +753,22 @@ func gpRenumberSheets() -> void:
 			gpSheet.gpApplyProjectInfo(gpStd)
 			gpTabBar.set_tab_title(gpI, _gpTabTitleOf(gpSheet))
 		gpI += 1
+	# D09: links FOLLOW the renumber — a NON-manual tag re-mints as
+	# "<peer(B) sheet number>-<seq>" (the creation convention); a manual tag is a deliberate
+	# choice and stays. A closed (hidden) sheet keeps its own number, so a link pointing at
+	# one still mints from the last number it had.
+	# D09：link **跟随**重编号 —— 非手改编号按「<对端(B)图号>-<序号>」重铸（与创建同惯例）；
+	# 手改编号是刻意选择，保持不动。关闭（隐藏）图纸保留自己的编号，指向它的 link 仍以
+	# 其最后编号铸号。
+	var gpNumbers: Dictionary = {}
+	for gpTabRaw in gpTabs:
+		var gpSheetNum: GPSheet = (gpTabRaw as Dictionary).get("sheet") as GPSheet
+		if gpSheetNum != null and gpSheetNum.gpId != "":
+			gpNumbers[gpSheetNum.gpId] = gpSheetNum.gpNumber
+	# The re-mint itself is a pure store function (headless-pinned); the refresh below
+	# republishes the render snapshot so the flags show the new numbers immediately.
+	# 重铸本身是 store 纯函数（headless 钉测）；下方刷新重发渲染快照，使旗标立即显示新号。
+	GPOffPageStore.gpRenumberTags(gpOffPageLinks, gpNumbers)
 	# Renumbering rewrites the very numbers the off-page flags display.
 	# 重编号改写的正是跨图纸旗标所显示的号。
 	gpRefreshOffPageContext()

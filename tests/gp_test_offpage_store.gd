@@ -183,3 +183,56 @@ func gpTestUnlinkTouchesStore() -> void:
 	gpSvc.gpStack.gpUndo(gpSvc.gpCtx)
 	gpEq(gpLinks.size(), 1, "undo restored the link / 撤销恢复了 link")
 	gpEq(gpReasons.size(), 2, "undo does not double-notify here / 撤销在此不多发通知")
+
+
+func gpTestLinkTagHandEditAndRenumber() -> void:
+	# D09: hand-editing a link's cross-sheet number is one undo step and marks tag_manual;
+	# the subsequent sheet renumber re-mints NON-manual tags as "<peer number>-<seq>" but
+	# leaves a deliberate manual choice alone.
+	# D09：手改 link 跨图编号是一个撤销步并置 tag_manual；随后的图纸重编号把**非手改**
+	# 编号重铸为「<对端图号>-<序号>」，但不动刻意的手改选择。
+	var gpL1: GPOffPageLink = GPOffPageLink.new()
+	gpL1.gpInstanceId = "xlink-1"
+	gpL1.gpTag = "2-1"
+	gpL1.gpB = {GPOffPageLink.GP_KEY_SHEET: "sheet-2"}
+	var gpL2: GPOffPageLink = GPOffPageLink.new()
+	gpL2.gpInstanceId = "xlink-2"
+	gpL2.gpTag = "2-2"
+	gpL2.gpB = {GPOffPageLink.GP_KEY_SHEET: "sheet-2"}
+	var gpLinks: Array[GPOffPageLink] = [gpL1, gpL2]
+	# Hand-edit L1's tag through the real command.
+	# 经真实命令手改 L1 的编号。
+	var gpCtx: GPCommandContext = GPCommandContext.new(GPPIDGraph.new(), GPIdGen.new(), null)
+	var gpCmd: GPSetLinkTagCommand = GPSetLinkTagCommand.new(gpL1, "5-9")
+	gpCheck(gpCmd.gpExecute(gpCtx), "hand edit accepted / 手改被接受")
+	gpEq(gpL1.gpTag, "5-9", "tag written / 编号已写")
+	gpCheck(bool(gpL1.gpAttrs.get("tag_manual", false)), "manual flag set / 手改标记已置")
+	# Renumber: sheet-2 becomes sheet 5. L2 (non-manual) follows; L1 (manual) stays.
+	# 重编号：sheet-2 变为图 5。L2（非手改）跟随；L1（手改）保持。
+	var gpReminted: int = GPOffPageStore.gpRenumberTags(gpLinks, {"sheet-2": "5"})
+	gpEq(gpReminted, 1, "exactly one tag re-minted / 恰好重铸一枚编号")
+	gpEq(gpL1.gpTag, "5-9", "manual tag survives / 手改编号保留")
+	gpEq(gpL2.gpTag, "5-2", "auto tag follows / 自动编号跟随")
+	# Undo restores BOTH the tag and the manual flag exactly.
+	# 撤销把编号与手改标记**同时**精确还原。
+	gpCmd.gpUndo(gpCtx)
+	gpEq(gpL1.gpTag, "2-1", "undo restores the tag / 撤销还原编号")
+	gpCheck(not bool(gpL1.gpAttrs.get("tag_manual", false)),
+		"undo restores the flag / 撤销还原手改标记")
+	# Redo re-applies. / 重做再应用。
+	gpCmd.gpRedo(gpCtx)
+	gpEq(gpL1.gpTag, "5-9", "redo re-applies / 重做再应用")
+	# Empty or unchanged tags are refused (no ambiguous "no number" flags, no dead undo step).
+	# 空号或同号被拒（不产生歧义的「无号」旗标，也不产生空撤销步）。
+	var gpCmdEmpty: GPSetLinkTagCommand = GPSetLinkTagCommand.new(gpL2, "  ")
+	gpCheck(not gpCmdEmpty.gpExecute(gpCtx), "empty tag refused / 空号被拒")
+	var gpCmdSame: GPSetLinkTagCommand = GPSetLinkTagCommand.new(gpL2, "5-2")
+	gpCheck(not gpCmdSame.gpExecute(gpCtx), "unchanged tag refused / 同号被拒")
+	# A link pointing at an UNKNOWN sheet falls back to the bare sequence (creation parity).
+	# 指向未知图纸的 link 回落为纯序号（与创建对齐）。
+	var gpL3: GPOffPageLink = GPOffPageLink.new()
+	gpL3.gpInstanceId = "xlink-3"
+	gpL3.gpB = {GPOffPageLink.GP_KEY_SHEET: "sheet-gone"}
+	gpLinks.append(gpL3)
+	GPOffPageStore.gpRenumberTags(gpLinks, {"sheet-2": "5"})
+	gpEq(gpL3.gpTag, "3", "unknown peer sheet -> bare seq / 未知对端图纸 -> 纯序号")

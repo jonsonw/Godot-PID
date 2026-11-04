@@ -26,6 +26,7 @@ extends RefCounted
 
 const GP_RULE_ORPHAN: String = "drc.offpage.orphan_link"
 const GP_RULE_UNPAIRED: String = "drc.offpage.unpaired"
+const GP_RULE_DANGLING: String = "drc.offpage.dangling_end"
 const GP_RULE_ATTR: String = "drc.offpage.attr_mismatch"
 const GP_RULE_KIND: String = "drc.offpage.kind_mismatch"
 const GP_RULE_DUP: String = "drc.offpage.duplicate"
@@ -48,6 +49,7 @@ static func gpRun(gpSheets: Array, gpLinks: Array[GPOffPageLink],
 			continue
 		_gpCheckEndpoints(gpL, gpIndex, gpOut)
 		_gpCheckUnpaired(gpL, gpIndex, gpOut)
+		_gpCheckDangling(gpL, gpIndex, gpOut)
 		_gpCheckAttrs(gpL, gpIndex, gpOut)
 		_gpCheckKind(gpL, gpIndex, gpOut)
 	_gpCheckStrays(gpLinks, gpIndex, gpOut)
@@ -198,23 +200,73 @@ static func _gpCheckUnpaired(gpL: GPOffPageLink, gpIndex: Dictionary,
 
 # Rule 2, direction 2 (needs the WHOLE link table, so it runs once, not per link): every
 # connector claiming a link_id must find that link in the table — a dangling claim means the
-# flag renders "?" forever and the pairing is broken.
+# flag renders "?" forever and the pairing is broken. D10 adds the missing half: a claim that
+# DOES exist but does not list this connector as an endpoint is a GHOST flag (typically a
+# pasted/older copy) — it renders a real number, cannot jump/sync, and survives deleting the
+# original; the copy/paste path strips link_id (D11) but archives written before that must
+# still be reported.
 # 规则 2 的方向 2（需要**整张** link 表，故只跑一次而非每 link）：每个声称 link_id 的
-# 连接符都必须在表中找到该 link —— 悬空的声称意味着旗标永远渲染 "?"，配对已断。
+# 连接符都必须在表中找到该 link —— 悬空的声称意味着旗标永远渲染 "?"，配对已断。D10 补上
+# 缺失的另一半：声称**存在**但并未把本连接符列为端点的，是**幽灵**旗标（多半是粘贴/旧
+# 副本）—— 它显示真实编号、无法跳转/同步、且删除原件后仍不消失；复制/粘贴路径已剥离
+# link_id（D11），但在此之前写出的旧档仍须被报告。
 static func _gpCheckStrays(gpLinks: Array[GPOffPageLink], gpIndex: Dictionary,
 		gpOut: Array[GPFinding]) -> void:
 	var gpKnown: Dictionary = {}
+	var gpMembers: Dictionary = {}
 	for gpL in gpLinks:
-		if gpL != null:
-			gpKnown[gpL.gpInstanceId] = true
+		if gpL == null:
+			continue
+		gpKnown[gpL.gpInstanceId] = true
+		for gpEnd in _gpEnds(gpL):
+			if gpEnd["node_id"] != "":
+				gpMembers[gpEnd["node_id"]] = true
 	for gpRec in (gpIndex["nodes"] as Dictionary).values():
 		var gpN: GPPIDNode = (gpRec as Dictionary).get("node") as GPPIDNode
 		if gpN == null:
 			continue
 		var gpClaim: String = str(gpN.gpProps.get(GPOffPageLink.GP_KEY_LINK_ID, ""))
-		if gpClaim == "" or gpKnown.has(gpClaim):
+		if gpClaim == "" or gpMembers.has(gpN.gpInstanceId):
 			continue
-		gpOut.append(_gpStrayF(gpClaim, gpN, (gpRec.get("sheet") as GPSheet).gpId))
+		var gpSheetId: String = (gpRec.get("sheet") as GPSheet).gpId
+		if gpKnown.has(gpClaim):
+			# D10 membership: the link EXISTS but does not own this connector — a ghost flag.
+			# D10 成员校验：link **存在**但不认得这个连接符 —— 幽灵旗标。
+			var gpF: GPFinding = GPFinding.gpMake(GP_RULE_UNPAIRED, GPFinding.GP_ERROR,
+				"drc.offpage.membership", [gpClaim, gpN.gpInstanceId]) \
+				.gpAs(GP_RULE_UNPAIRED, _gpHint(GP_RULE_UNPAIRED)) \
+				.gpOnEntity(GP_LINK_UID_PREFIX + gpClaim, gpSheetId)
+			gpF.gpOnNode(gpN.gpInstanceId, gpN.gpPosition)
+			gpOut.append(gpF)
+		else:
+			gpOut.append(_gpStrayF(gpClaim, gpN, gpSheetId))
+
+
+# D10 rule: dangling END — the link points at a connector whose referenced port has NO edge.
+# Mode B (panel pick) legally creates such a link mid-edit; the finding is a WARNING (it is
+# an unfinished drawing, not a broken one) and is exactly the data the K03 checklist needs.
+# D10 规则：悬空端 —— link 指向的连接符在其被引用的端口上**没有**任何边。模式 B（面板
+# 选图）在编辑中间态合法地产生这种 link；该发现为 WARNING（图纸未完成而非损坏），
+# 正是 K03 清单需要的数据。
+static func _gpCheckDangling(gpL: GPOffPageLink, gpIndex: Dictionary,
+		gpOut: Array[GPFinding]) -> void:
+	for gpEnd in _gpEnds(gpL):
+		var gpRec: Dictionary = (gpIndex["nodes"] as Dictionary).get(gpEnd["node_id"], {})
+		if gpRec.is_empty():
+			continue
+		if not bool(gpRec.get("connector", false)):
+			continue
+		var gpSheet: GPSheet = gpRec.get("sheet") as GPSheet
+		if not _gpEdgesAt(gpSheet.gpGraph, gpEnd["node_id"], gpEnd["port_id"]).is_empty():
+			continue
+		var gpNode: GPPIDNode = gpRec.get("node") as GPPIDNode
+		var gpF: GPFinding = GPFinding.gpMake(GP_RULE_DANGLING, GPFinding.GP_WARNING,
+			"drc.offpage.dangling_end", [_gpLabel(gpL),
+			"A" if gpEnd["end"] == "A" else "B", gpEnd["node_id"]]) \
+			.gpAs(GP_RULE_DANGLING, _gpHint(GP_RULE_DANGLING)) \
+			.gpOnEntity(GP_LINK_UID_PREFIX + gpL.gpInstanceId, gpSheet.gpId)
+		gpF.gpOnNode(gpNode.gpInstanceId, gpNode.gpPosition)
+		gpOut.append(gpF)
 
 
 # A stray claim has no link object to hang the uid on — the uid is the CLAIM itself.
@@ -399,8 +451,10 @@ static func _gpNodeF(gpL: GPOffPageLink, gpRule: String, gpMsgKey: String, gpPar
 	return gpF
 
 
-# Severity per plan §2.5: orphan/unpaired/kind are ERROR; attr/duplicate are WARNING.
-# 级别按方案 §2.5：orphan/unpaired/kind 为 ERROR；attr/duplicate 为 WARNING。
+# Severity per plan §2.5 + D10: orphan/unpaired/kind/membership are ERROR;
+# attr/duplicate/dangling are WARNING (an unfinished drawing is not a broken one).
+# 级别按方案 §2.5 + D10：orphan/unpaired/kind/membership 为 ERROR；
+# attr/duplicate/dangling 为 WARNING（图纸未完成不等于损坏）。
 static func _gpSeverity(gpRule: String) -> String:
 	return GPFinding.GP_WARNING if gpRule == GP_RULE_ATTR or gpRule == GP_RULE_DUP \
 		else GPFinding.GP_ERROR
@@ -414,6 +468,8 @@ static func _gpHint(gpRule: String) -> String:
 			return "drc.fix.offpage_repair_link"
 		GP_RULE_UNPAIRED:
 			return "drc.fix.offpage_repair_link"
+		GP_RULE_DANGLING:
+			return "drc.fix.offpage_connect_line"
 		GP_RULE_ATTR:
 			return "drc.fix.offpage_sync"
 		GP_RULE_KIND:

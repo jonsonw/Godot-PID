@@ -315,3 +315,66 @@ func gpTestEngineWiring() -> void:
 	for gpF2 in gpWithout:
 		gpCheck(not gpF2.gpCheckId.begins_with("drc.offpage."),
 			"sheet-only callers see no off-page rows (optional param stays optional)")
+
+
+# D10 rule A: dangling END — a link endpoint connector with NO edge at its referenced port.
+# Negative + positive: a healthy container is silent; a panel-picked link whose B connector
+# never got its line reports a WARNING anchored on that connector.
+# D10 规则 A：悬空端 —— link 端点连接符在被引用端口上**没有**边。正反两面：健康容器沉默；
+# 面板选图建立的 link 其 B 端连接符一直没接线时，报出锚定在该连接符上的 WARNING。
+func gpTestDanglingEndWarning() -> void:
+	# Negative: the healthy rig has an edge at BOTH referenced ports — no dangling finding.
+	# 反面：健康夹具在被引用的两端端口上都有边 —— 无悬空发现。
+	var gpClean: Array[GPFinding] = _gpRunAudit(_gpRig())
+	for gpF in gpClean:
+		gpCheck(gpF.gpMessageKey != "drc.offpage.dangling_end",
+			"healthy container stays silent on dangling / 健康容器对悬空保持沉默")
+	# Positive: strip sheet 2's edge — the B connector now dangles at its "ref" port.
+	# 正面：抽掉图纸 2 的边 —— B 端连接符在 ref 端口悬空。
+	var gpRig: Dictionary = _gpRig()
+	var gpSheet2: GPSheet = gpRig["sheets"][1] as GPSheet
+	gpSheet2.gpGraph.gpEdges.clear()
+	var gpF1: Array[GPFinding] = _gpRunAudit(gpRig)
+	var gpHits: Array[GPFinding] = []
+	for gpX in gpF1:
+		if gpX.gpMessageKey == "drc.offpage.dangling_end":
+			gpHits.append(gpX)
+	gpEq(gpHits.size(), 1, "exactly one dangling-end finding / 恰好一条悬空端发现")
+	if gpHits.size() == 1:
+		gpEq(gpHits[0].gpSeverity, GPFinding.GP_WARNING,
+			"dangling is a WARNING / 悬空是 WARNING")
+		gpEq(gpHits[0].gpNodeId, "n2", "anchored on the B connector / 锚在 B 端连接符")
+		gpEq(gpHits[0].gpEntityUid, GPOffPageAudit.GP_LINK_UID_PREFIX + "xlink-1",
+			"stable link uid for waivers / 供豁免的稳定 link uid")
+
+
+# D10 rule B: GHOST membership — a connector claims a link that EXISTS but does not list it.
+# Distinct from the unknown-claim stray: this one shows a REAL number (it renders via the
+# link it claims) yet no cascade and no jump can ever reach it.
+# D10 规则 B：幽灵成员 —— 连接符声称一条**存在**但不认得它的 link。与「未知声称」不同：
+# 它经所声称的 link 渲染出**真实编号**，但级联与跳转永远到不了它。
+func gpTestGhostMembershipError() -> void:
+	var gpRig: Dictionary = _gpRig()
+	# A second connector on sheet 1 claiming the SAME (existing) link id — the pasted-copy
+	# ghost. The copy path strips link_id now (D11); an archive written before did not.
+	# 图纸 1 上第二个连接符声称**同一条（存在的）**link id —— 粘贴副本幽灵。现在复制路径
+	# 已剥离 link_id（D11）；此前写出的存档没有。
+	(gpRig["sheets"][0] as GPSheet).gpGraph.gpNodes.append(
+		_gpConnector("n9", GP_ID_PIPE, "xlink-1"))
+	var gpF: Array[GPFinding] = _gpRunAudit(gpRig)
+	var gpKeys: Array[String] = []
+	for gpX in gpF:
+		gpKeys.append(gpX.gpMessageKey)
+	gpCheck(gpKeys.has("drc.offpage.membership"),
+		"ghost membership is reported / 幽灵成员被报告")
+	for gpX in gpF:
+		if gpX.gpMessageKey == "drc.offpage.membership":
+			gpEq(gpX.gpSeverity, GPFinding.GP_ERROR,
+				"membership is an ERROR / 成员校验是 ERROR")
+			gpEq(gpX.gpNodeId, "n9", "anchored on the ghost / 锚在幽灵旗标")
+	# And the honest copy path (D11) makes the whole class impossible going forward: a node
+	# WITHOUT the claim produces nothing.
+	# 且诚实的复制路径（D11）让这一类问题今后无法产生：不带声称的节点什么都不报。
+	var gpRig2: Dictionary = _gpRig()
+	(gpRig2["sheets"][0] as GPSheet).gpGraph.gpNodes.append(_gpConnector("n9b", GP_ID_PIPE, ""))
+	gpEq(_gpRunAudit(gpRig2).size(), 0, "claim-free copy is silent / 无声称副本沉默")
