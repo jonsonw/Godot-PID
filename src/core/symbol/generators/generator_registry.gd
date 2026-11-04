@@ -585,12 +585,12 @@ static func _gpGenerateOffpage(gpDef: GPSymbolDef, gpNode: GPPIDNode) -> Diction
 	#                      snapshot only an old-file fallback).
 	# The renderer and the print model read the same three slots, so screen and paper cannot
 	# disagree. Empty slots paint nothing — the honest "not resolved yet".
-	# 文字版式（用户反馈 2026-11-03；上一行契约 2026-11-04 修订，ADR-45 D2a/D2b）：三个槽位
-	# 全部**推导或继承**，没有一个是在连接符上手填的 —— **框内**：对端图纸号（**推导**，即
-	# 下方三态）；**框上方**：**对端**所服务位号（经 GPOffPageIndex 推导：**逐连接符** ——
-	# 孪生体显示**源端**设备位号）；**框下方**：介质（从 A 端服务边**派生**，link 快照只是
-	# 旧档回落）。渲染器与打印模型读**同一组**三个槽位，屏幕与纸面不可能分家。空槽不画
-	# —— 诚实的「尚未解析」。
+	# 文字版式（用户反馈 2026-11-03；上一行/框内契约 2026-11-04 修订，ADR-45 D2a/D2b/D2c）：
+	# 三个槽位全部**推导或继承**，没有一个是在连接符上手填的 —— **框内**：**相对本端**的对端
+	# 图号（**推导**，即下方三态 —— 源端说「去哪」、孪生体说「从哪来」）；**框上方**：**对端**
+	# 所服务位号（经 GPOffPageIndex 推导：**逐连接符** —— 孪生体显示**源端**设备位号）；
+	# **框下方**：介质（从 A 端服务边**派生**，link 快照只是旧档回落）。渲染器与打印模型读
+	# **同一组**三个槽位，屏幕与纸面不可能分家。空槽不画 —— 诚实的「尚未解析」。
 	var gpTarget: String = ""
 	var gpMedium: String = ""
 	var gpLink: GPOffPageLink = GPOffPageIndex.gpLinkForNode(

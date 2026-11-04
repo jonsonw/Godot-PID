@@ -650,6 +650,16 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 	var gpAttrsCb: Callable = Callable(self, "_gpOnEdgeAttrsCommitted").bind(gpCanvas)
 	if not gpCanvas.gpActions.gpEdgeAttrsCommitted.is_connected(gpAttrsCb):
 		gpCanvas.gpActions.gpEdgeAttrsCommitted.connect(gpAttrsCb)
+	# Draw-time follow pull (user feedback 2026-11-04, round 3): when a pipe is DRAWN on
+	# this sheet, the shell checks whether it feeds a B-end twin and pulls the source's
+	# block + number at once — follow mode is on by default, so the very first auto number
+	# must never linger on the canvas while the panel shows the source values.
+	# 画线即拉取（用户反馈 2026-11-04 第三轮）：**本**图纸画成一条管线时，外壳检查它是否
+	# 馈送某个 B 端孪生体并立刻拉取源端属性块与编号 —— 跟随默认开启，首个自动编号绝不能
+	# 在画布上滞留而面板却显示源端值。
+	var gpCreatedCb: Callable = Callable(self, "_gpOnEdgeCreated").bind(gpCanvas)
+	if not gpCanvas.gpActions.gpEdgeCreated.is_connected(gpCreatedCb):
+		gpCanvas.gpActions.gpEdgeCreated.connect(gpCreatedCb)
 	# W13-S8 (user request 2026-11-03): the cross-pane drag-to-connect gesture — wired per
 	# canvas so the SOURCE canvas is known at drop time without a second lookup.
 	# W13-S8（用户需求 2026-11-03）：跨窗格拖拽连线手势 —— 逐画布接线，
@@ -1124,9 +1134,29 @@ func _gpCreateCrossLink(gpCanvas: GPCanvas2D, gpFromRef: Dictionary, gpKind: Str
 	# link 表的变化由 store 信号通告（A2）：快照重发、脏标记与重绘都从那里跟随 —— 此处
 	# 不再手工刷新。
 	var gpTag: String = ""
+	var gpNewLink: GPOffPageLink = null
 	for gpL in gpCenter.gpOffPageLinks:
-		if gpL.gpInstanceId == gpLinkId:
+		if gpL != null and gpL.gpInstanceId == gpLinkId:
 			gpTag = gpL.gpTag
+			gpNewLink = gpL
+	# ROUND 3 (user feedback 2026-11-04): a continuation edge may ALREADY stand on the B-end
+	# sheet — drawn from the unlinked twin before this link existed (the inspector reconnect
+	# flow draws nothing itself). Pull the source block + number through the B-side sheet's
+	# own service, exactly as the draw-time pull would have. The mode-A peer connect (created
+	# in the same command with the preset tag) no-ops on the tag but still receives the ATTRS.
+	# 第三轮（用户反馈 2026-11-04）：B 端图纸上可能**早已立着**一条延续边 —— 本 link 存在前
+	# 就从未连接的孪生体画好了（属性面板重连流自己不画线）。经 B 端图纸**自己的**服务拉取
+	# 源端属性块与编号，与画线即拉取完全同构。模式 A 的对端连线（同一命令内以预置号创建）
+	# 编号相等空转，但**属性**仍会被拉平。
+	if gpNewLink != null:
+		var gpBNodeId: String = str(gpNewLink.gpB.get(GPOffPageLink.GP_KEY_NODE, ""))
+		var gpBSheetId: String = str(gpNewLink.gpB.get(GPOffPageLink.GP_KEY_SHEET, ""))
+		if gpBNodeId != "":
+			var gpBCanvas: GPCanvas2D = gpCenter.gpCanvasForSheetId(gpBSheetId)
+			if gpBCanvas != null and gpBCanvas.gpGraph != null:
+				var gpBEdge: GPPIDEdge = _gpEdgeTouching(gpBCanvas.gpGraph, gpBNodeId)
+				if gpBEdge != null:
+					_gpPullFollowState(gpBCanvas, gpBEdge.gpInstanceId)
 	# D18 (user feedback 2026-11-04): the creation must LAND visibly — flash both flags, and
 	# when the peer sheet is not visible anywhere (no pane, not popped out), open it in the
 	# first EMPTY pane so the user can see what just happened on the other sheet.
@@ -1512,6 +1542,50 @@ func _gpBsideContinuations(gpCanvas: GPCanvas2D, gpEdgeId: String) -> Array[Dict
 			continue
 		gpOut.append({"link": gpLink, "canvas": gpPeerCanvas, "edge": gpPeerEdge})
 	return gpOut
+
+
+# ROUND 3 PULL (user feedback 2026-11-04): when a B-side continuation edge FIRST exists —
+# drawn after the link was made, or already standing when the link was created (the inspector
+# reconnect flow) — its local state is still the freshly minted defaults while follow mode is
+# already ON (tag_manual absent). The locked panel displays the SOURCE values, so only the
+# canvas exposes the drift. One pull, through the edge's OWN sheet service (its undo stack,
+# its dirty flag, B3): the inheritable attribute block blind-written as ONE step, then the
+# source number through the dedicated tag path (propagated, so the follow chain stays alive).
+# Both writes are idempotent — equality guards make a repeated pull a no-op, which is what
+# keeps the created-signal → pull → tag-commit → pull chain terminating.
+# 第三轮拉取（用户反馈 2026-11-04）：B 端延续边**首次**存在时 —— link 建好后才画的线，或
+# link 建立（属性面板重连流）时就已立在那里的线 —— 本地状态还是刚铸的默认值，而跟随模式
+# 已经开启（无 tag_manual）。锁定面板显示**源端**值，只有画布暴露漂移。拉取一次，走这条边
+# **自己**图纸的服务（它的撤销栈、它的脏标记，B3）：可继承属性块一步盲写，随后源端编号走
+# 专用编号通道（带传播标记，跟随链保持存活）。两次写入皆幂等 —— 相等守卫使重复拉取成为
+# 空转，这正是「画成信号 → 拉取 → 编号落账 → 再拉取」链条能够收敛的原因。
+func _gpPullFollowState(gpCanvas: GPCanvas2D, gpEdgeId: String) -> void:
+	if gpCanvas == null or gpCanvas.gpGraph == null or gpCanvas.gpActions == null:
+		return
+	var gpEdge: GPPIDEdge = gpCanvas.gpGraph.gpGetEdge(gpEdgeId)
+	if gpEdge == null or gpEdge.gpKind == GPPIDEdge.GP_SIGNAL:
+		return
+	# Opted out: the block is deliberate, never touched again.
+	# 已选择退出：整个属性块是刻意选择，此后绝不再碰。
+	if bool(gpEdge.gpAttrs.get("tag_manual", false)):
+		return
+	var gpSrc: Dictionary = _gpSourceOfBSideEdge(gpCanvas, gpEdgeId)
+	var gpVals: Dictionary = gpSrc.get("values", {}) as Dictionary
+	var gpSrcTag: String = str(gpSrc.get("tag", ""))
+	if not gpVals.is_empty():
+		gpCanvas.gpActions.gpSetEdgeAttrs(gpEdgeId, gpVals)
+	if gpSrcTag != "" and gpEdge.gpTag != gpSrcTag:
+		if gpCanvas.gpActions.gpSetEdgeTag(gpEdgeId, gpSrcTag, true):
+			gpSetState("offpage.inherit_done", [gpSrcTag])
+		else:
+			gpSetState("offpage.inherit_fail",
+				[I18n.gpTr(gpCanvas.gpActions.gpLastRefusal)])
+
+
+# An edge was DRAWN on some sheet (gpEdgeCreated): if it feeds a B-end twin, pull now.
+# 某张图纸画成了一条边（gpEdgeCreated）：若它馈送某个 B 端孪生体，此刻即拉取。
+func _gpOnEdgeCreated(gpEdgeId: String, gpCanvas: GPCanvas2D) -> void:
+	_gpPullFollowState(gpCanvas, gpEdgeId)
 
 
 # A line number was committed on SOME sheet: propagate it to every cross-sheet continuation

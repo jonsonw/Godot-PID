@@ -300,9 +300,11 @@ func gpTestSilhouettesDiffer() -> void:
 
 # ---- the derived reference text / 推导出的交叉编号 ----------------------
 
-# THREE states, none of them stored: unlinked (blank), dangling reference ("?"), resolved (tag or
-# peer number).
-# **三**态，一律不存储：未连线（空）、引用悬空（「?」）、已解析（tag 或对端图号）。
+# THREE states, none of them stored: unlinked (blank), dangling reference ("?"), resolved (the
+# PEER drawing number relative to THIS end — the source flag names where the line goes, the twin
+# where it comes from; user feedback 2026-11-04 round 3, ADR-45 D2c).
+# **三**态，一律不存储：未连线（空）、引用悬空（「?」）、已解析（**相对本端**的对端图号 ——
+# 源端旗标说线去哪、孪生体说线从哪来；用户反馈 2026-11-04 第三轮，ADR-45 D2c）。
 func gpTestRefTextHasThreeDerivedStates() -> void:
 	_gpInstallContext()
 	gpEq(GPOffPageIndex.gpRefTextFor(_gpConnectorNode("n-cost", "")), "",
@@ -310,10 +312,14 @@ func gpTestRefTextHasThreeDerivedStates() -> void:
 	gpEq(GPOffPageIndex.gpRefTextFor(_gpConnectorNode("n-cost", "xlink-404")),
 		GPOffPageIndex.GP_UNRESOLVED_TEXT,
 		"a dangling link_id is reported, not silently blank")
-	gpEq(GPOffPageIndex.gpRefTextFor(_gpConnectorNode("n1", "xlink-1")), "3-1",
-		"a link carrying a tag shows the tag (ADR-43 D4)")
+	gpEq(GPOffPageIndex.gpRefTextFor(_gpConnectorNode("n1", "xlink-1")), "3",
+		"the SOURCE flag names the sheet the line GOES to (sheet-2 = \"3\")")
+	gpEq(GPOffPageIndex.gpRefTextFor(_gpConnectorNode("n2", "xlink-1")), "1",
+		"the TWIN names the sheet the line comes FROM (sheet-1 = \"1\") — never its own")
 	gpEq(GPOffPageIndex.gpRefTextFor(_gpConnectorNode("n3", "xlink-2")), "7",
-		"an untagged link shows the PEER sheet's drawing number")
+		"a link without a tag still resolves per end (peer sheet-3 = \"7\")")
+	gpEq(GPOffPageIndex.gpRefTextFor(_gpConnectorNode("n4", "xlink-2")), "1",
+		"the far end of the same link mirrors back (peer sheet-1 = \"1\")")
 	gpEq(GPOffPageIndex.gpRefTextFor(null), "", "a null node degrades to empty")
 	_gpClearContext()
 
@@ -332,7 +338,7 @@ func gpTestLegendInsideAboveBelow() -> void:
 	var gpLines: PackedStringArray = gpGen.get("text_lines",
 		PackedStringArray()) as PackedStringArray
 	gpEq(gpLines.size(), 1, "only ONE line lives inside the flag")
-	gpEq(str(gpLines[0]), "3-1", "the derived reference is the inside line")
+	gpEq(str(gpLines[0]), "3", "the inside line is the PEER sheet number, per end (D2c)")
 	gpEq(str(gpGen.get("text_above", "")), "T-101",
 		"the TARGET end's tag rides ABOVE the flag, derived through the index")
 	gpEq(str(gpGen.get("text_below", "")), "NAOH 32%",
@@ -431,14 +437,20 @@ func gpTestBodyWidthAdaptsToReferenceText() -> void:
 		_gpConnectorNode("n-cost", ""))
 	var gpBareW: float = _gpBodyWidthOf(gpBare)
 	gpCheck(gpBareW > 0.0, "an empty flag still draws a body (never a sliver)")
-	_gpInstallContext()
-	var gpLink: GPOffPageLink = GPOffPageIndex.gpLinkById("xlink-1")
+	# The box text is the PEER SHEET NUMBER now (D2c), so the width pins drive the numbers
+	# table directly — the link tag no longer rides the flag. "3-1" as a drawing number
+	# reproduces the width the old tag-pin used to exercise.
+	# 框内文字如今是**对端图号**（D2c），宽度钉子直接驱动图号表 —— link tag 不再上旗标。
+	# 以 "3-1" 作图号，复现旧 tag 钉曾行使的宽度。
+	GPOffPageIndex.gpSetContext(_gpContext(),
+		{"sheet-1": "1", "sheet-2": "3-1", "sheet-3": "7"}, _gpGraphs())
 	var gpShort: Dictionary = GPSymbolGeneratorRegistry.gpGenerate(_gpDef(GP_ID_PIPE),
 		_gpConnectorNode("n1", "xlink-1"))
 	var gpShortW: float = _gpBodyWidthOf(gpShort)
 	gpCheck(gpShortW > gpBareW,
 		"a resolved number widens the body: %.2f vs %.2f" % [gpShortW, gpBareW])
-	gpLink.gpTag = "10-12"
+	GPOffPageIndex.gpSetContext(_gpContext(),
+		{"sheet-1": "1", "sheet-2": "30-1200", "sheet-3": "7"}, _gpGraphs())
 	var gpLong: Dictionary = GPSymbolGeneratorRegistry.gpGenerate(_gpDef(GP_ID_PIPE),
 		_gpConnectorNode("n1", "xlink-1"))
 	var gpLongW: float = _gpBodyWidthOf(gpLong)
@@ -501,10 +513,12 @@ func gpTestContPortRidesTheBodyTip() -> void:
 	gpApprox(gpRefLocal.x, -gpEnvW * 0.5, 0.001,
 		"the ref port stays on the left envelope edge")
 	# A longer reference widens the body AND pushes the tip right with it, never out of the
-	# envelope. / 更长的编号加宽主体、旗尖随之右移，但绝不越出包络。
-	_gpInstallContext()
-	var gpLink: GPOffPageLink = GPOffPageIndex.gpLinkById("xlink-1")
-	gpLink.gpTag = "10-12"
+	# envelope. The width rides the peer DRAWING NUMBER now (D2c), so the numbers table
+	# carries the wide reference.
+	# 更长的编号加宽主体、旗尖随之右移，但绝不越出包络。宽度如今跟随对端**图号**（D2c），
+	# 故宽引用由图号表携带。
+	GPOffPageIndex.gpSetContext(_gpContext(),
+		{"sheet-1": "1", "sheet-2": "30-1200", "sheet-3": "7"}, _gpGraphs())
 	var gpLinkedNode: GPPIDNode = _gpConnectorNode("n1", "xlink-1")
 	var gpLongTipU: float = (GPSymbolGeneratorRegistry.gpPortUnitOverrides(gpDef,
 		gpLinkedNode)[GPSymbolPackOffpage.GP_PORT_CONT] as Vector2).x
@@ -617,7 +631,7 @@ func gpTestPrintModelCarriesFlagAndReference() -> void:
 			GPPrintModel.GP_OP_TEXT:
 				gpTexts.append(str(gpE.get("s", "")))
 	gpCheck(gpPolys >= 1, "the flag reaches the paper as a polyline entity")
-	gpCheck(gpTexts.has("3-1"), "the derived reference reaches the paper too, got %s" % [gpTexts])
+	gpCheck(gpTexts.has("3"), "the per-end peer sheet number reaches the paper too, got %s" % [gpTexts])
 	# The legend slots ride OUTSIDE the flag but must still reach the paper — an export that
 	# silently dropped the outside slots would ship half a legend. The ABOVE slot is the
 	# DERIVED target tag ("T-101" across the twin's edge on sheet-2), the BELOW slot the

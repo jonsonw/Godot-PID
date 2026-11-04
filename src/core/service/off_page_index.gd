@@ -174,21 +174,27 @@ static func gpPeerSheetNumberOf(gpNodeId: String) -> String:
 	return gpSheetNumber(str(gpPeer.get(GPOffPageLink.GP_KEY_SHEET, "")))
 
 
-# The text an off-page connector displays. THREE distinct states, deliberately not collapsed:
+# The text an off-page connector displays INSIDE the flag. THREE distinct states, deliberately
+# not collapsed:
 #   * no link_id          -> ""  — a freshly placed connector, not linked yet (nothing to say);
 #   * link_id but no link,
 #     or no peer sheet no.-> GP_UNRESOLVED_TEXT — a dangling reference (S4 flags it as ERROR);
-#   * resolved            -> the link's cross-reference TAG when it has one (ADR-43 D4,
-#                            "<peer sheet>-<seq>"), else the peer DRAWING NUMBER.
-# 跨图纸连接符显示的文字。三态刻意不合并：未连线（空）／悬空引用（问号，S4 报 ERROR）／已解析
-# （优先 link 的跨图编号 tag —— ADR-43 D4 的「<对端图号>-<序号>」—— 否则对端图号）。
+#   * resolved            -> the PEER DRAWING NUMBER relative to THIS end (user feedback
+#                            2026-11-04, round 3): the source flag says where the line GOES,
+#                            the twin says where it comes FROM. The link's cross-reference tag
+#                            ("<peer>-<seq>") no longer rides the flag — it remains the
+#                            cross-reference-table / report identity (ADR-45 D2c).
+# 跨图纸连接符**框内**显示的文字。三态刻意不合并：未连线（空）／悬空引用（问号，S4 报 ERROR）／
+# 已解析（**相对本端**的对端图号 —— 用户反馈 2026-11-04 第三轮：源端旗标说线**去哪**、孪生体
+# 说线**从哪来**）。link 的交叉编号（「<对端图号>-<序号>」）不再上旗标 —— 它仍是交叉索引表 /
+# 报表里的身份（ADR-45 D2c）。
 #
-# WHY THE TAG WINS OVER THE BARE NUMBER / 为何 tag 优先于裸图号：
-# The tag is the number the drawing's own cross-reference list quotes, and it already begins with
-# the peer sheet number, so showing it loses nothing and adds the sequence. A bare number is the
-# fallback for a link created before numbering ran.
-# tag 就是图面交叉索引表引用的那个号，且它本身已以对端图号开头，故显示它不损失信息、还多出序号；
-# 裸图号是「编号尚未运行时建立的 link」的回落。
+# WHY PER-END AND NOT THE SHARED TAG / 为何逐端而非共享 tag：
+# the stored tag is authored from the A perspective, so the twin quoting it would name its OWN
+# sheet — the opposite of "where the line comes from". A per-end derivation has exactly one
+# answer per connector and no second copy to drift.
+# 存储的 tag 是从 A 端视角铸的，孪生体引用它只会念出**自己**那张图 —— 恰与「线从哪来」相反。
+# 逐端推导对每个连接符恰有一个答案，不存在会漂移的第二份副本。
 static func gpRefTextFor(gpNode: GPPIDNode) -> String:
 	if gpNode == null:
 		return ""
@@ -198,8 +204,6 @@ static func gpRefTextFor(gpNode: GPPIDNode) -> String:
 	var gpLink: GPOffPageLink = gpLinkById(gpLinkId)
 	if gpLink == null:
 		return GP_UNRESOLVED_TEXT
-	if gpLink.gpTag != "":
-		return gpLink.gpTag
 	var gpPeer: Dictionary = gpPeerRefOf(gpLink, gpNode.gpInstanceId)
 	var gpNo: String = gpSheetNumber(str(gpPeer.get(GPOffPageLink.GP_KEY_SHEET, "")))
 	return gpNo if gpNo != "" else GP_UNRESOLVED_TEXT

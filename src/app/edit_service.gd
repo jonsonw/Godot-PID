@@ -45,6 +45,17 @@ signal gpEdgeTagCommitted(gpEdgeId: String, gpOldTag: String, gpNewTag: String)
 # gpSetEdgeAttrs（传播自身的下游写入）**不**发射，故传播写入绝不会再扇出。
 signal gpEdgeAttrsCommitted(gpEdgeId: String, gpKeys: Array[String])
 
+# Emitted after an edge was DRAWN (user feedback 2026-11-04, round 3): the shell listens on
+# every sheet's service so a new pipe touching a B-end twin connector pulls its source's
+# attribute block + number immediately — follow mode is ON by default, and without this pull
+# the panel (which displays the locked SOURCE values) would mask the drift until the next
+# source edit. Still sheet-local: the signal carries only the edge id, never link knowledge.
+# 一条边**画成**后发射（用户反馈 2026-11-04 第三轮）：外壳监听每张图纸的服务，使触及 B 端
+# 孪生连接符的新管线**立即**拉取源端属性块与编号 —— 跟随模式默认开启，若无此拉取，面板
+#（锁定显示**源端**值）会掩盖漂移直到下一次源端编辑。仍是单图纸语义：信号只带边 id，
+# 绝不携带 link 知识。
+signal gpEdgeCreated(gpEdgeId: String)
+
 # Undo/redo history for this document.
 # 本文档的撤销 / 重做历史。
 var gpStack: GPCommandStack = GPCommandStack.new()
@@ -659,6 +670,7 @@ func gpConnectEdge(gpFromRef: Dictionary, gpToRef: Dictionary, gpKind: String,
 		gpLastRefusal = gpCmd.gpRefusal
 		return ""
 	gpLastRefusal = ""
+	gpEdgeCreated.emit(gpCmd.gpCreatedId)
 	return gpCmd.gpCreatedId
 
 
@@ -680,6 +692,7 @@ func gpConnectEdgeRouted(gpFromRef: Dictionary, gpToRef: Dictionary, gpKind: Str
 		gpLastRefusal = gpCmd.gpRefusal
 		return ""
 	gpLastRefusal = ""
+	gpEdgeCreated.emit(gpCmd.gpCreatedId)
 	return gpCmd.gpCreatedId
 
 
