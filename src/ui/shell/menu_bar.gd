@@ -75,6 +75,14 @@ const GP_MENUS: Dictionary = {
 		["menu.view_zoom_in", "view_zoom_in"],
 		["menu.view_zoom_out", "view_zoom_out"],
 		["menu.view_grid", "view_grid"],
+		null,
+		# D22: the multi-view layouts finally have a menu entry (and discoverability for
+		# the Ctrl+1..4 shortcuts).
+		# D22：多视图布局终于有了菜单入口（也让 Ctrl+1..4 快捷键可被发现）。
+		["menu.view_layout1", "view_layout_single"],
+		["menu.view_layout2", "view_layout_side"],
+		["menu.view_layout3", "view_layout_big2"],
+		["menu.view_layout4", "view_layout_grid"],
 	],
 	"menu.project": [
 		["menu.project_tag_rules", "project_tag_rules"],

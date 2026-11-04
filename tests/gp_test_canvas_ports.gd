@@ -54,7 +54,11 @@ const GP_PORTS: Array = [
 	"gpClearPortPick", 0,
 	"gpRequestAutoConnect", 0,
 	"gpHitEdge", 1,
-	"gpReportRefusal", 1,
+	# P0-D24 widened it with an OPTIONAL prefix (default "edge."): cross-sheet refusals
+	# report under offpage.refuse_* instead of showing a raw key.
+	# P0-D24 增加了**可选**前缀参数（默认 "edge."）：跨图纸拒绝经 offpage.refuse_* 上报，
+	# 不再显示裸键。
+	"gpReportRefusal", 2,
 	"gpDeleteSelection", 0,
 	"gpClearSelection", 0,
 	"gpZoomStep", 1,

@@ -1898,8 +1898,8 @@ func gpHitEdge(gpWorld: Vector2) -> String:
 	return gpSymbolLayer.gpHitEdge(gpWorld)
 
 
-func gpReportRefusal(gpKey: String) -> void:
-	gpEditFacade.gpReportRefusal(gpKey)
+func gpReportRefusal(gpKey: String, gpPrefix: String = "edge.") -> void:
+	gpEditFacade.gpReportRefusal(gpKey, gpPrefix)
 
 
 # ADR-43 / S3: forward a cross-sheet gesture to the host. Thin on purpose: the canvas has no

@@ -409,6 +409,69 @@ func gpTestSyncRefusesWithoutContractValues() -> void:
 		"the stack refuses to record a step that changes nothing")
 
 
+# ---- P0-D03: dirty marking (notify) ----
+# ---- P0-D03：脏标记（notify）----
+
+# Execute notifies EVERY touched graph exactly ONCE; undo does the same (B3: an undo that
+# leaves the document "unmodified" loses the restore silently at close).
+# 执行给每张触及的图恰好**一次** notify；撤销同样（B3：撤销后文档若仍「未修改」，
+# 关闭时恢复会静默丢失）。
+func gpTestSyncNotifiesBothGraphsOnExecuteAndUndo() -> void:
+	var gpRig: Dictionary = _gpSyncRig()
+	var gpLink: GPOffPageLink = gpRig["link"]
+	var gpLocal: GPPIDGraph = gpRig["local"]
+	var gpPeer: GPPIDGraph = gpRig["peer"]
+	# Lambdas capture locals BY VALUE — count through arrays (reference semantics).
+	# Lambda 对局部变量按**值**捕获 —— 用数组（引用语义）计数。
+	var gpHits: Array[int] = [0, 0]
+	gpLocal.gpGraphChanged.connect(func() -> void: gpHits[0] += 1)
+	gpPeer.gpGraphChanged.connect(func() -> void: gpHits[1] += 1)
+	var gpGraphs: Array[GPPIDGraph] = [gpLocal, gpPeer]
+	var gpCmd: GPCrossSheetSyncCommand = GPCrossSheetSyncCommand.new(gpLink,
+		{"dn": "80"}, gpRig["edges"], gpGraphs)
+	gpCheck(gpCmd.gpExecute(gpRig["ctx"]), "the sync executes")
+	gpEq(gpHits[0], 1, "execute notifies the LOCAL graph exactly once")
+	gpEq(gpHits[1], 1, "execute notifies the PEER graph exactly once (D03)")
+	gpCmd.gpUndo(gpRig["ctx"])
+	gpEq(gpHits[0], 2, "undo notifies the local graph too (B3)")
+	gpEq(gpHits[1], 2, "undo notifies the peer graph too (B3)")
+
+
+# A graph left out of the gpGraphs list is NOT notified: the list is the whole contract.
+# 未列入 gpGraphs 的图**不会**被通知：这张名单就是完整契约。
+func gpTestSyncNotifiesOnlyTheListedGraphs() -> void:
+	var gpRig: Dictionary = _gpSyncRig()
+	var gpHits: Array[int] = [0]
+	var gpPeer: GPPIDGraph = gpRig["peer"]
+	gpPeer.gpGraphChanged.connect(func() -> void: gpHits[0] += 1)
+	var gpGraphs: Array[GPPIDGraph] = [gpRig["local"]]
+	var gpCmd: GPCrossSheetSyncCommand = GPCrossSheetSyncCommand.new(gpRig["link"],
+		{"dn": "80"}, gpRig["edges"], gpGraphs)
+	gpCheck(gpCmd.gpExecute(gpRig["ctx"]), "the sync executes")
+	gpEq(gpHits[0], 0, "a graph outside the list hears nothing")
+
+
+# ---- P0-D24: refusal keys are localized ----
+# ---- P0-D24：拒绝键已本地化 ----
+
+# Every cross-sheet refusal key has an offpage.refuse_* entry with BOTH zh and en — a
+# missing entry used to show the raw key (e.g. "edge.same_sheet") in the status bar.
+# 每个跨图纸拒绝键都有**中英双语**的 offpage.refuse_* 条目 —— 缺条目曾使状态栏显示裸键
+#（如「edge.same_sheet」）。
+func gpTestRefusalKeysAreLocalized() -> void:
+	var gpKeys: Array[String] = ["same_sheet", "connector_already_linked", "sheet_missing",
+		"node_missing", "peer_graph_missing", "links_missing", "no_contract_values",
+		"pipe_needs_one_bound"]
+	var gpStrings: Dictionary = (load("res://src/autoload/i18n.gd") as GDScript).GP_STRINGS
+	for gpKey in gpKeys:
+		var gpFull: String = "offpage.refuse_%s" % gpKey
+		gpCheck(gpStrings.has(gpFull), "refusal key %s exists in the i18n table" % gpFull)
+		if gpStrings.has(gpFull):
+			var gpEntry: Dictionary = gpStrings[gpFull] as Dictionary
+			gpCheck(str(gpEntry.get("zh", "")) != "", "%s has a zh string" % gpFull)
+			gpCheck(str(gpEntry.get("en", "")) != "", "%s has an en string" % gpFull)
+
+
 # A missing link and null edge entries are tolerated, not crashes.
 # 缺 link 与 null 边条目被容忍，而非崩溃。
 func gpTestSyncToleratesMissingPieces() -> void:

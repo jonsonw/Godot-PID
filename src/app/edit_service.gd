@@ -686,10 +686,18 @@ func gpCrossSheetCreate(gpFromRef: Dictionary, gpKind: String, gpSignalType: Str
 
 # Sync a link's contract attributes to the peer end as ONE undoable step.
 # 一步把 link 的契约属性同步到对端。
+# gpPeerGraph (D03): the command notifies BOTH touched graphs (local + peer) itself, so
+# the document is marked dirty no matter which canvas the caller sits on.
+# gpPeerGraph（D03）：命令自己给两张触及的图（本端 + 对端）各发一次 notify，
+# 无论调用方在哪个画布上，文档都会被标脏。
 func gpCrossSheetSync(gpLink: GPOffPageLink, gpValues: Dictionary,
-		gpEdges: Array[GPPIDEdge]) -> bool:
+		gpEdges: Array[GPPIDEdge], gpPeerGraph: GPPIDGraph = null) -> bool:
 	var gpCmd: GPCrossSheetSyncCommand = GPCrossSheetSyncCommand.new(gpLink, gpValues,
 		gpEdges)
+	if gpCtx.gpGraph != null:
+		gpCmd.gpGraphs.append(gpCtx.gpGraph)
+	if gpPeerGraph != null and gpPeerGraph != gpCtx.gpGraph:
+		gpCmd.gpGraphs.append(gpPeerGraph)
 	return gpStack.gpDo(gpCmd, gpCtx)
 
 

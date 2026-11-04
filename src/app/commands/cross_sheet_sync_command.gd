@@ -46,6 +46,13 @@ var gpValues: Dictionary = {}
 # 要保持一致的边（通常是本端边与对端边）。容忍 null 与悬空端：link 的一侧合法地可能没有边。
 var gpEdges: Array[GPPIDEdge] = []
 
+# The graphs this sync touches (local + peer). Each gets exactly ONE gpNotifyChanged()
+# per execute and per undo — dirty marking must never depend on callers remembering it
+# (D03: a sync left the document "unmodified" and the edit was silently lost).
+# 本次同步触及的图（本端 + 对端）。每次执行与撤销各发**一次** gpNotifyChanged() ——
+# 脏标记绝不能依赖调用方记得去标（D03：同步后文档仍「未修改」，改动被静默丢失）。
+var gpGraphs: Array[GPPIDGraph] = []
+
 # Human-readable reason the command refused. / 命令拒绝执行的人类可读原因。
 var gpRefusal: String = ""
 
@@ -69,10 +76,12 @@ var _gpAppliedKeys: Array[String] = []
 
 
 func _init(gpInLink: GPOffPageLink, gpInValues: Dictionary,
-		gpInEdges: Array[GPPIDEdge] = []) -> void:
+		gpInEdges: Array[GPPIDEdge] = [],
+		gpInGraphs: Array[GPPIDGraph] = []) -> void:
 	gpLink = gpInLink
 	gpValues = gpInValues.duplicate(true)
 	gpEdges = gpInEdges
+	gpGraphs = gpInGraphs
 	gpLabel = "同步到对端"
 
 
@@ -120,7 +129,17 @@ func gpExecute(_gpCtx: GPCommandContext) -> bool:
 		for gpKey in gpApply.keys():
 			gpE.gpAttrs[gpKey] = gpApply[gpKey]
 	_gpApplied = true
+	_gpNotifyAll()
 	return true
+
+
+# One notify per touched graph — both on the way in and on the way out (B3: undo must
+# dirty the document exactly like execute does).
+# 每张触及的图各一次 notify —— 执行与撤销一视同仁（B3：撤销必须与执行一样把文档标脏）。
+func _gpNotifyAll() -> void:
+	for gpG in gpGraphs:
+		if gpG != null:
+			gpG.gpNotifyChanged()
 
 
 func gpUndo(_gpCtx: GPCommandContext) -> void:
@@ -142,3 +161,4 @@ func gpUndo(_gpCtx: GPCommandContext) -> void:
 			else:
 				gpE.gpAttrs[gpKey] = gpPrior[gpKey]
 	_gpApplied = false
+	_gpNotifyAll()

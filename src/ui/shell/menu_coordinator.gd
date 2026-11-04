@@ -262,6 +262,18 @@ func gpOnMenu(gpAction: String) -> void:
 		"view_fit":
 			gpHost.gpActiveCanvas().gpResetView()
 			gpHost.gpSetState("status.view_reset")
+		# D22: menu entries for the four multi-view layouts — the same gpSetLayoutMode the
+		# header buttons and Ctrl+1..4 use, so one code path everywhere.
+		# D22：四种多视图布局的菜单入口 —— 与头部按钮、Ctrl+1..4 走**同一个**
+		# gpSetLayoutMode，处处一条代码路径。
+		"view_layout_single":
+			gpHost.gpCenter.gpSetLayoutMode(GPPaneLayout.GP_SINGLE)
+		"view_layout_side":
+			gpHost.gpCenter.gpSetLayoutMode(GPPaneLayout.GP_SIDE)
+		"view_layout_big2":
+			gpHost.gpCenter.gpSetLayoutMode(GPPaneLayout.GP_BIG2)
+		"view_layout_grid":
+			gpHost.gpCenter.gpSetLayoutMode(GPPaneLayout.GP_GRID)
 		"edit_delete":
 			if gpHost.gpActiveCanvas().gpSelectedId != "":
 				gpDeleteSelected()

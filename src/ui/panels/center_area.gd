@@ -32,6 +32,10 @@ signal gpFullscreenToggled(gpOn: bool)
 # 每个图纸一个标签页的标签栏。
 var gpTabBar: TabBar
 
+# D22: the four layout-mode buttons as one radio group (pressed = current mode).
+# D22：四个布局模式按钮构成一组单选（按下态 = 当前模式）。
+var gpLayoutButtons: Array[Button] = []
+
 # Container that stacks all sheet canvases; only the active one is visible.
 # 承载所有图纸画布的容器；仅活动页可见。
 var gpBody: Control
@@ -188,7 +192,14 @@ func _gpBuildLayoutButtons() -> HBoxContainer:
 		var gpMode: int = int(gpS[0])
 		gpBtn.pressed.connect(func() -> void: gpSetLayoutMode(gpMode))
 		gpBtn.set_meta("gp_layout_mode", gpMode)
+		# D22: toggle_mode turns the "pressed" plate into a persistent radio state; the
+		# sync below seeds it with the mode restored from Settings.
+		# D22：toggle_mode 让「按下」色块成为持久的单选态；下方 sync 用 Settings 恢复的
+		# 模式播种初值。
+		gpBtn.toggle_mode = true
+		gpLayoutButtons.append(gpBtn)
 		gpRow.add_child(gpBtn)
+	_gpSyncLayoutButtons()
 	return gpRow
 
 
@@ -387,7 +398,11 @@ func gpActivateSheet(gpSheetId: String) -> bool:
 			# the user is looking). The tab bar follows; the handler keeps them in step.
 			# W13（ADR-44）：「激活」= 在**活动**窗格中显示（DRC 跳转落在用户正看着的地方）。
 			# 标签栏跟随；处理器保持二者一致。
-			_gpBindActivePane(gpI)
+			# D02: a popped sheet consumes the activation (the popup got focused and the
+			# signal already fired) — do NOT re-emit.
+			# D02：已摘出图纸会**消费**激活（弹窗已聚焦、信号已发）—— 不得重复发。
+			if _gpBindActivePane(gpI):
+				return true
 			_gpTabSyncing = true
 			gpTabBar.current_tab = gpI
 			_gpTabSyncing = false
@@ -768,6 +783,17 @@ func gpSetLayoutMode(gpMode: int) -> void:
 	Settings.gpLayoutMode = gpMode
 	Settings.gpSave()
 	_gpRebuildLayout()
+	# D22: the four header buttons are a RADIO GROUP — the current mode stays visually
+	# pressed so the mode is readable without text.
+	# D22：头部四按钮是一组**单选** —— 当前模式保持视觉按下态，无文字也能读出模式。
+	_gpSyncLayoutButtons()
+
+
+# Keep the layout buttons' pressed state in step with gpLayoutMode.
+# 使布局按钮的按下态与 gpLayoutMode 保持一致。
+func _gpSyncLayoutButtons() -> void:
+	for gpBtn in gpLayoutButtons:
+		gpBtn.set_pressed_no_signal(int(gpBtn.get_meta("gp_layout_mode", 0)) == gpLayoutMode)
 
 
 # Tear the old pane tree down (detaching — never freeing — the canvases) and build the new
@@ -879,8 +905,19 @@ func _gpMakePane() -> GPCanvasPane:
 func _gpAttachPane(gpPaneIdx: int, gpSheetIdx: int) -> void:
 	if gpPaneIdx < 0 or gpPaneIdx >= _gpPanes.size():
 		return
+	var gpCv: GPCanvas2D = _gpCanvasOfTab(gpSheetIdx)
+	# D02 guard (second order): a canvas living in the pop-out window must NEVER be
+	# re-parented into a pane. The bind level routes popped sheets to _gpFocusPopout(),
+	# so reaching here means some caller bypassed it — refuse instead of stealing
+	# (add_child would auto-reparent the canvas OUT of the window).
+	# D02 守卫（二阶）：住在摘出窗口里的画布**绝不**被抢进窗格。绑定层已把已摘出的图纸
+	# 路由到 _gpFocusPopout()，走到这里说明有调用方绕过了它 —— 拒绝而非抢夺
+	#（add_child 会把画布自动 reparent **出**窗口）。
+	if gpCv != null and _gpPopWin != null and is_instance_valid(_gpPopWin) \
+			and gpCv.get_parent() == _gpPopWin:
+		return
 	var gpPane: GPCanvasPane = _gpPanes[gpPaneIdx]
-	gpPane.gpAttachCanvas(_gpCanvasOfTab(gpSheetIdx))
+	gpPane.gpAttachCanvas(gpCv)
 	gpPane.gpSheetIdx = gpSheetIdx
 
 
@@ -897,15 +934,32 @@ func _gpCanvasOfTab(gpS: int) -> GPCanvas2D:
 # pane", and the uniqueness invariant empties whatever other pane showed it.
 # 在**活动**窗格中显示图纸 gpTabIdx（标签栏与 gpAddTab 的意图）。它取代旧的单窗 _gpShowOnly：
 # 在任何模式下「切换图纸」都意味着「重绑活动窗格」，唯一性不变量会清空其它显示它的窗格。
-func _gpBindActivePane(gpTabIdx: int) -> void:
+# Returns true when the request was CONSUMED by the pop-out route (the caller must not emit
+# gpActiveChanged again — _gpFocusPopout already did); false when a normal bind happened.
+# 请求被摘出路由**消费**时返回 true（调用方不得再发 gpActiveChanged —— _gpFocusPopout 已发过）；
+# 发生普通绑定时返回 false。
+func _gpBindActivePane(gpTabIdx: int) -> bool:
 	if gpTabIdx < 0 or gpTabIdx >= gpTabs.size():
 		gpActive = -1
-		return
+		return false
+	# D02 (the choke point): activating the POPPED-OUT sheet must FOCUS the window, never
+	# rebind — a bind+attach would reparent the canvas out of the window (add_child auto-
+	# reparent), leaving the window empty while _gpPopSheet still points at it (and a later
+	# close would steal the canvas from whatever pane took it). EVERY activation route —
+	# tab click, DRC jump, jump-to-peer — funnels through here.
+	# D02（收口点）：激活**已摘出**的图纸必须**聚焦窗口**而绝不重绑 —— 绑定+挂载会把画布
+	# 抢出窗口（add_child 自动 reparent），窗口空着而 _gpPopSheet 仍指着它（且此后关窗会
+	# 从收留它的窗格里把画布再抢走）。**所有**激活路径 —— 标签点击、DRC 跳转、跳转到对端
+	# —— 都汇入此处。
+	if gpTabIdx == _gpPopSheet:
+		_gpFocusPopout()
+		return true
 	_gpPaneSheets = GPPaneLayout.gpBind(_gpPaneSheets, _gpActivePane, gpTabIdx)
 	_gpAttachPane(_gpActivePane, gpTabIdx)
 	gpActive = gpTabIdx
 	_gpFillPickers()
 	_gpRestylePanes()
+	return false
 
 
 # A pane's canvas gained focus (ADR-44 D4): THIS pane becomes the one the docks serve. If its
@@ -953,11 +1007,20 @@ func _gpOnPanePick(gpPane: GPCanvasPane, gpSheetIdx: int) -> void:
 func _gpSyncActiveTab() -> void:
 	var gpS: int = _gpPaneSheets[_gpActivePane] if _gpActivePane < _gpPaneSheets.size() \
 		else GPPaneLayout.GP_EMPTY
+	var gpOld: int = gpActive
 	gpActive = gpS
 	if gpS >= 0 and gpTabBar.current_tab != gpS:
 		_gpTabSyncing = true
 		gpTabBar.current_tab = gpS
 		_gpTabSyncing = false
+	# D04: a layout switch can silently rewrite gpActive — the docks (inspector, toolbar,
+	# menus) follow gpActiveChanged, so a silent change would leave them editing a sheet
+	# that is no longer visible. Emit exactly when the active sheet actually moved.
+	# D04：切换布局会静默改写 gpActive —— 侧栏（属性面板/工具栏/菜单）跟随
+	# gpActiveChanged，不发信号它们就会继续编辑一张已经不可见的图纸。活动页确实移动时
+	# 恰好发一次。
+	if gpActive != gpOld:
+		gpActiveChanged.emit()
 
 
 # Accent underline on the active pane only.
@@ -1046,18 +1109,37 @@ func gpPopoutPane(gpPane: GPCanvasPane) -> void:
 	_gpFillPickers()
 
 
-# The popped-out canvas gained focus: its sheet becomes the active tab (no rebind — the
-# sheet is in the window, not in a pane).
-# 被摘出的画布获得焦点：其图纸成为活动标签（**不**重绑 —— 图纸在窗口里，不在窗格中）。
-func _gpOnPopFocused() -> void:
+# B1/D02: THE single "focus the popped-out sheet" path — the window is raised, the sheet
+# becomes the active tab (NO rebind: the canvas lives in the window, not in a pane). Both
+# the canvas focus signal and the programmatic activation routes land here, so the
+# "focus popup" semantics can never be written twice.
+# B1/D02：**唯一**的「聚焦已摘出图纸」路径 —— 窗口置顶，该图纸成为活动标签（**不**重绑：
+# 画布住在窗口里，不在窗格中）。画布焦点信号与程序性激活路径都落到这里，「聚焦弹窗」
+# 的语义不可能被写第二遍。
+func _gpFocusPopout() -> void:
 	if _gpPopSheet < 0 or _gpPopSheet >= gpTabs.size():
 		return
-	if gpActive != _gpPopSheet:
-		gpActive = _gpPopSheet
+	if _gpPopWin != null and is_instance_valid(_gpPopWin):
+		if not _gpPopWin.visible:
+			# Defensive: a hidden window with a live pop state is the D01 bug shape —
+			# recover by showing it instead of leaving the sheet invisible.
+			# 防御：隐藏着的窗口却带着活弹窗状态正是 D01 的病灶形状 —— 重新显示以自愈，
+			# 而不是让图纸不可见。
+			_gpPopWin.show()
+		_gpPopWin.move_to_foreground()
+	var gpOld: int = gpActive
+	gpActive = _gpPopSheet
+	if gpActive != gpOld:
 		_gpTabSyncing = true
 		gpTabBar.current_tab = _gpPopSheet
 		_gpTabSyncing = false
 		gpActiveChanged.emit()
+
+
+# The popped-out canvas gained focus: route through the SINGLE popout-focus path (B1).
+# 被摘出的画布获得焦点：经**唯一**的弹窗聚焦路径转发（B1）。
+func _gpOnPopFocused() -> void:
+	_gpFocusPopout()
 
 
 # The pop-out window closed: return the canvas to its preferential pane (the one that popped
@@ -1092,6 +1174,13 @@ func _gpOnPopClosed() -> void:
 		gpActiveChanged.emit()
 	_gpFillPickers()
 	_gpRestylePanes()
+	# D01: close_requested does NOT close the window automatically (Godot 4.7 docs) —
+	# without an explicit hide() the window lingers as an empty shell the user can never
+	# dismiss (the reported "关不掉的空窗").
+	# D01：close_requested 不会自动关窗（Godot 4.7 文档）—— 不显式 hide() 窗口就以空壳
+	# 形式留在屏幕上且永远关不掉（即报告的「关不掉的空窗」）。
+	if _gpPopWin != null and is_instance_valid(_gpPopWin):
+		_gpPopWin.hide()
 
 
 # Active tab changed via the tab bar (a click, or a programmatic sync): show that sheet in
@@ -1102,7 +1191,11 @@ func _gpOnTabChanged(gpIdx: int) -> void:
 		return
 	if gpIdx < 0 or gpIdx >= gpTabs.size():
 		return
-	_gpBindActivePane(gpIdx)
+	# D02: the pop-out route emits inside _gpFocusPopout — consuming here avoids a double
+	# gpActiveChanged.
+	# D02：摘出路由在 _gpFocusPopout 内部发信号 —— 在此消费，避免 gpActiveChanged 发两次。
+	if _gpBindActivePane(gpIdx):
+		return
 	gpActiveChanged.emit()
 
 
@@ -1191,6 +1284,9 @@ func _gpCloseTabNow(gpIdx: int) -> void:
 	if _gpPopSheet == gpIdx and _gpPopWin != null and is_instance_valid(_gpPopWin):
 		_gpPopWin.remove_child(gpC)
 		_gpPopSheet = GPPaneLayout.GP_EMPTY
+		# D01: the closed sheet WAS the popped one — hide the window too, or it lingers.
+		# D01：被关的正是已摘出的那张 —— 窗口也要随之隐藏，否则留在屏幕上。
+		_gpPopWin.hide()
 	if gpC.get_parent() != null:
 		gpC.get_parent().remove_child(gpC)
 	gpC.queue_free()

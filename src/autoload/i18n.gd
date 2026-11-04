@@ -466,6 +466,12 @@ const GP_STRINGS: Dictionary = {
 	"menu.view_zoom_in":       { "zh": "放大",         "en": "Zoom In" },
 	"menu.view_zoom_out":      { "zh": "缩小",         "en": "Zoom Out" },
 	"menu.view_grid":          { "zh": "显示网格",     "en": "Show Grid" },
+	# D22: multi-view layout menu entries (Ctrl/Cmd+1..4).
+	# D22：多视图布局菜单项（Ctrl/Cmd+1..4）。
+	"menu.view_layout1":       { "zh": "单视图        Ctrl+1", "en": "Single View      Ctrl+1" },
+	"menu.view_layout2":       { "zh": "左右双视图    Ctrl+2", "en": "Side-by-Side    Ctrl+2" },
+	"menu.view_layout3":       { "zh": "一大两小      Ctrl+3", "en": "One Big + Two  Ctrl+3" },
+	"menu.view_layout4":       { "zh": "四宫格        Ctrl+4", "en": "Four Panes      Ctrl+4" },
 	"menu.insert_frame":       { "zh": "图框",         "en": "Frame" },
 	"menu.insert_frame_style": { "zh": "图框样式…",    "en": "Frame Style…" },
 	"menu.format_bg":          { "zh": "画布背景色…",  "en": "Canvas Background…" },
@@ -668,6 +674,18 @@ const GP_STRINGS: Dictionary = {
 	"offpage.sync_done":      { "zh": "契约属性已同步到对端", "en": "Contract attributes synced to the peer end" },
 	"offpage.jump_missing":   { "zh": "对端图纸未打开或已删除", "en": "The peer sheet is not open or was deleted" },
 	"offpage.status_created": { "zh": "跨图纸连接已创建（编号 %s）", "en": "Cross-sheet connection created (tag %s)" },
+	# ---- D24: cross-sheet refusal reasons (machine keys from the create/sync commands;
+	# reported with the "offpage.refuse_" prefix — never shown as a bare key). ----
+	# ---- D24：跨图纸拒绝原因（创建 / 同步命令的机器键；经 "offpage.refuse_" 前缀上报，
+	# 绝不以裸键形式示人）。----
+	"offpage.refuse_same_sheet":             { "zh": "跨图纸连接的两端必须在不同图纸上", "en": "A cross-sheet link must join two different sheets" },
+	"offpage.refuse_connector_already_linked": { "zh": "该连接符已建立跨图纸连接", "en": "This connector already has a cross-sheet link" },
+	"offpage.refuse_sheet_missing":          { "zh": "目标图纸不存在或已关闭", "en": "The target sheet does not exist or is closed" },
+	"offpage.refuse_node_missing":           { "zh": "目标对象不存在（图纸可能已变更）", "en": "The target item does not exist (the sheet may have changed)" },
+	"offpage.refuse_peer_graph_missing":     { "zh": "目标图纸没有可编辑的图", "en": "The target sheet has no editable graph" },
+	"offpage.refuse_links_missing":          { "zh": "跨图纸连接表不可用", "en": "The cross-sheet link table is unavailable" },
+	"offpage.refuse_no_contract_values":     { "zh": "没有可同步的契约字段", "en": "No contract fields to sync" },
+	"offpage.refuse_pipe_needs_one_bound":   { "zh": "跨图纸管线必须有一端绑定在图元上", "en": "A cross-sheet line needs one end bound to an item" },
 	# ---- S4 deletion cascade / 删除级联 ----
 	"offpage.del_title":      { "zh": "删除跨图纸连接", "en": "Delete Cross-Sheet Connection" },
 	"offpage.del_text":       { "zh": "删除连接符将删除**整条**跨图纸连接，对端图纸上的连接符将一并删除：\n%s",
