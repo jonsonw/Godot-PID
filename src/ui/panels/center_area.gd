@@ -44,6 +44,15 @@ var gpBody: Control
 # 每个图纸的记录：{ "title": 标题, "graph": 图, "canvas": 画布 }。
 var gpTabs: Array[Dictionary] = []
 
+# CLOSED (hidden) sheets: same record shape as gpTabs, but "canvas" is null — the model
+# (sheet + graph) stays alive so a save keeps the data and a picker can re-open the sheet.
+# Closing a tab NEVER deletes the sheet (user feedback 2026-11-04); real deletion belongs
+# to project management (W13).
+# 已关闭（隐藏）的图纸：与 gpTabs 同构的记录，但 "canvas" 为 null —— 模型（sheet + graph）
+# 保持存活，使保存保留数据、选择器可重新打开该图纸。关闭标签**绝不**删除图纸
+#（用户反馈 2026-11-04）；真删除归项目管理（W13）。
+var _gpClosedSheets: Array[Dictionary] = []
+
 # Index of the currently active sheet in gpTabs (-1 when empty).
 # 当前活动图纸在 gpTabs 中的下标（空时为 -1）。
 var gpActive: int = -1
@@ -464,6 +473,17 @@ func gpRefreshOffPageContext() -> void:
 		# 图随快照一同下发，使**推导**文字能够到**目标端**位号（用户反馈 2026-11-03）
 		# —— 与 link 表同一份按引用快照。
 		gpGraphs[gpSheet.gpId] = gpSheet.gpGraph
+	# CLOSED sheets keep their drawing numbers too: a hidden sheet is still in the project,
+	# so flags pointing at it must resolve instead of degrading to "?".
+	# 已关闭图纸同样保留图号：隐藏的图纸仍在工程里，指向它的旗标必须能解析而不是降级为 "？"。
+	for gpRec in _gpClosedSheets:
+		var gpSheet: GPSheet = gpRec.get("sheet") as GPSheet
+		if gpSheet == null:
+			continue
+		gpIdx += 1
+		var gpNo: String = gpSheet.gpNumber.strip_edges()
+		gpNumbers[gpSheet.gpId] = gpNo if gpNo != "" else str(gpIdx)
+		gpGraphs[gpSheet.gpId] = gpSheet.gpGraph
 	GPOffPageIndex.gpSetContext(gpOffPageLinks, gpNumbers, gpGraphs)
 	for gpTabRaw in gpTabs:
 		var gpC: GPCanvas2D = (gpTabRaw as Dictionary).get("canvas") as GPCanvas2D
@@ -500,8 +520,11 @@ func gpOffPageLinksList() -> Array[GPOffPageLink]:
 	return gpOffPageLinks
 
 
-# Every open tab as a persistable GPSheet, in tab order.
-# 把每个打开的标签页按标签顺序导出为可持久化的 GPSheet。
+# Every sheet — OPEN tabs first, then CLOSED (hidden) ones — as persistable GPSheets.
+# Closing a tab only hides it (user feedback 2026-11-04), so a save MUST include the
+# closed sheets or the data would silently vanish from the archive.
+# 全部图纸 —— 先打开的标签，后关闭（隐藏）的 —— 导出为可持久化 GPSheet。关闭标签只是
+# 隐藏（用户反馈 2026-11-04），故保存**必须**包含已关闭图纸，否则数据会从存档里静默消失。
 func gpToSheets() -> Array[GPSheet]:
 	var gpOut: Array[GPSheet] = []
 	var gpI: int = 0
@@ -517,6 +540,18 @@ func gpToSheets() -> Array[GPSheet]:
 		gpSheet.gpName = str(gpTab.get("title", ""))
 		gpSheet.gpIndex = gpI
 		gpSheet.gpGraph = gpTab["graph"]
+		gpOut.append(gpSheet)
+		gpI += 1
+	for gpRec in _gpClosedSheets:
+		# Closed sheets carry their sheet/graph verbatim — the record IS the model holder.
+		# 已关闭图纸原样携带其 sheet/graph —— 记录本身就是模型持有者。
+		var gpSheet: GPSheet = gpRec.get("sheet") as GPSheet
+		if gpSheet == null:
+			continue
+		gpSheet.gpId = str(gpRec.get("id", gpSheet.gpId))
+		gpSheet.gpName = str(gpRec.get("title", ""))
+		gpSheet.gpIndex = gpI
+		gpSheet.gpGraph = gpRec.get("graph") as GPPIDGraph
 		gpOut.append(gpSheet)
 		gpI += 1
 	return gpOut
@@ -542,6 +577,11 @@ func gpLoadSheets(gpSheets: Array) -> void:
 				gpC.get_parent().remove_child(gpC)
 			gpC.queue_free()
 	gpTabs.clear()
+	# A different project brings a different sheet set: the old closed registry MUST go too,
+	# or hidden sheets of the previous project would leak into the new archive.
+	# 换了工程就换了图纸集：旧的关闭注册表也**必须**清掉，否则上一工程的隐藏图纸会
+	# 泄漏进新存档。
+	_gpClosedSheets.clear()
 	gpTabBar.clear_tabs()
 	gpActive = -1
 	gpSheetSeq = 0
@@ -690,11 +730,17 @@ func gpApplyStandard(gpStd: GPProjectStandard) -> void:
 
 
 func gpSyncProjectGraphs() -> void:
+	# The project owns OPEN and CLOSED graphs alike — a hidden sheet is still in the project.
+	# 工程同时拥有**打开与关闭**的图 —— 隐藏的图纸仍在工程里。
 	var gpGraphs: Array = []
 	for gpTabRaw in gpTabs:
 		var gpGraphOne: GPPIDGraph = (gpTabRaw as Dictionary).get("graph") as GPPIDGraph
 		if gpGraphOne != null:
 			gpGraphs.append(gpGraphOne)
+	for gpRec in _gpClosedSheets:
+		var gpGraphOff: GPPIDGraph = gpRec.get("graph") as GPPIDGraph
+		if gpGraphOff != null:
+			gpGraphs.append(gpGraphOff)
 	for gpTabRaw in gpTabs:
 		var gpCanvasOne: GPCanvas2D = (gpTabRaw as Dictionary).get("canvas") as GPCanvas2D
 		if gpCanvasOne != null:
@@ -1016,8 +1062,16 @@ func _gpOnPaneFocused(gpPane: GPCanvasPane) -> void:
 # 活动窗格 —— 用户刚刚瞄准了它。
 func _gpOnPanePick(gpPane: GPCanvasPane, gpSheetIdx: int) -> void:
 	var gpIdx: int = _gpPanes.find(gpPane)
-	if gpIdx < 0 or gpSheetIdx < 0 or gpSheetIdx >= gpTabs.size():
+	if gpIdx < 0 or gpSheetIdx < 0:
 		return
+	# Picker items beyond the open tabs are CLOSED sheets: re-open the picked one first
+	# (its model was kept alive precisely for this), then bind it like any open sheet.
+	# 选择器中超过打开标签数的条目是**已关闭**图纸：先重开被选中的那张（其模型正是为此
+	# 保留的），再像任何打开图纸一样绑定。
+	if gpSheetIdx >= gpTabs.size():
+		gpSheetIdx = _gpReopenClosed(gpSheetIdx - gpTabs.size())
+		if gpSheetIdx < 0:
+			return
 	_gpActivePane = gpIdx
 	_gpPaneSheets = GPPaneLayout.gpSwapOrBind(_gpPaneSheets, gpIdx, gpSheetIdx)
 	# D05: a swap changes BOTH panes — re-home every pane from the binding table.
@@ -1092,8 +1146,41 @@ func _gpFillPickers() -> void:
 				gpPane.gpPick.set_item_disabled(gpPane.gpPick.item_count - 1, true)
 			elif gpS == _gpPopSheet:
 				gpPane.gpPick.set_item_disabled(gpPane.gpPick.item_count - 1, true)
+		# Closed sheets follow the open ones: picking one RE-OPENS it (hide ≠ delete,
+		# user feedback 2026-11-04). They are never disabled — every pane may take one.
+		# 已关闭图纸跟在打开图纸之后：选中即**重开**（隐藏 ≠ 删除，用户反馈
+		# 2026-11-04）。它们永不禁用 —— 任何窗格都可以认领。
+		for gpC in range(_gpClosedSheets.size()):
+			var gpClosed: Dictionary = _gpClosedSheets[gpC]
+			var gpSheet: GPSheet = gpClosed.get("sheet") as GPSheet
+			gpPane.gpPick.add_item(_gpTabTitleOf(gpSheet))
 		if gpSel >= 0:
 			gpPane.gpPick.select(gpSel)
+
+
+# Re-open a closed sheet: rebuild its VIEW (canvas) around the surviving model and move the
+# record back to the open tabs. Returns the new tab index (-1 on a bad index). The model was
+# never freed — this is cheap.
+# 重开一张已关闭图纸：围绕存活的模型重建其**视图**（画布），记录移回打开标签。
+# 返回新标签下标（坏下标为 -1）。模型从未被释放 —— 这一步很轻。
+func _gpReopenClosed(gpClosedIdx: int) -> int:
+	if gpClosedIdx < 0 or gpClosedIdx >= _gpClosedSheets.size():
+		return -1
+	var gpRec: Dictionary = _gpClosedSheets[gpClosedIdx]
+	var gpGraph: GPPIDGraph = gpRec.get("graph") as GPPIDGraph
+	var gpSheet: GPSheet = gpRec.get("sheet") as GPSheet
+	if gpGraph == null or gpSheet == null:
+		return -1
+	var gpTitle: String = str(gpRec.get("title", ""))
+	var gpId: String = str(gpRec.get("id", ""))
+	_gpClosedSheets.remove_at(gpClosedIdx)
+	# _gpAddTabWith adopts the GIVEN graph/sheet and builds a fresh canvas around them —
+	# exactly a re-open; nothing else needs hand-wiring.
+	# _gpAddTabWith 会采纳**给定的** graph/sheet 并围绕它们建新画布 —— 这正是重开；
+	# 无需任何额外接线。
+	_gpAddTabWith(gpTitle, gpId, gpGraph, gpSheet)
+	_gpFillPickers()
+	return gpTabs.size() - 1
 
 
 # The canvas under a GLOBAL point, for cross-pane gestures (W13-S8 drag-to-connect). The
@@ -1133,6 +1220,21 @@ func gpSheetVisible(gpSheetId: String) -> bool:
 # D18：把图纸（按 id）打开进**第一个空窗格** —— 跨图纸连接创建后「看看对端发生了什么」的
 # 一键答案。无空窗格（或该图纸已被摘出、窗格不得争抢）时返回 false。
 func gpOpenSheetInEmptyPane(gpSheetId: String) -> bool:
+	# A CLOSED sheet can be answered too: re-open it first, then bind like any open sheet.
+	# 已**关闭**的图纸同样要能响应：先重开，再像任何打开图纸一样绑定。
+	for gpC in range(_gpClosedSheets.size()):
+		if str(_gpClosedSheets[gpC].get("id", "")) == gpSheetId:
+			var gpNew: int = _gpReopenClosed(gpC)
+			if gpNew < 0:
+				return false
+			var gpSlot: int = _gpPaneSheets.find(GPPaneLayout.GP_EMPTY)
+			if gpSlot < 0:
+				return true  # re-opened at least; no empty pane to bind it into
+			_gpPaneSheets = GPPaneLayout.gpBind(_gpPaneSheets, gpSlot, gpNew)
+			_gpAttachPane(gpSlot, gpNew)
+			_gpFillPickers()
+			_gpRestylePanes()
+			return true
 	for gpI in range(gpTabs.size()):
 		var gpSheet: GPSheet = gpTabs[gpI].get("sheet") as GPSheet
 		if gpSheet == null or gpSheet.gpId != gpSheetId:
@@ -1307,55 +1409,12 @@ func _gpOnTabChanged(gpIdx: int) -> void:
 func _gpOnTabClose(gpIdx: int) -> void:
 	if gpTabs.size() <= 1:
 		return
-	var gpTab: Dictionary = gpTabs[gpIdx]
-	var gpC: GPCanvas2D = gpTab["canvas"]
-	# ADR-43 / S4 deletion case ③: closing a sheet invalidates every link ending on it.
-	# NEVER silently — list the affected links, get an explicit confirmation, delete the
-	# links, then close. The PEER connectors survive (their flags will show "?" and the
-	# unpaired rule reports the repair), because the peer drawing must not lose objects
-	# out from under the user.
-	# ADR-43 / S4 删除情形③：关闭图纸会让落在其上的每条 link 失效。**绝不静默** ——
-	# 列出受影响连接、取得明确确认、删除这些 link，然后关签。**对端连接符保留**
-	#（旗标显示 "？"，unpaired 规则提示修复）—— 不能让对端图纸上的对象凭空消失。
-	var gpSheetId: String = gpC.gpSheet.gpId if gpC.gpSheet != null else ""
-	var gpAffected: Array[GPOffPageLink] = []
-	for gpL in gpOffPageLinks:
-		if gpL == null:
-			continue
-		if str(gpL.gpA.get(GPOffPageLink.GP_KEY_SHEET, "")) == gpSheetId \
-				or str(gpL.gpB.get(GPOffPageLink.GP_KEY_SHEET, "")) == gpSheetId:
-			gpAffected.append(gpL)
-	if gpAffected.size() > 0:
-		_gpConfirmSheetClose(gpIdx, gpAffected)
-		return
+	# Closing a tab now only HIDES the sheet (user feedback 2026-11-04): the model stays
+	# alive, so cross-sheet links ending on it stay valid too — no confirmation, no link
+	# deletion. Real sheet deletion belongs to project management (W13).
+	# 关闭标签现在只是**隐藏**图纸（用户反馈 2026-11-04）：模型保持存活，落在其上的
+	# 跨图纸连接也随之继续有效 —— 无需确认框、无需删 link。真删除归项目管理（W13）。
 	_gpCloseTabNow(gpIdx)
-
-
-# The confirmation for case ③: one line per affected link; only an explicit OK deletes them.
-# 情形③的确认框：每条受影响 link 一行；只有明确的「确定」才删除。
-func _gpConfirmSheetClose(gpIdx: int, gpAffected: Array[GPOffPageLink]) -> void:
-	var gpLines: String = ""
-	for gpL in gpAffected:
-		var gpTag: String = gpL.gpTag if gpL.gpTag != "" else gpL.gpInstanceId
-		var gpPeerId: String = str(gpL.gpB.get(GPOffPageLink.GP_KEY_SHEET, ""))
-		if str(gpL.gpB.get(GPOffPageLink.GP_KEY_SHEET, "")) == _gpSheetIdAt(gpIdx):
-			gpPeerId = str(gpL.gpA.get(GPOffPageLink.GP_KEY_SHEET, ""))
-		gpLines += I18n.gpTr("offpage.del_line") % [gpTag,
-			I18n.gpTr("offpage.peer_sheet") % _gpSheetLabelOf(gpPeerId)] + "\n"
-	var gpDlg: ConfirmationDialog = ConfirmationDialog.new()
-	gpDlg.title = I18n.gpTr("offpage.close_title")
-	gpDlg.dialog_text = I18n.gpTr("offpage.close_text") % [gpLines.strip_edges()]
-	gpDlg.ok_button_text = I18n.gpTr("dialog.ok")
-	gpDlg.cancel_button_text = I18n.gpTr("dialog.cancel")
-	add_child(gpDlg)
-	gpDlg.confirmed.connect(func() -> void:
-		for gpL in gpAffected:
-			gpOffPageLinks.erase(gpL)
-		gpRefreshOffPageContext()
-		_gpCloseTabNow(gpIdx)
-		gpDlg.queue_free())
-	gpDlg.canceled.connect(gpDlg.queue_free)
-	gpDlg.popup_centered()
 
 
 # The sheet id of the tab at gpIdx ("" when out of range).
@@ -1374,6 +1433,12 @@ func _gpSheetLabelOf(gpSheetId: String) -> String:
 	for gpI in range(gpTabs.size()):
 		if _gpSheetIdAt(gpI) == gpSheetId:
 			return str(gpTabs[gpI].get("title", gpSheetId))
+	# Closed (hidden) sheets keep their names too — a link's peer label must not degrade
+	# to "?" just because the peer's tab is closed.
+	# 已关闭（隐藏）的图纸同样保名 —— link 对端的标签不能只因对端标签被关就降级为 "？"。
+	for gpRec in _gpClosedSheets:
+		if str(gpRec.get("id", "")) == gpSheetId:
+			return str(gpRec.get("title", gpSheetId))
 	return GPOffPageIndex.GP_UNRESOLVED_TEXT
 
 
@@ -1393,6 +1458,13 @@ func _gpCloseTabNow(gpIdx: int) -> void:
 	if gpC.get_parent() != null:
 		gpC.get_parent().remove_child(gpC)
 	gpC.queue_free()
+	# HIDE, not delete (user feedback 2026-11-04): the sheet/graph record moves to the
+	# closed registry — saves keep the data, pickers can re-open it. Only the VIEW (canvas)
+	# is destroyed; it is rebuilt on re-open.
+	# 隐藏，而非删除（用户反馈 2026-11-04）：sheet/graph 记录移入关闭注册表 ——
+	# 保存保留数据、选择器可重新打开。只有**视图**（画布）被销毁；重开时重建。
+	gpTab["canvas"] = null
+	_gpClosedSheets.append(gpTab)
 	gpTabs.remove_at(gpIdx)
 	gpTabBar.remove_tab(gpIdx)
 	# Keep the binding invariant: panes that showed this sheet go empty, later sheets shift
@@ -1421,10 +1493,10 @@ func _gpCloseTabNow(gpIdx: int) -> void:
 		gpTabBar.current_tab = gpPaneSheet
 		_gpTabSyncing = false
 	gpSyncProjectGraphs()
-	# Closing a sheet shifts every later tab's fallback number and, in S4, invalidates the links
-	# that ended on it — republish now so the surviving flags stop pointing into nothing.
-	# 关闭一张图纸会改变其后所有标签的回落编号，且在 S4 中会让落在该图上的 link 失效 ——
-	# 立即重新发布，使存活的旗标不再指向空处。
+	# Hiding a sheet does NOT invalidate its links (the graph stays alive) — the republish
+	# here only refreshes the {sheet_id: number} snapshot the flags read.
+	# 隐藏图纸**不会**使其 link 失效（图仍存活）—— 这里重发只是为了刷新旗标读取的
+	# {sheet_id: 图号} 快照。
 	gpRefreshOffPageContext()
 	_gpFillPickers()
 	_gpRestylePanes()
