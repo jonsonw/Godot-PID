@@ -437,6 +437,17 @@ func _gpOnValueChanged(gpKey: String, gpLang: String, gpText: String) -> void:
 		gpVal = {"zh": "", "en": ""}
 		(gpEntry as Dictionary)["value"] = gpVal
 	(gpVal as Dictionary)[gpLang] = gpText
+	# LIVE number sync (user feedback 2026-11-05, round 8): the preview writes the block
+	# directly, so the NUMBER FIELD — what the flags, tab captions and DRC read — lagged
+	# until commit; during typing the flags stood still. Sync now and broadcast ONLY when
+	# the number actually moved: a keystroke that retypes the number = one refresh, other
+	# cells cost nothing. The commit below still owns the single undo step.
+	# 实时图号同步（2026-11-05 用户反馈第八轮）：预览直接写图签，编号字段 —— 旗标、标签
+	# 标题与 DRC 所读 —— 要到提交才跟上；打字期间旗标纹丝不动。现在就同步，且只在图号
+	# **真的变了**时广播：改号的一个键击 = 一次刷新，其它格分文不花。下方的提交仍独占
+	# 那一个撤销步。
+	if gpSheet.gpSyncNumberFromBlock():
+		gpSheet.gpSheetChanged.emit()
 	_gpRepaint()
 
 
@@ -530,13 +541,22 @@ func _gpCommitTitleBlock() -> void:
 	if gpTarget != null:
 		gpOk = gpTarget.gpRequestSetTitleBlock(gpNew)
 	else:
+		# No canvas (headless): the direct write must sync the number field itself — the
+		# command path that normally owns the sync never ran.
+		# 无画布（headless）：直写路径必须自带字段同步 —— 平时负责同步的命令路径根本没跑。
 		gpSheet.gpTitleBlock = gpNew.duplicate(true)
+		gpSheet.gpSyncNumberFromBlock()
+		gpSheet.gpSheetChanged.emit()
 		gpOk = true
 	if not gpOk:
 		# The command refused (no canvas / no change). Keep what the user typed so the dialog
-		# never silently discards input; the next commit will try again.
-		# 命令拒绝（无画布 / 无变化）时保留用户输入，绝不静默丢弃；下次提交再试。
+		# never silently discards input; the next commit will try again. The direct keep is a
+		# model write too — sync the number field the same way.
+		# 命令拒绝（无画布 / 无变化）时保留用户输入，绝不静默丢弃；下次提交再试。这次直写保留
+		# 同样是一次模型写 —— 字段同步照做。
 		gpSheet.gpTitleBlock = gpNew.duplicate(true)
+		gpSheet.gpSyncNumberFromBlock()
+		gpSheet.gpSheetChanged.emit()
 	_gpTitleBaseline = gpNew.duplicate(true)
 	_gpRepaint()
 

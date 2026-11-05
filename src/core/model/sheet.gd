@@ -618,6 +618,16 @@ static func gpFromDict(gpD: Dictionary) -> GPSheet:
 	# a complete (empty) block rather than a frame with no title block at all.
 	# 缺少标题栏时填入完整标准格网，使旧档打开即是完整（空）标题栏，而不是有框无栏。
 	gpS.gpTitleBlock = (gpTB as Dictionary).duplicate(true) if gpTB is Dictionary else gpDefaultTitleBlock()
+	# FIELD<-BLOCK sync at LOAD too (user feedback 2026-11-05, round 8): an archive saved by
+	# an older build may carry a "number" field that disagrees with the drawing_no cell the
+	# user actually edited (the round-7 sync only existed in the command). The block is what
+	# the user sees and edits — it wins (the empty-cell guard keeps a number whose block
+	# cell was never filled). Without this the divergence survives every reload forever.
+	# **载入时**也做 字段←格 同步（2026-11-05 用户反馈第八轮）：旧版本构建保存的存档可能
+	# 带有与用户实际编辑过的「图号」格**不一致**的 number 字段（第七轮同步只存在于命令里）。
+	# 格是用户所见、所编辑的 —— 由它说了算（空格护栏保住从未填格的图号）。缺了这一步，
+	# 分家会在每次重开后永久存活。
+	gpS.gpSyncNumberFromBlock()
 	# Build the graph from the sheet's own geometry only. tag_rules is added conditionally
 	# because GPPIDGraph reads it by presence: passing an empty dict would fabricate a
 	# default rule set and, worse, mark the project as "has rules" on the next save.
@@ -700,15 +710,17 @@ func gpAssignNumber(gpNewNumber: String) -> void:
 # DRC read). One question, one answer: the two may never disagree. Silent on purpose — the
 # caller (the sheet command) owns the single gpSheetChanged emission. Conservative too: an
 # EMPTY cell never erases the number (clearing the block must not silently unname the sheet);
-# zh wins, en is the fallback.
+# zh wins, en is the fallback. Returns TRUE when the field moved — the live-preview caller
+# emits gpSheetChanged only then, so typing other cells never costs a refresh.
 # 整块写入后把 gpNumber **从**图签「图号」格同步过来（图签对话框编辑的是用户眼中所见的
 # 格；字段是旗标、标签标题与 DRC 读取的值）。同一问题只有一个答案：两者不得分家。刻意
 # 静默 —— 发射 gpSheetChanged 归调用方（图纸命令）**一次性**负责。同样保守：空格绝不抹号
-#（清空图签不得悄悄让图纸无名）；zh 优先，en 作回落。
-func gpSyncNumberFromBlock() -> void:
+#（清空图签不得悄悄让图纸无名）；zh 优先，en 作回落。字段**真的动了**时返回真 —— 实时
+# 预览的调用方仅此时才发 gpSheetChanged，敲其它格绝不产生重刷新开销。
+func gpSyncNumberFromBlock() -> bool:
 	var gpEntry: Variant = gpTitleBlock.get("drawing_no")
 	if gpEntry == null:
-		return
+		return false
 	var gpVal: Variant = (gpEntry as Dictionary).get("value")
 	var gpV: Dictionary = gpVal as Dictionary if gpVal is Dictionary else (gpEntry as Dictionary)
 	var gpCell: String = str(gpV.get("zh", "")).strip_edges()
@@ -716,6 +728,8 @@ func gpSyncNumberFromBlock() -> void:
 		gpCell = str(gpV.get("en", "")).strip_edges()
 	if gpCell != "" and gpCell != gpNumber:
 		gpNumber = gpCell
+		return true
+	return false
 
 
 # Effective value of one title-block field, falling back to the project info. Used by the dialog

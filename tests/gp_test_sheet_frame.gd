@@ -582,3 +582,41 @@ func gpTestTitleBlockWriteSyncsNumber() -> void:
 	}, "清空图签")
 	gpCheck(gpCmd2.gpExecute(gpCtx), "清空命令应执行")
 	gpEq(gpS.gpNumber, "30-1200", "空格不得抹掉图号")
+
+
+# Round 8 (user feedback 2026-11-05): the LOAD path must sync the NUMBER FIELD from the
+# drawing_no cell too — an archive saved by an older build can carry a "number" that
+# disagrees with the cell the user edited, and without the load sync the divergence
+# survives every reload forever. The BLOCK wins (it is what the user sees and edits);
+# an EMPTY cell never erases the field. gpSyncNumberFromBlock also returns whether the
+# field moved, so a live-preview caller can emit only on a real change.
+# 第八轮（2026-11-05 用户反馈）：**载入**路径也必须把编号字段从「图号」格同步 —— 旧版本
+# 构建保存的存档可能带着与用户编辑过的格不一致的 number；没有载入同步，分家在每次重开后
+# 永久存活。格说了算（用户所见、所编辑）；空格绝不抹号。gpSyncNumberFromBlock 同时返回
+# 字段是否真的动了，使实时预览的调用方只在真变化时发射。
+func gpTestLoadSyncsNumberFromBlock() -> void:
+	var gpS: GPSheet = GPSheet.gpNew("s", "s", 0)
+	gpS.gpAssignNumber("3")
+	var gpD: Dictionary = gpS.gpToDict()
+	gpD["number"] = "3"
+	var gpBlock: Dictionary = (gpD["title_block"] as Dictionary).duplicate(true)
+	(gpBlock["drawing_no"] as Dictionary)["value"] = {"zh": "1-0003", "en": "1-0003"}
+	gpD["title_block"] = gpBlock
+	var gpLoaded: GPSheet = GPSheet.gpFromDict(gpD)
+	gpEq(gpLoaded.gpNumber, "1-0003", "载入后字段应从图号格同步（格说了算）")
+	# An EMPTY cell never erases the field: a number without a filled block cell stays.
+	# 空格绝不抹号：只有字段、没填格的图号保持原样。
+	var gpD2: Dictionary = gpS.gpToDict()
+	var gpBlock2: Dictionary = (gpD2["title_block"] as Dictionary).duplicate(true)
+	(gpBlock2["drawing_no"] as Dictionary)["value"] = {"zh": "", "en": ""}
+	gpD2["title_block"] = gpBlock2
+	gpEq(GPSheet.gpFromDict(gpD2).gpNumber, "3", "空格载入不得抹掉字段图号")
+	# The predicate voice: true only on a real move, false on same / empty.
+	# 判谓声音：真变化才真，同值 / 空格皆假。
+	var gpS3: GPSheet = GPSheet.gpNew("s3", "s3", 0)
+	gpS3.gpAssignNumber("3")
+	var gpEntry: Dictionary = gpS3.gpTitleBlock.get("drawing_no") as Dictionary
+	(gpEntry["value"] as Dictionary)["zh"] = "9"
+	(gpEntry["value"] as Dictionary)["en"] = "9"
+	gpCheck(gpS3.gpSyncNumberFromBlock(), "图号变化时同步应报真")
+	gpCheck(not gpS3.gpSyncNumberFromBlock(), "同值重复同步应报假（不空发信号）")
