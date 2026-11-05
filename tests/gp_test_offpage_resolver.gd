@@ -335,6 +335,107 @@ func gpTestServedFallbackToTaggedInline() -> void:
 	gpEq(gpOut["target_tag"], "V-5", "the top line names the valve / 上一行点阀门的名")
 
 
+# ---- ADR-45 D2d round-6 revision (user feedback 2026-11-05): the walk crosses BOTH
+# relations — edges AND mounts; mounted parts never win; the nearest UNNAMED device stops.
+# ---- ADR-45 D2d 第六轮修订（2026-11-05 实机反馈）：行走横跨**两种**关系 —— 边与挂载；
+# 挂载部件绝不胜出；最近的无名设备止步。
+
+# The line lands on the tank's NOZZLE (mounted on the tank, no edge between nozzle and tank):
+# the walk crosses the mount relation to the host and names the tank. The round-6 defect: the
+# twin's top line stayed blank because the nozzle ended the walk one hop short of its tank.
+# 管线落在罐体的**管口**上（管口挂载于罐体、两者之间没有边）：行走跨过挂载关系到达宿主、
+# 点罐体的名。第六轮缺陷：孪生体上一行空白，因为行走离管口所属的罐体一步之遥处断了头。
+func gpTestServedCrossesMountToHost() -> void:
+	var gpR: Dictionary = _gpRig()
+	var gpG2: GPPIDGraph = gpR["g2"]
+	var gpConnB: GPPIDNode = gpG2.gpNewNode("n-conn-b", GPSymbolPackOffpage.GP_ID_PIPE,
+		"CONN-B", Vector2(60, 60), {})
+	gpConnB.gpProps[GPOffPageLink.GP_KEY_LINK_ID] = "xlink-1"
+	gpG2.gpAddNode(gpConnB)
+	# The nozzle: mounted on the tank (mount relation, NOT an edge), untagged.
+	# 管口：**挂载**在罐体上（挂载关系，**不是**边），无位号。
+	var gpNozzle: GPPIDNode = gpG2.gpNewNode("n-nozzle", "DGENERAL008", "", Vector2(200, 60), {})
+	gpNozzle.gpParentUid = "n-dev"
+	gpG2.gpAddNode(gpNozzle)
+	# The ONLY edge: connector — nozzle. The tank hangs off the nozzle by the mount alone.
+	# 唯一的边：连接符 —— 管口。罐体只靠挂载吊在管口下。
+	gpG2.gpAddEdge(gpG2.gpNewEdge("e-1", "n-conn-b", "n-nozzle"))
+	(gpR["link"] as GPOffPageLink).gpB = {"sheet_id": "sheet-2", "node_id": "n-conn-b",
+		"port_id": "in"}
+	# No lookup: the mount hop is pure node data, it must work without the def voice too.
+	# 无 lookup：挂载跳是纯节点数据，没有定义的声音也必须工作。
+	var gpOut: Dictionary = GPOffPageResolver.gpResolve(gpR["link"], gpR["numbers"],
+		gpR["graphs"])
+	gpEq(str((gpOut["served"] as Dictionary).get("node_id", "")), "n-dev",
+		"the walk crosses the mount to the host tank / 行走跨过挂载到达宿主罐体")
+	gpEq(gpOut["target_tag"], "P-101", "the top line names the tank / 上一行点罐体的名")
+
+
+# A mounted part NEVER wins, even when it carries a part tag: the nozzle's "N2" is not the
+# equipment the line serves — the walk penetrates the part and names its host.
+# 挂载部件**绝不**胜出，即便它带着部件号：管口的「N2」不是管线所服务的设备 —— 行走穿透
+# 部件、点其宿主的名。
+func gpTestMountedPartNeverWins() -> void:
+	var gpR: Dictionary = _gpRig()
+	var gpG2: GPPIDGraph = gpR["g2"]
+	var gpConnB: GPPIDNode = gpG2.gpNewNode("n-conn-b", GPSymbolPackOffpage.GP_ID_PIPE,
+		"CONN-B", Vector2(60, 60), {})
+	gpConnB.gpProps[GPOffPageLink.GP_KEY_LINK_ID] = "xlink-1"
+	gpG2.gpAddNode(gpConnB)
+	var gpNozzle: GPPIDNode = gpG2.gpNewNode("n-nozzle", "DGENERAL008", "N2", Vector2(200, 60), {})
+	gpNozzle.gpParentUid = "n-dev"
+	gpG2.gpAddNode(gpNozzle)
+	gpG2.gpAddEdge(gpG2.gpNewEdge("e-1", "n-conn-b", "n-nozzle"))
+	(gpR["link"] as GPOffPageLink).gpB = {"sheet_id": "sheet-2", "node_id": "n-conn-b",
+		"port_id": "in"}
+	# The lookup: DGENERAL008 is category "general" (the round-6 trap — it sat in the device
+	# list) BUT carries the NOZZLE mount kind; PUMP001 is a plain pump.
+	# lookup：DGENERAL008 类别为 "general"（第六轮陷阱 —— 它就在设备类别表里）**但**带
+	# NOZZLE 挂载种类；PUMP001 是普通泵。
+	var gpLookup: Callable = func(gpSymId: String) -> GPSymbolDef:
+		var gpDef: GPSymbolDef = GPSymbolDef.new()
+		gpDef.gpId = gpSymId
+		gpDef.gpCategory = "general" if gpSymId == "DGENERAL008" else "pump"
+		gpDef.gpMountKind = "NOZZLE" if gpSymId == "DGENERAL008" else ""
+		return gpDef
+	var gpOut: Dictionary = GPOffPageResolver.gpResolve(gpR["link"], gpR["numbers"],
+		gpR["graphs"], gpLookup)
+	gpEq(str((gpOut["served"] as Dictionary).get("node_id", "")), "n-dev",
+		"a tagged nozzle is still a PART — the host wins / 带位号的管口仍是**部件** —— 宿主胜出")
+	gpEq(gpOut["target_tag"], "P-101", "the top line names the pump, not the nozzle / 上一行点泵的名，不是管口")
+
+
+# The nearest device met UNNAMED stops its branch — the walk must NOT penetrate past a
+# device into its other lines to name a farther one; the honest answer is the blank slot.
+# 途中遇到的**无名字**最近设备令其分支止步 —— 行走**绝不**穿过设备跨进它的其它管线去点
+# 更远的名；诚实的答案是空槽。
+func gpTestUntaggedDeviceStopsBranch() -> void:
+	var gpR: Dictionary = _gpRig()
+	var gpG2: GPPIDGraph = gpR["g2"]
+	var gpConnB: GPPIDNode = gpG2.gpNewNode("n-conn-b", GPSymbolPackOffpage.GP_ID_PIPE,
+		"CONN-B", Vector2(60, 60), {})
+	gpConnB.gpProps[GPOffPageLink.GP_KEY_LINK_ID] = "xlink-1"
+	gpG2.gpAddNode(gpConnB)
+	# An UNTAGGED tank on the line, a tagged pump beyond it.
+	# 线上一台**无位号**的罐，其后一台有位号的泵。
+	var gpTank: GPPIDNode = gpG2.gpNewNode("n-tank", "TANK001", "", Vector2(120, 60), {})
+	gpG2.gpAddNode(gpTank)
+	gpG2.gpAddEdge(gpG2.gpNewEdge("e-1", "n-conn-b", "n-tank"))
+	gpG2.gpAddEdge(gpG2.gpNewEdge("e-2", "n-tank", "n-dev"))
+	(gpR["link"] as GPOffPageLink).gpB = {"sheet_id": "sheet-2", "node_id": "n-conn-b",
+		"port_id": "in"}
+	var gpLookup: Callable = func(gpSymId: String) -> GPSymbolDef:
+		var gpDef: GPSymbolDef = GPSymbolDef.new()
+		gpDef.gpId = gpSymId
+		gpDef.gpCategory = "tank" if gpSymId == "TANK001" else "pump"
+		return gpDef
+	var gpOut: Dictionary = GPOffPageResolver.gpResolve(gpR["link"], gpR["numbers"],
+		gpR["graphs"], gpLookup)
+	gpEq(gpOut["served"], null,
+		"the unnamed nearest device stops the walk — honest blank / 无名的最近设备令行走止步 —— 诚实空槽")
+	gpEq(gpOut["target_tag"], "", "no farther guess across the device / 绝不越过设备向更远处臆造")
+
+
 # The broken-claim predicate (user feedback 2026-11-05): a claim whose link is gone is
 # BROKEN (the reconnect leftover); a healthy claim is not; no claim is not.
 # 断声称判谓（用户反馈 2026-11-05）：link 已走的声称 = 「断」（重连遗留物）；健康声称

@@ -157,22 +157,21 @@ static func _gpEndDangling(gpRef: Dictionary, gpGraphs: Dictionary) -> bool:
 	return gpGraph.gpGetNode(gpNodeId) == null
 
 
-# The item ONE end ref SERVES (the flag's top line; ADR-45 D2a, refined 2026-11-05 as D2d):
-#   * the end is a plain item  -> itself (its own tag);
-#   * the end is a CONNECTOR (the twin) -> the NEAREST equipment/instrument ALONG the line
-#     (user feedback 2026-11-05): a breadth-first walk across the connected edges — a device
-#     category wins immediately (BFS = nearest first), untagged/tagged inline items (valves,
-#     fittings) are traversed THROUGH, chained connectors are never crossed (they lead to
-#     another sheet). The first TAGGED inline item met on the way is kept as the fallback for
-#     the no-lookup mode and for lines that reach no device at all.
-#   * anything unresolvable    -> {} (a blank slot, never a guess).
+# The item ONE end ref SERVES (the flag's top line; ADR-45 D2a, refined 2026-11-05 as D2d,
+# round-6 revision): the walk is a breadth-first traversal across BOTH relations a line is
+# made of — edges AND mounts (a mounted nozzle joins the line by an edge, its equipment by
+# the mount). A NAMED device/instrument wins at its BFS depth (nearest first); mounted parts
+# and inline piping are walked through; the nearest device met UNNAMED stops its branch (the
+# honest blank — a farther guess would cross into the device's other lines); chained
+# connectors are never crossed; the first TAGGED inline item met is the fallback for lines
+# that reach no device at all.
 # Returns {"node_id", "tag"} or {}.
-# 某一**端引用**所服务的对象（旗标上一行；ADR-45 D2a，2026-11-05 细化为 D2d）：端是普通
-# 对象 → 它自己（自身位号）；端是**连接符**（孪生体）→ **沿连线最近**的设备 / 仪表
-#（用户反馈 2026-11-05）：沿连通边做**广度优先**行走 —— 设备类别即刻胜出（BFS 即最近
-# 优先）、内联件（阀门 / 管件，有无位号皆可）被**穿透**、链式连接符绝不跨过（它们通向
-# 另一张图纸）。途中遇到的第一条**有位号**的内联件记为回落 —— 供无 lookup 模式与完全
-# 到不了设备的线使用。一切无法解析 → {}（空槽位，绝不臆造）。返回 {"node_id","tag"} 或 {}。
+# 某一**端引用**所服务的对象（旗标上一行；ADR-45 D2a，2026-11-05 细化为 D2d，第六轮修订）：
+# 行走是横跨**两种**关系的广度优先 —— **边与挂载**（挂载管口靠边接入管线、靠挂载接入设备）。
+# **有名字**的设备 / 仪表在其 BFS 深度上胜出（即最近优先）；挂载部件与内联管线被穿透；
+# 途中遇到的**无名字**最近设备令其分支止步（诚实空槽 —— 向更远处臆造会跨进该设备的其它
+# 管线）；链式连接符绝不跨过；完全到不了设备时，第一条**有位号**的内联件记为回落。
+# 返回 {"node_id","tag"} 或 {}。
 static func _gpServedOf(gpRef: Dictionary, gpGraphs: Dictionary,
 		gpDefLookup: Callable = Callable()) -> Dictionary:
 	var gpSheetId: String = str(gpRef.get(GPOffPageLink.GP_KEY_SHEET, ""))
@@ -196,23 +195,43 @@ static func _gpServedOf(gpRef: Dictionary, gpGraphs: Dictionary,
 	var gpFallback: Dictionary = {}
 	while not gpQueue.is_empty():
 		var gpCur: String = gpQueue.pop_front()
+		# Next hops = the far ends of the edges at gpCur PLUS gpCur's mount HOST. A mounted
+		# inline item — the tank's nozzle the line lands on — joins the LINE by an edge but
+		# its EQUIPMENT by the MOUNT relation (two relations, never one: the mount layer's
+		# founding contract). The walk must cross both, or the nozzle dead-ends one hop
+		# short of the tank it belongs to (user feedback 2026-11-05, round 6).
+		# 下一跳 = gpCur 各条边的另一端 **加上** gpCur 的挂载宿主。挂载内联件 —— 管线所落的
+		# 罐体管口 —— 靠**边**接入管线、靠**挂载关系**接入设备（两种关系，从来不是一种：
+		# 挂载层的立约）。行走必须两种都跨，否则管口在离它所属罐体一步之遥处断头
+		#（2026-11-05 实机反馈第六轮）。
+		var gpNext: Array[String] = []
 		for gpE in gpGraph.gpEdges:
 			if gpE == null:
 				continue
 			var gpOtherId: String = _gpEdgeOtherNode(gpE, gpCur)
-			if gpOtherId == "" or gpSeen.has(gpOtherId):
-				continue
+			if gpOtherId != "" and not gpSeen.has(gpOtherId):
+				gpNext.append(gpOtherId)
+		var gpCurNode: GPPIDNode = gpGraph.gpGetNode(gpCur)
+		if gpCurNode != null and gpCurNode.gpIsMounted() \
+				and not gpSeen.has(gpCurNode.gpParentUid):
+			gpNext.append(gpCurNode.gpParentUid)
+		for gpOtherId in gpNext:
+			gpSeen[gpOtherId] = true
 			var gpOther: GPPIDNode = gpGraph.gpGetNode(gpOtherId)
 			if gpOther == null:
 				continue
-			gpSeen[gpOtherId] = true
 			# A chained connector is a dead end: it lives on ANOTHER sheet (or claims to).
 			# 链式连接符是死路：它活在**另一张**图纸上（或声称如此）。
 			if (gpOther.gpProps as Dictionary).has(GPOffPageLink.GP_KEY_LINK_ID) \
 					or _gpIsOffpageDef(gpOther, gpDefLookup):
 				continue
-			if _gpIsDeviceNode(gpOther, gpDefLookup):
+			var gpKind: String = _gpServedKindOf(gpOther, gpDefLookup)
+			if gpKind == "device":
 				return {"node_id": gpOtherId, "tag": gpOther.gpTag}
+			if gpKind == "dead":
+				# The nearest equipment is here but unnamed — stop, never guess farther.
+				# 最近的设备就在此处但没有名字 —— 止步，绝不向更远处臆造。
+				continue
 			if str(gpOther.gpTag) != "" and gpFallback.is_empty():
 				gpFallback = {"node_id": gpOtherId, "tag": gpOther.gpTag}
 			gpQueue.append(gpOtherId)
@@ -226,18 +245,41 @@ static func _gpServedOf(gpRef: Dictionary, gpGraphs: Dictionary,
 const GP_DEVICE_CATEGORIES: Array[String] = ["pump", "tank", "heat", "instrument", "general"]
 
 
-# Whether the node's symbol category is a device/instrument. Without a lookup the tag is the
-# only voice: a tagged non-connector item is treated as the served item (the historical
-# single-hop behavior, extended to walk through untagged items).
-# 节点的符号类别是否为设备 / 仪表。没有 lookup 时位号是唯一声音：有位号的非连接符对象
-# 即视为被服务对象（历史上的单跳行为，扩展为穿透无位号者）。
-static func _gpIsDeviceNode(gpN: GPPIDNode, gpDefLookup: Callable) -> bool:
+# The three-way classification the served walk needs (user feedback 2026-11-05, round 6):
+#   * "device" — may be NAMED as the served item: a tagged equipment/instrument whose def is
+#     not a mounted part;
+#   * "inline" — walk THROUGH: a mounted part (the def carries a mount kind — nozzle, manhole,
+#     blind, insulation, actuator … a part joins equipment by the MOUNT relation, never by the
+#     line), inline piping, or — in no-lookup mode — anything untagged (the tag is the only
+#     voice left);
+#   * "dead"   — the nearest equipment IS HERE but unnamed (device category, no tag): stop this
+#     branch. Penetrating past a device would cross into its OTHER lines and could name a
+#     farther, wrong device; the honest answer is the blank slot — assign the tag, it appears.
+# Without a lookup the tag is the only voice: a tagged non-connector item is treated as the
+# served item (the historical single-hop behavior, extended to walk through untagged items).
+# Pure.
+# 服务行走所需的**三分类**（2026-11-05 实机反馈第六轮）：
+#   * "device" —— 可被**点名**为服务对象：有位号、设备 / 仪表类别、且非挂载部件的定义；
+#   * "inline" —— **穿透**：挂载部件（定义带挂载种类 —— 管口、人孔、盲板、保温、执行机构
+#     ……部件靠**挂载关系**接入设备，从不靠管线）、内联管线，或 —— 无 lookup 模式下 ——
+#     一切无位号者（位号是唯一剩下的声音）；
+#   * "dead"   —— 最近的设备**就在此处**但没有名字（设备类别、无位号）：此分支**止步**。
+#     穿过设备会跨进它的**其它**管线、可能点名更远的错误设备；诚实的答案是空槽 —— 赋上位号
+#     它就会出现。
+# 没有 lookup 时位号是唯一声音：有位号的非连接符对象即视为被服务对象（历史上的单跳行为，
+# 扩展为穿透无位号者）。纯函数。
+static func _gpServedKindOf(gpN: GPPIDNode, gpDefLookup: Callable) -> String:
+	var gpTagged: bool = str(gpN.gpTag) != ""
 	if not gpDefLookup.is_valid():
-		return str(gpN.gpTag) != ""
+		return "device" if gpTagged else "inline"
 	var gpDef: GPSymbolDef = gpDefLookup.call(gpN.gpSymbolId) as GPSymbolDef
 	if gpDef == null:
-		return str(gpN.gpTag) != ""
-	return GP_DEVICE_CATEGORIES.has(gpDef.gpCategory)
+		return "device" if gpTagged else "inline"
+	if gpDef.gpMountKind != "":
+		return "inline"
+	if not GP_DEVICE_CATEGORIES.has(gpDef.gpCategory):
+		return "inline"
+	return "device" if gpTagged else "dead"
 
 
 # Whether the node's symbol is the offpage connector category (user packs may lack the
