@@ -134,14 +134,37 @@ func gpAttachCanvas(gpCv: GPCanvas2D) -> void:
 	if _gpCanvas != null and is_instance_valid(_gpCanvas):
 		if not _gpCanvas.focus_entered.is_connected(gpEmitFocused):
 			_gpCanvas.focus_entered.disconnect(gpEmitFocused)
-		if _gpCanvas != gpCv and _gpCanvas.get_parent() != null:
-			_gpCanvas.get_parent().remove_child(_gpCanvas)
+		# Only evict the old canvas while it still lives in OUR host: during a swap the
+		# OTHER pane's attach may have already MOVED it out (explicit reparent below) —
+		# pulling it from wherever it now sits would yank the peer pane's fresh canvas
+		# right back out. Bookkeeping guarantees _gpCanvas is either here or detached.
+		# 只在旧画布仍住在**本承载区**时才逐出：交换时另一窗格的挂载可能已经把它**搬走**
+		#（见下方显式 reparent）—— 从它现在住的地方硬拉会把对端窗格刚挂的画布又拽出去。
+		# 账本保证 _gpCanvas 要么在这里、要么已被摘出。
+		if _gpCanvas != gpCv and _gpCanvas.get_parent() == gpHost:
+			gpHost.remove_child(_gpCanvas)
 	_gpCanvas = gpCv
 	if gpCv == null:
-		_gpHint.visible = true
+		if _gpHint != null:
+			_gpHint.visible = true
 		return
-	_gpHint.visible = false
-	gpHost.add_child(gpCv)
+	if _gpHint != null:
+		_gpHint.visible = false
+	# EXPLICIT reparent semantics — Godot's add_child() ERRORS on a node that already has
+	# a parent (it never auto-reparents). Real callers reach here with the canvas still
+	# parented: the pane picker re-fires _gpAttachAllPanes even when nothing changed
+	# (same canvas, same host — the "already has a parent (same host)" error), and a swap
+	# hands a canvas over while it still lives in the OTHER pane's host. Idempotent when
+	# already home; otherwise it leaves the old parent first.
+	# **显式** reparent 语义 —— Godot 的 add_child() 对已有父节点的节点**直接报错**
+	#（绝不自动 reparent）。真实调用方到达这里时画布往往还挂着父节点：窗格选择器即使
+	# 什么都没变也会重发 _gpAttachAllPanes（同画布、同承载区 —— 「已有父节点（同一承载
+	# 区）」报错），交换则把画布从一个窗格交到另一个时它还住在**另一个**窗格里。已在
+	# 家中时幂等；否则先离开旧父。
+	if gpCv.get_parent() != gpHost:
+		if gpCv.get_parent() != null:
+			gpCv.get_parent().remove_child(gpCv)
+		gpHost.add_child(gpCv)
 	gpCv.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	gpCv.visible = true
 	if not gpCv.focus_entered.is_connected(gpEmitFocused):
