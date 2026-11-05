@@ -607,7 +607,7 @@ const GP_STRINGS: Dictionary = {
 	"center.layout2_tip":     { "zh": "左右二分", "en": "Split side by side" },
 	"center.layout3_tip":     { "zh": "一大两小", "en": "One large + two small" },
 	"center.layout4_tip":     { "zh": "四宫格", "en": "2×2 grid" },
-	"center.pane_empty":      { "zh": "从上方标签或下拉选择图纸", "en": "Pick a sheet from the tab bar or the list" },
+	"center.pane_empty":      { "zh": "选择一张图纸以在此显示", "en": "Pick a sheet to display here" },
 	"center.popout_tip":      { "zh": "摘出到独立窗口（关闭窗口归位）", "en": "Pop out to its own window (close to return)" },
 	"center.popout_already":  { "zh": "已有摘出窗口（关闭后才能再摘出）", "en": "A pop-out window is already open (close it first)" },
 	"menu.view_popout":       { "zh": "摘出活动图纸", "en": "Pop Out Active Sheet" },

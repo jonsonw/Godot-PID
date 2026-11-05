@@ -198,3 +198,34 @@ func gpTestSwapOrBindSwapsWhenHeldElsewhere() -> void:
 	gpB = GPPaneLayout.gpSwapOrBind([0, 1], 0, 0)
 	gpEq(gpB[0], 0, "re-picking the same sheet changes nothing")
 	gpEq(gpB[1], 1, "re-picking the same sheet changes nothing")
+
+
+# ------------------------------------------------------------------ D7 workspace semantics (2026-11-05)
+# 工作区语义（D7，2026-11-05）
+
+# The tab BAR belongs to the single-view workspace only; multi-view hides it and the pane
+# pickers are the only navigator there. The decision is a PURE mode-table function so the
+# center-area visibility assignment can never grow a second, drifting copy.
+# 标签栏只属于单视图工作区；多视图将其隐藏、该处唯一的导航是窗格选择器。判定收口为
+# 纯模式表函数，使 center_area 的可见性赋值不可能长出第二份会分家的副本。
+func gpTestTabBarBelongsToTheSingleViewWorkspaceOnly() -> void:
+	gpCheck(GPPaneLayout.gpShowsTabBar(GPPaneLayout.GP_SINGLE),
+		"the single-view workspace shows the sheet tab bar")
+	for gpM in [GPPaneLayout.GP_SIDE, GPPaneLayout.GP_BIG2, GPPaneLayout.GP_GRID]:
+		gpCheck(not GPPaneLayout.gpShowsTabBar(gpM),
+			"multi-view mode %d hides the tab bar (the pickers navigate)" % gpM)
+	gpCheck(not GPPaneLayout.gpShowsTabBar(0), "an invalid mode never hosts the tab bar")
+	gpCheck(not GPPaneLayout.gpShowsTabBar(5), "an invalid mode never hosts the tab bar")
+	gpCheck(not GPPaneLayout.gpShowsTabBar(-1), "an invalid mode never hosts the tab bar")
+
+
+# The EXIT contract (D7): returning to the single view lands on the ACTIVE pane's sheet —
+# "the pane you were last looking at becomes the tab you edit". This is gpResized's gpKeep
+# flow; pinned here under its D7 meaning so the exit point stays deterministic and
+# explainable.
+# 退出契约（D7）：回到单视图落在**活动窗格**的图纸上 —— 「最后注视的窗格成为被编辑的
+# 标签」。这正是 gpResized 的 gpKeep 流；在此以 D7 语义钉住，使退出点保持确定、可解释。
+func gpTestExitToSingleViewLandsOnTheActivePaneSheet() -> void:
+	var gpB: Array[int] = GPPaneLayout.gpResized([0, 1, 2], 1, 2)
+	gpEq(gpB.size(), 1, "the single view has exactly one pane")
+	gpEq(gpB[0], 2, "the active pane's sheet becomes the tab the user lands on")

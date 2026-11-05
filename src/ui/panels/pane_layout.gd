@@ -57,6 +57,18 @@ static func gpIsValid(gpMode: int) -> bool:
 	return gpPaneCount(gpMode) > 0
 
 
+# D7 (2026-11-05): whether the sheet TAB BAR belongs to a mode. Mode 1 is the single-view
+# WORKSPACE where the tab bar is the only navigator; modes 2-4 are the multi-view
+# workspace, where the pane pickers take over and the tab bar hides. An invalid mode never
+# hosts the bar (defensive: an unknown mode must not strand a navigator that contradicts
+# the layout actually built).
+# D7（2026-11-05）：某模式是否拥有图纸**标签栏**。模式 1 是单视图工作区，标签栏是唯一
+# 导航；模式 2-4 是多视图工作区，导航权移交窗格选择器、标签栏隐藏。非法模式绝不显示
+# 标签栏（防御：未知模式不得留下一个与实际布局相矛盾的导航）。
+static func gpShowsTabBar(gpMode: int) -> bool:
+	return gpMode == GP_SINGLE
+
+
 # Bind gpSheetIdx into gpPaneIdx. Enforces the uniqueness invariant: whatever pane currently
 # shows that sheet is emptied first. Returns the NEW array (pure — the caller replaces its
 # state with the return value; the input is never mutated).

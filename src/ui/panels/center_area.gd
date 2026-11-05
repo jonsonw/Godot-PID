@@ -144,6 +144,12 @@ var _gpRenameEdit: LineEdit = null
 # 正在重命名的图纸下标（空闲时为 -1）。
 var _gpRenameIdx: int = -1
 
+# D7 (ADR-44, 2026-11-05): the EXPAND spacer that holds "+" and the right-side buttons at
+# the header's right end while the tab band is hidden in the multi-view workspace.
+# D7（ADR-44，2026-11-05）：多视图工作区隐藏标签色带时，把「+」与右侧按钮钉在头部
+# 右端的 EXPAND 占位撑条。
+var _gpTabSpacer: Control = null
+
 
 # Build the header (tab bar + add + fullscreen buttons) and the canvas body.
 # The first sheet is NOT created here: the host connects gpOnCanvasReady first,
@@ -188,6 +194,7 @@ func _gpBuildHeader() -> HBoxContainer:
 	# 零间距：「+」按钮必须紧贴最后一张图纸的 tab。
 	gpHeader.add_theme_constant_override("separation", 0)
 	gpHeader.add_child(_gpBuildTabBar())
+	gpHeader.add_child(_gpBuildTabSpacer())
 	gpHeader.add_child(_gpBuildAddButton())
 	gpHeader.add_child(_gpBuildFullscreenButton())
 	gpHeader.add_child(_gpBuildLayoutButtons())
@@ -283,6 +290,18 @@ func _gpBuildTabBar() -> TabBar:
 	gpTabBar.add_theme_stylebox_override("button_pressed", gpCloseBg)
 	gpTabBar.add_theme_stylebox_override("button_highlight", gpCloseBg)
 	return gpTabBar
+
+
+# The spacer that mirrors the tab band's EXPAND role while the band is hidden (D7): without
+# it, hiding the band would let "+" fall to the header's LEFT edge instead of its right end.
+# 标签色带隐藏时接替其 EXPAND 角色的撑条（D7）：缺了它，隐藏色带会让「+」落到头部
+# **左**端而不是右端。
+func _gpBuildTabSpacer() -> Control:
+	_gpTabSpacer = Control.new()
+	_gpTabSpacer.size_flags_horizontal = SIZE_EXPAND_FILL
+	_gpTabSpacer.size_flags_vertical = SIZE_SHRINK_CENTER
+	_gpTabSpacer.visible = false
+	return _gpTabSpacer
 
 
 # The three plate styles every header icon button shares (normal / hover / active).
@@ -976,6 +995,21 @@ func _gpSyncLayoutButtons() -> void:
 		gpBtn.set_pressed_no_signal(int(gpBtn.get_meta("gp_layout_mode", 0)) == gpLayoutMode)
 
 
+# D7 (ADR-44, 2026-11-05): the tab band belongs to the SINGLE-view workspace only. The
+# multi-view workspace hides it — the pane pickers are the only navigator there — and the
+# spacer keeps "+" and the right-side buttons pinned to the header's right end. The
+# DECISION lives in GPPaneLayout.gpShowsTabBar (pure, headless-tested); this is only the
+# assignment.
+# D7（ADR-44，2026-11-05）：标签色带只属于**单视图**工作区。多视图工作区将其隐藏 ——
+# 那里唯一的导航是窗格选择器 —— 撑条则把「+」与右侧按钮钉在头部右端。**判定**住在
+# GPPaneLayout.gpShowsTabBar（纯函数、headless 受测）；此处只做赋值。
+func _gpSyncChromeForMode() -> void:
+	var gpShowBar: bool = GPPaneLayout.gpShowsTabBar(gpLayoutMode)
+	gpTabBar.visible = gpShowBar
+	if _gpTabSpacer != null:
+		_gpTabSpacer.visible = not gpShowBar
+
+
 # Tear the old pane tree down (detaching — never freeing — the canvases) and build the new
 # one around the same instances.
 # 拆除旧窗格树（只**摘下**、绝不释放画布），围绕同一批实例建新的。
@@ -1003,6 +1037,11 @@ func _gpRebuildLayout() -> void:
 	_gpSyncActiveTab()
 	_gpFillPickers()
 	_gpRestylePanes()
+	# D7 (2026-11-05): the header chrome follows the workspace — called HERE (not only in
+	# gpSetLayoutMode) so the mode restored from Settings at _ready also lands correctly.
+	# D7（2026-11-05）：头部铬件跟随工作区 —— 在**这里**调用（而非只在 gpSetLayoutMode），
+	# 使 _ready 从 Settings 恢复的模式同样落对。
+	_gpSyncChromeForMode()
 
 
 # The pane tree per mode (ADR-44 D1: nested SPLIT containers — a GridContainer has no
