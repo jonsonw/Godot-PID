@@ -20,17 +20,28 @@ var gpLinks: Array[GPOffPageLink] = []
 var gpLocalGraph: GPPIDGraph = null
 var gpPeerGraph: GPPIDGraph = null
 
+# Reconnect variant (user feedback 2026-11-05): when TRUE the PEER end's link_id claim is
+# LEFT in place — the far flag did not ask to be unlinked; it must render "?" with the amber
+# line and the DRC strays rule reports it as an ERROR, so the orphaned continuation is
+# visible and checkable. The plain 断开 button keeps false (both ends honest-unlinked).
+# 重连变体（用户反馈 2026-11-05）：为真时**对端**的 link_id 声称**保留** —— 远端旗标并
+# 没有要求被断开；它必须渲染「?」、连线染琥珀色，且 DRC strays 规则将其报为 ERROR，
+# 使被遗弃的延续可见、可查。普通「断开」按钮仍为假（两端都回到诚实的未连接态）。
+var gpKeepPeerClaim: bool = false
+
 var _gpAt: int = -1
 var _gpLocalId: String = ""
 var _gpPeerId: String = ""
 
 
 func _init(gpInLink: GPOffPageLink, gpInLinks: Array[GPOffPageLink],
-		gpInLocalGraph: GPPIDGraph, gpInPeerGraph: GPPIDGraph) -> void:
+		gpInLocalGraph: GPPIDGraph, gpInPeerGraph: GPPIDGraph,
+		gpInKeepPeerClaim: bool = false) -> void:
 	gpLink = gpInLink
 	gpLinks = gpInLinks
 	gpLocalGraph = gpInLocalGraph
 	gpPeerGraph = gpInPeerGraph
+	gpKeepPeerClaim = gpInKeepPeerClaim
 	if gpLink != null:
 		_gpLocalId = str(gpLink.gpA.get(GPOffPageLink.GP_KEY_NODE, ""))
 		_gpPeerId = str(gpLink.gpB.get(GPOffPageLink.GP_KEY_NODE, ""))
@@ -63,13 +74,16 @@ func gpRedo(gpCtx: GPCommandContext) -> void:
 	_gpApply()
 
 
-# The shared execute/redo mutation: pull the link from the table, clear both props.
-# 执行 / 重做共用的变更：link 移出表、清除两端属性。
+# The shared execute/redo mutation: pull the link from the table, clear the LOCAL prop —
+# and the PEER prop too, unless the reconnect variant keeps the far claim.
+# 执行 / 重做共用的变更：link 移出表、清除本端属性 —— 对端属性同样清除，**除非**重连
+# 变体要求保留远端声称。
 func _gpApply() -> void:
 	_gpAt = gpLinks.find(gpLink)
 	gpLinks.remove_at(_gpAt)
 	_gpSetLinked(gpLocalGraph, _gpLocalId, false)
-	_gpSetLinked(gpPeerGraph, _gpPeerId, false)
+	if not gpKeepPeerClaim:
+		_gpSetLinked(gpPeerGraph, _gpPeerId, false)
 
 
 # Seat (or clear) the link reference on ONE end's connector; a missing node is tolerated —

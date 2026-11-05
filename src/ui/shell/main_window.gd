@@ -1008,8 +1008,14 @@ func _gpBreakLinkForReconnect(gpLinkId: String, gpCanvas: GPCanvas2D) -> bool:
 	if gpPeerGraph == null:
 		gpSetState("offpage.refuse_sheet_missing", [])
 		return false
+	# gpKeepPeerClaim = true (user feedback 2026-11-05): the OLD target did not ask to be
+	# unlinked — its flag keeps the stale claim, renders "?" with an amber line, and the DRC
+	# strays rule reports it, so the orphaned continuation stays visible and checkable.
+	# gpKeepPeerClaim = true（用户反馈 2026-11-05）：**原目标端**并没有要求被断开 ——
+	# 它的旗标保留陈旧声称、渲染「?」、连线染琥珀色，DRC strays 规则照报，被遗弃的
+	# 延续保持可见、可查。
 	if gpCanvas.gpActions.gpUnlinkOffPage(gpLink, gpCenter.gpOffPageLinks,
-			gpCanvas.gpGraph, gpPeerGraph):
+			gpCanvas.gpGraph, gpPeerGraph, true):
 		# A2: the store signal already refreshed/dirtied the canvases.
 		# A2：store 信号已刷新并标脏画布。
 		gpSetState("offpage.unlink_done", [])

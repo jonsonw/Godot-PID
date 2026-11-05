@@ -42,6 +42,10 @@ static var _gpSheetNumbers: Dictionary = {}
 # **目标端**位号，而它活在 对端图纸上）。与 link 表一样按引用持有。
 static var _gpGraphs: Dictionary = {}
 
+# Optional symbol-def lookup (node -> category voice for the served walk, ADR-45 D2d).
+# 可选的符号定义查找（为 served 行走提供类别声音，ADR-45 D2d）。
+static var _gpDefLookup: Callable = Callable()
+
 # What a connector shows when it HAS a link_id but the link / peer cannot be resolved.
 # A question mark, not an error shout: an off-page flag without a reference is an INCOMPLETE
 # drawing (mid-edit), which is legal; DRC (`drc.offpage.unpaired`, S4) is what reports it.
@@ -58,11 +62,16 @@ const GP_UNRESOLVED_TEXT: String = "?"
 # [param gpSheetNumbers] {sheet_id: 图号}，仅包含确有图号的图纸。
 # [param gpGraphs] {sheet_id: GPPIDGraph}, for deriving texts that reach across sheets.
 # [param gpGraphs] {sheet_id: GPPIDGraph}，供跨图推导文字使用。
+# [param gpDefLookup] optional symbol-id -> GPSymbolDef callable, feeding the served walk's
+# device categories (ADR-45 D2d). Omitted -> the tag is the only voice.
+# [param gpDefLookup] 可选的 符号id -> GPSymbolDef 调用，为 served 行走的设备类别供数
+#（ADR-45 D2d）。省略 → 位号是唯一声音。
 static func gpSetContext(gpLinks: Array[GPOffPageLink], gpSheetNumbers: Dictionary,
-		gpGraphs: Dictionary = {}) -> void:
+		gpGraphs: Dictionary = {}, gpDefLookup: Callable = Callable()) -> void:
 	_gpLinks = gpLinks
 	_gpSheetNumbers = gpSheetNumbers
 	_gpGraphs = gpGraphs
+	_gpDefLookup = gpDefLookup
 
 
 # Drop the snapshot (document closed / tests). A later render resolves to GP_UNRESOLVED_TEXT.
@@ -71,6 +80,7 @@ static func gpClear() -> void:
 	_gpLinks = []
 	_gpSheetNumbers = {}
 	_gpGraphs = {}
+	_gpDefLookup = Callable()
 
 
 # The drawing number of a sheet, or "" when the sheet is unknown or unnumbered.
@@ -229,7 +239,8 @@ static func gpTargetTagFor(gpNode: GPPIDNode) -> String:
 	# semantics — the renderer, print model, DRC and the W22 exporter all share it.
 	# A3：推导本体住在 GPOffPageResolver（显式上下文、纯函数）；本索引只是喂入当前快照的
 	# UI **缓存壳**。语义只有一份 —— 渲染器、打印模型、DRC 与 W22 导出器共享它。
-	var gpOut: Dictionary = GPOffPageResolver.gpResolve(gpLink, _gpSheetNumbers, _gpGraphs)
+	var gpOut: Dictionary = GPOffPageResolver.gpResolve(gpLink, _gpSheetNumbers, _gpGraphs,
+		_gpDefLookup)
 	return str(gpOut.get("target_tag", ""))
 
 
@@ -251,7 +262,24 @@ static func gpPeerTagFor(gpNode: GPPIDNode) -> String:
 	var gpFar: Dictionary = gpPeerRefOf(gpLink, gpNode.gpInstanceId)
 	if gpFar.is_empty():
 		return ""
-	return GPOffPageResolver.gpServedTagFor(gpFar, _gpSheetNumbers, _gpGraphs)
+	return GPOffPageResolver.gpServedTagFor(gpFar, _gpSheetNumbers, _gpGraphs, _gpDefLookup)
+
+
+# Whether THIS connector's flag is BROKEN — it claims a link (link_id set) but the reference
+# does not resolve ("?"): either the link left the table (a stale claim after a reconnect —
+# user feedback 2026-11-05) or the peer sheet has no drawing number. The renderer paints the
+# flag amber (D20) and the attached line amber through this one predicate — one copy of the
+# "this continuation is broken" voice for both.
+# 该连接符的旗标是否**已断** —— 它声称一条 link（link_id 在）但引用解析不到（「?」）：
+# 要么 link 已离开表（重连后的陈旧声称 —— 用户反馈 2026-11-05），要么对端图纸没有图号。
+# 渲染器经**这一个**判谓把旗标（D20 琥珀）与所连管线一并染琥珀 —— 「这段延续已断」的
+# 声音只有一份。
+static func gpFlagBrokenFor(gpNode: GPPIDNode) -> bool:
+	if gpNode == null:
+		return false
+	if not (gpNode.gpProps as Dictionary).has(GPOffPageLink.GP_KEY_LINK_ID):
+		return false
+	return gpRefTextFor(gpNode) == GP_UNRESOLVED_TEXT
 
 
 # The DERIVED medium of this connector's link (ADR-45 D2b): the A end's served edge carries

@@ -23,7 +23,9 @@ extends RefCounted
 #   * the target tag is DERIVED at read time (ADR-43 D3) — never a stored field;
 #   * each connector's top legend line is the PEER end's served tag (ADR-45 D2a, user
 #     feedback 2026-11-04): the source connector shows what the B end serves, the twin shows
-#     what the A end serves — "where the line comes from / where it goes".
+#     what the A end serves — "where the line comes from / where it goes"; the served item is
+#     the NEAREST equipment/instrument ALONG the line (user feedback 2026-11-05, ADR-45 D2d):
+#     the walk traverses through untagged inline items (valves, fittings) until a device wins.
 # 本解析钉住的**展示契约**对（同步起草的）ADR-45 具有规范性：三态永不合并；目标位号在
 # 读取期**推导**（ADR-43 D3），绝不是存储字段；每个连接符的图例上一行是**其对端**所服务
 # 对象的位号（ADR-45 D2a，2026-11-04 实机反馈）：源端连接符显示 B 端所服务者，孪生体显示
@@ -51,7 +53,7 @@ extends RefCounted
 # 的展示走 gpServedTagFor）；medium（**派生**介质，ADR-45 D2b：A 端服务边的 medium 属性，
 # 回落 link 快照）；served（B 端所服务对象的 {node_id}，无法解析为 null）。
 static func gpResolve(gpLink: GPOffPageLink, gpNumbers: Dictionary,
-		gpGraphs: Dictionary) -> Dictionary:
+		gpGraphs: Dictionary, gpDefLookup: Callable = Callable()) -> Dictionary:
 	if gpLink == null:
 		return {}
 	var gpA: Dictionary = gpLink.gpA
@@ -59,7 +61,7 @@ static func gpResolve(gpLink: GPOffPageLink, gpNumbers: Dictionary,
 	var gpADangling: bool = _gpEndDangling(gpA, gpGraphs)
 	var gpBDangling: bool = _gpEndDangling(gpB, gpGraphs)
 	var gpPeerNo: String = str(gpNumbers.get(str(gpB.get(GPOffPageLink.GP_KEY_SHEET, "")), ""))
-	var gpServed: Dictionary = _gpServedOf(gpB, gpGraphs)
+	var gpServed: Dictionary = _gpServedOf(gpB, gpGraphs, gpDefLookup)
 	var gpTargetTag: String = ""
 	if not gpServed.is_empty():
 		gpTargetTag = str(gpServed.get("tag", ""))
@@ -76,14 +78,15 @@ static func gpResolve(gpLink: GPOffPageLink, gpNumbers: Dictionary,
 
 
 # The tag of the item ONE end reference serves — the PER-CONNECTOR top legend line (ADR-45
-# D2a): a plain item serves itself, a connector (twin) serves the item across its first
-# non-connector edge, anything unresolvable serves nothing. Pure.
-# 某一**端引用**所服务对象的位号 —— **逐连接符**的图例上一行（ADR-45 D2a）：普通对象
-# 服务它自己、连接符（孪生体）服务横过它第一条非连接符边的对象、一切无法解析者服务空。
-# 纯函数。
+# D2a/D2d): a plain item serves itself, a connector (twin) serves the NEAREST equipment or
+# instrument along its line (BFS through inline items), anything unresolvable serves nothing.
+# Pure.
+# 某一**端引用**所服务对象的位号 —— **逐连接符**的图例上一行（ADR-45 D2a/D2d）：普通对象
+# 服务它自己、连接符（孪生体）服务**沿连线最近**的设备 / 仪表（广度优先穿透内联件）、一切
+# 无法解析者服务空。纯函数。
 static func gpServedTagFor(gpRef: Dictionary, gpNumbers: Dictionary,
-		gpGraphs: Dictionary) -> String:
-	var gpServed: Dictionary = _gpServedOf(gpRef, gpGraphs)
+		gpGraphs: Dictionary, gpDefLookup: Callable = Callable()) -> String:
+	var gpServed: Dictionary = _gpServedOf(gpRef, gpGraphs, gpDefLookup)
 	if gpServed.is_empty():
 		return ""
 	return str(gpServed.get("tag", ""))
@@ -154,16 +157,24 @@ static func _gpEndDangling(gpRef: Dictionary, gpGraphs: Dictionary) -> bool:
 	return gpGraph.gpGetNode(gpNodeId) == null
 
 
-# The item the B end SERVES (the flag's top line, user feedback 2026-11-03):
-#   * the B end is a plain item  -> itself (its own tag);
-#   * the B end is a CONNECTOR (the twin) -> the item across its edge — the first edge whose
-#     other end is not itself a connector (chained connectors carry no tag of their own);
-#   * anything unresolvable      -> {} (a blank slot, never a guess).
+# The item ONE end ref SERVES (the flag's top line; ADR-45 D2a, refined 2026-11-05 as D2d):
+#   * the end is a plain item  -> itself (its own tag);
+#   * the end is a CONNECTOR (the twin) -> the NEAREST equipment/instrument ALONG the line
+#     (user feedback 2026-11-05): a breadth-first walk across the connected edges — a device
+#     category wins immediately (BFS = nearest first), untagged/tagged inline items (valves,
+#     fittings) are traversed THROUGH, chained connectors are never crossed (they lead to
+#     another sheet). The first TAGGED inline item met on the way is kept as the fallback for
+#     the no-lookup mode and for lines that reach no device at all.
+#   * anything unresolvable    -> {} (a blank slot, never a guess).
 # Returns {"node_id", "tag"} or {}.
-# B 端**所服务**的对象（旗标上一行，用户反馈 2026-11-03）：B 端是普通对象 → 它自己（自身
-# 位号）；B 端是**连接符**（孪生体）→ 横过它那条边后的对象 —— 第一条「对端不是连接符」的边
-#（链式连接符自己不带位号）；一切无法解析 → {}（空槽位，绝不臆造）。返回 {"node_id","tag"} 或 {}。
-static func _gpServedOf(gpRef: Dictionary, gpGraphs: Dictionary) -> Dictionary:
+# 某一**端引用**所服务的对象（旗标上一行；ADR-45 D2a，2026-11-05 细化为 D2d）：端是普通
+# 对象 → 它自己（自身位号）；端是**连接符**（孪生体）→ **沿连线最近**的设备 / 仪表
+#（用户反馈 2026-11-05）：沿连通边做**广度优先**行走 —— 设备类别即刻胜出（BFS 即最近
+# 优先）、内联件（阀门 / 管件，有无位号皆可）被**穿透**、链式连接符绝不跨过（它们通向
+# 另一张图纸）。途中遇到的第一条**有位号**的内联件记为回落 —— 供无 lookup 模式与完全
+# 到不了设备的线使用。一切无法解析 → {}（空槽位，绝不臆造）。返回 {"node_id","tag"} 或 {}。
+static func _gpServedOf(gpRef: Dictionary, gpGraphs: Dictionary,
+		gpDefLookup: Callable = Callable()) -> Dictionary:
 	var gpSheetId: String = str(gpRef.get(GPOffPageLink.GP_KEY_SHEET, ""))
 	if gpSheetId == "":
 		return {}
@@ -178,19 +189,65 @@ static func _gpServedOf(gpRef: Dictionary, gpGraphs: Dictionary) -> Dictionary:
 		return {}
 	if not (gpN.gpProps as Dictionary).has(GPOffPageLink.GP_KEY_LINK_ID):
 		return {"node_id": gpNodeId, "tag": gpN.gpTag}
-	# The B end is a CONNECTOR (the twin): walk across its edges to the first item that is
-	# not itself a connector.
-	# B 端是**连接符**（孪生体）：横过它的边，找到第一个「自身不是连接符」的对象。
-	for gpE in gpGraph.gpEdges:
-		if gpE == null:
-			continue
-		var gpOtherId: String = _gpEdgeOtherNode(gpE, gpNodeId)
-		if gpOtherId == "":
-			continue
-		var gpOther: GPPIDNode = gpGraph.gpGetNode(gpOtherId)
-		if gpOther != null and not (gpOther.gpProps as Dictionary).has(GPOffPageLink.GP_KEY_LINK_ID):
-			return {"node_id": gpOtherId, "tag": gpOther.gpTag}
-	return {}
+	# The end is a CONNECTOR (the twin): breadth-first along the line, nearest device wins.
+	# 该端是**连接符**（孪生体）：沿连线广度优先，最近的设备胜出。
+	var gpQueue: Array[String] = [gpNodeId]
+	var gpSeen: Dictionary = {gpNodeId: true}
+	var gpFallback: Dictionary = {}
+	while not gpQueue.is_empty():
+		var gpCur: String = gpQueue.pop_front()
+		for gpE in gpGraph.gpEdges:
+			if gpE == null:
+				continue
+			var gpOtherId: String = _gpEdgeOtherNode(gpE, gpCur)
+			if gpOtherId == "" or gpSeen.has(gpOtherId):
+				continue
+			var gpOther: GPPIDNode = gpGraph.gpGetNode(gpOtherId)
+			if gpOther == null:
+				continue
+			gpSeen[gpOtherId] = true
+			# A chained connector is a dead end: it lives on ANOTHER sheet (or claims to).
+			# 链式连接符是死路：它活在**另一张**图纸上（或声称如此）。
+			if (gpOther.gpProps as Dictionary).has(GPOffPageLink.GP_KEY_LINK_ID) \
+					or _gpIsOffpageDef(gpOther, gpDefLookup):
+				continue
+			if _gpIsDeviceNode(gpOther, gpDefLookup):
+				return {"node_id": gpOtherId, "tag": gpOther.gpTag}
+			if str(gpOther.gpTag) != "" and gpFallback.is_empty():
+				gpFallback = {"node_id": gpOtherId, "tag": gpOther.gpTag}
+			gpQueue.append(gpOtherId)
+	return gpFallback
+
+
+# Device/instrument category keys (ADR-45 D2d): what the flag's top line may name. Valves are
+# inline piping, not equipment; "general" covers the misc-equipment family.
+# 设备 / 仪表类别键（ADR-45 D2d）：旗标上一行可以点名的对象。阀门属内联管线、不是设备；
+# "general" 涵盖杂项设备家族。
+const GP_DEVICE_CATEGORIES: Array[String] = ["pump", "tank", "heat", "instrument", "general"]
+
+
+# Whether the node's symbol category is a device/instrument. Without a lookup the tag is the
+# only voice: a tagged non-connector item is treated as the served item (the historical
+# single-hop behavior, extended to walk through untagged items).
+# 节点的符号类别是否为设备 / 仪表。没有 lookup 时位号是唯一声音：有位号的非连接符对象
+# 即视为被服务对象（历史上的单跳行为，扩展为穿透无位号者）。
+static func _gpIsDeviceNode(gpN: GPPIDNode, gpDefLookup: Callable) -> bool:
+	if not gpDefLookup.is_valid():
+		return str(gpN.gpTag) != ""
+	var gpDef: GPSymbolDef = gpDefLookup.call(gpN.gpSymbolId) as GPSymbolDef
+	if gpDef == null:
+		return str(gpN.gpTag) != ""
+	return GP_DEVICE_CATEGORIES.has(gpDef.gpCategory)
+
+
+# Whether the node's symbol is the offpage connector category (user packs may lack the
+# link_id prop — the def category is the honest identity).
+# 节点的符号是否为离页连接符类别（用户包可能缺 link_id 属性 —— def 类别才是诚实身份）。
+static func _gpIsOffpageDef(gpN: GPPIDNode, gpDefLookup: Callable) -> bool:
+	if not gpDefLookup.is_valid():
+		return false
+	var gpDef: GPSymbolDef = gpDefLookup.call(gpN.gpSymbolId) as GPSymbolDef
+	return gpDef != null and gpDef.gpCategory == "offpage"
 
 
 # The id of the node at the OPPOSITE end of an edge, or "" when gpNodeId is not an end.

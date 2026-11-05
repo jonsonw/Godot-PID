@@ -537,7 +537,14 @@ func gpRefreshOffPageContext() -> void:
 		var gpNo: String = gpSheet.gpNumber.strip_edges()
 		gpNumbers[gpSheet.gpId] = gpNo if gpNo != "" else str(gpIdx)
 		gpGraphs[gpSheet.gpId] = gpSheet.gpGraph
-	GPOffPageIndex.gpSetContext(gpOffPageLinks, gpNumbers, gpGraphs)
+	# ADR-45 D2d: the served walk needs the symbol-def categories — borrow the active
+	# canvas's lookup (one document active at a time; no canvas -> the tag is the only voice).
+	# ADR-45 D2d：served 行走需要符号定义类别 —— 借**活动画布**的查找（同一时刻只有一个
+	# 活动文档；无画布 → 位号是唯一声音）。
+	var gpLookupCanvas: GPCanvas2D = gpActiveCanvas()
+	var gpLookup: Callable = gpLookupCanvas.gpDefLookupCallable() \
+		if gpLookupCanvas != null else Callable()
+	GPOffPageIndex.gpSetContext(gpOffPageLinks, gpNumbers, gpGraphs, gpLookup)
 	for gpTabRaw in gpTabs:
 		var gpC: GPCanvas2D = (gpTabRaw as Dictionary).get("canvas") as GPCanvas2D
 		if gpC != null and is_instance_valid(gpC):

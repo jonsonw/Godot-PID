@@ -1160,3 +1160,56 @@ func gpTestSnapSlotPicksNearestEdge() -> void:
 	# 打印安全：**每个**吸附槽位都在图框**内**（绝无出纸打印）。
 	for gpSlot in [gpRight, gpTop, gpRight2, gpRight3]:
 		gpCheck(gpFrame.has_point(gpSlot), "the slot is inside the frame / 槽位在图框内")
+
+
+# ---- unlink（U3 断开 + 重连变体）----
+# ---- unlink ----
+
+# The plain 断开 clears BOTH claims; the RECONNECT variant (gpKeepPeerClaim, user feedback
+# 2026-11-05) leaves the FAR claim in place — the old target renders "?" with an amber line
+# and the DRC strays rule reports it as an ERROR, while undo restores everything.
+# 普通「断开」清除**两端**声称；**重连变体**（gpKeepPeerClaim，用户反馈 2026-11-05）把
+# 远端声称留在原地 —— 原目标端渲染「?」、连线染琥珀，DRC strays 规则报 ERROR，
+# 而撤销恢复一切。
+func gpTestUnlinkKeepsPeerClaimForReconnect() -> void:
+	# Plain unlink: both ends go back to the honest unlinked state.
+	# 普通「断开」：两端都回到诚实的未连接态。
+	var gpRig: Dictionary = _gpRig()
+	_gpCreate(gpRig)
+	var gpLink: GPOffPageLink = gpRig["links"][0]
+	var gpLocalId: String = str(gpLink.gpA.get("node_id", ""))
+	var gpPeerId: String = str(gpLink.gpB.get("node_id", ""))
+	var gpCmd: GPUnlinkOffPageCommand = GPUnlinkOffPageCommand.new(gpLink,
+		gpRig["links"], gpRig["local"], gpRig["peer"])
+	gpCheck(gpCmd.gpExecute(gpRig["ctx"]), "plain unlink executes / 普通断开可执行")
+	gpEq((gpRig["links"] as Array).size(), 0, "the link left the table / link 已离表")
+	gpEq(str((gpRig["local"] as GPPIDGraph).gpGetNode(gpLocalId).gpProps.get(
+		GPOffPageLink.GP_KEY_LINK_ID, "")), "", "local claim cleared / 本端声称已清")
+	gpEq(str((gpRig["peer"] as GPPIDGraph).gpGetNode(gpPeerId).gpProps.get(
+		GPOffPageLink.GP_KEY_LINK_ID, "")), "", "peer claim cleared / 对端声称已清")
+	gpCmd.gpUndo(gpRig["ctx"])
+	gpEq((gpRig["links"] as Array).size(), 1, "undo re-inserts the link / 撤销插回 link")
+	gpEq(str((gpRig["peer"] as GPPIDGraph).gpGetNode(gpPeerId).gpProps.get(
+		GPOffPageLink.GP_KEY_LINK_ID, "")), gpLink.gpInstanceId,
+		"undo re-seats the peer claim / 撤销复位对端声称")
+	# Reconnect variant: the FAR claim survives — stale on purpose (ADR-45 D2e).
+	# 重连变体：远端声称**存活** —— 刻意陈旧（ADR-45 D2e）。
+	var gpRig2: Dictionary = _gpRig()
+	_gpCreate(gpRig2)
+	var gpLink2: GPOffPageLink = gpRig2["links"][0]
+	var gpLocalId2: String = str(gpLink2.gpA.get("node_id", ""))
+	var gpPeerId2: String = str(gpLink2.gpB.get("node_id", ""))
+	var gpCmd2: GPUnlinkOffPageCommand = GPUnlinkOffPageCommand.new(gpLink2,
+		gpRig2["links"], gpRig2["local"], gpRig2["peer"], true)
+	gpCheck(gpCmd2.gpExecute(gpRig2["ctx"]), "reconnect break executes / 重连断开可执行")
+	gpEq((gpRig2["links"] as Array).size(), 0, "the link left the table / link 已离表")
+	gpEq(str((gpRig2["local"] as GPPIDGraph).gpGetNode(gpLocalId2).gpProps.get(
+		GPOffPageLink.GP_KEY_LINK_ID, "")), "", "local claim cleared / 本端声称已清")
+	gpEq(str((gpRig2["peer"] as GPPIDGraph).gpGetNode(gpPeerId2).gpProps.get(
+		GPOffPageLink.GP_KEY_LINK_ID, "")), gpLink2.gpInstanceId,
+		"the far claim SURVIVES — stale on purpose / 远端声称**存活** —— 刻意陈旧")
+	gpCmd2.gpUndo(gpRig2["ctx"])
+	gpEq((gpRig2["links"] as Array).size(), 1, "undo restores the link / 撤销恢复 link")
+	gpEq(str((gpRig2["local"] as GPPIDGraph).gpGetNode(gpLocalId2).gpProps.get(
+		GPOffPageLink.GP_KEY_LINK_ID, "")), gpLink2.gpInstanceId,
+		"undo re-seats the local claim / 撤销复位本端声称")

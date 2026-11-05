@@ -781,11 +781,12 @@ func gpCrossSheetDelete(gpLink: GPOffPageLink, gpLocalNodeIds: Array[String],
 # U3：断开跨图纸连接 —— link 离开表、两连接符回到诚实的未连接态，一个撤销步
 #（见 GPUnlinkOffPageCommand）。
 func gpUnlinkOffPage(gpLink: GPOffPageLink, gpLinks: Array[GPOffPageLink],
-		gpLocalGraph: GPPIDGraph, gpPeerGraph: GPPIDGraph) -> bool:
+		gpLocalGraph: GPPIDGraph, gpPeerGraph: GPPIDGraph,
+		gpKeepPeerClaim: bool = false) -> bool:
 	if gpLink == null:
 		return false
 	var gpCmd: GPUnlinkOffPageCommand = GPUnlinkOffPageCommand.new(gpLink, gpLinks,
-		gpLocalGraph, gpPeerGraph)
+		gpLocalGraph, gpPeerGraph, gpKeepPeerClaim)
 	var gpOk: bool = gpStack.gpDo(gpCmd, gpCtx)
 	# A2: the link left the table (flags stay as honest placeholders) — notify as "remove".
 	# A2：link 已离开表（旗标保留为诚实的占位）—— 以 remove 通知。

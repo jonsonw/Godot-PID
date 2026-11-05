@@ -154,11 +154,35 @@ func gpApplyGeometry() -> void:
 	var gpSt: Dictionary = GPEdgeStyle.gpStyleFor(gpEdge.gpKind, gpEdge.gpSignalType, gpZoom)
 	var gpW: float = float(gpSt.get("width", 1.6))
 	var gpCol: Color = gpSt.get("color", Color(0.6, 0.65, 0.75))
+	# Broken continuation (user feedback 2026-11-05): when either end is an off-page flag
+	# whose claim no longer resolves ("?" — stale after a reconnect, or an unnumbered peer),
+	# the line turns amber — the same voice as the flag's D20 dangling stroke. One predicate
+	# (GPOffPageIndex.gpFlagBrokenFor) answers for both.
+	# 延续已断（用户反馈 2026-11-05）：任一端是声称解析不到（「?」—— 重连后的陈旧声称，
+	# 或对端无图号）的离页旗标时，管线染琥珀 —— 与旗标 D20 悬空描边同一种声音。判谓
+	#（GPOffPageIndex.gpFlagBrokenFor）两端共用一份。
+	if _gpHasBrokenFlagEnd():
+		gpCol = GPEdgeStyle.GP_DANGLING
 	var gpPat: PackedFloat32Array = gpSt.get("pattern", PackedFloat32Array())
 	if gpStyle != null and gpStyle.gpScreenConstantWidth:
 		gpW = gpW / gpZoom
 	gpW = maxf(gpW, GPEdgeStyle.GP_MIN_PX / gpZoom)
 	_gpPaintInkBody(gpPts, gpCol, gpW, gpPat)
+
+
+# Whether EITHER endpoint is an off-page flag whose claim no longer resolves ("?"): a stale
+# claim left by a reconnect, or a peer sheet without a drawing number. Read through the index
+# — the same snapshot the flag's own text derives from, so flag and line can never disagree.
+# 任一端是否为声称解析不到（「?」）的离页旗标：重连遗留的陈旧声称，或对端图纸没有图号。
+# 经索引读取 —— 与旗标自身文字推导**同一份**快照，旗标与管线永不分家。
+func _gpHasBrokenFlagEnd() -> bool:
+	if gpGraph == null or gpEdge == null:
+		return false
+	for gpEnd in [gpEdge.gpFromRef, gpEdge.gpToRef]:
+		var gpN: GPPIDNode = gpGraph.gpGetNode(str(gpEnd.get("node_id", "")))
+		if gpN != null and GPOffPageIndex.gpFlagBrokenFor(gpN):
+			return true
+	return false
 
 
 # Resolve the two ends once and paint the whole edge.
@@ -175,6 +199,11 @@ func _draw() -> void:
 	var gpSt: Dictionary = GPEdgeStyle.gpStyleFor(gpEdge.gpKind, gpEdge.gpSignalType, gpZoom)
 	var gpW: float = float(gpSt.get("width", 1.6))
 	var gpCol: Color = gpSt.get("color", Color(0.6, 0.65, 0.75))
+	# Same broken-continuation voice as _draw (see there) — the drag-follow ink layer must
+	# not disagree with the authoritative CPU body.
+	# 与 _draw 同一个「延续已断」声音（见彼处）—— 拖拽跟随墨线层不得与权威 CPU 主体分家。
+	if _gpHasBrokenFlagEnd():
+		gpCol = GPEdgeStyle.GP_DANGLING
 	var gpPat: PackedFloat32Array = gpSt.get("pattern", PackedFloat32Array())
 	# Screen-constant line weight: keep the rendered pixel width fixed across zoom
 	# (width / zoom), the "plotting lineweight" mode. Off by default (lines thicken when

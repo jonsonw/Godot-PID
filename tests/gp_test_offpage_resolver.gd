@@ -252,3 +252,117 @@ func gpTestMediumDerivesFromSourceEdge() -> void:
 	# Null safety / 空安全。
 	gpEq(GPOffPageResolver.gpMediumOf(null, gpR["numbers"], gpR["graphs"]), "",
 		"a null link has no medium / null link 无介质")
+
+
+# ---- ADR-45 D2d (user feedback 2026-11-05) ----
+# ---- served = 沿连线最近的设备 / 仪表（BFS 穿透内联件）----
+
+# An untagged valve between the connector and the device is passed THROUGH, not served.
+# 连接符与设备之间的**无位号**阀门被**穿透**，而非被当作服务对象。
+func gpTestServedWalksThroughUntaggedInline() -> void:
+	var gpR: Dictionary = _gpRig()
+	var gpG2: GPPIDGraph = gpR["g2"]
+	var gpConnB: GPPIDNode = gpG2.gpNewNode("n-conn-b", GPSymbolPackOffpage.GP_ID_PIPE,
+		"CONN-B", Vector2(60, 60), {})
+	gpConnB.gpProps[GPOffPageLink.GP_KEY_LINK_ID] = "xlink-1"
+	gpG2.gpAddNode(gpConnB)
+	var gpValve: GPPIDNode = gpG2.gpNewNode("n-valve", "VALVE001", "", Vector2(120, 60), {})
+	gpG2.gpAddNode(gpValve)
+	gpG2.gpAddEdge(gpG2.gpNewEdge("e-1", "n-conn-b", "n-valve"))
+	gpG2.gpAddEdge(gpG2.gpNewEdge("e-2", "n-valve", "n-dev"))
+	(gpR["link"] as GPOffPageLink).gpB = {"sheet_id": "sheet-2", "node_id": "n-conn-b",
+		"port_id": "in"}
+	var gpOut: Dictionary = GPOffPageResolver.gpResolve(gpR["link"], gpR["numbers"],
+		gpR["graphs"])
+	gpEq(str((gpOut["served"] as Dictionary).get("node_id", "")), "n-dev",
+		"the walk passes the untagged valve to the device / 行走穿过无位号阀门到达设备")
+	gpEq(gpOut["target_tag"], "P-101", "the top line names the device / 上一行点设备的名")
+
+
+# With a def lookup a TAGGED inline valve does not stop the walk — the category says inline;
+# the pump beyond it wins (BFS keeps going until a device category answers).
+# 带 def lookup 时**带位号**的内联阀门也拦不住行走 —— 类别说它是内联件；其后的泵胜出
+#（BFS 一直走到设备类别作答为止）。
+func gpTestServedDeviceBeatsTaggedValve() -> void:
+	var gpR: Dictionary = _gpRig()
+	var gpG2: GPPIDGraph = gpR["g2"]
+	var gpConnB: GPPIDNode = gpG2.gpNewNode("n-conn-b", GPSymbolPackOffpage.GP_ID_PIPE,
+		"CONN-B", Vector2(60, 60), {})
+	gpConnB.gpProps[GPOffPageLink.GP_KEY_LINK_ID] = "xlink-1"
+	gpG2.gpAddNode(gpConnB)
+	var gpValve: GPPIDNode = gpG2.gpNewNode("n-valve", "VALVE001", "", Vector2(120, 60), {})
+	gpValve.gpTag = "V-5"
+	gpG2.gpAddNode(gpValve)
+	gpG2.gpAddEdge(gpG2.gpNewEdge("e-1", "n-conn-b", "n-valve"))
+	gpG2.gpAddEdge(gpG2.gpNewEdge("e-2", "n-valve", "n-dev"))
+	(gpR["link"] as GPOffPageLink).gpB = {"sheet_id": "sheet-2", "node_id": "n-conn-b",
+		"port_id": "in"}
+	# The lookup: VALVE001 is inline piping, PUMP001 is a device.
+	# lookup：VALVE001 是内联管线，PUMP001 是设备。
+	var gpLookup: Callable = func(gpSymId: String) -> GPSymbolDef:
+		var gpDef: GPSymbolDef = GPSymbolDef.new()
+		gpDef.gpId = gpSymId
+		gpDef.gpCategory = "valve" if gpSymId == "VALVE001" else "pump"
+		return gpDef
+	var gpOut: Dictionary = GPOffPageResolver.gpResolve(gpR["link"], gpR["numbers"],
+		gpR["graphs"], gpLookup)
+	gpEq(str((gpOut["served"] as Dictionary).get("node_id", "")), "n-dev",
+		"a tagged valve is INLINE — the walk continues to the pump / 带位号的阀门是内联件 —— 行走继续到泵")
+	gpEq(gpOut["target_tag"], "P-101", "the top line names the pump / 上一行点泵的名")
+
+
+# No device reachable at all: the FIRST tagged inline item met is the honest fallback —
+# a named thing beats a blank slot, never a guess beyond what the line actually touches.
+# 完全到不了设备：途中**第一条**有位号的内联件是诚实的回落 —— 有点名的对象胜过空槽，
+# 但绝不越过连线真正触及的东西去臆造。
+func gpTestServedFallbackToTaggedInline() -> void:
+	var gpR: Dictionary = _gpRig()
+	var gpG2: GPPIDGraph = gpR["g2"]
+	var gpConnB: GPPIDNode = gpG2.gpNewNode("n-conn-b", GPSymbolPackOffpage.GP_ID_PIPE,
+		"CONN-B", Vector2(60, 60), {})
+	gpConnB.gpProps[GPOffPageLink.GP_KEY_LINK_ID] = "xlink-1"
+	gpG2.gpAddNode(gpConnB)
+	var gpValve: GPPIDNode = gpG2.gpNewNode("n-valve", "VALVE001", "", Vector2(120, 60), {})
+	gpValve.gpTag = "V-5"
+	gpG2.gpAddNode(gpValve)
+	gpG2.gpAddEdge(gpG2.gpNewEdge("e-1", "n-conn-b", "n-valve"))
+	(gpR["link"] as GPOffPageLink).gpB = {"sheet_id": "sheet-2", "node_id": "n-conn-b",
+		"port_id": "in"}
+	var gpOut: Dictionary = GPOffPageResolver.gpResolve(gpR["link"], gpR["numbers"],
+		gpR["graphs"])
+	gpEq(str((gpOut["served"] as Dictionary).get("node_id", "")), "n-valve",
+		"the tagged inline item is the fallback / 有位号的内联件是回落")
+	gpEq(gpOut["target_tag"], "V-5", "the top line names the valve / 上一行点阀门的名")
+
+
+# The broken-claim predicate (user feedback 2026-11-05): a claim whose link is gone is
+# BROKEN (the reconnect leftover); a healthy claim is not; no claim is not.
+# 断声称判谓（用户反馈 2026-11-05）：link 已走的声称 = 「断」（重连遗留物）；健康声称
+# = 否；无声称 = 否。
+func gpTestFlagBrokenPredicate() -> void:
+	var gpR: Dictionary = _gpRig()
+	var gpG1: GPPIDGraph = gpR["g1"]
+	GPOffPageIndex.gpSetContext([gpR["link"]] as Array[GPOffPageLink], gpR["numbers"],
+		gpR["graphs"])
+	# Healthy claim: the link exists, the peer number resolves.
+	# 健康声称：link 在、对端图号可解析。
+	var gpConnA: GPPIDNode = gpG1.gpGetNode("n-conn-a")
+	gpCheck(not GPOffPageIndex.gpFlagBrokenFor(gpConnA),
+		"a healthy claim is not broken / 健康声称不算断")
+	# Stale claim: the link_id points at a link the table no longer holds.
+	# 陈旧声称：link_id 指向表里已不存在的 link。
+	var gpStale: GPPIDNode = gpG1.gpNewNode("n-stale", GPSymbolPackOffpage.GP_ID_PIPE,
+		"CONN-S", Vector2(50, 200), {})
+	gpStale.gpProps[GPOffPageLink.GP_KEY_LINK_ID] = "xlink-404"
+	gpG1.gpAddNode(gpStale)
+	gpCheck(GPOffPageIndex.gpFlagBrokenFor(gpStale),
+		"a stale claim IS broken / 陈旧声称即断")
+	# No claim at all: not broken (an honest unlinked flag).
+	# 完全无声称：不算断（诚实的未连接旗标）。
+	var gpBare: GPPIDNode = gpG1.gpNewNode("n-bare", GPSymbolPackOffpage.GP_ID_PIPE,
+		"CONN-B2", Vector2(50, 300), {})
+	gpG1.gpAddNode(gpBare)
+	gpCheck(not GPOffPageIndex.gpFlagBrokenFor(gpBare),
+		"no claim is not broken / 无声称不算断")
+	gpCheck(not GPOffPageIndex.gpFlagBrokenFor(null), "null degrades to false / null 回落假")
+	GPOffPageIndex.gpClear()
