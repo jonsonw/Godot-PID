@@ -565,6 +565,28 @@ func _gpOnGraphTouched() -> void:
 	gpRefreshOffPageContext()
 
 
+# ANY sheet's SHEET-LEVEL data changed (title block / drawing number / size…). Tab captions
+# show "<number> <name>" and the off-page flags derive from the number — both re-derive here.
+# **任意**图纸的**图纸级**数据变了（图签 / 图号 / 图幅……）。标签标题是「<图号> <名称>」、
+# 跨图纸旗标从图号推导 —— 两者都在此重推。
+func _gpOnSheetTouched() -> void:
+	if _gpLoading:
+		return
+	gpSyncTabTitles()
+	gpRefreshOffPageContext()
+
+
+# Rewrite every tab caption from its sheet. Number/name edits never re-order tabs, so the
+# index each caption sits at is simply its tab's own.
+# 依图纸重写每个标签标题。图号 / 名称的编辑绝不改变标签次序，故每个标题所在下标就是
+# 其标签自身的。
+func gpSyncTabTitles() -> void:
+	for gpI in range(gpTabs.size()):
+		var gpSheet: GPSheet = (gpTabs[gpI] as Dictionary).get("sheet") as GPSheet
+		if gpSheet != null:
+			gpTabBar.set_tab_title(gpI, _gpTabTitleOf(gpSheet))
+
+
 # ADR-43 / S3: jump to the PEER end of the link a connector stands for — switch to the
 # peer sheet's tab and select the peer connector. Navigation is deliberately NOT an
 # undoable command: it changes nothing in any document.
@@ -884,6 +906,15 @@ func _gpAddTabWith(gpTitle: String, gpId: String = "", gpGraphIn: GPPIDGraph = n
 	# 载入由 _gpLoading 守卫吞掉、末尾统一刷一次。
 	if not gpGraph.gpGraphChanged.is_connected(_gpOnGraphTouched):
 		gpGraph.gpGraphChanged.connect(_gpOnGraphTouched)
+	# Sheet-level data feeds cross-sheet display too (user feedback 2026-11-05, round 7):
+	# the flag legend reads the DRAWING NUMBER and the tab caption shows "<number> <name>",
+	# so a title-block edit (or a DRC number repair) must republish the snapshot and refresh
+	# the captions — the round-5 lesson extended to the sheet's own fields.
+	# 图纸级数据同样喂养跨图显示（用户反馈 2026-11-05 第七轮）：旗标图例读的是**图号**、
+	# 标签标题是「<图号> <名称>」，故图签编辑（或 DRC 补号）必须重发快照并刷新标题
+	# —— 第五轮的教训推广到图纸自身字段。
+	if gpSheet != null and not gpSheet.gpSheetChanged.is_connected(_gpOnSheetTouched):
+		gpSheet.gpSheetChanged.connect(_gpOnSheetTouched)
 	# Hand the sheet to the canvas so its frame renderer knows the size and title block.
 	# 把图纸交给画布，使其图框渲染器知道图幅与标题栏。
 	gpCanvas.gpSetSheet(gpSheet)

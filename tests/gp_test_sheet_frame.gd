@@ -551,3 +551,34 @@ func gpTestDefaultTitleBlockSchemaAndRoundTrip() -> void:
 	var gpLegacy: GPSheet = GPSheet.gpNew("tb-legacy", "旧档", 0)
 	gpLegacy.gpTitleBlock["company"] = {"zh": "旧公司", "en": "Old Co."}
 	gpEq(gpLegacy.gpTitleValue("company"), "旧公司", "a legacy flat value remains readable")
+
+
+# Round 7 (user feedback 2026-11-05): a whole-block write that retypes the drawing_no cell
+# must sync the NUMBER FIELD from the cell — the flags / tab captions / DRC read gpNumber
+# while the dialog edits the cell; the two may never disagree. Undo restores the old number;
+# an EMPTY cell never erases it.
+# 第七轮（用户反馈 2026-11-05）：整块写入改写「图号」格时，必须把编号**字段**从格同步
+# —— 旗标 / 标签标题 / DRC 读 gpNumber，对话框编辑的是格；二者不得分家。撤销还原旧号；
+# 空格绝不抹号。
+func gpTestTitleBlockWriteSyncsNumber() -> void:
+	var gpS: GPSheet = GPSheet.gpNew("s", "s", 0)
+	gpS.gpAssignNumber("3")
+	var gpCtx: GPCommandContext = GPCommandContext.new(gpS.gpGraph, GPIdGen.new())
+	var gpAfter: Dictionary = gpS.gpTitleBlock.duplicate(true)
+	gpAfter["drawing_no"] = {"value": {"zh": "30-1200", "en": "30-1200"}}
+	var gpCmd: GPMutateSheetCommand = GPMutateSheetCommand.new(gpS, {
+		GPMutateSheetCommand.GP_FIELD_TITLE_BLOCK: gpAfter,
+	}, "编辑图签")
+	gpCheck(gpCmd.gpExecute(gpCtx), "图签命令应执行")
+	gpEq(gpS.gpNumber, "30-1200", "图号字段应从图号格同步")
+	gpCmd.gpUndo(gpCtx)
+	gpEq(gpS.gpNumber, "3", "撤销应还原旧图号")
+	gpCmd.gpRedo(gpCtx)
+	gpEq(gpS.gpNumber, "30-1200", "重做应再次同步新图号")
+	var gpCleared: Dictionary = gpS.gpTitleBlock.duplicate(true)
+	(gpCleared["drawing_no"] as Dictionary)["value"] = {"zh": "", "en": ""}
+	var gpCmd2: GPMutateSheetCommand = GPMutateSheetCommand.new(gpS, {
+		GPMutateSheetCommand.GP_FIELD_TITLE_BLOCK: gpCleared,
+	}, "清空图签")
+	gpCheck(gpCmd2.gpExecute(gpCtx), "清空命令应执行")
+	gpEq(gpS.gpNumber, "30-1200", "空格不得抹掉图号")

@@ -415,3 +415,44 @@ static func gpIsConnectorNode(gpNode: GPPIDNode, gpDefLookup: Callable) -> bool:
 		if gpDef != null:
 			return gpDef.gpCategory == "offpage"
 	return (gpNode.gpProps as Dictionary).has(GPOffPageLink.GP_KEY_LINK_ID)
+
+
+# Where a cross-sheet line may LAND on a host item (user feedback 2026-11-05, round 7):
+# its MOUNTED NOZZLES, one ref {node_id, port_id, nozzle_id, tag, anchor} per nozzle — the
+# line must land on a nozzle, never straight on the equipment body. Each ref's node is the
+# NOZZLE itself (the served edge connects to the nozzle's own line port), so the flag's
+# served walk then hops the mount relation to the equipment (the round-6 rule). Non-nozzle
+# children (manholes, blinds …) are not line landing points and never appear. Pure.
+# 跨图纸管线在宿主对象上的**落点**（用户反馈 2026-11-05 第七轮）：它**挂载的管口**，
+# 每枚管口一个引用 {node_id, port_id, nozzle_id, tag, anchor} —— 线必须落在管口上，
+# 绝不直连设备本体。每个引用的节点就是**管口本身**（服务边接到管口自己的管线端口），
+# 旗标的 served 行走随后经挂载关系跳到设备（第六轮规则）。非管口子件（人孔、盲板……）
+# 不是管线落点，绝不出现。纯函数。
+static func gpNozzleLandingRefs(gpGraph: GPPIDGraph, gpHostUid: String,
+		gpDefLookup: Callable) -> Array[Dictionary]:
+	var gpOut: Array[Dictionary] = []
+	if gpGraph == null or gpHostUid == "":
+		return gpOut
+	for gpChild in GPMountResolver.gpChildrenOf(gpGraph, gpHostUid):
+		if gpChild == null:
+			continue
+		var gpDef: GPSymbolDef = null
+		if gpDefLookup.is_valid():
+			gpDef = gpDefLookup.call(gpChild.gpSymbolId) as GPSymbolDef
+		if gpDef == null or gpDef.gpMountKind != "NOZZLE":
+			continue
+		# The nozzle's LINE port: the def's first NOZZLE-type port, else its first port.
+		# 管口的**管线**端口：定义里第一个 NOZZLE 型端口，否则第一个端口。
+		var gpPort: String = ""
+		for gpP in gpDef.gpPorts:
+			if gpP != null and gpP.gpType == GPPort.GP_NOZZLE:
+				gpPort = gpP.gpName
+				break
+		if gpPort == "" and not gpDef.gpPorts.is_empty() and gpDef.gpPorts[0] != null:
+			gpPort = gpDef.gpPorts[0].gpName
+		if gpPort == "":
+			continue
+		gpOut.append({"node_id": gpChild.gpInstanceId, "port_id": gpPort,
+			"nozzle_id": str(gpChild.gpProps.get("nozzle_id", "")),
+			"tag": str(gpChild.gpTag), "anchor": gpChild.gpMountAnchor})
+	return gpOut

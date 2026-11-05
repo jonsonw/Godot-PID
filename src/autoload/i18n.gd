@@ -674,6 +674,7 @@ const GP_STRINGS: Dictionary = {
 	"offpage.filter":         { "zh": "按位号过滤", "en": "Filter by tag" },
 	"offpage.target_item":    { "zh": "目标对象", "en": "Target item" },
 	"offpage.port":           { "zh": "端口", "en": "Port" },
+	"offpage.nozzle_item":    { "zh": "管口 %s", "en": "Nozzle %s" },
 	"offpage.ok":             { "zh": "创建连接", "en": "Create connection" },
 	"offpage.ctx_connect":    { "zh": "连接到其他图纸…", "en": "Connect to another sheet…" },
 	"offpage.ctx_jump":       { "zh": "跳转到对端", "en": "Go to peer end" },

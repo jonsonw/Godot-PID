@@ -695,6 +695,29 @@ func gpAssignNumber(gpNewNumber: String) -> void:
 		gpSheetChanged.emit()
 
 
+# Sync gpNumber FROM the title block's drawing_no cell after a whole-block write (the title
+# block dialog edits the cell the user sees; the field is what flags, tab captions and the
+# DRC read). One question, one answer: the two may never disagree. Silent on purpose — the
+# caller (the sheet command) owns the single gpSheetChanged emission. Conservative too: an
+# EMPTY cell never erases the number (clearing the block must not silently unname the sheet);
+# zh wins, en is the fallback.
+# 整块写入后把 gpNumber **从**图签「图号」格同步过来（图签对话框编辑的是用户眼中所见的
+# 格；字段是旗标、标签标题与 DRC 读取的值）。同一问题只有一个答案：两者不得分家。刻意
+# 静默 —— 发射 gpSheetChanged 归调用方（图纸命令）**一次性**负责。同样保守：空格绝不抹号
+#（清空图签不得悄悄让图纸无名）；zh 优先，en 作回落。
+func gpSyncNumberFromBlock() -> void:
+	var gpEntry: Variant = gpTitleBlock.get("drawing_no")
+	if gpEntry == null:
+		return
+	var gpVal: Variant = (gpEntry as Dictionary).get("value")
+	var gpV: Dictionary = gpVal as Dictionary if gpVal is Dictionary else (gpEntry as Dictionary)
+	var gpCell: String = str(gpV.get("zh", "")).strip_edges()
+	if gpCell == "":
+		gpCell = str(gpV.get("en", "")).strip_edges()
+	if gpCell != "" and gpCell != gpNumber:
+		gpNumber = gpCell
+
+
 # Effective value of one title-block field, falling back to the project info. Used by the dialog
 # to show what the sheet will actually print, without mutating it.
 # 某标题栏字段的**生效**值，缺失时回落到项目信息。对话框用它显示图纸实际会打印的内容，

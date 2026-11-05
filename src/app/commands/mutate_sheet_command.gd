@@ -133,6 +133,14 @@ func gpExecute(_gpCtx: GPCommandContext) -> bool:
 			break
 	if not gpChanged:
 		return false
+	# A whole-block write may have retyped the drawing_no cell: sync the number FIELD from
+	# the cell so the flags / tab captions / DRC read what the user just typed (user
+	# feedback 2026-11-05, round 7). The emission below covers the sync — no second signal.
+	# 整块写入可能改写了「图号」格：把编号**字段**从格同步过来，使旗标 / 标签标题 / DRC
+	# 读到的正是用户刚键入的值（用户反馈 2026-11-05 第七轮）。下方的发射同时覆盖同步
+	# —— 不发第二个信号。
+	if _gpNew.has(GP_FIELD_TITLE_BLOCK):
+		_gpSheet.gpSyncNumberFromBlock()
 	_gpSheet.gpSheetChanged.emit()
 	return true
 
@@ -146,6 +154,10 @@ func gpUndo(_gpCtx: GPCommandContext) -> void:
 	if _gpSheet == null or _gpOld.is_empty():
 		return
 	_gpWriteAll(_gpOld, false)
+	# The restored block carries the OLD number cell — the field follows it back.
+	# 还原的图签带着**旧**的图号格 —— 字段随之退回。
+	if _gpOld.has(GP_FIELD_TITLE_BLOCK):
+		_gpSheet.gpSyncNumberFromBlock()
 	_gpSheet.gpSheetChanged.emit()
 
 
@@ -158,6 +170,10 @@ func gpRedo(_gpCtx: GPCommandContext) -> void:
 	if _gpSheet == null or _gpNew.is_empty():
 		return
 	_gpWriteAll(_gpNew, true)
+	# Same sync as gpExecute — redo retypes the cell too.
+	# 与 gpExecute 同步 —— 重做同样会改写格。
+	if _gpNew.has(GP_FIELD_TITLE_BLOCK):
+		_gpSheet.gpSyncNumberFromBlock()
 	_gpSheet.gpSheetChanged.emit()
 
 

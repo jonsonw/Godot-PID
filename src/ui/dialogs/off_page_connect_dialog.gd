@@ -57,6 +57,13 @@ var _gpSheetByIndex: Array[GPSheet] = []
 # 列表下标 -> 节点实例 id，同一规则。
 var _gpNodeByIndex: Array[String] = []
 
+# Port dropdown index -> the landing ref it stands for {"node_id","port_id"}. Usually the
+# picked node itself; a NOZZLE entry points at the nozzle (user feedback 2026-11-05,
+# round 7) — the handler never parses labels back.
+# 端口下拉下标 -> 该项所代表的落点引用 {"node_id","port_id"}。通常是所选对象自身；
+# **管口**项指向管口（用户反馈 2026-11-05 第七轮）—— 处理函数绝不去反解标签文字。
+var _gpPortRefByIndex: Array[Dictionary] = []
+
 
 func _ready() -> void:
 	title = I18n.gpTr("offpage.dlg_title")
@@ -186,21 +193,55 @@ func _gpPopulateItems() -> void:
 	_gpUpdateOk()
 
 
-# Ports of the picked node's symbol def, in def order (drawing order = intent order).
-# 所选节点图元定义的端口，按定义次序（图面次序＝设计意图次序）。
+# Ports of the picked node. NOZZLE-PREFERRED (user feedback 2026-11-05, round 7): when the
+# item carries mounted nozzles, the dropdown lists THOSE — the cross-sheet line must land
+# on a nozzle, never straight on the equipment body — and each entry's ref points at the
+# NOZZLE itself (its line port), so the served edge lands on real piping geometry and the
+# flag's served walk hops the mount to the equipment. Only a nozzle-less item (an
+# instrument, a bare device) falls back to its own def ports.
+# 所选对象的端口。**管口优先**（用户反馈 2026-11-05 第七轮）：对象带挂载管口时，下拉列出
+# 的就是**管口** —— 跨图纸管线必须落在管口上、绝不直连设备本体 —— 且每项引用指向
+# **管口本身**（其管线端口），使服务边落在真实管线几何上、旗标的 served 行走经挂载跳到
+# 设备。只有无管口的对象（仪表、未画管口的设备）才回落到自身定义端口。
 func _gpPopulatePorts(gpNodeId: String) -> void:
 	_gpPortPick.clear()
+	_gpPortRefByIndex = []
 	if gpNodeId == "" or _gpPickedSheet() == null:
 		return
-	var gpNode: GPPIDNode = _gpPickedSheet().gpGraph.gpGetNode(gpNodeId)
+	var gpGraph: GPPIDGraph = _gpPickedSheet().gpGraph
+	if gpGraph == null:
+		return
+	var gpNode: GPPIDNode = gpGraph.gpGetNode(gpNodeId)
 	if gpNode == null:
 		return
-	var gpDef: GPSymbolDef = _gpDefFor(gpNode.gpSymbolId)
-	if gpDef == null:
-		return
-	for gpP in gpDef.gpPorts:
-		if gpP != null:
-			_gpPortPick.add_item(gpP.gpName)
+	# Mounted nozzles first; the label prefers the part's own name (nozzle_id / tag), then
+	# the host anchor it sits on, then a plain ordinal.
+	# 先列挂载管口；标签优先用部件自己的名字（nozzle_id / 位号），其次其所坐的宿主锚点，
+	# 最后是纯序号。
+	var gpNozzles: Array[Dictionary] = GPOffPageIndex.gpNozzleLandingRefs(gpGraph,
+		gpNodeId, Callable(self, "_gpDefFor"))
+	for gpI in range(gpNozzles.size()):
+		var gpR: Dictionary = gpNozzles[gpI]
+		var gpName: String = str(gpR.get("nozzle_id", ""))
+		if gpName == "":
+			gpName = str(gpR.get("tag", ""))
+		if gpName == "":
+			gpName = str(gpR.get("anchor", ""))
+		if gpName == "":
+			gpName = str(gpI + 1)
+		_gpPortPick.add_item(I18n.gpTr("offpage.nozzle_item") % gpName)
+		_gpPortRefByIndex.append({"node_id": gpR.get("node_id", ""),
+			"port_id": gpR.get("port_id", "")})
+	if _gpPortRefByIndex.is_empty():
+		# Fallback: the item's own def ports, in def order (drawing order = intent order).
+		# 回落：对象自身定义端口，按定义次序（图面次序＝设计意图次序）。
+		var gpDef: GPSymbolDef = _gpDefFor(gpNode.gpSymbolId)
+		if gpDef == null:
+			return
+		for gpP in gpDef.gpPorts:
+			if gpP != null:
+				_gpPortPick.add_item(gpP.gpName)
+				_gpPortRefByIndex.append({"node_id": gpNodeId, "port_id": gpP.gpName})
 	if _gpPortPick.item_count > 0:
 		_gpPortPick.select(0)
 
@@ -227,21 +268,26 @@ func _gpPickedNodeId() -> String:
 	return _gpNodeByIndex[gpI] if gpI >= 0 and gpI < _gpNodeByIndex.size() else ""
 
 
-func _gpPickedPort() -> String:
-	if _gpPortPick.item_count == 0 or _gpPortPick.selected < 0:
-		return ""
-	return _gpPortPick.get_item_text(_gpPortPick.selected)
+# The landing ref of the selected port entry, or {} when nothing is selected. The node_id
+# is the picked item itself — or the NOZZLE a nozzle entry stands for.
+# 所选端口项的落点引用；未选中时为 {}。node_id 是所选对象自身 —— 或**管口项**所代表的
+# 那枚管口。
+func _gpPickedPortRef() -> Dictionary:
+	var gpI: int = _gpPortPick.selected
+	if _gpPortPick.item_count == 0 or gpI < 0 or gpI >= _gpPortRefByIndex.size():
+		return {}
+	return _gpPortRefByIndex[gpI]
 
 
 # A complete ref is the OK gate: sheet + node + port, all three.
 # 完整引用是 OK 的闸门：图纸 + 节点 + 端口，三者缺一不可。
 func _gpCurrentRef() -> Dictionary:
 	var gpSheet: GPSheet = _gpPickedSheet()
-	var gpNodeId: String = _gpPickedNodeId()
-	var gpPort: String = _gpPickedPort()
-	if gpSheet == null or gpNodeId == "" or gpPort == "":
+	var gpRef: Dictionary = _gpPickedPortRef()
+	if gpSheet == null or gpRef.is_empty():
 		return {}
-	return {"sheet_id": gpSheet.gpId, "node_id": gpNodeId, "port_id": gpPort}
+	return {"sheet_id": gpSheet.gpId, "node_id": str(gpRef.get("node_id", "")),
+		"port_id": str(gpRef.get("port_id", ""))}
 
 
 func _gpUpdateOk() -> void:

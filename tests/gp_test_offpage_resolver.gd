@@ -467,3 +467,55 @@ func gpTestFlagBrokenPredicate() -> void:
 		"no claim is not broken / 无声称不算断")
 	gpCheck(not GPOffPageIndex.gpFlagBrokenFor(null), "null degrades to false / null 回落假")
 	GPOffPageIndex.gpClear()
+
+
+# The NOZZLE LANDING refs (user feedback 2026-11-05, round 7): the connect dialog's port
+# list must name the host's MOUNTED NOZZLES — the line lands on the nozzle, never on the
+# equipment body; a non-nozzle part (manhole) is not a landing point.
+# **管口落点**引用（用户反馈 2026-11-05 第七轮）：连接对话框的端口列表必须列出宿主
+# **挂载的管口** —— 线落在管口上、绝不落在设备本体上；非管口部件（人孔）不是落点。
+func gpTestNozzleLandingRefs() -> void:
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	var gpTank: GPPIDNode = gpG.gpNewNode("n-tank", "TANK001", "T-1003", Vector2(300, 100), {})
+	gpTank.gpTag = "T-1003"
+	gpG.gpAddNode(gpTank)
+	var gpNoz: GPPIDNode = gpG.gpNewNode("n-noz", "DGENERAL008", "", Vector2(300, 60),
+		{"nozzle_id": "N2"})
+	gpNoz.gpParentUid = "n-tank"
+	gpNoz.gpMountAnchor = "pump_discharge"
+	gpG.gpAddNode(gpNoz)
+	var gpHole: GPPIDNode = gpG.gpNewNode("n-hole", "DGENERAL007", "", Vector2(320, 100), {})
+	gpHole.gpParentUid = "n-tank"
+	gpHole.gpMountAnchor = "manhole"
+	gpG.gpAddNode(gpHole)
+	var gpLookup: Callable = func(gpSymId: String) -> GPSymbolDef:
+		var gpDef: GPSymbolDef = GPSymbolDef.new()
+		gpDef.gpId = gpSymId
+		match gpSymId:
+			"DGENERAL008":
+				gpDef.gpCategory = "general"
+				gpDef.gpMountKind = "NOZZLE"
+				gpDef.gpPorts = [GPPort.gpMake("pipe", Vector2(1, 0.5), Vector2(1, 0))]
+			"DGENERAL007":
+				gpDef.gpCategory = "general"
+				gpDef.gpMountKind = "MANHOLE"
+				# A port on the manhole too — so the KIND check, not a missing port, is
+				# what excludes non-nozzle parts (keeps the pin sensitive to the filter).
+				# 人孔**也**带端口 —— 使排除非管口部件的是**种类检查**而非缺端口
+				#（保持钉子对过滤器敏感）。
+				gpDef.gpPorts = [GPPort.gpMake("hole", Vector2(0.5, 0), Vector2(0, -1))]
+			_:
+				gpDef.gpCategory = "tank"
+		return gpDef
+	var gpRefs: Array[Dictionary] = GPOffPageIndex.gpNozzleLandingRefs(gpG, "n-tank", gpLookup)
+	gpEq(gpRefs.size(), 1, "exactly the nozzle is a landing point / 恰好管口是落点")
+	if gpRefs.size() == 1:
+		gpEq(str(gpRefs[0].get("node_id", "")), "n-noz",
+			"the ref points AT the nozzle / 引用指向管口本身")
+		gpEq(str(gpRefs[0].get("port_id", "")), "pipe",
+			"the port is the nozzle's line port / 端口是管口的管线端口")
+		gpEq(str(gpRefs[0].get("nozzle_id", "")), "N2", "the part name rides along / 部件名随行")
+	gpEq(GPOffPageIndex.gpNozzleLandingRefs(gpG, "n-missing", gpLookup).size(), 0,
+		"an unknown host yields nothing / 未知宿主交回空")
+	gpEq(GPOffPageIndex.gpNozzleLandingRefs(null, "n-tank", gpLookup).size(), 0,
+		"a null graph yields nothing / 空图交回空")
