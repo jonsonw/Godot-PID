@@ -552,6 +552,19 @@ func gpRefreshOffPageContext() -> void:
 			gpC.queue_redraw()
 
 
+# ANY sheet's graph changed (topology, tag, attrs — one emission per committed user action;
+# nothing during a drag). The off-page context re-derives and every tab's views repaint, so a
+# flag's cross-sheet legend (peer number / peer served tag / medium) can never go stale.
+# During a load each graph is built node by node — swallow the storm, one refresh at the end.
+# **任意**图纸的图变了（拓扑、位号、属性 —— 一次用户动作恰一次发射；拖拽中不发射）。跨图纸
+# 上下文重新推导、所有标签页的视图重绘，旗标的跨图图例（对端图号 / 对端位号 / 介质）因此
+# 永不陈旧。载入期间每张图逐节点搭建 —— 吞掉风暴、末尾统一刷一次。
+func _gpOnGraphTouched() -> void:
+	if _gpLoading:
+		return
+	gpRefreshOffPageContext()
+
+
 # ADR-43 / S3: jump to the PEER end of the link a connector stands for — switch to the
 # peer sheet's tab and select the peer connector. Navigation is deliberately NOT an
 # undoable command: it changes nothing in any document.
@@ -857,6 +870,20 @@ func _gpAddTabWith(gpTitle: String, gpId: String = "", gpGraphIn: GPPIDGraph = n
 	var gpCanvas: GPCanvas2D = GPCanvas2D.new()
 	gpCanvas.gpGraph = gpGraph
 	gpCanvas.gpDefs = gpDefs
+	# ADR-45 D2d follow-up (user feedback 2026-11-05): a connector's TOP legend line is
+	# DERIVED on the PEER sheet's topology (the nearest device along the line), so ANY
+	# sheet's structural change can stale ANY OTHER sheet's flag text. This sheet's own
+	# repaint is the binder's business; here we route every graph change into the off-page
+	# context refresh, which re-derives the snapshot and repaints EVERY tab's views.
+	# Dragging fires nothing during the move (the tool drives views directly) and the commit
+	# fires once — and a load is swallowed by the _gpLoading guard, one refresh at the end.
+	# ADR-45 D2d 后续（用户反馈 2026-11-05）：连接符**上一行**的位号在**对端**图纸的拓扑上
+	# 推导（沿线最近设备），故**任何**图纸的结构变更都可能让**其它**图纸的旗标文字陈旧。
+	# 本图自己的重绘归绑定器管；此处把每次图变更汇入跨图纸上下文刷新 —— 重新推导快照并
+	# 重绘**所有**标签页的视图。拖拽在拖动中不发射（工具直接驱动视图）、提交时一次；
+	# 载入由 _gpLoading 守卫吞掉、末尾统一刷一次。
+	if not gpGraph.gpGraphChanged.is_connected(_gpOnGraphTouched):
+		gpGraph.gpGraphChanged.connect(_gpOnGraphTouched)
 	# Hand the sheet to the canvas so its frame renderer knows the size and title block.
 	# 把图纸交给画布，使其图框渲染器知道图幅与标题栏。
 	gpCanvas.gpSetSheet(gpSheet)
