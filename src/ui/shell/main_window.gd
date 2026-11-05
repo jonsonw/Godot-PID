@@ -1169,8 +1169,14 @@ func _gpCreateCrossLink(gpCanvas: GPCanvas2D, gpFromRef: Dictionary, gpKind: Str
 	# D18（用户反馈 2026-11-04）：创建必须有**落地感** —— 两端旗标短促高亮；对端图纸未在
 	# 任何视图显示（无窗格、未摘出）时，打开进**第一个空窗格**，让用户看见对端那张图刚发生了什么。
 	_gpFlashLinkEnds(gpLinkId)
-	if not gpCenter.gpSheetVisible(gpPeerSheetId) \
-			and gpCenter.gpOpenSheetInEmptyPane(gpPeerSheetId):
+	# D25 (ADR-46, 2026-11-05): the peer sheet must be SEEN — reveal it per the user's
+	# priority (single view → side-by-side; multi-view → shown pane / empty pane / swap
+	# into the non-active pane) and put the FOCUS on the revealing pane. Case ① (already
+	# shown) still re-focuses, so the twin's flash lands where the user is looking.
+	# D25（ADR-46，2026-11-05）：对端图纸必须**被看见** —— 按用户拍板的优先级揭示
+	#（单视图 → 左右二分；多视图 → 已显示窗格 / 空窗格 / 换入非活动窗格），并把**焦点**
+	# 放到揭示窗格。情形 ①（已显示）同样重新聚焦，让孪生体的高亮落在用户视线里。
+	if gpCenter.gpRevealPeerSheet(gpPeerSheetId):
 		gpSetState("offpage.status_created_opened", [gpTag])
 		return gpLinkId
 	gpSetState("offpage.status_created", [gpTag])

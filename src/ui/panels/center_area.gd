@@ -1433,6 +1433,90 @@ func gpOpenSheetInEmptyPane(gpSheetId: String) -> bool:
 	return false
 
 
+# D25 (ADR-46, 2026-11-05): after a cross-sheet link is created, make the PEER sheet
+# visible and put the FOCUS there — the user must see the twin they just minted. The
+# DECISION (which pane) lives in GPPaneLayout.gpRevealPane (pure); this is only the
+# plumbing: mode switch, bind, attach, focus. A closed sheet re-opens first; the popped-out
+# sheet counts as visible and focuses its window (A1: a pane never fights the window).
+# D25（ADR-46，2026-11-05）：跨图纸连接创建后让**对端图纸**可见并把**焦点**放过去 ——
+# 用户必须立刻看到刚铸出的孪生体。**判定**（选哪个窗格）住在 GPPaneLayout.gpRevealPane
+#（纯函数）；此处只是管线：模式切换、绑定、挂载、聚焦。已关闭图纸先重开；已摘出图纸
+# 视为可见并聚焦其窗口（A1：窗格绝不与窗口争抢画布）。
+func gpRevealPeerSheet(gpSheetId: String) -> bool:
+	var gpTab: int = -1
+	for gpI in range(gpTabs.size()):
+		var gpSheet: GPSheet = gpTabs[gpI].get("sheet") as GPSheet
+		if gpSheet != null and gpSheet.gpId == gpSheetId:
+			gpTab = gpI
+			break
+	if gpTab < 0:
+		for gpC in range(_gpClosedSheets.size()):
+			if str(_gpClosedSheets[gpC].get("id", "")) == gpSheetId:
+				gpTab = _gpReopenClosed(gpC)
+				break
+	if gpTab < 0:
+		return false
+	if gpTab == _gpPopSheet:
+		_gpFocusPopout()
+		return true
+	if gpLayoutMode == GPPaneLayout.GP_SINGLE:
+		# User decision: single view becomes SIDE-BY-SIDE (mode 2, fixed) — pane 0 keeps
+		# the source sheet (gpResized's gpKeep carries the active tab over) and pane 1
+		# receives the peer. The mode change itself saves Settings and rebuilds the panes.
+		# 用户拍板：单视图切**左右二分**（模式 2，固定）—— 窗格 0 保持源图纸（gpResized
+		# 的 gpKeep 把活动标签带过去），窗格 1 接收对端。模式切换本身会存 Settings 并重建窗格。
+		gpSetLayoutMode(GPPaneLayout.GP_SIDE)
+		if gpTab == gpActive:
+			_gpFocusPaneAt(0)
+			return true
+		_gpPaneSheets = GPPaneLayout.gpBind(_gpPaneSheets, 1, gpTab)
+		_gpAttachPane(1, gpTab)
+		_gpFillPickers()
+		_gpRestylePanes()
+		_gpFocusPaneAt(1)
+		return true
+	# Multi-view: the pure decision, then the plumbing. ① lands here with no rebind at all.
+	# 多视图：纯判定，然后是管线。情形 ① 走到这里完全不用重绑。
+	var gpPane: int = GPPaneLayout.gpRevealPane(_gpPaneSheets, _gpActivePane, gpTab)
+	if gpPane < 0:
+		return false
+	if _gpPaneSheets[gpPane] != gpTab:
+		# ②/③: bind (the model's pre-flight keeps the popped sheet out of reach) — via
+		# gpBindOrSwap so ③ displaces nothing into a blank pane.
+		# ②/③：绑定（模型预检保证已摘出图纸够不着）—— 经 gpBindOrSwap 使 ③ 顶走的图纸
+		# 不落成空白窗格。
+		var gpPick: Dictionary = GPViewHostModel.gpBindOrSwap(_gpPaneSheets, _gpPopSheet,
+			gpPane, gpTab)
+		_gpPaneSheets = gpPick["bindings"]
+	# Idempotent re-home — ① must not TRUST the binding table: a pane whose slot says
+	# "shown" but whose canvas was physically detached elsewhere would stay a placeholder
+	# forever. Re-homing every pane is a no-op for the ones already correct (D05 contract).
+	# 幂等重挂 —— ① **不得信任**绑定表：槽位写着「已显示」但画布在别处被物理摘下的窗格
+	# 会永远是占位符。整表重挂对本来正确的窗格是空转（D05 契约）。
+	_gpAttachAllPanes()
+	_gpFillPickers()
+	_gpRestylePanes()
+	_gpFocusPaneAt(gpPane)
+	return true
+
+
+# D25: make pane gpPaneIdx the ACTIVE pane — real keyboard focus when the canvas can take
+# it (the pane's gpPaneFocused then re-enters the same state path), plus the DIRECT emit so
+# the focus lands even where a Control focus chain cannot reach (freshly rebuilt panes,
+# headless probes). The emit is idempotent: _gpOnPaneFocused only syncs state.
+# D25：使窗格 gpPaneIdx 成为**活动**窗格 —— 画布能接键盘焦点时给真焦点（窗格的
+# gpPaneFocused 随后走同一条状态路径），并**直接**发射使焦点在控件焦点链够不到的地方
+#（刚重建的窗格、headless 探针）也能落地。发射是幂等的：_gpOnPaneFocused 只做状态同步。
+func _gpFocusPaneAt(gpIdx: int) -> void:
+	if gpIdx < 0 or gpIdx >= _gpPanes.size():
+		return
+	var gpPane: GPCanvasPane = _gpPanes[gpIdx]
+	var gpCv: GPCanvas2D = gpPane.gpCanvas()
+	if gpCv != null and gpCv.is_inside_tree() and gpCv.focus_mode != Control.FOCUS_NONE:
+		gpCv.grab_focus()
+	gpPane.gpEmitFocused()
+
+
 # D22: menu entries for pop-out / return — the pop-out button greys out while a window is
 # open, and single view hides the pane header, so the menu is the always-available entry.
 # D22：摘出 / 归位的菜单入口 —— 窗口开着时摘出按钮置灰、单视图隐藏窗格头部，

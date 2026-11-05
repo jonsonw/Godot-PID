@@ -63,6 +63,13 @@ const GP_CTX_DETACH: int = 29
 const GP_CTX_CROSS_CONNECT: int = 30
 const GP_CTX_JUMP_PEER: int = 31
 const GP_CTX_SYNC_PEER: int = 32
+# ADR-46 D1 (2026-11-05): "跨图连线…" on a DEVICE / INSTRUMENT / INLINE node — the gesture
+# starts from the node's NOZZLE or def port instead of an existing connector. Same dialog,
+# same command: one more door into the same question "where does this line continue?".
+# ADR-46 D1（2026-11-05）：**设备 / 仪表 / 内联件**节点上的「跨图连线…」—— 手势从节点的
+# **管口或定义端口**起手，而非既有连接符。同一个对话框、同一条命令 ——
+# 「这条线在哪里续接」多开一扇门。
+const GP_CTX_CROSS_CONNECT_DEV: int = 39
 # One action id per candidate part type in the dynamic "添加附件 ▶" submenu. Parked far above every
 # other block so a dynamically built list can never collide with a fixed id, however long it grows.
 # 「添加附件 ▶」动态子菜单中每种候选部件各占一个动作 id。取值远高于其它号段，
@@ -351,6 +358,13 @@ func _gpBuildMenuItems(gpMenu: PopupMenu, gpNodeHit: String) -> void:
 				gpMenu.add_item(I18n.gpTr("offpage.ctx_sync"), GP_CTX_SYNC_PEER)
 			else:
 				gpMenu.add_item(I18n.gpTr("offpage.ctx_connect"), GP_CTX_CROSS_CONNECT)
+		# ADR-46 D1: a NON-connector node with a usable landing (mounted nozzles first, else
+		# def ports) offers "跨图连线…" — the connector's own entry above owns ITS state.
+		# ADR-46 D1：有可用落点（挂载管口优先，无管口回落定义端口）的**非连接符**节点提供
+		#「跨图连线…」—— 上方连接符自己的条目管它自己的状态。
+		if gpNodeHit != "" and not _gpIsOffpageConnector(gpNodeHit) \
+				and not _gpCrossFromRefFor(gpNodeHit).is_empty():
+			gpMenu.add_item(I18n.gpTr("offpage.ctx_connect_dev"), GP_CTX_CROSS_CONNECT_DEV)
 	# Delete applies to either shapes or nodes.
 	# 删除可同时作用于图形或图元。
 	var gpCanDelete: bool = gpNodeCtx or (not gpCv.gpShapeSel.is_empty())
@@ -423,6 +437,71 @@ func _gpPendingLine() -> Object:
 
 # Whether the hit node is an OFF-PAGE CONNECTOR: one of the two builtin ids, or any node
 # whose props already carry a link id (a user-pack connector proves itself that way).
+# ADR-46 D1: the fromRef a device/instrument/inline right-click starts from. Mounted
+# nozzles FIRST (the SAME landing enumeration the dialog uses — the cross line must land on
+# real piping geometry, never straight on the body), then the node's own def ports. A
+# right-click ON a nozzle part locks THAT nozzle. {} = no usable landing (no menu entry).
+# ADR-46 D1：设备 / 仪表 / 内联件右键的源端引用。挂载管口**优先**（与对话框**同一套**
+# 落点枚举 —— 跨图纸连线必须落在真实管线几何上，绝不直连本体），然后回落节点自身定义
+# 端口。右键恰落在管口部件上时**锁定**该管口。{} = 无可用落点（不出菜单条目）。
+func _gpCrossFromRefFor(gpNodeId: String) -> Dictionary:
+	if gpCv.gpGraph == null:
+		return {}
+	var gpNode: GPPIDNode = gpCv.gpGraph.gpGetNode(gpNodeId)
+	if gpNode == null:
+		return {}
+	# The node itself IS a mounted part (a nozzle right-clicked directly): lock it.
+	# 节点自身就是挂载部件（直接右键了管口）：锁定它。
+	if gpNode.gpIsMounted():
+		var gpOwn: String = _gpFirstPortName(gpNode.gpSymbolId)
+		return {"node_id": gpNodeId, "port_id": gpOwn} if gpOwn != "" else {}
+	# Mounted nozzles first (the dialog's own enumeration), then def ports.
+	# 先挂载管口（与对话框同一枚举），再回落定义端口。
+	var gpNozzles: Array[Dictionary] = GPOffPageIndex.gpNozzleLandingRefs(gpCv.gpGraph,
+		gpNodeId, gpCv.gpDefLookupCallable())
+	if not gpNozzles.is_empty():
+		var gpR: Dictionary = gpNozzles[0]
+		return {"node_id": str(gpR.get("node_id", "")), "port_id": str(gpR.get("port_id", ""))}
+	var gpPort: String = _gpFirstPortName(gpNode.gpSymbolId)
+	if gpPort == "":
+		return {}
+	return {"node_id": gpNodeId, "port_id": gpPort}
+
+
+# ADR-46 D1: the link KIND follows the FROM port's own purpose — a SIGNAL/ACTUATOR terminal
+# makes a SIGNAL link (the same rule the command layer applies to connectors), everything
+# else is PROCESS. A kind guess that ignores the port would only earn a DRC kind_mismatch.
+# ADR-46 D1：link 类别跟随**起点端口自身的用途** —— SIGNAL/ACTUATOR 端子产出 SIGNAL 连接
+#（与命令层对连接符用的同一规则），其余为 PROCESS。无视端口的类别猜测只会换来
+# DRC 的 kind_mismatch。
+func _gpKindForFromRef(gpRef: Dictionary) -> String:
+	if gpCv.gpGraph == null:
+		return GPPIDEdge.GP_PROCESS
+	var gpN: GPPIDNode = gpCv.gpGraph.gpGetNode(str(gpRef.get("node_id", "")))
+	if gpN == null:
+		return GPPIDEdge.GP_PROCESS
+	var gpDef: GPSymbolDef = gpCv.gpDefLookupCallable().call(gpN.gpSymbolId) as GPSymbolDef
+	if gpDef == null:
+		return GPPIDEdge.GP_PROCESS
+	for gpP in gpDef.gpPorts:
+		if gpP != null and gpP.gpName == str(gpRef.get("port_id", "")) \
+				and (gpP.gpType == GPPort.GP_SIGNAL or gpP.gpType == GPPort.GP_ACTUATOR):
+			return GPPIDEdge.GP_SIGNAL
+	return GPPIDEdge.GP_PROCESS
+
+
+# The FIRST declared port name of a symbol def ("" when the def is missing or portless).
+# 某图元定义的**第一个**声明端口名（定义缺失或无端口时为 ""）。
+func _gpFirstPortName(gpSymbolId: String) -> String:
+	var gpDef: GPSymbolDef = gpCv.gpDefLookupCallable().call(gpSymbolId) as GPSymbolDef
+	if gpDef == null:
+		return ""
+	for gpP in gpDef.gpPorts:
+		if gpP != null:
+			return gpP.gpName
+	return ""
+
+
 # 命中节点是否为跨图纸**连接符**：两个内置 id 之一，或 props 已带 link id 的节点
 #（用户包连接符以此自证身份）。
 func _gpIsOffpageConnector(gpNodeId: String) -> bool:
@@ -616,6 +695,22 @@ func gpOnContext(gpId: int) -> void:
 			gpCv.gpRequestCrossSheet(
 				{"node_id": _gpCtxHit, "port_id": GPSymbolPackOffpage.GP_PORT_NAME},
 				Vector2.ZERO, GPPIDEdge.GP_PROCESS, "")
+		GP_CTX_CROSS_CONNECT_DEV:
+			# ADR-46 D1, path 3: a device/instrument/inline node asks for a peer. The ref
+			# names the NOZZLE (or the node's own port) the local edge starts from; the
+			# device's own world position seeds the local flag's column/row snap NEAR the
+			# equipment (never a bare (0,0)); the kind follows the FROM port's purpose.
+			# ADR-46 D1，路径 3：设备 / 仪表 / 内联件节点请求对端。引用指明本端连线起手的
+			# **管口**（或节点自身端口）；设备自身世界坐标让本端旗标吸附到**设备就近**的
+			# 列 / 行（绝非裸 (0,0)）；类别跟随起点端口用途。
+			var gpDevRef: Dictionary = _gpCrossFromRefFor(_gpCtxHit)
+			if not gpDevRef.is_empty():
+				var gpDevN: GPPIDNode = gpCv.gpGraph.gpGetNode(_gpCtxHit) \
+					if gpCv.gpGraph != null else null
+				var gpDevWorld: Vector2 = gpDevN.gpPosition if gpDevN != null else Vector2.ZERO
+				var gpDevKind: String = _gpKindForFromRef(gpDevRef)
+				var gpDevSig: String = "ELECTRIC" if gpDevKind == GPPIDEdge.GP_SIGNAL else ""
+				gpCv.gpRequestCrossSheet(gpDevRef, gpDevWorld, gpDevKind, gpDevSig)
 		GP_CTX_JUMP_PEER:
 			gpCv.gpJumpToPeerRequested.emit(_gpCtxHit)
 		GP_CTX_SYNC_PEER:

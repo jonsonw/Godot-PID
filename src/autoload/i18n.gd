@@ -677,6 +677,7 @@ const GP_STRINGS: Dictionary = {
 	"offpage.nozzle_item":    { "zh": "管口 %s", "en": "Nozzle %s" },
 	"offpage.ok":             { "zh": "创建连接", "en": "Create connection" },
 	"offpage.ctx_connect":    { "zh": "连接到其他图纸…", "en": "Connect to another sheet…" },
+	"offpage.ctx_connect_dev": { "zh": "跨图连线…", "en": "Cross-sheet connect…" },
 	"offpage.ctx_jump":       { "zh": "跳转到对端", "en": "Go to peer end" },
 	"offpage.ctx_sync":       { "zh": "同步属性到对端", "en": "Sync attributes to peer" },
 	"offpage.sync_done":      { "zh": "契约属性已同步到对端", "en": "Contract attributes synced to the peer end" },

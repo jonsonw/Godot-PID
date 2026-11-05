@@ -136,6 +136,35 @@ static func gpSwapOrBind(gpBindings: Array[int], gpPaneIdx: int, gpSheetIdx: int
 	return gpBind(gpBindings, gpPaneIdx, gpSheetIdx)
 
 
+# D25 (ADR-46, 2026-11-05): which pane should REVEAL a peer sheet after a cross-sheet link
+# is created. Priority (user decision 2026-11-05): ① the pane ALREADY showing the sheet
+# (zero disturbance) → ② the FIRST EMPTY pane → ③ the FIRST NON-ACTIVE pane (apply it
+# through gpSwapOrBind so no pane goes blank). Returns -1 when nothing fits (no panes, or
+# the only pane is active and already shows something else — the single-view caller must
+# switch to mode 2 first; see GPCenterArea.gpRevealPeerSheet). Pure.
+# D25（ADR-46，2026-11-05）：跨图纸连接创建后，由哪个窗格**揭示**对端图纸。优先级
+#（2026-11-05 用户拍板）：① 已显示该图纸的窗格（零扰动）→ ② 第一个空窗格 → ③ 第一个
+# **非活动**窗格（经 gpSwapOrBind 应用，任何窗格都不留白）。无解时返回 -1（无窗格；或
+# 仅有的一个窗格是活动窗格且显示着别张图 —— 单视图调用方必须先切模式 2，见
+# GPCenterArea.gpRevealPeerSheet）。纯函数。
+static func gpRevealPane(gpBindings: Array[int], gpActivePane: int, gpTabIdx: int) -> int:
+	if gpBindings.is_empty() or gpTabIdx < 0:
+		return -1
+	var gpHolder: int = gpBindings.find(gpTabIdx)
+	if gpHolder >= 0:
+		return gpHolder
+	var gpSlot: int = gpBindings.find(GP_EMPTY)
+	if gpSlot >= 0:
+		return gpSlot
+	# ③: the first pane that is NOT the active one — a deterministic scan from index 0, so
+	# the same state always picks the same pane.
+	# ③：第一个**非活动**窗格 —— 自下标 0 确定性扫描，同一状态永远选中同一窗格。
+	for gpI in range(gpBindings.size()):
+		if gpI != gpActivePane:
+			return gpI
+	return -1
+
+
 # The first sheet tab index NOT shown in any pane (or GP_EMPTY when every sheet is shown).
 # [param gpExclude] a sheet index that must not be picked (e.g. one living in the pop-out
 # window — binding it to a pane would fight the window for the same canvas).

@@ -229,3 +229,41 @@ func gpTestExitToSingleViewLandsOnTheActivePaneSheet() -> void:
 	var gpB: Array[int] = GPPaneLayout.gpResized([0, 1, 2], 1, 2)
 	gpEq(gpB.size(), 1, "the single view has exactly one pane")
 	gpEq(gpB[0], 2, "the active pane's sheet becomes the tab the user lands on")
+
+
+# ------------------------------------------------------------------ D25 peer reveal (ADR-46, 2026-11-05)
+# 对端揭示（D25，ADR-46，2026-11-05）
+
+# After a cross-sheet link is created the PEER sheet must be SEEN: the pane choice is the
+# user's fixed priority — ① a pane already showing it (zero disturbance) → ② the first
+# empty pane → ③ the first NON-ACTIVE pane (applied through gpSwapOrBind so no pane goes
+# blank). Pure decision; the center area only plumbs bind/attach/focus after it.
+# 跨图纸连接创建后对端图纸必须**被看见**：窗格选择按用户拍板的固定优先级 ——
+# ① 已显示它的窗格（零扰动）→ ② 第一个空窗格 → ③ 第一个**非活动**窗格（经 gpSwapOrBind
+# 应用，任何窗格都不留白）。纯判定；center_area 只在其后做绑定/挂载/聚焦管线。
+func gpTestPeerRevealPanePriority() -> void:
+	# ①: the pane already showing the sheet wins, wherever it sits.
+	# ①：已显示该图纸的窗格胜出，无论它在哪个位置。
+	gpEq(GPPaneLayout.gpRevealPane([2, 0, GPPaneLayout.GP_EMPTY], 0, 2), 0,
+		"priority 1: the pane already showing the sheet is chosen")
+	gpEq(GPPaneLayout.gpRevealPane([0, 2], 1, 2), 1,
+		"priority 1: even the active pane counts as already showing")
+	# ②: no pane shows it → the first EMPTY pane.
+	# ②：无人显示 → 第一个空窗格。
+	gpEq(GPPaneLayout.gpRevealPane([0, GPPaneLayout.GP_EMPTY, GPPaneLayout.GP_EMPTY], 1, 2), 1,
+		"priority 2: the first empty pane is chosen")
+	gpEq(GPPaneLayout.gpRevealPane([GPPaneLayout.GP_EMPTY, 0], 1, 2), 0,
+		"priority 2: an empty pane before the active one still wins")
+	# ③: all panes busy → the first NON-ACTIVE pane (the swap keeps nothing blank).
+	# ③：全部占用 → 第一个**非活动**窗格（交换不留白）。
+	gpEq(GPPaneLayout.gpRevealPane([0, 1], 0, 2), 1,
+		"priority 3: with pane 0 active, pane 1 takes the peer")
+	gpEq(GPPaneLayout.gpRevealPane([0, 1], 1, 2), 0,
+		"priority 3: with pane 1 active, pane 0 takes the peer")
+	gpEq(GPPaneLayout.gpRevealPane([0, 1, 3], 1, 2), 0,
+		"priority 3: the scan is deterministic from index 0")
+	# Degenerate inputs. / 退化输入。
+	gpEq(GPPaneLayout.gpRevealPane([], 0, 0), -1, "no panes, no reveal")
+	gpEq(GPPaneLayout.gpRevealPane([0], 0, 1), -1,
+		"single view must switch modes first (the only pane is active and busy)")
+	gpEq(GPPaneLayout.gpRevealPane([0, 1], 0, -1), -1, "an invalid tab never reveals")
