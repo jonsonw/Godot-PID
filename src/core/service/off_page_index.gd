@@ -315,13 +315,30 @@ static func gpNextLeftSlot(gpGraph: GPPIDGraph, gpFrame: Rect2, gpEnv: Vector2,
 	return gpNextEdgeSlot(gpGraph, gpFrame, gpEnv, gpIsConnector, "left")
 
 
-# D17 (2026-11-04, R4): the drop point picks the NEAREST frame edge, and the local flag snaps
+# D26 (2026-11-06 user feedback): the SOURCE offpage connector ALWAYS lands in the RIGHT
+# column — top-down stacking, ≈ 1/12 of the frame width inside the right border. The
+# device/drop point no longer picks the side (that was gpSnapSlotFor's job; superseded
+# for the source flag by the user's real-machine feedback).
+# D26（2026-11-06 用户反馈）：**源端**跨图连接符一律落**右列** —— 自上而下堆叠、
+# 距右内边框约 1/12 图幅宽。设备/松手点不再决定走向（那是 gpSnapSlotFor 的职责；
+# 对源端旗标已被用户实机反馈取代）。
+static func gpNextRightSlot(gpGraph: GPPIDGraph, gpFrame: Rect2, gpEnv: Vector2,
+		gpIsConnector: Callable) -> Vector2:
+	return gpNextEdgeSlot(gpGraph, gpFrame, gpEnv, gpIsConnector, "right")
+
+
+# D17 (2026-11-04, R4): the drop point picks the NEAREST frame edge, and the flag snaps
 # into THAT edge's connector column/row — same stacking family as the left column. The drop
 # point only decides WHICH side; it never places the flag itself (no outside-the-frame
 # prints, no flags sitting on the frame line).
-# D17（2026-11-04，R4）：松手点只选**最近的图框边**，本端旗标吸附进**该边**的连接符
+# D17（2026-11-04，R4）：松手点只选**最近的图框边**，旗标吸附进**该边**的连接符
 # 列/行 —— 与左列同一套堆叠家族。松手点只决定走向哪一侧；旗标本身绝不落在松手点上
 #（杜绝出纸打印、杜绝压线旗标）。
+# D26 supersession (2026-11-06): the SOURCE flag no longer runs through here — it always
+# takes the right column via gpNextRightSlot. Kept as the nearest-edge geometry family
+# (still the side-picking rule should a drop-driven path return).
+# D26 取代说明（2026-11-06）：**源端**旗标不再走这里 —— 一律经 gpNextRightSlot 落右列。
+# 保留最近边几何家族（若未来出现由落点选边的路径仍复用）。
 static func gpSnapSlotFor(gpWorld: Vector2, gpGraph: GPPIDGraph, gpFrame: Rect2,
 		gpEnv: Vector2, gpIsConnector: Callable) -> Vector2:
 	if gpFrame.size == Vector2.ZERO:
@@ -357,7 +374,12 @@ static func gpNextEdgeSlot(gpGraph: GPPIDGraph, gpFrame: Rect2, gpEnv: Vector2,
 		gpColX = gpFrame.position.x + gpEnv.x * 0.55
 		gpBandFar = gpFrame.position.x + gpFrame.size.x * 0.3
 	elif gpSide == "right":
-		gpColX = gpFrame.end.x - gpEnv.x * 0.55
+		# D26 (2026-11-06 user feedback): the SOURCE column sits ≈ 1/12 of the frame
+		# width inside the right border (A1 ≈ 70 mm) — deeper than the legacy
+		# half-envelope hug; the max() floor keeps small frames print-safe.
+		# D26（2026-11-06 用户反馈）：**源端列**距右内边框约 1/12 图幅宽（A1 ≈ 70 mm）
+		# —— 比旧的半包络贴边更深；max() 下限保证小图幅不出纸。
+		gpColX = gpFrame.end.x - maxf(gpEnv.x * 0.55, gpFrame.size.x / 12.0)
 		gpBandFar = gpFrame.end.x - gpFrame.size.x * 0.3
 	elif gpSide == "top":
 		gpRowY = gpFrame.position.y + gpEnv.y * 0.55

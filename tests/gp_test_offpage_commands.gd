@@ -1126,9 +1126,12 @@ func gpTestSnapSlotPicksNearestEdge() -> void:
 	var gpG: GPPIDGraph = GPPIDGraph.new()
 	# Nearest-edge choice: a drop far to the RIGHT snaps into the right column.
 	# 最近边选择：图框右侧远处的松手点吸附进**右**列。
+	# D26 (2026-11-06): the right column now sits ≈ 1/12 frame width inside the border.
+	# D26（2026-11-06）：右列现位于距内边框约 1/12 图幅宽处。
 	var gpRight: Vector2 = GPOffPageIndex.gpSnapSlotFor(Vector2(900, 300), gpG,
 		gpFrame, gpEnv, gpIsConn)
-	gpCheck(absf(gpRight.x - (gpFrame.end.x - gpEnv.x * 0.55)) < 0.001,
+	gpCheck(absf(gpRight.x - (gpFrame.end.x - maxf(gpEnv.x * 0.55,
+			gpFrame.size.x / 12.0))) < 0.001,
 		"the right drop hugs the frame's right edge / 右侧松手贴右缘")
 	gpCheck(absf(gpRight.y - (gpFrame.position.y + gpEnv.y * 1.5)) < 0.001,
 		"an empty right column starts near the top / 空右列从顶部附近起排")
@@ -1160,6 +1163,49 @@ func gpTestSnapSlotPicksNearestEdge() -> void:
 	# 打印安全：**每个**吸附槽位都在图框**内**（绝无出纸打印）。
 	for gpSlot in [gpRight, gpTop, gpRight2, gpRight3]:
 		gpCheck(gpFrame.has_point(gpSlot), "the slot is inside the frame / 槽位在图框内")
+
+
+# D26 (2026-11-06 user feedback): the SOURCE connector's slot API — ALWAYS the right
+# column, top-down stacking, ≈ 1/12 of the frame width inside the right border; the
+# half-envelope floor keeps small frames print-safe.
+# D26（2026-11-06 用户反馈）：**源端**连接符专用槽位 —— 一律**右列**、自上而下堆叠、
+# 距右内边框约 1/12 图幅宽；半包络下限保证小图幅不出纸。
+func gpTestNextRightSlotParksTheSourceFlag() -> void:
+	var gpFrame: Rect2 = Rect2(0, 0, 841, 594)
+	var gpEnv: Vector2 = Vector2(48, 5)
+	var gpIsConn: Callable = func(_gpN: GPPIDNode) -> bool:
+		return true
+	var gpSlotX: float = gpFrame.end.x - maxf(gpEnv.x * 0.55, gpFrame.size.x / 12.0)
+	# An empty source column starts near the top, at the 1/12-depth column.
+	# 空源列从顶部附近起排，列位在 1/12 深度。
+	var gpFirst: Vector2 = GPOffPageIndex.gpNextRightSlot(null, gpFrame, gpEnv, gpIsConn)
+	gpCheck(absf(gpFirst.x - gpSlotX) < 0.001,
+		"the source column sits 1/12 frame width inside the right border / 源端列距右内边框 1/12 图幅宽")
+	gpCheck(absf(gpFirst.y - (gpFrame.position.y + gpEnv.y * 1.5)) < 0.001,
+		"an empty source column starts near the top / 空源列从顶部附近起排")
+	# Stacking: the next source flag goes BELOW the lowest member, same column.
+	# 堆叠：下一个源端旗标排在**最低**成员之下，同列。
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	gpG.gpAddNode(gpG.gpNewNode("c1", GP_ID_PIPE, "", Vector2(gpFirst.x, gpFirst.y), {}))
+	var gpNext: Vector2 = GPOffPageIndex.gpNextRightSlot(gpG, gpFrame, gpEnv, gpIsConn)
+	gpCheck(absf(gpNext.x - gpFirst.x) < 0.001,
+		"the source column keeps its x / 源端列保持 x")
+	gpCheck(absf(gpNext.y - (gpFirst.y + gpEnv.y * 3.0)) < 0.001,
+		"the next source slot stacks 3 envelopes down / 源列下一槽下移 3 倍包络")
+	# A LEFT-band member (the PEER twin) never stacks the source column.
+	# **左**带成员（对端孪生体）不参与源列堆叠。
+	var gpG2: GPPIDGraph = GPPIDGraph.new()
+	gpG2.gpAddNode(gpG2.gpNewNode("c2", GP_ID_PIPE, "",
+		Vector2(gpFrame.position.x + gpEnv.x * 0.55, gpFrame.position.y + 50.0), {}))
+	var gpFresh: Vector2 = GPOffPageIndex.gpNextRightSlot(gpG2, gpFrame, gpEnv, gpIsConn)
+	gpCheck(absf(gpFresh.y - (gpFrame.position.y + gpEnv.y * 1.5)) < 0.001,
+		"a left-band member does not stack the source column / 左带成员不堆叠源列")
+	# Print safety on a small frame: the half-envelope floor wins over 1/12.
+	# 小图幅打印安全：半包络下限压过 1/12。
+	var gpSmall: Vector2 = GPOffPageIndex.gpNextRightSlot(null, Rect2(0, 0, 200, 150),
+		gpEnv, gpIsConn)
+	gpCheck(absf(gpSmall.x - (200.0 - gpEnv.x * 0.55)) < 0.001,
+		"a small frame keeps the envelope floor / 小图幅保持半包络下限")
 
 
 # ---- unlink（U3 断开 + 重连变体）----

@@ -1239,12 +1239,19 @@ func _gpKindForConnector(gpNode: GPPIDNode) -> String:
 # D17 完整吸附（2026-11-04，R4）：出图框手势的松手点**只决定走向哪一侧** —— 本端旗标吸附
 # 进最近图框边的连接符列/行（与对端左列同一套堆叠家族），绝不落在松手点上。退化情形
 #（无图框）回落到钳制。模式 B（本端既有连接符）不消费该位置。
+# D26 (2026-11-06 user feedback): the SOURCE flag ALWAYS lands in the RIGHT connector
+# column — top-down stacking, ≈ 1/12 of the frame width inside the right border. The
+# device/drop point no longer picks the side (supersedes D17-R4's nearest-edge choice);
+# gpWorld only feeds the degenerate no-frame clamp.
+# D26（2026-11-06 用户反馈）：**源端**旗标一律落**右列** —— 自上而下堆叠、距右内边框
+# 约 1/12 图幅宽。设备/松手点不再选边（取代 D17-R4 的最近边选择）；gpWorld 仅用于
+# 无图框退化回路的钳制。
 func _gpSnapLocalFlag(gpWorld: Vector2, gpSheet: GPSheet, gpEnv: Vector2) -> Vector2:
 	if gpSheet == null or gpSheet.gpGraph == null:
 		return _gpClampIntoFrame(gpWorld, gpSheet, gpEnv)
 	var gpLookup: Callable = func(gpSymId: String) -> GPSymbolDef:
 		return gpDefFor(gpSymId)
-	return GPOffPageIndex.gpSnapSlotFor(gpWorld, gpSheet.gpGraph,
+	return GPOffPageIndex.gpNextRightSlot(gpSheet.gpGraph,
 		GPFrameGeometry.gpFrameRect(gpSheet), gpEnv,
 		func(gpN: GPPIDNode) -> bool:
 			return GPOffPageIndex.gpIsConnectorNode(gpN, gpLookup))
