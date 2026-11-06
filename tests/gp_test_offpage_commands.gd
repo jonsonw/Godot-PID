@@ -1208,6 +1208,68 @@ func gpTestNextRightSlotParksTheSourceFlag() -> void:
 		"a small frame keeps the envelope floor / 小图幅保持半包络下限")
 
 
+# ADR-46 entry 2 (2026-11-06): the cross-pane drop lands PORT-LEVEL — the host resolves the
+# landing with GPPortAnchor.gpHitPort(graph, lookup, world, zoom, []) (EMPTY node list =
+# every symbol is a candidate). Pins: the pointed port wins; a point outside the pick radius
+# refuses (no fallback to a def's first port); the NEAREST of two far-apart nodes wins.
+# ADR-46 入口 2（2026-11-06）：跨窗格落点是**端口级**的 —— 宿主用
+# GPPortAnchor.gpHitPort(graph, lookup, world, zoom, []) 解析落点（节点列表为空 = 所有图元
+# 皆候选）。钉子：指向的端口取胜；拾取半径之外拒绝（绝不回落到定义的第一个端口）；
+# 两个远隔的图元之间**最近**者取胜。
+func gpTestPortLevelDropResolvesNearestAnchor() -> void:
+	var gpDefs: Array[GPSymbolDef] = GPSymbolLibrary.gpDefaultDefs()
+	var gpLookup: Callable = func(gpSymId: String) -> GPSymbolDef:
+		for gpD in gpDefs:
+			if gpD != null and gpD.gpId == gpSymId:
+				return gpD
+		return null
+	# Any default symbol that actually exposes ports. / 任一真正暴露端口的默认图元。
+	var gpDef: GPSymbolDef = null
+	for gpD in gpDefs:
+		if gpD != null and not gpD.gpPorts.is_empty():
+			gpDef = gpD
+			break
+	if gpDef == null:
+		return
+	var gpG: GPPIDGraph = GPPIDGraph.new()
+	gpG.gpAddNode(gpG.gpNewNode("p1", gpDef.gpId, "", Vector2(100, 100), {}))
+	gpG.gpAddNode(gpG.gpNewNode("p2", gpDef.gpId, "", Vector2(500, 100), {}))
+	var gpAnchors: Array[Dictionary] = GPPortAnchor.gpAnchors(gpG, gpLookup, [])
+	if gpAnchors.is_empty():
+		return
+	# The pointed anchor wins. / 指向的锚点取胜。
+	var gpA: Dictionary = gpAnchors[0]
+	var gpHit: Dictionary = GPPortAnchor.gpHitPort(gpG, gpLookup,
+		gpA["pos"] as Vector2, 1.0, [])
+	gpCheck(str(gpHit.get("node_id", "")) == str(gpA.get("node_id", "")) \
+			and str(gpHit.get("port_id", "")) == str(gpA.get("port_id", "")),
+		"the drop snaps to the pointed port / 落点吸附到指向的端口")
+	# Outside the pick radius: REFUSE (the host then says "point at a nozzle").
+	# 拾取半径之外：**拒绝**（宿主随后提示「请指向管口」）。
+	var gpMiss: Dictionary = GPPortAnchor.gpHitPort(gpG, gpLookup,
+		(gpA["pos"] as Vector2) + Vector2(60, 0), 1.0, [])
+	gpCheck(gpMiss.is_empty(),
+		"a drop outside the pick radius refuses / 拾取半径之外的落点拒绝")
+	# Between two far-apart symbols, the NEAREST anchor wins (no first-node/first-port
+	# fallback). The expected winner is derived from the fixture itself, so the pin tests
+	# the dispatch, not a particular symbol's geometry.
+	# 两个远隔图元之间，**最近**的锚点取胜（绝不回落第一个节点 / 第一个端口）。期望胜者
+	# 由夹具自身推导，使钉子钉的是**分派规则**而非某个图元的几何。
+	var gpNearest: Dictionary = {}
+	var gpBestD: float = 1e12
+	for gpA2 in gpAnchors:
+		var gpD2: float = ((gpA2["pos"] as Vector2) - Vector2(100, 100)).length()
+		if gpD2 < gpBestD:
+			gpBestD = gpD2
+			gpNearest = gpA2
+	if gpBestD >= 10.0:
+		return
+	var gpHit2: Dictionary = GPPortAnchor.gpHitPort(gpG, gpLookup, Vector2(100, 100), 1.0, [])
+	gpCheck(str(gpHit2.get("node_id", "")) == str(gpNearest.get("node_id", "")) \
+			and str(gpHit2.get("port_id", "")) == str(gpNearest.get("port_id", "")),
+		"the nearest anchor wins across symbols / 跨图元最近的锚点取胜")
+
+
 # ---- unlink（U3 断开 + 重连变体）----
 # ---- unlink ----
 

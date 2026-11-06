@@ -670,6 +670,17 @@ func _gpOnCanvasReady(gpCanvas: GPCanvas2D) -> void:
 		gpCanvas.gpCrossPaneDropped.connect(_gpOnCrossPaneDropped.bind(gpCanvas))
 	if not gpCanvas.gpCrossPaneDragEnded.is_connected(_gpOnCrossPaneDragEnded):
 		gpCanvas.gpCrossPaneDragEnded.connect(_gpOnCrossPaneDragEnded)
+	# ADR-46 entry 2 (user request 2026-11-06): the cross-pane PORT link gesture — pulling
+	# from a nozzle of a selected symbol across panes. Wired per canvas for the same reason
+	# as W13-S8: the source canvas must be known at drop time.
+	# ADR-46 入口 2（用户需求 2026-11-06）：跨窗格**端口**连线手势 —— 从已选中图元的管口
+	# 拖出、跨越窗格。与 W13-S8 同理逐画布接线：落点时刻即知**源**画布。
+	if not gpCanvas.gpPortLinkUpdated.is_connected(_gpOnPortLinkUpdated):
+		gpCanvas.gpPortLinkUpdated.connect(_gpOnPortLinkUpdated.bind(gpCanvas))
+	if not gpCanvas.gpPortLinkDropped.is_connected(_gpOnPortLinkDropped):
+		gpCanvas.gpPortLinkDropped.connect(_gpOnPortLinkDropped.bind(gpCanvas))
+	if not gpCanvas.gpPortLinkEnded.is_connected(_gpOnPortLinkEnded):
+		gpCanvas.gpPortLinkEnded.connect(_gpOnPortLinkEnded)
 	# fire the toolbar sync twice, so it is intentionally not connected here.
 	# 故此处有意不再连接。
 	# A brand-new sheet has an empty undo stack: make the 编辑 menu agree with it right away.
@@ -1404,11 +1415,141 @@ func _gpOnCrossPaneDragEnded() -> void:
 		_gpSetDragSourceFeedback(_gpDragSrcCanvas, _gpDragSrcNode, false)
 
 
+# ---- ADR-46 entry 2: cross-pane PORT link (pull from a nozzle, drop on another sheet) ----
+# ---- ADR-46 入口 2：跨窗格端口连线（从管口拖出，落到另一张图）----
+
+# A port drag is crossing panes: rubber band from the SOURCE PORT, then highlight the node —
+# and expose its anchors — on whichever OTHER canvas is under the pointer.
+# 端口拖拽正跨越窗格：从**源端口**画橡皮筋，然后在指针下的**另一块**画布上高亮图元 ——
+# 并暴露其锚点。
+func _gpOnPortLinkUpdated(gpFrom: Dictionary, gpScreen: Vector2,
+		gpSource: GPCanvas2D) -> void:
+	_gpRubberFromPort(gpSource, gpFrom, gpScreen)
+	var gpTarget: GPCanvas2D = gpCenter.gpCanvasAtScreenPoint(gpScreen)
+	if gpTarget == gpSource:
+		gpTarget = null
+	_gpClearDragHighlight()
+	if gpTarget == null:
+		return
+	var gpWorld: Vector2 = _gpWorldOfScreen(gpTarget, gpScreen)
+	var gpHit: String = gpTarget.gpHitTest(gpWorld)
+	# The user aims at a NOZZLE TIP, which sits OUTSIDE the symbol body — a body-only hit
+	# test would leave the gesture blind exactly where it needs to be precise. A port within
+	# the pick radius counts as hovering its node too.
+	# 用户瞄准的是**管口端头**，它位于图元本体**之外** —— 只认本体的命中判定恰在最需要
+	# 精确的地方失明。拾取半径内的端口同样算作悬停其所属图元。
+	if gpHit == "":
+		var gpNear: Dictionary = GPPortAnchor.gpHitPort(gpTarget.gpGraph,
+			gpTarget.gpDefLookupCallable(), gpWorld, gpTarget.gpViewZoom, [])
+		if not gpNear.is_empty():
+			gpHit = str(gpNear.get("node_id", ""))
+	# Same-sheet targets are refused by the creation helper anyway; refusing the HIGHLIGHT
+	# too keeps what you see and what you get in agreement (same rule as W13-S8).
+	# 同图纸目标本就会被创建助手拒绝；高亮同样拒绝，使「看到的」与「得到的」始终一致
+	#（与 W13-S8 同一条规则）。
+	if gpHit != "" and gpTarget.gpSheet != null and gpSource.gpSheet != null \
+			and gpTarget.gpSheet.gpId == gpSource.gpSheet.gpId:
+		return
+	_gpDragHlCanvas = gpTarget
+	_gpDragHlNode = gpHit
+	# The hint rides ALONG with the highlight: "" (blank under the pointer) clears it.
+	# 提示**随**高亮走：空串（指针下为空白）即清除。
+	gpTarget.gpPortLinkHint = gpHit
+	if gpHit != "":
+		gpTarget.gpSetDropHighlight(gpHit)
+
+
+# The port drag was released: PORT-LEVEL landing — the nearest anchor within the pick
+# radius wins, no fallback to the definition's first port (the gesture means "this
+# nozzle"; a silent body landing is the misleading shape round 7 removed).
+# 端口拖拽松手：**端口级**落点 —— 拾取半径内最近的锚点取胜，绝不回落到定义的第一个端口
+#（手势意为「就是这个管口」；悄悄接到设备本体正是第七轮修掉的误导形状）。
+func _gpOnPortLinkDropped(gpFrom: Dictionary, gpScreen: Vector2,
+		gpSource: GPCanvas2D) -> void:
+	_gpClearDragHighlight()
+	_gpRubberStop()
+	var gpTarget: GPCanvas2D = gpCenter.gpCanvasAtScreenPoint(gpScreen)
+	# Dropped OUTSIDE every view (canvas + popup): a deliberate cancel — stay silent.
+	# 落在所有视图（画布 + 弹窗）**之外**：刻意的取消 —— 保持沉默。
+	if gpTarget == null:
+		return
+	if gpTarget == gpSource or (gpSource.gpSheet != null and gpTarget.gpSheet != null \
+			and gpSource.gpSheet.gpId == gpTarget.gpSheet.gpId):
+		gpSetState("offpage.refuse_same_sheet", [])
+		return
+	var gpWorld: Vector2 = _gpWorldOfScreen(gpTarget, gpScreen)
+	# The landing anchor: mounted nozzles participate through gpServingPorts, so "nozzle
+	# preferred" falls out of plain nearest-distance — the pointer IS the user's choice.
+	# 落点锚点：挂载管口经 gpServingPorts 参与，「管口优先」由**普通最近距离**自然达成 ——
+	# 指针本身就是用户的选择。
+	var gpA: Dictionary = GPPortAnchor.gpHitPort(gpTarget.gpGraph,
+		gpTarget.gpDefLookupCallable(), gpWorld, gpTarget.gpViewZoom, [])
+	if gpA.is_empty():
+		gpSetState("offpage.drop_no_port", [])
+		return
+	# Type pairing follows the IN-CANVAS drag rule: a pipe port and a signal port refuse
+	# out loud instead of minting a DRC-flagged link.
+	# 类型配对沿用**画布内**拖拽规则：管口与信号口大声拒绝，而不是铸出一条等着 DRC 报错的连接。
+	var gpKind: String = GPPortAnchor.gpConnectKindFor(str(gpFrom.get("type", "")),
+		str(gpA.get("type", "")))
+	if gpKind == "":
+		gpSetState("edge.port_type_mismatch", [])
+		return
+	var gpSignalType: String = "ELECTRIC" if gpKind == GPPIDEdge.GP_SIGNAL else ""
+	_gpCreateCrossLink(gpSource,
+		{"node_id": str(gpFrom.get("node_id", "")),
+			"port_id": str(gpFrom.get("port_id", ""))},
+		gpKind, gpSignalType,
+		gpFrom.get("pos", Vector2.ZERO) as Vector2,
+		gpTarget.gpSheet.gpId,
+		{"node_id": str(gpA.get("node_id", "")), "port_id": str(gpA.get("port_id", ""))})
+
+
+# The port link gesture ended without a drop (ESC): clear the highlights.
+# 端口连线手势未落点即结束（ESC）：清除高亮。
+func _gpOnPortLinkEnded() -> void:
+	_gpClearDragHighlight()
+	_gpRubberStop()
+
+
+# A4 roundtrip: the SCREEN point a canvas reported → that canvas's WORLD point. The exact
+# inverse of GPCanvas2D.gpScreenMouse() (its own viewport transform + its global transform,
+# both inverted) — the drop is resolved where the gesture HAPPENED, not where the mouse is
+# now, and the whole path stays deterministic for probes.
+# A4 往返：画布上报的**屏幕**点 → 该画布的**世界**点。与 GPCanvas2D.gpScreenMouse() 精确互逆
+#（各自的 viewport 变换与全局变换，双双取逆）—— 落点解析在手势**发生**之处，而非鼠标此刻
+# 所在之处，且整条路径对探针完全确定。
+func _gpWorldOfScreen(gpCanvas: GPCanvas2D, gpScreen: Vector2) -> Vector2:
+	var gpGlobal: Vector2 = gpCanvas.get_viewport().get_screen_transform().affine_inverse() \
+		* gpScreen
+	return gpCanvas.gpWorldFromScreen(gpCanvas.get_global_transform().affine_inverse() * gpGlobal)
+
+
+# D23's rubber band, from a PORT world position instead of a connector node (the two entry
+# paths share one visual language).
+# D23 橡皮筋，从**端口**世界坐标出发而非连接符节点（两条入口共用一套视觉语言）。
+func _gpRubberFromPort(gpSource: GPCanvas2D, gpFrom: Dictionary, gpScreen: Vector2) -> void:
+	if gpSource == null:
+		return
+	var gpPos: Vector2 = gpFrom.get("pos", Vector2.ZERO)
+	_gpRubberFrom = gpSource.get_global_transform() * gpSource.gpScreenFromWorld(gpPos)
+	# A4: the drag point arrives in SCREEN space; the overlay paints in the MAIN window's
+	# global space — convert through the main window's screen transform.
+	# A4：拖拽点以**屏幕**空间到达；覆盖层在**主窗**全局空间绘制 —— 经主窗 screen transform 换算。
+	_gpRubberTo = get_viewport().get_screen_transform().affine_inverse() * gpScreen
+	_gpRubberActive = true
+	_gpEnsureRubber().queue_redraw()
+
+
 # Clear the drop highlight (idempotent).
 # 清除落点高亮（幂等）。
 func _gpClearDragHighlight() -> void:
 	if _gpDragHlCanvas != null and is_instance_valid(_gpDragHlCanvas):
 		_gpDragHlCanvas.gpSetDropHighlight("")
+		# ADR-46 entry 2: the anchor hint (exposed ports on the target canvas) dies with
+		# the highlight — the two are one and the same visual contract.
+		# ADR-46 入口 2：锚点提示（目标画布暴露的端口）随高亮一同清除 —— 二者是同一个视觉契约。
+		_gpDragHlCanvas.gpPortLinkHint = ""
 	_gpDragHlCanvas = null
 	_gpDragHlNode = ""
 

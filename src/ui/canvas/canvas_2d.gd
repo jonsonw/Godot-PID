@@ -100,6 +100,24 @@ signal gpCrossPaneDropped(gpNodeId: String, gpScreen: Vector2)
 # 跨窗格拖拽未落点即结束（ESC / 工具复位）—— 清掉落点高亮。
 signal gpCrossPaneDragEnded()
 
+# ADR-46 / entry 2 (user request 2026-11-06, port-level cross-pane link): an ANCHOR drag
+# (press a nozzle of a selected symbol and pull) has LEFT this canvas — the drag converts
+# into a cross-pane link whose SOURCE is a device PORT, not an off-page connector. The
+# canvas reports the gesture live (screen-space pointer); it knows nothing about panes.
+# ADR-46 / 入口 2（用户需求 2026-11-06，端口级跨窗格连线）：一次**锚点拖拽**（按住已选中
+# 图元的管口拖出）已经**离开**本画布 —— 拖拽转为跨窗格连线，其**源**是设备**端口**（from_ref），
+# 而非离页连接符。画布实时上报手势（屏幕空间指针）；对窗格一无所知。
+signal gpPortLinkUpdated(gpFromRef: Dictionary, gpScreen: Vector2)
+
+# The port link gesture was RELEASED: the host resolves the pane / port under the point and
+# either builds the link or refuses out loud.
+# 端口连线手势**松手**：宿主解析该点下的窗格 / 端口，或建立连接、或大声拒绝。
+signal gpPortLinkDropped(gpFromRef: Dictionary, gpScreen: Vector2)
+
+# The port link gesture ended without a drop (ESC) — clear the highlights.
+# 端口连线手势未落点即结束（ESC）—— 清掉高亮。
+signal gpPortLinkEnded()
+
 # (Minimum marquee drag distance now lives on GPCanvasMarquee.GP_MIN_DRAG, next to the
 # window/crossing rule it belongs with.)
 # （框选最小拖拽距离现位于 GPCanvasMarquee.GP_MIN_DRAG，与它所属的窗口/交叉规则放在一起。）
@@ -489,6 +507,13 @@ var gpHoverPort: Dictionary = {}
 # The two endpoints picked for "auto-connect" (in click order, at most two).
 # 为「自动连线」拾取的两个端点（按点击顺序，最多两个）。
 var gpPortPick: Array[Dictionary] = []
+
+# ADR-46 entry 2: the node whose anchors this canvas exposes while ANOTHER canvas runs a
+# cross-pane port-link gesture over it — the user aims at a port they must be able to SEE.
+# Written by the host, cleared with the drop highlight.
+# ADR-46 入口 2：**另一块**画布正对本画布进行跨窗格端口连线手势时，本画布为其暴露锚点的
+# 图元 —— 用户要瞄准的端口必须**看得见**。由宿主写入，随落点高亮一并清除。
+var gpPortLinkHint: String = ""
 
 # the drawing transient state (_gpDrawFrom / _gpDrawTo / _gpDrawActive / _gpPolyPts) and the
 # three drawing verbs (_gpOnDrawDown() / _gpCommitDraw() / _gpFinishPolyline()) moved into GPDrawShapeTool,
@@ -1251,7 +1276,12 @@ func _process(_gpDelta: float) -> void:
 	# actually performs — "press and drag from the nozzle".
 	# 另一种画线方式：从端点锚点**拖拽**（gpPortOps）。它不是工具，故缺这一分支时，
 	# 用户实际使用的那个手势（「按住管嘴拖出来」）永远不会出现悬停提示。
-	if not gpPending and gpPortOps != null and gpPortOps.gpIsDragging():
+	if not gpPending and gpPortOps != null and gpPortOps.gpIsDragging() \
+			and not gpPortOps.gpIsCrossLink():
+		# ADR-46 entry 2: a cross-pane port link is NOT a "stopped here" gesture — the dwell
+		# prompt (open-end note) must not fire in the middle of it.
+		# ADR-46 入口 2：跨窗格端口连线**不是**「停在这儿」的手势 —— 悬停提示（开口端注记）
+		# 绝不能在它的中途触发。
 		gpPending = true
 	_gpDwell.gpTick(gpPending, Time.get_ticks_msec())
 

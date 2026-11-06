@@ -108,6 +108,18 @@ func _init(gpCanvas: GPCanvas2D) -> void:
 # 当前手势是否已移动足够远、构成**画线**而不是**单击**。
 var _gpMoved: bool = false
 
+# ADR-46 entry 2 (2026-11-06): while true, the anchor drag has LEFT this canvas and became
+# a cross-pane PORT link gesture — the local preview is frozen and every motion is reported
+# to the host, which highlights drop targets in the other panes. Mirrors W13-S8's arming.
+# ADR-46 入口 2（2026-11-06）：为真时，锚点拖拽已经**离开**本画布、变为跨窗格**端口**连线
+# 手势 —— 本地预览冻结，每次移动都上报宿主，由宿主在其它窗格高亮落点目标。镜像 W13-S8 上膛。
+var _gpCross: bool = false
+
+# True while the drag is armed as a cross-pane port link (the dwell prompt must stay quiet).
+# 拖拽已上膛为跨窗格端口连线时为真（悬停提示必须保持安静）。
+func gpIsCrossLink() -> bool:
+	return _gpCross
+
 # True while an anchor-to-anchor drag is in flight.
 # 端点对端点拖拽进行中返回真。
 func gpIsDragging() -> bool:
@@ -155,6 +167,13 @@ func gpUpdateHover(gpWorld: Vector2) -> void:
 func gpUpdateDrag(gpWorld: Vector2) -> void:
 	if _gpFrom.is_empty():
 		return
+	# ADR-46 entry 2: the gesture has left the canvas — freeze the local preview and keep
+	# reporting the pointer (SCREEN space, so any pane or pop-out window can test it).
+	# ADR-46 入口 2：手势已离开画布 —— 本地预览冻结，持续上报指针（**屏幕**空间，
+	# 任何窗格或摘出窗口都能判定它）。
+	if _gpCross:
+		gpCv.gpPortLinkUpdated.emit(_gpFrom, gpCv.gpScreenMouse())
+		return
 	_gpCursor = gpWorld
 	# Movement threshold: 3 world units ≈ a few pixels. Below it the gesture is still a CLICK
 	# (picking two anchors for auto-connect), above it the user meant to draw a line.
@@ -162,6 +181,15 @@ func gpUpdateDrag(gpWorld: Vector2) -> void:
 	# 高于它说明用户是在画线。
 	if gpWorld.distance_to(_gpPressWorld) > 3.0:
 		_gpMoved = true
+	# ADR-46 entry 2 ARMING (mirrors W13-S8): pulling from a bound anchor whose pointer just
+	# LEFT this canvas converts the drag into a cross-pane PORT link. Everything else keeps
+	# dragging; only leaving the canvas is the commitment.
+	# ADR-46 入口 2 **上膛**（镜像 W13-S8）：从已绑定锚点拖出、指针刚**离开**本画布 ——
+	# 拖拽转为跨窗格**端口**连线。其余一切照常拖拽；只有离开画布才是承诺。
+	if not Rect2(Vector2.ZERO, gpCv.size).has_point(gpCv.gpScreenFromWorld(gpWorld)):
+		_gpCross = true
+		gpCv.gpPortLinkUpdated.emit(_gpFrom, gpCv.gpScreenMouse())
+		return
 	# During a drag EVERY symbol's anchors are candidates: requiring the target to be selected
 	# first would make the gesture useless.
 	# 拖拽期间「每个」图元的锚点都是候选：若要求目标先被选中，该手势就没用了。
@@ -175,6 +203,18 @@ func gpUpdateDrag(gpWorld: Vector2) -> void:
 # 提交或放弃本次拖拽。创建出边时返回 true。
 func gpFinishDrag() -> bool:
 	if _gpFrom.is_empty():
+		return false
+	# ADR-46 entry 2: the cross-pane port link gesture ends here — report the drop and
+	# consume the release. Whether a link is built is the HOST's decision (it resolves the
+	# pane / port under the pointer); the local preview stays frozen, nothing is committed.
+	# ADR-46 入口 2：跨窗格端口连线手势在此结束 —— 上报落点并消费释放。是否建立连接由
+	# **宿主**决定（它解析指针下的窗格 / 端口）；本地预览保持冻结，本地不做任何提交。
+	if _gpCross:
+		_gpCross = false
+		var gpFrom: Dictionary = _gpFrom
+		_gpReset()
+		gpCv.gpPortLinkDropped.emit(gpFrom, gpCv.gpScreenMouse())
+		gpCv.queue_redraw()
 		return false
 	var gpFrom: Dictionary = _gpFrom
 	var gpTarget: Dictionary = _gpTarget
@@ -271,8 +311,15 @@ func gpKindOfSource(gpPortType: String) -> String:
 func gpCancelDrag() -> void:
 	if _gpFrom.is_empty():
 		return
+	var gpWasCross: bool = _gpCross
+	_gpCross = false
 	_gpReset()
 	gpCv.queue_redraw()
+	# ADR-46 entry 2: an abandoned CROSS gesture must tell the host, so the cross-pane
+	# highlights and the rubber band are cleared.
+	# ADR-46 入口 2：被放弃的**跨窗格**手势必须通知宿主，使跨窗格高亮与橡皮筋得以清除。
+	if gpWasCross:
+		gpCv.gpPortLinkEnded.emit()
 
 
 # Add / remove an anchor from the auto-connect pick list (max two, oldest dropped first).
@@ -312,7 +359,7 @@ func gpDrawPorts(gpTarget: CanvasItem) -> void:
 		# 即使没有选中节点，悬停的端口也必须画出来：拖注记时选中的是**图形**而非节点 ——
 		# 缺这一分支就没有可高亮的锚点。
 		if gpCv.gpSelection.is_empty() and gpCv.gpPortPick.is_empty() \
-				and gpCv.gpHoverPort.is_empty():
+				and gpCv.gpHoverPort.is_empty() and gpCv.gpPortLinkHint == "":
 			return
 		gpNodeIds = gpCv.gpSelection.duplicate()
 		for gpP in gpCv.gpPortPick:
@@ -322,11 +369,24 @@ func gpDrawPorts(gpTarget: CanvasItem) -> void:
 		var gpHoverNid: String = str(gpCv.gpHoverPort.get("node_id", ""))
 		if gpHoverNid != "" and not gpNodeIds.has(gpHoverNid):
 			gpNodeIds.append(gpHoverNid)
+		# ADR-46 entry 2: anchors exposed for a cross-pane port-link gesture hovering over
+		# this canvas — the user must SEE the port they are aiming at.
+		# ADR-46 入口 2：跨窗格端口连线手势悬停于本画布时为落点图元暴露锚点 ——
+		# 用户要瞄准的端口必须**看得见**。
+		if gpCv.gpPortLinkHint != "" and not gpNodeIds.has(gpCv.gpPortLinkHint):
+			gpNodeIds.append(gpCv.gpPortLinkHint)
+	elif _gpCross:
+		# ADR-46 entry 2: the gesture lives on the OTHER panes now — the source canvas keeps
+		# only its own source anchor visible, and the frozen preview is suppressed (the host's
+		# cross-pane rubber band replaces it).
+		# ADR-46 入口 2：手势已活在**其它**窗格 —— 源画布只保留自己的源锚点可见，冻结的
+		# 预览予以抑制（宿主的跨窗格橡皮筋取而代之）。
+		gpNodeIds.append(str(_gpFrom.get("node_id", "")))
 	var gpAnchors: Array[Dictionary] = GPPortAnchor.gpAnchors(gpCv.gpGraph,
 		gpCv.gpDefLookupCallable(), gpNodeIds)
 	for gpA in gpAnchors:
 		_gpDrawOne(gpTarget, gpA, gpDragging)
-	if gpDragging:
+	if gpDragging and not _gpCross:
 		_gpDrawPreview(gpTarget)
 
 

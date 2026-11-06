@@ -685,6 +685,7 @@ const GP_STRINGS: Dictionary = {
 	"offpage.status_created": { "zh": "跨图纸连接已创建（编号 %s）", "en": "Cross-sheet connection created (tag %s)" },
 	"offpage.status_created_opened": { "zh": "跨图纸连接已创建（编号 %s）· 对端图纸已打开在空窗格", "en": "Cross-sheet connection created (tag %s) · peer sheet opened in the empty pane" },
 	"offpage.drop_blank": { "zh": "落点在图纸空白处 —— 请指向要对端服务的设备 / 管线 / 仪表", "en": "Dropped on blank canvas — point at the item the peer should serve (equipment / line / instrument)" },
+	"offpage.drop_no_port": { "zh": "拾取半径内没有管口或端口 —— 请直接指向对端图元的管口", "en": "No nozzle or port within the pick radius — point directly at a port on the peer sheet" },
 	"offpage.act_jump": { "zh": "跳到对端", "en": "Jump to Peer" },
 	"offpage.act_jump_tip": { "zh": "切到对端图纸并选中对端连接符", "en": "Switch to the peer sheet and select the peer connector" },
 	"offpage.act_unlink": { "zh": "断开", "en": "Unlink" },
