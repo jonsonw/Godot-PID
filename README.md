@@ -111,7 +111,7 @@ The core code is released under the **MIT License** — free to use, modify, and
 # macOS / Linux 必须给引擎可写 HOME，否则 user:// 建不出来会直接 SIGSEGV（详见 CONTRIBUTING）
 mkdir -p /tmp/gpidhome
 
-# 自研 GPGTest：118 套 / 9,556 断言（编译 0 错 · SCRIPT ERROR 0）
+# 自研 GPGTest：129 套 / 10,759 断言（编译 0 错 · SCRIPT ERROR 0）
 HOME=/tmp/gpidhome godot --headless --path . --script res://tests/run_core_tests.gd
 
 # 解析检查：新增 class_name 后先跑这条（headless runner 从 .godot 的类名缓存解析类）
@@ -144,7 +144,7 @@ Godot-PID/                # GitHub 仓库根（本地工作目录为 Godot-PID-C
 │   │   ├── platform/      # DPI 窗口、弹窗辅助
 │   │   └── service/       # GPIdGen、GPIOResult
 │   ├── app/               # 应用服务层：命令、撤销栈、事件总线、文档管理
-│   │   └── commands/      # 32 条具体命令（增删移图元/图形/连线、路径与标签编辑、落点恢复）
+│   │   └── commands/      # 51 条具体命令（增删移图元/图形/连线、路径与标签编辑、落点恢复）
 │   ├── render/            # GPSymbolView / GPEdgeView / 图框 GPFrameView / 背景 GPBackgroundView / 绘制器
 │   ├── io/                # *.pid.json 读写；DEXPI（Proteus XML）导入导出；DXF R12 / PDF 1.4 / 清单导出
 │   │   ├── dexpi_schema.gd    # 版本常量 / RDL 双域 / 保留 Set 名 / 版本能力表
@@ -157,11 +157,11 @@ Godot-PID/                # GitHub 仓库根（本地工作目录为 Godot-PID-C
 │   │   └── exporter_registry.gd # 导出器注册表：新增格式不再改 UI 分发
 │   ├── ui/
 │   │   ├── shell/         # 主窗口组合根、菜单栏、7 个协调者、快捷命令条、自动保存
-│   │   ├── canvas/        # 画布外壳 + 5 个实现类、增量同步、快捷键、右键菜单
+│   │   ├── canvas/        # 画布外壳 GPCanvas2D + 16 个协作者（输入路由/视图控制/图层/编辑门面）
 │   │   ├── tools/         # 画布交互工具：选择 / 放置 / 绘制 / 抓取点
 │   │   ├── panels/        # 多标签绘图区、图元库、属性面板、工具栏
 │   │   └── dialogs/       # 设置、新建图元（含端口编辑面板）、标题栏；symbol_editor/ 为图元几何编辑
-│   ├── addons/            # GPIPIDAddon：商业化插件契约
+│   ├── addons/            # GPIPIDAddon：商业化插件契约（v3，12 钩子）+ GPAddonLoader（尚未挂载）
 │   └── autoload/          # 3 个全局单例：I18n（翻译）、Settings（字体与配置）、SnapState（CAD 开关）
 ├── addons/gut/            # GUT 9.7.1 测试框架（vendored，MIT）
 ├── assets/                # 图元 SVG、中文字体、主题
@@ -189,18 +189,18 @@ Godot-PID/                # GitHub 仓库根（本地工作目录为 Godot-PID-C
 ### 了解更多 / Learn more
 
 - [`docs/README.md`](docs/README.md) — **文档总索引**（公开文档 / 本地过程文档的分工与阅读路径）
-- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — **开发指南**：架构地图、强制规则、扩展点、门禁与常见陷阱
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 架构总览（分层、依赖规则、调用链路）
-- [`docs/ARCHITECTURE_FOR_BEGINNERS.md`](docs/ARCHITECTURE_FOR_BEGINNERS.md) — **新手导读**，从 Godot 概念讲到「加功能该改哪里」
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — 编码与命名规范（`gp` / `GP` 前缀、显式类型、中英双语注释）
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — **开发指南**：架构地图、**新增功能落位 R1–R6**（写第一行代码前先读）、强制规则、扩展点、门禁与常见陷阱
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 架构总览（分层、依赖规则、**架构守卫与预算门**、调用链路）；基线数字的唯一出处
+- [`docs/ARCHITECTURE_FOR_BEGINNERS.md`](docs/ARCHITECTURE_FOR_BEGINNERS.md) — **新手导读**，从 Godot 概念讲到「加功能该改哪里」（含落位五问）
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — 编码与命名规范（`gp` / `GP` 前缀、显式类型、中英双语注释）+ 新增功能落位摘要
 
 ---
 
 ## 贡献 / Contributing
 
-欢迎以 Issue / PR 参与。图元采用 `GPSymbolDef` 数据驱动，新增符号零门槛；新增编辑操作请走命令层（见新手导读 §11.2）。
+欢迎以 Issue / PR 参与。图元采用 `GPSymbolDef` 数据驱动，新增符号零门槛；新增编辑操作请走命令层（见新手导读 §5.2），**新增功能默认落新文件**（见 `docs/DEVELOPMENT.md` §2.1）。
 
-Contributions are welcome via Issues / PRs. Symbols are `GPSymbolDef`-driven, so adding one has near-zero friction; new edit operations should go through the command layer (see Beginner's Guide §11.2).
+Contributions are welcome via Issues / PRs. Symbols are `GPSymbolDef`-driven, so adding one has near-zero friction; new edit operations should go through the command layer (see Beginner's Guide §5.2), and **new features start in a new file** (see `docs/DEVELOPMENT.md` §2.1).
 
 ---
 

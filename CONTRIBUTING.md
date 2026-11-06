@@ -13,7 +13,9 @@ This guide explains how to add symbols, run tests, and submit pull requests.
 - Fork the repo and create a feature branch.
 - Follow the coding rules: every variable declares its type explicitly; containers use typed arrays (e.g. `Array[SymbolDef]`).
 - Comments are **bilingual** — an English line immediately followed by its Chinese translation — and **mandatory** in coverage (see "Comment standard" below).
-- Add or update GUT tests under `tests/`.
+- Add tests under `tests/`: a GPGTest suite (`gp_test_*.gd`) for behaviour, and the GUT bridge picks it up once `GP_EXPECTED_SUITES` is bumped.
+- Keep new logic out of the big files — see "Where new features go" below before you type the first line.
+- Private members (`_gp*`) never cross an object boundary; the architecture suite fails the build if they do.
 - Open a PR with a clear description.
 
 ### Comment standard（强制 / mandatory）
@@ -89,6 +91,16 @@ A new feature starts in a **new file**. The file you already have open is a wiri
 - **R3 — cut by "what changes together"**, not by "who calls whom". If the code needs its own test, it needs its own file.
 - **R4 — cross the module boundary through a port or contract.** Private members never cross an object boundary (also gated since S8). Corollary: *whoever holds the handler holds the wiring* — connect a signal in the class that implements its handler.
 - **R5 — an extraction without a test is a move, not a refactor.** Ship the suite file, a behaviour assertion, and an anti-backslide assertion in the same change.
+- **R6 — exceptions are review-level, never an edit.** A budget may be raised only when the code provably cannot move, when *both* the active and the frozen table change in the same diff, and when the reason and a repayment plan are recorded. "It was easier this way" is not a reason.
+
+What the gate says when you break R1/R2 — and what to do about it:
+
+```
+file budget exceeded — extract a module, do not raise the cap:
+  src/ui/canvas/canvas_2d.gd 2026>2024
+```
+
+Move the new logic into a new file (R1) — the wiring you actually need is 1–5 lines in the old file. Never edit the number.
 
 Full reasoning, the decision tree and the exception process: internal `docs/ADR/2026-11-06-ADR-47-模块化与新增功能落位.md`.
 
@@ -119,7 +131,9 @@ authoritative definition, guarded by `tests/gp_test_symbol_naming.gd`.
 - Fork 仓库并新建功能分支。
 - 遵守编码规范：所有变量显式声明类型；容器使用带类型数组（如 `Array[SymbolDef]`）。
 - 注释为**双语**——英文一行紧接中文一行——且**强制覆盖**（详见下方「注释规范」）。
-- 在 `tests/` 下新增或更新 GUT 测试。
+- 在 `tests/` 下补测试：行为用 GPGTest 套件（`gp_test_*.gd`），GUT 桥在 `GP_EXPECTED_SUITES` 同步后自动纳入。
+- 新逻辑不要写进那几个大文件 —— 动键盘前先读下方「新增功能落位」。
+- 私有成员（`_gp*`）不得跨对象边界；伸手的话架构套件会直接把构建判红。
 - 提交带清晰说明的 PR。
 
 ### 注释规范（强制）
@@ -191,6 +205,16 @@ HOME=/tmp/gpidhome "$GODOT" --headless --path . --editor --quit
 - **R3 按「谁会一起变」切**，不按「谁调用谁」切。如果这段代码需要单独的测试，它就需要单独的文件。
 - **R4 跨模块只经端口/契约**，私有成员不出对象边界（自 S8 起亦有守卫）。推论：**谁持有处理器，谁持有接线** —— 信号的 `connect` 写在实现其处理器的那个类里。
 - **R5 没有测试的提取只能叫「搬家」**，不算重构。同一次提交里要带上：套件文件 + 一条行为断言 + 一条防回流断言。
+- **R6 例外是评审级决议，不是顺手改数**。只有「这段代码确实搬不走」、且**在用表与冻结快照在同一次 diff 里同改**、并在 ADR-47 附录 B 登记理由与偿还计划时，预算才可上调。「这样写更省事」不是理由。
+
+破坏 R1 / R2 时门 2 会这样说话（以及你该做什么）：
+
+```
+file budget exceeded — extract a module, do not raise the cap:
+  src/ui/canvas/canvas_2d.gd 2026>2024
+```
+
+把新逻辑挪进新文件（R1）—— 你真正需要的接线通常只有 1–5 行。**不要动那个数字。**
 
 完整理由、落位决策树与例外流程见内部 `docs/ADR/2026-11-06-ADR-47-模块化与新增功能落位.md`。
 

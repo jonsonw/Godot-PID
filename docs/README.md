@@ -7,9 +7,12 @@
 
 | 文档 | 内容 | 适合谁 |
 |---|---|---|
-| [`DEVELOPMENT.md`](DEVELOPMENT.md) | **开发指南：架构地图 + 强制开发规则 + 扩展点 + 提交约定** | 想改代码的人（第一站） |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 架构总览（精简版）：分层表、依赖方向、单档格式、扩展接缝、测试与 CI | 想快速理解系统的人 |
-| [`ARCHITECTURE_FOR_BEGINNERS.md`](ARCHITECTURE_FOR_BEGINNERS.md) | **新手导读**（权威完整版）：从 Godot 概念讲到「加功能该改哪里」 | 第一次接触本项目的人 |
+| [`DEVELOPMENT.md`](DEVELOPMENT.md) | **开发指南：架构地图 + 新增功能落位（R1–R6）+ 强制规则 + 扩展点 + 门禁** | 想改代码的人（第一站） |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 架构总览（精简版）：分层表、依赖方向、架构守卫、单档格式、扩展接缝、测试与 CI；**基线数字的唯一出处** | 想快速理解系统的人 |
+| [`ARCHITECTURE_FOR_BEGINNERS.md`](ARCHITECTURE_FOR_BEGINNERS.md) | **新手导读**（权威完整版）：从 Godot 概念讲到「加功能该改哪里」（含落位五问） | 第一次接触本项目的人 |
+| [`DEXPI_COVERAGE.md`](DEXPI_COVERAGE.md) | DEXPI 1.4 / Proteus 4.2.0 覆盖报告（**生成物，勿手改**；由 `tools/gp_dexpi_coverage.gd` 重算） | 做 DEXPI 交换的人 |
+| [`ISO_DEVIATIONS.md`](ISO_DEVIATIONS.md) | ISO / GB 采用与偏离表（H02 交付摘要，冲突以内部 ADR-28 为准） | 需要引用标准依据的工程师 |
+| [`PERF_900.md`](PERF_900.md) | 900 节点基准（D06）：只记录 headless 可证明的模型层数字 | 关心性能与回归的人 |
 | [`清单模板说明.md`](清单模板说明.md) | 数据清单 Excel 的模板结构、标记、字段映射、属性回写规则与限制 | 用模板出交付物的工程师 / 维护者 |
 | [`清单字段目录_v1.md`](清单字段目录_v1.md) | 管线/设备/仪表/阀门四张清单的字段 key、别名、类型、可写性 | 改清单/模板/回写的开发者 |
 | [`清单i18n键清单.md`](清单i18n键清单.md) | 数据清单与回写的 i18n key 清单（菜单/对话框/字段/错误） | 改 UI 文案的开发者 |
@@ -20,7 +23,7 @@
 > 需要空白 A3 起点图时，运行 `Godot --headless --script res://tools/make_blank_a3.gd` 在本地生成
 > （默认写到 `user://blank_a3.pid.json`，也可追加参数指定路径；**产物不入库**）。
 
-**仓库根目录还有：** [`README.md`](../README.md)（项目总览 / 下载 / 上手）、[`CONTRIBUTING.md`](../CONTRIBUTING.md)（命名与注释规范：双语注释、`GP`/`gp` 前缀、图元 id 规则）、[`CHANGELOG.md`](../CHANGELOG.md)（语义化版本变更记录）。
+**仓库根目录还有：** [`README.md`](../README.md)（项目总览 / 下载 / 上手）、[`CONTRIBUTING.md`](../CONTRIBUTING.md)（命名与注释规范：双语注释、`GP`/`gp` 前缀、图元 id 规则、**新增功能落位 R1–R6**）、[`CHANGELOG.md`](../CHANGELOG.md)（语义化版本变更记录）。
 
 ## 二、本地过程文档（**不随仓库分发**）/ Local-only Process Docs
 
@@ -29,7 +32,7 @@
 
 | 分区 | 回答的问题 | 为什么不上传 |
 |---|---|---|
-| `ADR/` | **为什么这样决定**（每个决策一篇，含前后因果链） | 决策过程属内部资产 |
+| `ADR/` | **为什么这样决定**（每个决策一篇，含前后因果链）。近期关键：**ADR-47**（新增功能落位与预算只减不增）、ADR-10（分层与依赖方向，含"零跨对象私有调用"修正案） | 决策过程属内部资产 |
 | `SDLC/` | **长期往哪走 / 本周走到哪**（按周长期方向 spec） | 含内部排期与里程碑判断 |
 | `YAGNI/` | **明确不做什么**（禁令 + 原因 + 替代方案） | 含试错记录与失败模式 |
 | `Todo/` | **下一步做什么、依赖是什么**（Rev.3 复核 × 会话 × 功能说明的 73 项 Todo + BUG-001/002/003） | 含内部排期判断与未公开的交付节奏 |
@@ -43,13 +46,17 @@
 |---|---|
 | 第一次来，只想看看 | `README.md` → `docs/ARCHITECTURE.md` |
 | 想加一个图元（不写代码） | `README.md` → `CONTRIBUTING.md` §图元 id 规则 → `tools/gen_symbol_packs.py` |
+| **要加一个新功能（先决定放哪）** | `docs/DEVELOPMENT.md` §二 新增功能落位（R1–R6）→ `docs/ARCHITECTURE_FOR_BEGINNERS.md` §5.5 落位五问 → 再动键盘 |
 | 想改代码 / 提 PR | 本索引 → `docs/DEVELOPMENT.md` → `docs/ARCHITECTURE_FOR_BEGINNERS.md` → `CONTRIBUTING.md` |
 | 想接后端 / 批处理 / 二次开发 | `docs/ARCHITECTURE.md`（分层与扩展接缝）→ `docs/DEVELOPMENT.md` §扩展点 |
+| 遇到"加了行代码门禁就红" | `docs/DEVELOPMENT.md` §4.2 预算门（报错怎么读、四种失败各是什么）→ §2.1 R1 落位 |
 | 项目维护者（本人） | 本索引 → `ADR/README.md`（决策）→ `SDLC/README.md`（方向）→ `Todo/README.md`（执行）→ `YAGNI/README.md`（禁令） |
 
 ## 四、维护规则 / Maintenance Rules
 
-1. **登记制**：新增文档必须在上表登记；删除文档必须同时删掉登记行。
+1. **登记制**：新增文档必须在上表登记；删除文档必须同时删掉登记行。（本索引曾漏登 `DEXPI_COVERAGE.md` / `ISO_DEVIATIONS.md` / `PERF_900.md` 三份入库文档 —— 2026-11-06 补登。**"索引里没有"不等于"仓库里没有"**，改完请用 `git ls-files docs/` 对一遍。）
 2. **公开 ≠ 内部**：公开文档只写对外成立的内容（架构、规则、扩展方式）；决策的取舍细节与排期留在本地分区。
-3. **不写断链**：公开文档禁止相对链接到 `ADR/`、`SDLC/`、`Todo/`、`YAGNI/`（见上面铁律）。
+3. **不写断链**：公开文档禁止相对链接到 `ADR/`、`SDLC/`、`Todo/`、`YAGNI/`（见上面铁律）。按**编号**引用（如 `ADR-47`）可以，写成链接不行。
 4. **与代码同步**：架构与基线类表述改完必须**核验代码**（`docs/` 与代码冲突时，以代码为准）；带日期的历史记录保留原值，不追改。
+5. **基线数字只有一个家**：`src` 文件数/行数、套件数、断言总数只写在 `ARCHITECTURE.md` 顶部基线行；其余文档**引用**它而不复制。历史上 `DEVELOPMENT.md`、本索引、新手导读各自抄过一份，结果三处数不同步 —— 复制来的数字第二次修改就会变成谎。
+6. **新规则先过守卫，再进文档**：一条只写在文档里的规则会以"下一个截止日期"的速度腐坏（ADR-10 的教训）。新增/修改强制规则时，同一次提交里要有对应的门 2 断言，否则文档里那句应标注为"约定"而非"强制"。

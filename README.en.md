@@ -104,7 +104,7 @@ The core code is released under the **MIT License** — free to use, modify, and
 # with SIGSEGV before any test runs (details in CONTRIBUTING.md).
 mkdir -p /tmp/gpidhome
 
-# Home-grown GPGTest: 109 suites / 9,086 assertions (compile-clean, 0 SCRIPT ERROR)
+# Home-grown GPGTest: 129 suites / 10,759 assertions (compile-clean, 0 SCRIPT ERROR)
 HOME=/tmp/gpidhome godot --headless --path . --script res://tests/run_core_tests.gd
 
 # Parse check — run this once after adding a class_name (the headless runner resolves classes
@@ -138,7 +138,7 @@ Godot-PID/                # GitHub repo root (local working folder: Godot-PID-Co
 │   │   ├── platform/      # DPI window, popup helpers
 │   │   └── service/       # GPIdGen, GPIOResult
 │   ├── app/               # Application services: commands, undo stack, event bus, documents
-│   │   └── commands/      # 32 concrete commands (node/shape/edge add-delete-move, path & tag editing, drop restore)
+│   │   └── commands/      # 51 concrete commands (node/shape/edge add-delete-move, path & tag editing, drop restore)
 │   ├── render/            # GPSymbolView / GPEdgeView / frame GPFrameView / backdrop GPBackgroundView / painter
 │   ├── io/                # *.pid.json read/write; DEXPI (Proteus XML) import/export;
 │   │   │                  # DXF R12 / PDF 1.4 / list export
@@ -152,11 +152,11 @@ Godot-PID/                # GitHub repo root (local working folder: Godot-PID-Co
 │   │   └── exporter_registry.gd # export registry: a new format never touches the UI dispatch
 │   ├── ui/
 │   │   ├── shell/         # Main window composition root, menu bar, 7 coordinators, quick command bar, autosave
-│   │   ├── canvas/        # Canvas shell + 5 implementation classes, incremental sync, shortcuts, context menu
+│   │   ├── canvas/        # Canvas shell GPCanvas2D + 16 collaborators (input routing, view control, layers, edit facade)
 │   │   ├── tools/         # Canvas tools: select / place / draw / grip
 │   │   ├── panels/        # Multi-sheet area, palette, inspector, toolbar
 │   │   └── dialogs/       # Settings, new symbol (incl. port editor panel), title block; symbol_editor/ edits geometry
-│   ├── addons/            # GPIPIDAddon: commercial addon contract
+│   ├── addons/            # GPIPIDAddon: commercial addon contract (v3, 12 hooks) + GPAddonLoader (not mounted yet)
 │   └── autoload/          # 3 singletons: I18n, Settings (fonts & config), SnapState (CAD toggles)
 ├── addons/gut/            # GUT 9.7.1 test framework (vendored, MIT)
 ├── assets/                # Symbol SVGs, CJK fonts, theme
@@ -193,9 +193,9 @@ Godot-PID/                # GitHub repo root (local working folder: Godot-PID-Co
 
 ## Contributing / 贡献
 
-Contributions are welcome via Issues / PRs. Symbols are `GPSymbolDef`-driven, so adding one has near-zero friction; new edit operations should go through the command layer (see Beginner's Guide §11.2).
+Contributions are welcome via Issues / PRs. Symbols are `GPSymbolDef`-driven, so adding one has near-zero friction; new edit operations should go through the command layer (see Beginner's Guide §5.2; new features start in a new file, see docs/DEVELOPMENT.md §2.1).
 
-欢迎以 Issue / PR 参与。图元采用 `GPSymbolDef` 数据驱动，新增符号零门槛；新增编辑操作请走命令层（见新手导读 §11.2）。
+欢迎以 Issue / PR 参与。图元采用 `GPSymbolDef` 数据驱动，新增符号零门槛；新增编辑操作请走命令层（见新手导读 §5.2；新增功能默认落新文件，见 docs/DEVELOPMENT.md §2.1）。
 
 ---
 
