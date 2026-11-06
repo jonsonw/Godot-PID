@@ -86,11 +86,10 @@ func _gpExport() -> void:
 	if _gpPlan.is_empty():
 		return
 	var gpDir: String = "user://drc_reports"
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(gpDir))
 	var gpPath: String = gpDir.path_join("repair-%s.json" % Time.get_datetime_string_from_system().replace(":", "-"))
-	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.WRITE)
-	if gpF == null:
+	# Directory creation + write go through the io gateway (ADR-2); a failure leaves the summary
+	# untouched, exactly as the old `if gpF == null: return` did.
+	# 建目录与写盘经 io 网关（ADR-2）；失败时不改摘要，与旧的 `if gpF == null: return` 一致。
+	if not GPFileGateway.gpWriteText(gpPath, JSON.stringify({"schema": "gpid.repair/1", "plan": _gpPlan}, "\t")):
 		return
-	gpF.store_string(JSON.stringify({"schema": "gpid.repair/1", "plan": _gpPlan}, "\t"))
-	gpF.close()
 	_gpSummary.text = gpPath

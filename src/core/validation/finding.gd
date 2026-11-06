@@ -172,7 +172,7 @@ func gpToDict() -> Dictionary:
 # Human-readable one-liner (localized) for text reports and the panel row.
 # 供文本报告与面板行使用的人类可读单行（已本地化）。
 func gpText() -> String:
-	var gpMsg: String = I18n.gpTr(gpMessageKey)
+	var gpMsg: String = GPLocalizer.gpTr(gpMessageKey)
 	if gpParams.is_empty():
 		return gpMsg
 	return gpMsg % gpParams

@@ -12,9 +12,22 @@
 class_name GPSymbolDrawTool
 extends GPSymbolEditorTool
 
-# Which primitive this tool instance draws. Set by the editor when the tool is activated.
-# 本工具实例绘制哪种图元。由编辑器在激活时设定。
+# Which primitive this tool instance draws. Fixed at construction by gpForKind() and read-only
+# from outside: the editor keeps ONE instance per kind, so a mutable kind would let one mode's
+# setting leak into another's (and writing it from outside was a cross-object private access).
+# 本工具实例绘制哪种图元。由 gpForKind() 在构造时确定，对外只读：编辑器每种类型只保留
+# **一个**实例，可变类型会让一种模式的设置漏到另一种（且由类外写入本就是跨对象私有访问）。
 var _gpKind: int = GPShape.GPKind.GP_LINE
+
+
+# Build a draw tool bound to one primitive kind. Note what this buys: the kind is not a knob
+# someone can turn later, so "which kind is this tool?" is answered once, at birth.
+# 按图元类型构建绘制工具。注意它换来了什么：类型不是一个事后可拧的旋钮，
+# 故「这个工具画什么」在出生时回答一次即可。
+static func gpForKind(gpKind: int) -> GPSymbolDrawTool:
+	var gpTool: GPSymbolDrawTool = GPSymbolDrawTool.new()
+	gpTool._gpKind = gpKind
+	return gpTool
 
 # Two-point drag anchor (author space) + rubber-band end. / 两点拖拽的锚点（作者空间）+ 橡皮筋终点。
 var _gpFrom: Vector2 = Vector2.ZERO

@@ -53,7 +53,7 @@ func gpTestCsvQuotesCommas() -> void:
 
 func gpTestReportWritesAndReadsBack() -> void:
 	var gpDir: String = "user://drc_test_reports"
-	var gpPath: String = GPDRCReport.gpWrite(_gpFindings(), gpDir, "unit", false)
+	var gpPath: String = GPDRCReportFile.gpWrite(_gpFindings(), gpDir, "unit", false)
 	gpCheck(gpPath != "", "写出成功 / the write succeeds")
 	gpCheck(FileAccess.file_exists(gpPath), "文件存在 / the file exists")
 	gpCheck(FileAccess.get_file_as_string(gpPath).contains("drc.tag_missing"),
@@ -86,3 +86,32 @@ func gpTestPanelRunsAndFillsRows() -> void:
 	gpCheck(gpPanel.gpFindings()[0] is GPFinding, "发现是 GPFinding / findings are typed")
 	gpPanel.queue_free()
 	gpCv.queue_free()
+
+
+# P0-5 (W12 review): core gets its text through GPLocalizer, never by naming the I18n autoload.
+# P0-5（W12 审查）：core 经 GPLocalizer 取文案，绝不命名 I18n 单例。
+#
+# The seam must be TRANSPARENT in the app and IDENTITY-shaped in a bare run — that is what makes
+# core's message text assertable instead of merely "non-empty".
+# 该缝在应用里必须**透明**，在裸运行里必须**恒等** —— 这正是 core 的文案从「只能断言非空」变成
+# 「可与期望值比对」的原因。
+func gpTestLocalizerSeamIsInstalledAndTransparent() -> void:
+	gpCheck(GPLocalizer.gpHasTranslator(),
+		"the composition root installed a translator (i18n autoload _init)")
+	# 'drc.summary' is a real key; a translated value must not equal the key itself.
+	# 'drc.summary' 是真实键；翻译后的值不应等于键本身。
+	var gpSummary: String = GPLocalizer.gpTr("drc.summary")
+	gpCheck(gpSummary != "drc.summary", "a known key resolves to real text, not to the key")
+
+
+func gpTestLocalizerFallsBackToIdentity() -> void:
+	# Save / clear / restore: proving the fallback must not leave the app untranslated.
+	# 保存 / 清除 / 恢复：证明回退不等于让应用失译。
+	var gpSaved: Callable = GPLocalizer.gpTranslator()
+	GPLocalizer.gpClearTranslator()
+	gpCheck(not GPLocalizer.gpHasTranslator(), "clearing leaves no translator installed")
+	gpEq(GPLocalizer.gpTr("drc.summary"), "drc.summary",
+		"with no translator a key resolves to itself (honest, not empty)")
+	GPLocalizer.gpSetTranslator(gpSaved)
+	gpCheck(GPLocalizer.gpHasTranslator(), "the original translator is restored for later suites")
+	gpCheck(GPLocalizer.gpTr("drc.summary") != "drc.summary", "translation works again")

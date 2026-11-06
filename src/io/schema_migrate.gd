@@ -245,7 +245,7 @@ static func _gpStepV2ToV3(gpOut: Dictionary, gpSheetsOut: Array) -> void:
 	if not (gpOut.get("config") is Dictionary):
 		gpOut["config"] = gpDefaultConfig()
 	else:
-		gpOut["config"] = _gpFillConfig((gpOut.get("config") as Dictionary))
+		gpOut["config"] = gpFillConfig((gpOut.get("config") as Dictionary))
 
 
 # --- v3 header ---------------------------------------------------------------
@@ -568,9 +568,14 @@ static func gpDefaultConfig() -> Dictionary:
 	}
 
 
-# Fill missing config sub-keys without disturbing what the user already set.
-# 填补缺失的 config 子键，不动用户已设置的内容。
-static func _gpFillConfig(gpIn: Dictionary) -> Dictionary:
+# Return a COPY of the config with every default sub-key present; user values always win.
+# PUBLIC on purpose: export needs the SAME fill the import chain applies, so a config written
+# by GPProjectExport already has the shape gpMigrate() would have produced. Keeping it private
+# only pushed a caller into reaching across the class boundary (ADR-10).
+# 返回 config 的**副本**，补齐全部默认子键；用户已设的值永远优先。
+# **故意公开**：导出需要与导入链**同一套**填补逻辑，故 GPProjectExport 写出的 config 已是
+# gpMigrate() 会产出的形态。把它留作私有的唯一后果，就是逼调用方跨类边界伸手（ADR-10）。
+static func gpFillConfig(gpIn: Dictionary) -> Dictionary:
 	var gpDef: Dictionary = gpDefaultConfig()
 	var gpOut: Dictionary = (gpIn as Dictionary).duplicate(true)
 	for gpKey in gpDef.keys():

@@ -222,3 +222,67 @@ func gpTestDanglingSegmentsStayRoundAsRingGrows() -> void:
 	# 退化缩放不得产生零 / 负 / 无界的段数。
 	gpCheck(GPEdgePainter.gpDanglingSegments(0.0) >= GPEdgePainter.GP_DANGLING_SEG_MIN,
 		"zoom 0 is clamped, not a zero count")
+
+
+# ============================================================================
+# P0-1 (W12 review, fix stage 1): the linetype TABLE moved to core, the .ltp READER moved to io.
+# P0-1（W12 审查 · 修复阶段 1）：线型**表**下沉 core，.ltp **读取器**迁入 io。
+# The move must be invisible: same patterns, same scale behaviour. These tests exist because the
+# old arrangement had ZERO tests over the linetype table — which is how core→render lived for
+# two months without anyone noticing.
+# 搬迁必须不可见：同样的图案、同样的缩放行为。这些测试之所以存在，是因为旧结构下线型表**没有任何**
+# 测试 —— core→render 才能躲两个月无人发现。
+# ============================================================================
+
+func gpTestLinetypeTableLivesInCore() -> void:
+	# The consumer is the deciding witness: GPEdgeStyle (core) still answers "dashed" for UTILITY.
+	# 以消费者作证：GPEdgeStyle（core）对 UTILITY 仍答「虚线」。
+	var gpUtil: PackedFloat32Array = GPEdgeStyle.gpStyleFor(GPPIDEdge.GP_UTILITY, "", 1.0)["pattern"]
+	gpCheck(not gpUtil.is_empty(), "UTILITY is still dashed after the table moved to core")
+	gpEq(GPLinetypeRegistry.gpPatternFor("DASHED"), PackedFloat32Array([6.0, 2.0]),
+		"the built-in DASHED pattern is byte-identical after the move")
+	gpCheck(GPLinetypeRegistry.gpPatternFor("CONTINUOUS").is_empty(),
+		"CONTINUOUS resolves to an empty pattern (solid)")
+	gpCheck(GPLinetypeRegistry.gpPatternFor("NO_SUCH_LINE").is_empty(),
+		"an unknown name falls back to solid instead of failing")
+
+
+func gpTestLinetypeScaleMultipliesEveryRun() -> void:
+	var gpBefore: PackedFloat32Array = GPLinetypeRegistry.gpPatternFor("DASHED")
+	GPLinetypeRegistry.gpLinetypeScale = 3.0
+	var gpAfter: PackedFloat32Array = GPLinetypeRegistry.gpPatternFor("DASHED")
+	GPLinetypeRegistry.gpResetScale()
+	gpEq(gpBefore, PackedFloat32Array([6.0, 2.0]), "LTSCALE 1.0 passes the built-in through")
+	gpEq(gpAfter, PackedFloat32Array([18.0, 6.0]), "LTSCALE 3.0 triples every run")
+	gpEq(GPLinetypeRegistry.gpLinetypeScale, 1.0, "the scale is restored for the suites after this")
+
+
+func gpTestLinetypeFileParser() -> void:
+	# The old parser only existed in its file-reading form, so the format itself was untested.
+	# A malformed block must be SKIPPED, never fatal: a broken .ltp degrades to the built-ins.
+	# 旧解析器只有读文件那一形态，格式本身未被测试。坏块必须**跳过**而非致命：.ltp 写坏了应退回内置值。
+	var gpLtp: String = ("# header\nDASHED = 虚线\nA,18.0,6.0\n"
+		+ "BROKEN = 缺图案行\nNOT_A_NUMBER\nCENTER = 中心线\nA,28.0,6.0,3.0\n")
+	var gpTable: Dictionary = GPLinetypeFile.gpParse(gpLtp)
+	gpEq(gpTable.size(), 2, "only well-formed blocks are kept")
+	gpEq(gpTable.get("DASHED", PackedFloat32Array()), PackedFloat32Array([18.0, 6.0]),
+		"the file's DASHED parses in order")
+	gpEq(gpTable.get("CENTER", PackedFloat32Array()), PackedFloat32Array([28.0, 6.0, 3.0]),
+		"a three-run pattern parses in order")
+	gpCheck(not gpTable.has("BROKEN"), "a block with no A-line is dropped, not half-applied")
+	gpEq(GPLinetypeFile.gpParse(""), {}, "empty text yields an empty table")
+	gpEq(GPLinetypeFile.gpRead("res://assets/linetypes/does_not_exist.ltp"), {},
+		"a missing file yields an empty table (caller keeps the built-ins)")
+
+
+func gpTestLinetypeOverridesReplaceBuiltins() -> void:
+	GPLinetypeRegistry.gpSetOverrides({"DASHED": PackedFloat32Array([18.0, 6.0])})
+	gpEq(GPLinetypeRegistry.gpPatternFor("DASHED"), PackedFloat32Array([18.0, 6.0]),
+		"an installed override wins over the built-in")
+	gpEq(GPLinetypeRegistry.gpPatternFor("CENTER"), PackedFloat32Array([20.0, 3.0, 3.0, 3.0]),
+		"a name absent from the override table keeps its built-in")
+	gpCheck(GPLinetypeRegistry.gpHasOverrides(), "the override flag follows the table")
+	GPLinetypeRegistry.gpSetOverrides({})
+	gpEq(GPLinetypeRegistry.gpPatternFor("DASHED"), PackedFloat32Array([6.0, 2.0]),
+		"clearing the override restores the built-in")
+	gpCheck(not GPLinetypeRegistry.gpHasOverrides(), "an empty table means no overrides")

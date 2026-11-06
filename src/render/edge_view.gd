@@ -301,7 +301,7 @@ func _gpPaintInkBody(gpPts: PackedVector2Array, gpColor: Color, gpWidth: float,
 				gpZoomed.append(maxf(gpV, gpMin))
 			gpMat.set_shader_parameter("pattern", gpZoomed)
 			gpMat.set_shader_parameter("pattern_count", gpZoomed.size())
-			gpMat.set_shader_parameter("linetype_scale", GPLinetypeManager.gpLinetypeScale)
+			gpMat.set_shader_parameter("linetype_scale", GPLinetypeRegistry.gpLinetypeScale)
 			var gpLen: float = 0.0
 			for gpI in range(gpPts.size() - 1):
 				gpLen += gpPts[gpI].distance_to(gpPts[gpI + 1])
@@ -431,11 +431,11 @@ func _gpDrawTagGrip(gpGeo: Dictionary) -> void:
 	var gpBox: Rect2 = gpGeo.get("box", Rect2())
 	if gpBox == Rect2():
 		return
-	var gpGs: float = GPLabelGripOps.GP_GRIP_SIZE / maxf(gpZoom, 0.0001)
+	var gpGs: float = GPLabelPlacement.GP_GRIP_SIZE / maxf(gpZoom, 0.0001)
 	var gpC: Vector2 = gpBox.get_center()
 	var gpR: float = gpGs * 0.5
 	draw_rect(Rect2(gpC.x - gpR, gpC.y - gpR, gpGs, gpGs), Color(1.0, 1.0, 1.0), true)
-	draw_rect(Rect2(gpC.x - gpR, gpC.y - gpR, gpGs, gpGs), GPLabelGripOps.GP_COL, false, 1.5 / gpZoom)
+	draw_rect(Rect2(gpC.x - gpR, gpC.y - gpR, gpGs, gpGs), GPLabelPlacement.GP_COL, false, 1.5 / gpZoom)
 
 
 # Live preview while the number is being dragged: write the offset straight onto the edge and

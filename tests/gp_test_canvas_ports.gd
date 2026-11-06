@@ -180,3 +180,92 @@ func gpTestGraphSignalRepaintsChildViews() -> void:
 	gpEq(gpB.gpEdgeRefreshes, 2, "边视图同步再刷新 / edge views refresh in step")
 	gpB.free()
 	gpCv.free()
+
+
+# ============================================================================
+# S7 (2026-11-06): the last mouse position belongs to the ROUTER, not the canvas.
+# S7（2026-11-06）：最近一次鼠标位置属于**路由**，不属于画布。
+#
+# WHY THIS PIN EXISTS / 为何需要这颗钉：
+# `_gpLastMouseWorld` was the only state on GPCanvas2D whose single writer lived in another
+# class. GPCanvasInputRouter wrote it through `gpHost._gpLastMouseWorld = ...` — three
+# cross-object private accesses, the last real ones in the canvas. The canvas merely stored the
+# number and read it once, to put a coordinate into the status snapshot.
+# `_gpLastMouseWorld` 是画布上唯一「唯一写入者住在另一个类里」的状态：GPCanvasInputRouter 经
+# `gpHost._gpLastMouseWorld = ...` 写它 —— 三处跨对象私有访问，也是画布内最后三处。画布只是替它
+# 存着，并且只读一次（往状态快照里放一个坐标）。
+#
+# The failure this pin prevents is not a crash. It is the shape the canvas file itself already
+# documents twice (drawing state, shape-drag state): state left on the root "because the root is
+# where things are", and then the root is the party that has to be kept in sync with the class
+# that actually acts on the value. Nobody notices; the status bar just shows a stale coordinate.
+# 本钉防的不是崩溃，而是画布文件里已经写过两次的形状（绘图态、图形拖拽态）：状态「因为根类方便」
+# 留在根类，于是根类成了那个必须跟真正使用它的类保持同步的一方。没人会注意到 —— 状态栏只是显示
+# 一个过期的坐标。
+# ============================================================================
+
+const GP_INPUT_ROUTER_PATH: String = "res://src/ui/canvas/input_router.gd"
+const GP_CANVAS_PATH: String = "res://src/ui/canvas/canvas_2d.gd"
+
+
+func gpTestMouseTrackingStateLivesWithTheRouter() -> void:
+	var gpRouterSrc: String = FileAccess.get_file_as_string(GP_INPUT_ROUTER_PATH)
+	var gpCanvasSrc: String = FileAccess.get_file_as_string(GP_CANVAS_PATH)
+	gpCheck(gpRouterSrc != "" and gpCanvasSrc != "",
+		"两份源码可读（不可读会让下面每条都白过）/ both sources are readable")
+
+	# 1) The state is declared by its writer, and stays PRIVATE there.
+	# 1) 状态由它的写入者声明，并在那里保持**私有**。
+	gpCheck(gpRouterSrc.contains("var _gpLastMouseWorld: Vector2"),
+		"字段住在路由里且是私有的 / the field lives in the router, privately")
+	gpCheck(gpRouterSrc.contains("func gpLastMouseWorld() -> Vector2"),
+		"路由提供只读端口 / the router publishes a read-only port")
+
+	# 2) The canvas no longer declares it. A leftover declaration is the dangerous shape: it
+	# compiles, the snapshot keeps using it, and the router's value silently drifts away from
+	# the one on screen.
+	# 2) 画布不再声明它。残留声明是最危险的形状：照样编译，快照继续用它，而路由里的值与屏幕上
+	# 的那个悄悄分家。
+	gpCheck(not gpCanvasSrc.contains("var _gpLastMouseWorld"),
+		"画布不再持有这个字段 / the canvas no longer declares the field")
+
+	# 3) The snapshot READS THROUGH THE PORT. Checked as the exact expression, because the
+	# failure mode here is a plausible-looking alternative (a local copy, a parameter, a
+	# recomputed value) that is wrong for a reason no reviewer would see.
+	# 3) 快照**经端口读**。判据是完整表达式：此处的失效形态是一个看起来同样合理的替代（本地副本、
+	# 参数、重算的值），而它错在一个评审看不出来的理由上。
+	gpCheck(gpCanvasSrc.contains('"world": gpInputRouter.gpLastMouseWorld()'),
+		"状态快照经端口取值 / the status snapshot borrows the value through the port")
+
+	# 4) Anti-backslide, judged inside the router only: no cross-object private access left in
+	# it at all. `gpHost._gp` is the precise marker — `_gpLastMouseWorld` alone would also match
+	# the router's own field.
+	# 4) 防回流，只在路由内判定：其中不得再有任何跨对象私有访问。判据用 `gpHost._gp` 前缀 ——
+	# 只用 `_gpLastMouseWorld` 会把路由自己的字段也算进去。
+	gpCheck(not gpRouterSrc.contains("gpHost._gp"),
+		"路由不再经宿主读私有成员 / the router touches no private member of its host")
+
+	# 5) Read-only means read-only: no setter. A `gpSetLastMouseWorld()` would let any caller
+	# move the "cursor" with no mouse — the status bar would then report a position where
+	# nothing happened.
+	# 5) 只读就是只读：不得有 setter。`gpSetLastMouseWorld()` 会让任何调用方在没有鼠标的情况下
+	# 移动「光标」—— 状态栏随后会报告一个什么都没发生过的位置。
+	gpCheck(not gpRouterSrc.contains("func gpSetLastMouseWorld"),
+		"没有可写端口（状态只有一个写入者）/ no setter: the state has exactly one writer")
+
+	# 6) Behaviour, off-tree: the port answers, and the emitted snapshot carries the same
+	# number. `gpEvents` has a private fallback bus, so gpEmitStatus() is callable without
+	# the scene tree (that is what makes this assertion possible at all).
+	# 6) 行为（树外）：端口可用，且发出的快照带着同一个数。`gpEvents` 有私有回退总线，故
+	# gpEmitStatus() 无需场景树即可调用 —— 这正是这条断言得以成立的前提。
+	var gpCv: GPCanvas2D = GPCanvas2D.new()
+	gpEq(gpCv.gpInputRouter.gpLastMouseWorld(), Vector2.ZERO,
+		"未收到移动事件时为零 / zero before any motion event")
+	var gpSeen: Array[Dictionary] = []
+	gpCv.gpStatusUpdated.connect(func(gpIn: Dictionary) -> void: gpSeen.append(gpIn))
+	gpCv.gpEmitStatus()
+	gpEq(gpSeen.size(), 1, "快照已发出 / one snapshot emitted")
+	gpCheck(gpSeen[0].has("world"), "快照含 world 键 / the snapshot carries 'world'")
+	gpEq(gpSeen[0].get("world", Vector2.ONE), gpCv.gpInputRouter.gpLastMouseWorld(),
+		"快照里的坐标就是端口的值 / the snapshot's coordinate IS the port's value")
+	gpCv.free()

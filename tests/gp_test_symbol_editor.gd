@@ -159,3 +159,36 @@ func gpTestAuthorPorts() -> void:
 	gpEd.gpAddPort(gpP)
 	var gpArr: Array = gpEd.gpAuthorPorts("general")
 	gpCheck(gpArr.size() == 1, "author ports returns one entry")
+
+
+# Each draw tool is bound to its primitive kind at CONSTRUCTION (GPSymbolDrawTool.gpForKind),
+# not by poking a field afterwards. This test drives the real input path and reads the kind of
+# the shape that actually came out — the only way to know the four registrations are not
+# accidentally all pointing at LINE.
+# 每个绘制工具的图元类型在**构造时**绑定（GPSymbolDrawTool.gpForKind），而不是事后写字段。
+# 本测试走真实输入链路，读**实际产出**图元的类型 —— 这是唯一能知道四次注册没有全都指向
+# LINE 的办法。
+func gpTestDrawToolKindsAreBoundAtConstruction() -> void:
+	var gpCases: Array = [
+		[GPSymbolEditor.GP_LINE, GPShape.GPKind.GP_LINE],
+		[GPSymbolEditor.GP_RECT, GPShape.GPKind.GP_RECT],
+		[GPSymbolEditor.GP_CIRCLE, GPShape.GPKind.GP_CIRCLE],
+	]
+	for gpCase in gpCases:
+		var gpEd: GPSymbolEditor = GPSymbolEditor.new()
+		gpEd.gpSetViewSize(Vector2(200.0, 200.0))
+		gpEd.gpSetTool(int(gpCase[0]))
+		var gpDown: InputEventMouseButton = InputEventMouseButton.new()
+		gpDown.button_index = MOUSE_BUTTON_LEFT
+		gpDown.pressed = true
+		gpDown.position = Vector2(50.0, 50.0)
+		gpEd.gpOnInput(gpDown)
+		var gpUp: InputEventMouseButton = InputEventMouseButton.new()
+		gpUp.button_index = MOUSE_BUTTON_LEFT
+		gpUp.pressed = false
+		gpUp.position = Vector2(150.0, 150.0)
+		gpEd.gpOnInput(gpUp)
+		gpEq(gpEd.gpShapes.size(), 1, "tool %d produced one shape" % int(gpCase[0]))
+		if gpEd.gpShapes.size() == 1:
+			gpEq((gpEd.gpShapes[0] as GPShape).gpKind, int(gpCase[1]),
+				"tool %d produced the kind it was built for" % int(gpCase[0]))

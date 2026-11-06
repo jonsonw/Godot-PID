@@ -371,7 +371,7 @@ func _gpExport(gpAsCsv: bool) -> void:
 		return
 	var gpDir: String = "user://drc_reports"
 	var gpBase: String = "drc-%s" % Time.get_datetime_string_from_system().replace(":", "-")
-	var gpPath: String = GPDRCReport.gpWrite(_gpFindings, gpDir, gpBase, gpAsCsv)
+	var gpPath: String = GPDRCReportFile.gpWrite(_gpFindings, gpDir, gpBase, gpAsCsv)
 	if gpPath == "":
 		return
 	gpFindingActivated.emit(Vector2.INF)
@@ -434,6 +434,6 @@ func _gpExportJson() -> void:
 		"doc_hash": GPExportGate.gpDocHash([_gpCanvas.gpSheet] if _gpCanvas != null else []),
 		"rules_hash": GPExportGate.gpRulesHash(gpStd),
 	}
-	var gpPath: String = GPDRCReport.gpWriteJson(_gpFindings, gpDir, gpBase, gpMeta)
+	var gpPath: String = GPDRCReportFile.gpWriteJson(_gpFindings, gpDir, gpBase, gpMeta)
 	if gpPath != "":
 		_gpSummary.text = "%s\n%s" % [GPDRCReport.gpSummary(_gpFindings), gpPath]

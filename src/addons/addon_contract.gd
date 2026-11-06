@@ -81,3 +81,26 @@ static func gpValidateHooks(gpHooks: Array) -> Array[String]:
 		if gpSev != "" and not GP_SEVERITIES.has(gpSev):
 			gpOut.append("hook '%s' declares unknown severity '%s'" % [gpId, gpSev])
 	return gpOut
+
+
+# Compare a declared contract version with this core's. Returns "ok" / "older" / "newer" /
+# "unknown" — a VERDICT for the diagnostics, never a gate (ADR-35 §7: report, do not refuse).
+# 把插件声明的契约版本与本核心的比较。返回 "ok" / "older" / "newer" / "unknown" —— 一个写进
+# 诊断的**结论**，绝不是闸门（ADR-35 §7：只报告，不拒绝）。
+#
+# WHY "newer" IS THE DANGEROUS ONE / 为何危险的是 "newer"：
+# an addon built against a newer contract may call a hook this core does not have. The base class
+# cannot stop it — the override simply never runs, which looks like "the feature is missing" and
+# reports nothing. "older" is the safe direction: every hook has a default, so an old addon is a
+# subset, not a migration.
+# 针对更新契约编译的插件可能调用本核心没有的钩子。基类拦不住它 —— 覆写单纯永不执行，看起来像
+# 「功能没做」，且什么都不报。"older" 才是安全方向：每个钩子都有默认实现，旧插件是子集，不是迁移。
+static func gpContractVerdict(gpDeclared: int) -> String:
+	if gpDeclared <= 0:
+		return "unknown"
+	var gpCurrent: int = GPIPIDAddon.GP_CONTRACT_VERSION
+	if gpDeclared > gpCurrent:
+		return "newer"
+	if gpDeclared < gpCurrent:
+		return "older"
+	return "ok"

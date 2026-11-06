@@ -61,7 +61,7 @@ func gpScan(gpDir: String) -> Array[GPIPIDAddon]:
 func gpLoadedNames() -> Array[String]:
 	var gpOut: Array[String] = []
 	for gpA in gpAddons:
-		gpOut.append(gpA._gpGetName())
+		gpOut.append(gpA.gpGetName())
 	return gpOut
 
 
@@ -83,15 +83,15 @@ func gpCollect() -> Dictionary:
 	var gpToolDefs: Array = []
 	var gpValidationHooks: Array = []
 	for gpA in gpAddons:
-		gpTools.append_array(gpA._gpGetTools())
-		gpPanels.append_array(gpA._gpGetPanels())
-		gpExporters.append_array(gpA._gpRegisterExporters())
-		gpPacks.append_array(gpA._gpRegisterSymbolPacks())
-		var gpChat: String = gpA._gpGetChatPanel()
+		gpTools.append_array(gpA.gpGetTools())
+		gpPanels.append_array(gpA.gpGetPanels())
+		gpExporters.append_array(gpA.gpRegisterExporters())
+		gpPacks.append_array(gpA.gpRegisterSymbolPacks())
+		var gpChat: String = gpA.gpGetChatPanel()
 		if gpChat != "":
 			gpChatPanels.append(gpChat)
-		gpToolDefs.append_array(gpA._gpGetToolDefs())
-		gpValidationHooks.append_array(gpA._gpGetValidationHooks())
+		gpToolDefs.append_array(gpA.gpGetToolDefs())
+		gpValidationHooks.append_array(gpA.gpGetValidationHooks())
 	return {
 		"tools": gpTools,
 		"panels": gpPanels,
@@ -120,13 +120,12 @@ func gpAllFailed() -> bool:
 # 列出候选脚本。排序使加载顺序可复现（插件可能依赖更早的那个已存在）。
 func _gpListScripts(gpDir: String) -> Array[String]:
 	var gpOut: Array[String] = []
-	if gpDir == "" or not DirAccess.dir_exists_absolute(gpDir):
-		return gpOut
-	var gpDirAccess: DirAccess = DirAccess.open(gpDir)
-	if gpDirAccess == null:
-		return gpOut
-	for gpName in gpDirAccess.get_files():
-		if gpName.ends_with(GP_SUFFIX) and not gpName.ends_with(GP_SUFFIX + ".import"):
+	# Directory walking belongs to the io layer (ADR-2). GPFileGateway hands back file names only,
+	# which is exactly what this loop needs — the old DirAccess version also had to skip entries.
+	# 遍历目录属 io 层（ADR-2）。GPFileGateway 只交回文件名，正是本循环所需 —— 旧的 DirAccess 版本
+	# 还得自行排除目录项。
+	for gpName in GPFileGateway.gpListFiles(gpDir, GP_SUFFIX):
+		if not gpName.ends_with(GP_SUFFIX + ".import"):
 			gpOut.append(gpDir.path_join(gpName))
 	gpOut.sort()
 	return gpOut
@@ -158,8 +157,14 @@ func _gpTryLoad(gpPath: String) -> void:
 	# can actually offer. The engine still logs the error, and the diagnostic marks the addon.
 	# 注意：GDScript 没有 try/catch。插件方法内的运行时错误只中止**那一次调用**并向我们返回 null，
 	# 扫描循环因此继续 —— 这是我们能提供的实际隔离。引擎仍会记录错误，诊断里也会标出该插件。
-	var gpName: String = str(gpAddon._gpGetName())
+	var gpName: String = str(gpAddon.gpGetName())
 	var gpVersion: String = str(gpAddon.get_meta("version", "0"))
+	# ADR-35 §7 promised "the contract version rides along in the diagnostics" and nothing read
+	# `GP_CONTRACT_VERSION` for three weeks — the constant existed, the promise did not. It is
+	# compared here, on every candidate, and never used as a gate.
+	# ADR-35 §7 承诺「契约版本随诊断一起报告」，而 `GP_CONTRACT_VERSION` 三周无人读取 —— 常量在、
+	# 承诺不在。这里对每个候选项比较一次，且绝不用作闸门。
+	var gpContract: String = GPAddonContract.gpContractVerdict(int(gpAddon.gpContractVersion()))
 	if gpName == "" or gpName == "unnamed":
 		# The base class returns "unnamed": an addon that never overrode it cannot be told apart
 		# from the base, and two of them would collide in every diagnostic.
@@ -176,7 +181,7 @@ func _gpTryLoad(gpPath: String) -> void:
 		return
 	_gpSeenIds[gpName] = true
 	gpAddons.append(gpAddon)
-	_gpDiag(gpPath, true, "", gpName, gpVersion)
+	_gpDiag(gpPath, true, "", gpName, gpVersion, gpContract)
 
 
 # Call the addon's load hook with the minimal context. Returns false when it must be isolated.
@@ -191,18 +196,24 @@ func _gpRunLoadHook(gpAddon: GPIPIDAddon, gpPath: String, gpName: String,
 		"name": gpName,
 		"version": gpVersion,
 	}
-	gpAddon._gpOnLoad(gpCtx)
+	gpAddon.gpOnLoad(gpCtx)
 	return true
 
 
 # Append one diagnostic row.
 # 追加一条诊断。
+#
+# `gpContract` is empty for the four early exits: those candidates never produced an instance, so
+# there is no declared version to compare — an empty verdict says that, where "ok" would lie.
+# `gpContract` 在四个提前返回处为空：那些候选从未产出实例，没有可比较的声明版本 ——
+# 空结论说的是这件事，而 "ok" 会撒谎。
 func _gpDiag(gpPath: String, gpOk: bool, gpReason: String, gpName: String,
-		gpVersion: String) -> void:
+		gpVersion: String, gpContract: String = "") -> void:
 	gpDiagnostics.append({
 		"path": gpPath,
 		"ok": gpOk,
 		"reason": gpReason,
 		"name": gpName,
 		"version": gpVersion,
+		"contract": gpContract,
 	})

@@ -45,9 +45,41 @@ static var gpDocSizeScale: float = 1.0
 # 施加，绝不复利。
 static var _gpBaseSizes: Dictionary = {}
 
-# Directory where user-authored symbol packs are persisted across sessions.
-# 用户自建图元包的跨会话持久化目录（由符号编辑器导出时写入）。
-const GP_USER_PACKS_DIR: String = "user://symbol_packs"
+# Persistence seam (ADR-2 / ADR-10, 2026-11-06). Core owns the registry but may not open a file,
+# so the two disk operations it needs are named here as Callables and filled in by the composition
+# root with GPSymbolPackStore. This is the same move as GPLocalizer, applied to symbol storage.
+# 持久化缝（ADR-2 / ADR-10，2026-11-06）。core 持有登记表但不可开文件，故它需要的两个磁盘操作在此
+# 声明为 Callable，由组合根用 GPSymbolPackStore 填入。这与 GPLocalizer 是同一手法，用在图元存储上。
+#
+# DEFAULT IS "NO PERSISTENCE", ON PURPOSE / 默认刻意是"无持久化"：
+# With nothing installed a read yields nothing and a delete succeeds — exactly what a bare
+# headless run should see, and exactly what the old code did when the directory did not exist.
+# 未装入时读取为空、删除成功 —— 这正是裸 headless 运行应有的样子，也正是旧代码在目录不存在时的行为。
+static var _gpPackReader: Callable = Callable()
+static var _gpPackDeleter: Callable = Callable()
+
+
+# Install the persistence seam. Called ONCE by the composition root (ui/shell/main_window.gd
+# `_ready`, before the first gpLoadUserPacks) with GPSymbolPackStore bound to it.
+# 装入持久化缝。由组合根（ui/shell/main_window.gd 的 `_ready`，在首次 gpLoadUserPacks 之前）调用
+# **一次**，绑定 GPSymbolPackStore。
+static func gpSetPackStore(gpReader: Callable, gpDeleter: Callable) -> void:
+	_gpPackReader = gpReader
+	_gpPackDeleter = gpDeleter
+
+
+# Drop the persistence seam, restoring "no persistence". Used by tests that must prove the
+# fallback without leaving the app unable to save symbols.
+# 卸下持久化缝，恢复"无持久化"。供需要证明回退路径的测试使用。
+static func gpClearPackStore() -> void:
+	_gpPackReader = Callable()
+	_gpPackDeleter = Callable()
+
+
+# Whether a real persistence layer is installed (i.e. the app is running, not a bare script).
+# 是否已装入真实持久化层（即处于应用运行态，而非裸脚本）。
+static func gpHasPackStore() -> bool:
+	return _gpPackReader.is_valid()
 
 
 # Return the default built-in symbol definitions.
@@ -247,56 +279,39 @@ static func gpDeleteDef(gpId: String) -> bool:
 	_gpExtraDefs.remove_at(gpExtraIdx)
 	_gpCachedDefs.remove_at(_gpBuiltinCount + gpExtraIdx)
 	_gpCacheValid = true
-	# Delete the persisted user pack file (user://symbol_packs/<id>.json). A single symbol
-	# is stored as one pack file, written by GPMakeSymbolDialog._gpPersist().
-	# 删除持久化的用户包文件（user://symbol_packs/<id>.json）。单个图元存为一个包文件，
-	# 由 GPMakeSymbolDialog._gpPersist() 写入。
-	var gpPath: String = "%s/%s.json" % [GP_USER_PACKS_DIR, gpId]
-	if FileAccess.file_exists(gpPath):
-		var gpErr: Error = DirAccess.remove_absolute(gpPath)
-		if gpErr != OK:
-			push_warning("GPSymbolLibrary: failed to delete user pack %s (err %d)" % [gpPath, gpErr])
-			return false
+	# Ask the persistence seam to delete the stored pack for this id. With no seam installed there
+	# is no stored pack, so the removal of the in-memory def above is the whole job.
+	# 请持久化缝删除该 id 的存档。未装入缝时本无存档，故上面那次内存移除即是全部工作。
+	if _gpPackDeleter.is_valid() and not bool(_gpPackDeleter.call(gpId)):
+		push_warning("GPSymbolLibrary: failed to delete user pack for %s" % gpId)
+		return false
 	return true
 
 
-# Read every persisted user pack from GP_USER_PACKS_DIR as GPSymbolPack objects.
-# 把 GP_USER_PACKS_DIR 下所有持久化的用户图元包以 GPSymbolPack 对象读出。
-# No registration: this is the shared reader used by both gpLoadUserPacks (which
-# then registers the symbols into the live library) and gpUserPacks (which hands
-# them to the save/export path so they can be embedded into the *.pid.json file).
-# 不做注册：这是被 gpLoadUserPacks()（随后把图元注册进活动图元库）与 gpUserPacks()
-#（交给存盘/导出路径、以便嵌入 *.pid.json）共用的读取器。
+# Return every persisted user pack, read through the persistence seam.
+# 经持久化缝读出全部持久化用户包。
+# No registration: this is the shared reader used by both gpLoadUserPacks (which then registers
+# the symbols into the live library) and gpUserPacks (which hands them to the save/export path so
+# they can be embedded into the *.pid.json file).
+# 不做注册：这是被 gpLoadUserPacks()（随后把图元注册进活动图元库）与 gpUserPacks()（交给存盘/导出
+# 路径、以便嵌入 *.pid.json）共用的读取器。
+# The FILE FORMAT lives in the io layer (GPSymbolPackStore): core asks for packs, not for JSON.
+# 文件格式属于 io 层（GPSymbolPackStore）：core 要的是包，不是 JSON。
 static func _gpReadUserPackFiles() -> Array[GPSymbolPack]:
+	if not _gpPackReader.is_valid():
+		return []
+	var gpRead: Variant = _gpPackReader.call()
+	if not (gpRead is Array):
+		return []
 	var gpPacks: Array[GPSymbolPack] = []
-	# Nothing to read if the directory was never created.
-	# 目录从未创建过则无内容可读。
-	if not DirAccess.dir_exists_absolute(GP_USER_PACKS_DIR):
-		return gpPacks
-	var gpDir: DirAccess = DirAccess.open(GP_USER_PACKS_DIR)
-	if gpDir == null:
-		return gpPacks
-	gpDir.list_dir_begin()
-	var gpFileName: String = gpDir.get_next()
-	while gpFileName != "":
- # Only consider top-level .json files (each is one exported symbol pack).
- # 只处理顶层 .json 文件（每个文件即一个导出的图元包）。
-		if not gpDir.current_is_dir() and gpFileName.ends_with(".json"):
-			var gpPath: String = "%s/%s" % [GP_USER_PACKS_DIR, gpFileName]
-			var gpText: String = _gpReadFile(gpPath)
-			if gpText != "":
-				var gpJson: Variant = JSON.parse_string(gpText)
-				if gpJson is Dictionary:
-					var gpPack: GPSymbolPack = GPSymbolPack.new()
-					gpPack.gpFromDict(gpJson as Dictionary)
-					gpPacks.append(gpPack)
-		gpFileName = gpDir.get_next()
-	gpDir.list_dir_end()
+	for gpItem in gpRead as Array:
+		if gpItem is GPSymbolPack:
+			gpPacks.append(gpItem as GPSymbolPack)
 	return gpPacks
 
 
-# Return the user-authored symbol packs currently persisted in GP_USER_PACKS_DIR.
-# 返回当前持久化在 GP_USER_PACKS_DIR 的用户自建图元包。
+# Return the user-authored symbol packs currently persisted on disk.
+# 返回当前持久化于磁盘的用户自建图元包。
 # The save/export path calls this to embed custom symbols into the *.pid.json so the
 # file is self-contained and re-openable on any machine without the separate
 # user://symbol_packs/ files (data sovereignty).
@@ -306,8 +321,8 @@ static func gpUserPacks() -> Array[GPSymbolPack]:
 	return _gpReadUserPackFiles()
 
 
-# Load every persisted user pack from GP_USER_PACKS_DIR back into the live library.
-# 把 GP_USER_PACKS_DIR 下所有持久化的用户图元包读回活动图元库。
+# Load every persisted user pack back into the live library.
+# 把所有持久化用户图元包读回活动图元库。
 # Called once at startup (see main_window._ready()) so symbols authored in a previous
 # session re-appear in the left palette and on the canvas after a restart.
 # 启动时调用一次（见 main_window._ready()），使上一会话中自建的图元在重启后
@@ -325,17 +340,6 @@ static func gpLoadUserPacks() -> int:
 	if gpRestoredDefs.size() > 0:
 		gpRegisterDefs(gpRestoredDefs)
 	return gpRestoredDefs.size()
-
-
-# Read a UTF-8 text file fully; returns "" on any failure (missing / unreadable).
-# 完整读取一个 UTF-8 文本文件；任何失败（缺失/不可读）均返回空串。
-static func _gpReadFile(gpPath: String) -> String:
-	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.READ)
-	if gpF == null:
-		return ""
-	var gpText: String = gpF.get_as_text()
-	gpF.close()
-	return gpText
 
 
 # Look up one definition by id across built-ins, packs and runtime registrations.

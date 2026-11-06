@@ -6,9 +6,9 @@ extends RefCounted
 #
 # WHY THIS EXISTS / 为何存在：
 # GPMainWindow was carrying many unrelated responsibilities in one file; this coordinator
-# owns the "Menu dispatch, undo/redo and the settings dialog" use case end to end, so the root keeps only assembly and forwarding.
+# owns the "Menu dispatch, undo/redo and the settings dialog" use case end to end, so the root keeps only assembly — the sibling relays live in the GPShellHost contract.
 # GPMainWindow 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「菜单分发、撤销/重做与设置对话框；文件类动作转发给 GPFileCoordinator」这一用例，
-# 使根类只保留装配与转发。
+# 使根类只保留装配 —— 兄弟中继已在 GPShellHost 契约里。
 #
 # Interaction / 交互方式：
 # - the root creates this coordinator and injects itself as gpHost (composition root);
@@ -22,7 +22,11 @@ extends RefCounted
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
-var gpHost: GPMainWindow = null
+# The SHELL CONTRACT, not the scene root: this type declares every member a coordinator
+# may touch, so an undeclared reach is a parse error at gate 5 instead of a code review miss.
+# **外壳契约**，而非场景根类：该类型声明了协调者可以触碰的每个成员，故未声明的伸手在门 5
+# 就是解析错误，而不是评审疏忽。
+var gpHost: GPShellHost = null
 
 
 func gpDeleteSelected() -> void:

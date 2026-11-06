@@ -913,10 +913,7 @@ func _gpOnExport() -> void:
 	gpDlg.file_selected.connect(func(gpPath: String) -> void:
 		_gpCollectAll()
 		var gpText: String = GPTagRuleService.gpStandardToJson(_gpStd)
-		var gpFile: FileAccess = FileAccess.open(gpPath, FileAccess.WRITE)
-		if gpFile != null:
-			gpFile.store_string(gpText)
-			gpFile.close()
+		if GPFileGateway.gpWriteText(gpPath, gpText):
 			gpStatus.emit("standard.io_saved", [gpPath]))
 	gpDlg.popup_centered_ratio(0.6)
 
@@ -928,7 +925,12 @@ func _gpOnImport() -> void:
 	gpDlg.add_filter("*.json", "JSON")
 	add_child(gpDlg)
 	gpDlg.file_selected.connect(func(gpPath: String) -> void:
-		var gpText: String = FileAccess.get_file_as_string(gpPath)
+		# Read through the io gateway (ADR-2). A missing / unreadable file yields "", which
+		# gpStandardFromJson already reports as standard.io_failed — the old inline read behaved
+		# the same way.
+		# 经 io 网关读取（ADR-2）。文件缺失或不可读时得到 ""，gpStandardFromJson 本就把它报为
+		# standard.io_failed —— 与旧的内联读法行为一致。
+		var gpText: String = GPFileGateway.gpReadText(gpPath)
 		var gpImported: GPProjectStandard = GPTagRuleService.gpStandardFromJson(gpText)
 		if gpImported == null:
 			gpStatus.emit("standard.io_failed", [gpPath])

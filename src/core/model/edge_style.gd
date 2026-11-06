@@ -70,13 +70,13 @@ static func gpStyleFor(gpKind: String, gpSignalType: String, gpZoom: float = 1.0
  # semantic process colour while adopting the standard solid line.
  # CONTINUOUS —— 实线；AutoCAD 线型叠加（ADR-UI-02）在保留语义工艺色的同时
  # 采用标准实线。
-			gpPat = GPLinetypeManager.gpPatternFor("CONTINUOUS")
+			gpPat = GPLinetypeRegistry.gpPatternFor("CONTINUOUS")
 		GPPIDEdge.GP_UTILITY:
 			gpW = 0.25
 			gpCol = Color("#9AA6BE")
  # DASHED — AutoCAD utility convention, scaled by the global LTSCALE.
  # DASHED —— AutoCAD 公用工程线惯例，受全局 LTSCALE 缩放。
-			gpPat = GPLinetypeManager.gpPatternFor("DASHED")
+			gpPat = GPLinetypeRegistry.gpPatternFor("DASHED")
 		GPPIDEdge.GP_SIGNAL:
 			match gpSignalType:
 				"ELECTRIC":

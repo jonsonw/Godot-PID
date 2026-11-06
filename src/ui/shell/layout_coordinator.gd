@@ -6,9 +6,9 @@ extends RefCounted
 #
 # WHY THIS EXISTS / 为何存在：
 # GPMainWindow was carrying many unrelated responsibilities in one file; this coordinator
-# owns the "Splitter ratios, DPI scaling, window resize handling and maximised start-up" use case end to end, so the root keeps only assembly and forwarding.
+# owns the "Splitter ratios, DPI scaling, window resize handling and maximised start-up" use case end to end, so the root keeps only assembly — the sibling relays live in the GPShellHost contract.
 # GPMainWindow 曾把多类互不相关的职责压在同一文件里；本协调者端到端接管「分隔条比例、DPI 缩放、窗口尺寸响应与最大化」这一用例，
-# 使根类只保留装配与转发。
+# 使根类只保留装配 —— 兄弟中继已在 GPShellHost 契约里。
 #
 # Interaction / 交互方式：
 # - the root creates this coordinator and injects itself as gpHost (composition root);
@@ -22,7 +22,11 @@ extends RefCounted
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
-var gpHost: GPMainWindow = null
+# The SHELL CONTRACT, not the scene root: this type declares every member a coordinator
+# may touch, so an undeclared reach is a parse error at gate 5 instead of a code review miss.
+# **外壳契约**，而非场景根类：该类型声明了协调者可以触碰的每个成员，故未声明的伸手在门 5
+# 就是解析错误，而不是评审疏忽。
+var gpHost: GPShellHost = null
 
 
 # A splitter in the three-pane body was dragged. The engine applies (and clamps) the
@@ -53,14 +57,14 @@ func gpOnBodyDragged(_gpOffset: int) -> void:
 	# Left splitter: its offset IS the left-dock width. Feed the new width to the palette
 	# grid so it recomputes its column count immediately.
 	# 左分隔条：偏移即左栏宽度。把新宽度传给图元网格，使其立即重算列数。
-	gpHost.gpLeftWidthPx = clampf(float(gpCur[0]), GPMainWindow.GP_LEFT_MIN,
-		gpBW - GPMainWindow.GP_RIGHT_MIN - 80.0)
+	gpHost.gpLeftWidthPx = clampf(float(gpCur[0]), GPShellHost.GP_LEFT_MIN,
+		gpBW - GPShellHost.GP_RIGHT_MIN - 80.0)
 	if gpHost.gpLeftDock != null and gpHost.gpLeftDock.has_method("gpReflow"):
 		gpHost.gpLeftDock.gpReflow(gpHost.gpLeftWidthPx)
 	# Right splitter: its offset is the left+center span, so right width = body - offset.
 	# 右分隔条：偏移即左+中跨度，故右栏宽度 = 主体宽度 - 偏移。
-	gpHost.gpRightWidthPx = clampf(gpBW - float(gpCur[1]), GPMainWindow.GP_RIGHT_MIN,
-		gpBW - GPMainWindow.GP_LEFT_MIN - 80.0)
+	gpHost.gpRightWidthPx = clampf(gpBW - float(gpCur[1]), GPShellHost.GP_RIGHT_MIN,
+		gpBW - GPShellHost.GP_LEFT_MIN - 80.0)
 
 
 # ============================ lookups ============================
@@ -84,8 +88,8 @@ func gpInitSplits() -> void:
 	# until the next restart.
 	# 用声明宽度初始化存储宽度：左栏起始于「每行 3 个」默认（使图元库首次启动即排 3 列），
 	# 右栏起始于 200px 默认（2026-09-25 需求）；画布取得其余空间。拖拽会覆盖，直到下次重启。
-	gpHost.gpLeftWidthPx = GPMainWindow.GP_LEFT_DEFAULT
-	gpHost.gpRightWidthPx = GPMainWindow.GP_RIGHT_DEFAULT
+	gpHost.gpLeftWidthPx = GPShellHost.GP_LEFT_DEFAULT
+	gpHost.gpRightWidthPx = GPShellHost.GP_RIGHT_DEFAULT
 	gpApplySplits()
 	var gpWin: Window = gpHost.get_window()
 	gpHost.gpPrevWidth = int(gpWin.size.x) if gpWin != null else 0

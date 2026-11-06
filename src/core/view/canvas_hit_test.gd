@@ -34,14 +34,26 @@ static func gpNodeCenter(gpGraph: GPPIDGraph, gpId: String,
 # 节点的世界坐标包围矩形，取自其定义标称包络（缺省回退 64x48）。
 # Mount-aware: the rect is centred on the node's DERIVED world origin (see gpNodeCenter()).
 # 感知挂载：矩形以节点**推导**的世界原点为中心（见 gpNodeCenter()）。
-static func gpNodeRect(gpGraph: GPPIDGraph, gpBinder: GPGraphBinder, gpId: String) -> Rect2:
-	if gpGraph == null or gpBinder == null:
+#
+# DEFINITION LOOKUP IS A CALLABLE, NOT A BINDER / 定义查找器是 Callable，不是绑定器：
+# It used to take GPGraphBinder (a ui class), which made this core module depend on ui. The lookup
+# contract is identical to gpNodeCenter()/gpHitEdge() — symbol id in, GPSymbolDef (or null) out —
+# so the canvas hands over its own `gpDefLookup` and nothing above core is named here.
+# 本函数原接收 GPGraphBinder（ui 类），使 core 模块依赖了 ui。查找契约与 gpNodeCenter() /
+# gpHitEdge() 完全一致 —— 符号 id 进、GPSymbolDef（或 null）出 —— 故画布把自己的 gpDefLookup
+# 交过来即可，此处不再出现 core 之上的任何名字。
+# An INVALID lookup keeps the old "no binder" answer (empty rect): callers that cannot resolve
+# definitions have no envelope to report, and a guessed 64x48 would be a lie about the symbol.
+# 查找器**无效**时保持旧「无绑定器」答案（空矩形）：无法解析定义者没有包络可言，
+# 猜一个 64x48 等于对符号撒谎。
+static func gpNodeRect(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpId: String) -> Rect2:
+	if gpGraph == null or not gpDefLookup.is_valid():
 		return Rect2()
 	for gpN in gpGraph.gpNodes:
 		if gpN.gpInstanceId == gpId:
-			var gpDef: GPSymbolDef = gpBinder.gpDefFor(gpN.gpSymbolId)
+			var gpDef: GPSymbolDef = gpDefLookup.call(gpN.gpSymbolId) as GPSymbolDef
 			var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef != null else Vector2(64.0, 48.0)
-			var gpOrigin: Vector2 = _gpWorldOrigin(gpGraph, gpBinder, gpN)
+			var gpOrigin: Vector2 = GPPortResolver.gpNodeWorldOrigin(gpGraph, gpDefLookup, gpN)
 			return Rect2(gpOrigin - gpSz / 2.0, gpSz)
 	return Rect2()
 
@@ -63,16 +75,17 @@ static func gpNodeRect(gpGraph: GPPIDGraph, gpBinder: GPGraphBinder, gpId: Strin
 # deeper node displaces an already-found hit, so drawings without mounts hit-test identically.
 # 同深度仍取图声明顺序中的**第一个**节点，与本改动之前完全一致。只有**严格更深**的节点才会
 # 顶替已找到的命中，故没有挂载的图纸命中结果不变。
-static func gpHitNode(gpGraph: GPPIDGraph, gpBinder: GPGraphBinder, gpWorld: Vector2) -> String:
+static func gpHitNode(gpGraph: GPPIDGraph, gpDefLookup: Callable, gpWorld: Vector2) -> String:
 	if gpGraph == null:
 		return ""
-	var gpLookup: Callable = gpBinder.gpDefFor if gpBinder != null else Callable()
 	var gpBest: String = ""
 	var gpBestDepth: int = -1
 	for gpN in gpGraph.gpNodes:
-		var gpDef: GPSymbolDef = gpBinder.gpDefFor(gpN.gpSymbolId) if gpBinder != null else null
+		var gpDef: GPSymbolDef = null
+		if gpDefLookup.is_valid():
+			gpDef = gpDefLookup.call(gpN.gpSymbolId) as GPSymbolDef
 		var gpSz: Vector2 = gpDef.gpDefaultSize if gpDef != null else Vector2(64.0, 48.0)
-		var gpOrigin: Vector2 = GPPortResolver.gpNodeWorldOrigin(gpGraph, gpLookup, gpN)
+		var gpOrigin: Vector2 = GPPortResolver.gpNodeWorldOrigin(gpGraph, gpDefLookup, gpN)
 		# Stage 2 pick modes (gpPickMode): NONE = never pickable (the frame-like furniture);
 		# BORDER = only a band along the envelope's edge, so a pick inside a big annotation
 		# (table / multiline text) falls through to what is UNDER it instead of grabbing the
@@ -112,16 +125,6 @@ static func _gpMountDepth(gpGraph: GPPIDGraph, gpNode: GPPIDNode) -> int:
 		if gpCur != null:
 			gpDepth += 1
 	return gpDepth
-
-
-# Derived world origin of a node through the binder's own definition lookup.
-# 经绑定器自身的定义查找器求节点的推导世界原点。
-static func _gpWorldOrigin(gpGraph: GPPIDGraph, gpBinder: GPGraphBinder,
-		gpNode: GPPIDNode) -> Vector2:
-	if gpBinder == null:
-		return gpNode.gpPosition
-	# Bare method reference: parse-time checked, rename-safe. / 裸方法引用：解析期受检，重命名安全。
-	return GPPortResolver.gpNodeWorldOrigin(gpGraph, gpBinder.gpDefFor, gpNode)
 
 
 # Topmost edge id under the world point, or "".

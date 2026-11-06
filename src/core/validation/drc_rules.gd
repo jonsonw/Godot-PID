@@ -388,7 +388,7 @@ static func gpCheckTitleBlockRequired(gpSnap: GPDrcSnapshot,
 		if gpVal.strip_edges() != "":
 			continue
 		gpOut.append(GPFinding.gpMake("drc.doc", str((gpRow as Array)[2]),
-			"drc.title_block_required", [I18n.gpTr(str((gpRow as Array)[1]))])
+			"drc.title_block_required", [GPLocalizer.gpTr(str((gpRow as Array)[1]))])
 			.gpAs("drc.doc.title_block_required", "drc.fix.fill_title_block")
 			.gpOnEntity(gpSnap.sheet_id, gpSnap.sheet_id))
 	return gpOut
@@ -709,7 +709,7 @@ static func gpCheckTitleBlockInherit(gpSnap: GPDrcSnapshot,
 		var gpProj: String = gpSnap.std.gpInfo(gpInfoKey).strip_edges()
 		if gpOwn != "" and gpProj != "" and gpOwn != gpProj:
 			gpOut.append(GPFinding.gpMake("drc.doc", GP_SEV_INFO, "drc.title_block_inherit",
-				[I18n.gpTr("frame.fld." + gpKey), gpOwn, gpProj])
+				[GPLocalizer.gpTr("frame.fld." + gpKey), gpOwn, gpProj])
 				.gpAs("drc.doc.title_block_inherit", "drc.fix.review_override")
 				.gpOnEntity(gpSnap.sheet_id, gpSnap.sheet_id))
 	return gpOut
@@ -805,7 +805,7 @@ static func gpCheckRevision(gpSnap: GPDrcSnapshot, gpCfg: Dictionary) -> Array[G
 	for gpKey in ["rev", "date"]:
 		if gpSnap.sheet.gpTitleValue(gpKey).strip_edges() == "":
 			gpOut.append(GPFinding.gpMake("drc.doc", GP_SEV_WARNING, "drc.revision_missing",
-				[I18n.gpTr("frame.fld." + gpKey)])
+				[GPLocalizer.gpTr("frame.fld." + gpKey)])
 				.gpAs("drc.doc.revision_missing", "drc.fix.fill_title_block")
 				.gpOnEntity(gpSnap.sheet_id, gpSnap.sheet_id))
 	return gpOut

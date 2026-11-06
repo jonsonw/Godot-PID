@@ -310,7 +310,7 @@ func _gpExportJson() -> void:
 		"doc_hash": GPExportGate.gpDocHash([_gpCanvas.gpSheet] if _gpCanvas != null else []),
 		"rules_hash": GPExportGate.gpRulesHash(gpStd),
 	}
-	var gpPath: String = GPDRCReport.gpWriteJson(_gpFindings, gpDir, gpBase, gpMeta)
+	var gpPath: String = GPDRCReportFile.gpWriteJson(_gpFindings, gpDir, gpBase, gpMeta)
 	if gpPath != "":
 		_gpSummary.text = "%s\n%s" % [GPDRCReport.gpSummary(_gpFindings), gpPath]
 

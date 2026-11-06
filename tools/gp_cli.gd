@@ -20,6 +20,11 @@ extends Node
 
 
 func _ready() -> void:
+	# Install symbol persistence before anything reads user packs: `check`/`export` embed them in
+	# the emitted file, and GPSymbolLibrary (core) reaches the disk only through this seam.
+	# 在任何读取用户图元包之前装入持久化：`check`/`export` 会把它们嵌入输出文件，而
+	# GPSymbolLibrary（core）只经本缝触达磁盘。
+	GPSymbolPackStore.gpInstall()
 	var gpArgs: PackedStringArray = OS.get_cmdline_user_args()
 	if gpArgs.is_empty():
 		_gpUsage()
@@ -93,7 +98,7 @@ func _gpCheck(gpArgs: PackedStringArray) -> void:
 	if gpReport != "":
 		var gpDir: String = gpReport.get_base_dir()
 		var gpBase: String = gpReport.get_file().get_basename()
-		var gpWritten: String = GPDRCReport.gpWriteJson(gpFindings, gpDir, gpBase, gpMeta)
+		var gpWritten: String = GPDRCReportFile.gpWriteJson(gpFindings, gpDir, gpBase, gpMeta)
 		if gpWritten == "":
 			printerr("check: cannot write report: " + gpReport)
 			get_tree().quit(2)

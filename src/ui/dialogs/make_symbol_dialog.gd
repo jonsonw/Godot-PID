@@ -708,9 +708,11 @@ func _gpOnOk() -> void:
 # Persist a def as a single-symbol user pack under user://symbol_packs/<id>.json.
 # 把单个图元 def 持久化为 user://symbol_packs/<id>.json 用户包。
 func _gpPersist(gpNewDef: GPSymbolDef) -> void:
-	var gpDir: String = GPSymbolLibrary.GP_USER_PACKS_DIR
-	if not DirAccess.dir_exists_absolute(gpDir):
-		DirAccess.make_dir_recursive_absolute(gpDir)
+	# The directory and the file format both belong to the io layer (GPSymbolPackStore); this
+	# dialog only assembles the pack. Writing goes through GPFileGateway so the null check and
+	# the parent-directory creation are not re-invented here (ADR-2).
+	# 目录与文件格式都属 io 层（GPSymbolPackStore）；本对话框只组装包。写盘经 GPFileGateway，
+	# 使空判断与父目录创建不必在此再发明一遍（ADR-2）。
 	var gpPack: GPSymbolPack = GPSymbolPack.new()
 	gpPack.gpPackId = "user_%s" % gpNewDef.gpId
 	gpPack.gpName = gpNewDef.gpDisplayName
@@ -719,10 +721,6 @@ func _gpPersist(gpNewDef: GPSymbolDef) -> void:
 	# wholesale to the typed Array[GPSymbolDef] member (runtime type error).
 	# 用 append（勿用字面量整体赋值）：无类型数组字面量不能整体赋给强类型 Array[GPSymbolDef] 成员。
 	gpPack.gpSymbols.append(gpNewDef)
-	var gpPath: String = "%s/%s.json" % [gpDir, gpNewDef.gpId]
-	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.WRITE)
-	if gpF == null:
+	var gpPath: String = "%s/%s.json" % [GPSymbolPackStore.GP_DIR, gpNewDef.gpId]
+	if not GPFileGateway.gpWriteText(gpPath, JSON.stringify(gpPack.gpToDict(), "", true)):
 		push_warning("GPMakeSymbolDialog: cannot write %s" % gpPath)
-		return
-	gpF.store_string(JSON.stringify(gpPack.gpToDict(), "", true))
-	gpF.close()

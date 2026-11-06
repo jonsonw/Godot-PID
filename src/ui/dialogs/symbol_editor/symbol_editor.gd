@@ -80,14 +80,10 @@ func _gpRegisterTools() -> void:
 	_gpRegistry.gpRegister(GP_SELECT, GPSymbolSelectTool.new())
 	var gpPort: GPSymbolPortTool = GPSymbolPortTool.new()
 	_gpRegistry.gpRegister(GP_PORT, gpPort)
-	var gpLine: GPSymbolDrawTool = GPSymbolDrawTool.new(); gpLine._gpKind = GPShape.GPKind.GP_LINE
-	var gpRect: GPSymbolDrawTool = GPSymbolDrawTool.new(); gpRect._gpKind = GPShape.GPKind.GP_RECT
-	var gpCircle: GPSymbolDrawTool = GPSymbolDrawTool.new(); gpCircle._gpKind = GPShape.GPKind.GP_CIRCLE
-	var gpPoly: GPSymbolDrawTool = GPSymbolDrawTool.new(); gpPoly._gpKind = GPShape.GPKind.GP_POLYLINE
-	_gpRegistry.gpRegister(GP_LINE, gpLine)
-	_gpRegistry.gpRegister(GP_RECT, gpRect)
-	_gpRegistry.gpRegister(GP_CIRCLE, gpCircle)
-	_gpRegistry.gpRegister(GP_POLY, gpPoly)
+	_gpRegistry.gpRegister(GP_LINE, GPSymbolDrawTool.gpForKind(GPShape.GPKind.GP_LINE))
+	_gpRegistry.gpRegister(GP_RECT, GPSymbolDrawTool.gpForKind(GPShape.GPKind.GP_RECT))
+	_gpRegistry.gpRegister(GP_CIRCLE, GPSymbolDrawTool.gpForKind(GPShape.GPKind.GP_CIRCLE))
+	_gpRegistry.gpRegister(GP_POLY, GPSymbolDrawTool.gpForKind(GPShape.GPKind.GP_POLYLINE))
 
 
 # Replace the working model (used when the dialog opens on a draft). Mutates in place so the command

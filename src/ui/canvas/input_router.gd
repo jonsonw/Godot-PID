@@ -49,7 +49,34 @@ var _gpSignalTool: GPSignalTool = null
 var _gpPanning: bool = false
 var _gpPanStart: Vector2 = Vector2.ZERO
 var _gpPanOffsetStart: Vector2 = Vector2.ZERO
+# Last known mouse position in world coordinates.
+#
+# It lives HERE, not on the canvas. This class is the only writer, and the only reader whose
+# behaviour depends on it (tool dispatch, the connect preview). The canvas reads the number
+# exactly once — to put a coordinate into the status snapshot — through gpLastMouseWorld().
+# The field stays private so nothing outside can SET it: a position tracking input belongs to
+# the party that routes the input, and the status bar only borrows the value.
+# 最近一次鼠标的世界坐标。
+#
+# 它住**此处**而非画布。本类是唯一的写入者，也是唯一据此行动的读者（工具分派、连接预览）。
+# 画布只读一次 —— 往状态快照里放一个坐标 —— 且经 gpLastMouseWorld() 端口。字段保持私有，
+# 因此外部无法**写**它：跟踪输入的位置，属于路由输入的那一方；状态栏只是借用这个值。
+var _gpLastMouseWorld: Vector2 = Vector2.ZERO
 
+
+# Public READ-ONLY port for the last mouse world position.
+#
+# Read-only is the point, not a convenience: the canvas needs this number for its status
+# snapshot, while the state itself must have exactly one writer. A public settable var would
+# let any caller move the "cursor" without a mouse, and the symptom would be a status bar
+# showing a position where nothing happened.
+# 最近一次鼠标世界坐标的**只读**公开端口。
+#
+# 「只读」是要点而非便利：画布的状态快照需要这个数，而这份状态必须只有一个写入者。若做成
+# 公开可写变量，任何调用方都能在没有鼠标的情况下移动「光标」，症状是状态栏显示一个什么都没
+# 发生过的位置。
+func gpLastMouseWorld() -> Vector2:
+	return _gpLastMouseWorld
 
 # Build the input-side delegates, the tool registry and the six mode tools. Called from the
 # canvas's _ready : tools are pure input-dispatch implementation details, so
@@ -340,13 +367,13 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
 
 	if gpEvent is InputEventMouseMotion:
 		var gpMotion: InputEventMouseMotion = gpEvent as InputEventMouseMotion
-		gpHost._gpLastMouseWorld = gpHost.gpViewController.gpWorldFromScreen(gpMotion.position)
+		_gpLastMouseWorld = gpHost.gpViewController.gpWorldFromScreen(gpMotion.position)
 		# Dwell trigger FIRST, before any early-returning drag branch: an anchor drag (press on a
 		# nozzle and pull) consumes motion and returns early, so a notice placed later never runs
 		# during exactly the gesture the prompt exists for.
 		# 悬停触发放在**最前**，早于任何会提前返回的拖拽分支：锚点拖拽（按住管嘴拖出）会消费移动并
 		# 提前 return，放在后面的通知在提示真正需要服务的那个手势里永远不会执行。
-		gpHost.gpNoticeCursorMove(gpHost._gpLastMouseWorld, gpMotion.position)
+		gpHost.gpNoticeCursorMove(_gpLastMouseWorld, gpMotion.position)
  # Panning in progress.
  # 正在平移。
 		if _gpPanning:
@@ -442,6 +469,6 @@ func gpOnGuiInput(gpEvent: InputEvent) -> void:
  # The tool returns true when it consumed the motion (e.g. rubber band) so we accept it.
  # 工具专属橡皮筋 / 连接预览（select=连接预览，draw=橡皮筋）。工具消费了移动事件时返回
  # true，画布据此 accept_event。
-		if gpActiveTool().gpOnMove(gpHost._gpLastMouseWorld):
+		if gpActiveTool().gpOnMove(_gpLastMouseWorld):
 			gpHost.accept_event()
 			return

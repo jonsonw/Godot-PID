@@ -211,20 +211,20 @@ func _draw() -> void:
 	if gpDef != null and not gpDef.gpLabelSlots.is_empty():
 		var gpDrewAny: bool = false
 		for gpSlot in gpDef.gpLabelSlots:
-			if not GPLabelGripOps.gpSlotVisible(gpNode, gpDef, gpSlot):
+			if not GPLabelPlacement.gpSlotVisible(gpNode, gpDef, gpSlot):
 				continue
-			var gpSlotText: String = GPLabelGripOps.gpSlotText(gpNode, gpDef, gpSlot, gpLocale)
+			var gpSlotText: String = GPLabelPlacement.gpSlotText(gpNode, gpDef, gpSlot, gpLocale)
 			if gpSlotText == "":
 				continue
 			_gpDrawOneText(gpSlotText,
-				GPLabelGripOps.gpSlotAnchor(gpNode, gpDef, gpSlot, gpGraph, gpDefLookupCb),
-				GPLabelGripOps.gpSlotOffsetLocal(gpNode, gpDef, gpSlot, gpGraph, gpDefLookupCb),
+				GPLabelPlacement.gpSlotAnchor(gpNode, gpDef, gpSlot, gpGraph, gpDefLookupCb),
+				GPLabelPlacement.gpSlotOffsetLocal(gpNode, gpDef, gpSlot, gpGraph, gpDefLookupCb),
 				GPTextRole.gpSlotMM(gpSlot.gpTier, _gpBaseFontMM(), gpDef.gpDefaultSize))
 			gpDrewAny = true
 		# The grip rides the FIRST slot's anchor, so a drag still has one predictable home.
 		# 抓取点跟随**首个**槽的锚点，使拖拽仍有一个可预期的落点。
 		if gpSelected and gpDrewAny:
-			_gpDrawGrip(GPLabelGripOps.gpSlotOffsetLocal(gpNode, gpDef, gpDef.gpLabelSlots[0],
+			_gpDrawGrip(GPLabelPlacement.gpSlotOffsetLocal(gpNode, gpDef, gpDef.gpLabelSlots[0],
 				gpGraph, gpDefLookupCb))
 		return
 
@@ -233,11 +233,11 @@ func _draw() -> void:
 	# the grip and the headless tests all agree on where it goes.
 	# M10b：标签即**位号**，经共用的几何模块解析，使画布、抓取点与 headless 测试
 	# 对「它画在哪」完全一致。
-	var gpLabel: String = GPLabelGripOps.gpLabelText(gpNode, gpDef, gpLocale)
+	var gpLabel: String = GPLabelPlacement.gpLabelText(gpNode, gpDef, gpLocale)
 	if gpLabel == "":
 		return
-	var gpAnchor: int = GPLabelGripOps.gpEffectiveAnchor(gpNode, gpDef)
-	var gpOff: Vector2 = GPLabelGripOps.gpLocalOffset(gpNode, gpDef)
+	var gpAnchor: int = GPLabelPlacement.gpEffectiveAnchor(gpNode, gpDef)
+	var gpOff: Vector2 = GPLabelPlacement.gpLocalOffset(gpNode, gpDef)
 	# The height depends on WHAT the symbol is, not on a single global number: the reference drawing
 	# annotates equipment at 4.5 mm and everything in-line at 3.0 mm. See GPTextRole for the
 	# measurement. The setting supplies the in-line tier (and the fallback for an unknown category).
@@ -298,7 +298,7 @@ func _gpDrawOneText(gpText: String, gpAnchor: int, gpOffLocal: Vector2, gpFontMM
 	# 包围盒取「取整字号 × 残差」，即**真正会被画出来**的那个盒子；定位必须据它计算，而非未补偿的测量值。
 	var gpSzText: Vector2 = gpFont.get_string_size(gpText, HORIZONTAL_ALIGNMENT_LEFT, -1.0,
 		gpFontSz) * gpFit.y
-	var gpOrigin: Vector2 = GPLabelGripOps.gpDrawOrigin(gpAnchor, gpOff, gpSzText, gpScale)
+	var gpOrigin: Vector2 = GPLabelPlacement.gpDrawOrigin(gpAnchor, gpOff, gpSzText, gpScale)
 	# The residual rides in the DRAW SCALE, so the anchor must be pre-divided by it: the glyph then
 	# scales ABOUT gpOrigin and lands on exactly the design pixel gpDrawOrigin chose. Putting gpOrigin
 	# in the transform's position instead would multiply it by the parent scale a second time — the
@@ -312,7 +312,7 @@ func _gpDrawOneText(gpText: String, gpAnchor: int, gpOffLocal: Vector2, gpFontMM
 	# pinned by gp_test_label_anchor.
 	# 宽度为 -1 时对齐参数不起作用（Godot 忽略它，已实测），故位置完全由上面的 gpDrawOrigin 决定。
 	# 仍然传入它只是为了表明意图，并由 gp_test_label_anchor 钉住其取值。
-	draw_string(gpFont, gpOrigin / gpFit.y, gpText, GPLabelGripOps.gpAlignFor(gpAnchor),
+	draw_string(gpFont, gpOrigin / gpFit.y, gpText, GPLabelPlacement.gpAlignFor(gpAnchor),
 		-1.0, gpFontSz, Color(0.9, 0.9, 0.9))
 	# Restore the identity so anything drawn later on this item is unaffected.
 	# 复位为单位变换，使本项之后的任何绘制不受影响。
@@ -322,22 +322,22 @@ func _gpDrawOneText(gpText: String, gpAnchor: int, gpOffLocal: Vector2, gpFontMM
 # The drag handle for the label grip, drawn at a symbol-local offset.
 # 位号抓取点的拖拽手柄，绘制在给定图元本地偏移处。
 #
-# GPLabelGripOps.GP_GRIP_SIZE is a SCREEN-pixel size (the edge grips draw it in screen space),
+# GPLabelPlacement.GP_GRIP_SIZE is a SCREEN-pixel size (the edge grips draw it in screen space),
 # but this node draws inside the scaled world_root — used raw it became a 9 mm square, i.e. a
 # handle larger than a ball valve. Dividing by the accumulated scale restores the intended
 # constant screen size and matches the edge grips exactly.
-# GPLabelGripOps.GP_GRIP_SIZE 是**屏幕像素**尺寸（边抓取点在屏幕空间绘制它），但本节点在
+# GPLabelPlacement.GP_GRIP_SIZE 是**屏幕像素**尺寸（边抓取点在屏幕空间绘制它），但本节点在
 # 被缩放的世界根内绘制 —— 直接使用会变成 9mm 方块，即比球阀还大的手柄。除以累积缩放即可恢复
 # 既定的屏幕恒定尺寸，并与边抓取点完全一致。
 func _gpDrawGrip(gpOffLocal: Vector2) -> void:
 	var gpOff: Vector2 = _gpOriented(gpOffLocal)
 	var gpScale: float = GPCanvasText.gpScaleOf(self)
-	var gpGs: float = GPLabelGripOps.GP_GRIP_SIZE / gpScale
+	var gpGs: float = GPLabelPlacement.GP_GRIP_SIZE / gpScale
 	var gpHalf: float = gpGs * 0.5
 	draw_rect(Rect2(gpOff - Vector2(gpHalf, gpHalf), Vector2(gpGs, gpGs)),
 		Color(1.0, 1.0, 1.0), true)
 	draw_rect(Rect2(gpOff - Vector2(gpHalf, gpHalf), Vector2(gpGs, gpGs)),
-		GPLabelGripOps.GP_COL, false, 1.5)
+		GPLabelPlacement.GP_COL, false, 1.5)
 
 
 # Apply the symbol's own flip then rotation to a symbol-local offset (label / grip placement).

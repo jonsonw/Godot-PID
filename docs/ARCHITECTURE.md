@@ -52,8 +52,8 @@ meta / sheets[] / library / config
 - `gen_symbol_packs.py` —— 图元数据驱动：声明几何与端口即可生成图元，无需为每个图元写类。
 - `GPIPIDAddon` + `GPAddonLoader` —— 商业化插件契约**与加载器**：扫描目录 → 实例化 → 每条候选一条诊断 →
   隔离坏插件 → 按类返回要注入的工具 / 面板 / 导出器 / 图元包（Pro 代码不进本仓，核心只认契约）。
-  契约 v2 另有三处挂载点：`_gpGetChatPanel()`（对话面板场景路径）、`_gpGetToolDefs()`（与 MCP 共用的
-  `{id, description, args, handler}`，`handler` 是方法名）、`_gpGetValidationHooks()`（追加校验规则，
+  契约 v2 另有三处挂载点：`gpGetChatPanel()`（对话面板场景路径）、`gpGetToolDefs()`（与 MCP 共用的
+  `{id, description, args, handler}`，`handler` 是方法名）、`gpGetValidationHooks()`（追加校验规则，
   严重度限 error / warning / info）。三者默认空实现，v1 插件零改动可用。
 - `GPRulePack` + `GPFinding`（`src/core/validation/`）—— 七条 DRC 纯规则与发现值对象：不碰 Node、
   不碰 autoload，故 GUI 面板、headless 测试与将来的 CLI 门禁共用同一份实现。

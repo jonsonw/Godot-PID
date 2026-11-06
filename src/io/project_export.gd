@@ -34,7 +34,7 @@ static func gpBuildProject(gpGraph: GPPIDGraph, gpDocId: String = "",
 	if not gpDocId.is_empty():
 		gpOut["doc_id"] = gpDocId
 	if not gpConfig.is_empty():
-		gpOut["config"] = GPSchemaMigrate._gpFillConfig(gpConfig)
+		gpOut["config"] = GPSchemaMigrate.gpFillConfig(gpConfig)
 	return gpOut
 
 
@@ -70,7 +70,7 @@ static func gpBuildConfig(gpConfig: Dictionary, gpTagRules: Variant = null) -> D
 		"generator": GPSchemaMigrate.gpGeneratorInfo(),
 		"created_at": GPSchemaMigrate.gpNowIso(),
 		"doc_id": GPIdGen.gpNewDocId(),
-		"config": GPSchemaMigrate._gpFillConfig(gpConfig),
+		"config": GPSchemaMigrate.gpFillConfig(gpConfig),
 	}
 	if gpTagRules != null and gpTagRules is GPProjectTagRules:
 		gpOut["tag_rules"] = (gpTagRules as GPProjectTagRules).gpToDict()

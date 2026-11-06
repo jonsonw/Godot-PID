@@ -521,9 +521,13 @@ var gpPortLinkHint: String = ""
 # 绘图瞬态状态（_gpDrawFrom / _gpDrawTo / _gpDrawActive / _gpPolyPts）与三个绘图动作
 # gpDrawOverlay() 钩子自绘橡皮筋（此钩子 P2 即已声明，但从未接线）。
 
-# Last known mouse position in world coordinates.
-# 最近一次鼠标在世界坐标系中的位置。
-var _gpLastMouseWorld: Vector2 = Vector2.ZERO
+# The last known mouse world position moved OUT of the canvas into GPCanvasInputRouter — that
+# router is the only writer, and the canvas only borrows the number for the status snapshot
+# (gpInputRouter.gpLastMouseWorld()). Same reasoning as the drawing and shape-drag state above:
+# state lives with the party that acts on it, not with the party that happens to be the root.
+# 最近一次鼠标世界坐标已**移出**画布，进入 GPCanvasInputRouter —— 那是唯一的写入者，画布只为状态
+# 快照借用这个数（gpInputRouter.gpLastMouseWorld()）。理由与上面的绘图 / 图形拖拽状态一致：
+# 状态跟着**据它行动**的一方走，而不是跟着恰好是根类的那一方。
 
 # the annotation grip / whole-shape drag state (_gpShapeDragIdx / _gpShapeDragStart /
 # _gpShapeDragOrigPts / _gpShapeDragOrigR / _gpGripDrag) moved OUT of the canvas into
@@ -967,7 +971,7 @@ func gpEmitStatus() -> void:
 		"shapes": gpShapeSel.size(),
 		"edges": gpEdgeSel.size(),
 		"zoom": gpViewZoom,
-		"world": _gpLastMouseWorld,
+		"world": gpInputRouter.gpLastMouseWorld(),
 	}
 	gpStatusUpdated.emit(gpInfo)
 	# same snapshot on the app bus; new subscribers listen here, not on the signal.

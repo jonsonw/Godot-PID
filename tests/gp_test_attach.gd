@@ -724,13 +724,13 @@ func gpTestHitNodePrefersTheDeeperPart() -> void:
 	gpG.gpAddNode(_gpNode("H", "host_mnt", Vector2(0.0, 0.0)))
 	gpG.gpAddNode(_gpMounted("C", "child_mnt", "H", "top"))
 	var gpB: GPGraphBinder = _gpBinder(gpG)
-	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpB, Vector2(0.0, -20.0)), "C",
+	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpB.gpDefFor, Vector2(0.0, -20.0)), "C",
 		"where a part overlaps its host the PART wins, so a nozzle stays selectable")
-	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpB, Vector2(20.0, 0.0)), "H",
+	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpB.gpDefFor, Vector2(20.0, 0.0)), "H",
 		"outside the part's rect the host still wins")
-	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpB, Vector2(-8.0, 5.0)), "H",
+	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpB.gpDefFor, Vector2(-8.0, 5.0)), "H",
 		"a point vertically clear of the part hits the host")
-	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpB, Vector2(200.0, 200.0)), "",
+	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpB.gpDefFor, Vector2(200.0, 200.0)), "",
 		"a point under nothing hits nothing")
 	gpB.free()
 
@@ -740,7 +740,7 @@ func gpTestHitNodeKeepsDeclarationOrderOnTies() -> void:
 	gpG.gpAddNode(_gpNode("first", "host_mnt", Vector2(0.0, 0.0)))
 	gpG.gpAddNode(_gpNode("second", "host_mnt", Vector2(0.0, 0.0)))
 	var gpB: GPGraphBinder = _gpBinder(gpG)
-	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpB, Vector2(0.0, 0.0)), "first",
+	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpB.gpDefFor, Vector2(0.0, 0.0)), "first",
 		"with no mounts the FIRST declared node still wins, exactly as before this change")
 	gpB.free()
 
@@ -756,7 +756,7 @@ func gpTestNodeCenterAndRectFollowTheDerivedOrigin() -> void:
 		"gpNodeCenter reads the DERIVED origin, not the stale stored coordinate")
 	gpEq(GPCanvasHitTest.gpNodeCenter(gpG, "ghost", Callable(gpB, "gpDefFor")), Vector2.INF,
 		"an unknown id still reports INF")
-	var gpR: Rect2 = GPCanvasHitTest.gpNodeRect(gpG, gpB, "C")
+	var gpR: Rect2 = GPCanvasHitTest.gpNodeRect(gpG, gpB.gpDefFor, "C")
 	gpEq(gpR.size, Vector2(16.0, 16.0), "the rect keeps the definition's nominal envelope")
 	gpEq(gpR.get_center(), Vector2(0.0, -24.0), "the rect is centred on the derived origin")
 	gpCheck(gpR.get_center() != Vector2(999.0, 999.0), "the stale coordinate is provably not used")

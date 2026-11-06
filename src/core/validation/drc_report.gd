@@ -23,14 +23,14 @@ const GP_CSV_HEADER: String = "severity,rule,node,edge,shape_idx,x,y,message"
 # One-line summary: "3 errors / 2 warnings / 1 info".
 # 单行摘要："3 errors / 2 warnings / 1 info"。
 static func gpSummary(gpFindings: Array[GPFinding]) -> String:
-	var gpText: String = I18n.gpTr("drc.summary") % [
+	var gpText: String = GPLocalizer.gpTr("drc.summary") % [
 		GPDRCConfig.gpCountActive(gpFindings, GPFinding.GP_ERROR),
 		GPDRCConfig.gpCountActive(gpFindings, GPFinding.GP_WARNING),
 		GPDRCConfig.gpCountActive(gpFindings, GPFinding.GP_INFO),
 	]
 	var gpWaived: int = GPDRCConfig.gpCountWaived(gpFindings)
 	if gpWaived > 0:
-		gpText += " · " + (I18n.gpTr("drc.summary_waived") % gpWaived)
+		gpText += " · " + (GPLocalizer.gpTr("drc.summary_waived") % gpWaived)
 	return gpText
 
 
@@ -40,7 +40,7 @@ static func gpSummary(gpFindings: Array[GPFinding]) -> String:
 # 把拦路问题埋在下面的报告没人会读。
 static func gpToText(gpFindings: Array[GPFinding]) -> String:
 	var gpOut: Array[String] = []
-	gpOut.append(I18n.gpTr("drc.report_title"))
+	gpOut.append(GPLocalizer.gpTr("drc.report_title"))
 	gpOut.append(gpSummary(gpFindings))
 	for gpSev in [GPFinding.GP_ERROR, GPFinding.GP_WARNING, GPFinding.GP_INFO]:
 		var gpRows: Array[GPFinding] = []
@@ -74,22 +74,10 @@ static func gpToCsv(gpFindings: Array[GPFinding]) -> String:
 
 # Write a report next to the project (or under user:// when there is no project path).
 # 把报告写到工程旁边（无工程路径时写 user://）。
-# Returns the written path, or "" on failure. The caller shows the path, so the user never has to
-# guess where the file went.
-# 返回写入路径，失败返回空串。调用方把路径显示出来，用户不必猜文件去哪了。
-static func gpWrite(gpFindings: Array[GPFinding], gpDir: String, gpBaseName: String,
-		gpAsCsv: bool) -> String:
-	if gpDir == "":
-		return ""
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(gpDir))
-	var gpExt: String = ".csv" if gpAsCsv else ".txt"
-	var gpPath: String = gpDir.path_join(gpBaseName + gpExt)
-	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.WRITE)
-	if gpF == null:
-		return ""
-	gpF.store_string(gpToCsv(gpFindings) if gpAsCsv else gpToText(gpFindings))
-	gpF.close()
-	return gpPath
+# MOVED: the disk step is GPDRCReportFile in the io layer (see the note at the top of this file).
+# Here only the string builders live, so "pure" is a fact rather than an aspiration.
+# 已移出：写盘一步改为 io 层的 GPDRCReportFile（见本文件顶部说明）。此处只留字符串构建器，
+# 「纯」从愿景变成事实。
 
 
 # Quote one CSV field when it contains a comma, a quote or a newline.
@@ -127,15 +115,5 @@ static func gpToJson(gpFindings: Array[GPFinding], gpMeta: Dictionary = {}) -> S
 
 # Write the JSON report and return its path ("" on failure).
 # 写出 JSON 报告并返回路径（失败为空串）。
-static func gpWriteJson(gpFindings: Array[GPFinding], gpDir: String, gpBaseName: String,
-		gpMeta: Dictionary = {}) -> String:
-	if gpDir == "":
-		return ""
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(gpDir))
-	var gpPath: String = gpDir.path_join(gpBaseName + ".json")
-	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.WRITE)
-	if gpF == null:
-		return ""
-	gpF.store_string(gpToJson(gpFindings, gpMeta))
-	gpF.close()
-	return gpPath
+# MOVED to GPDRCReportFile (io) for the same reason as gpWrite above.
+# 与上面的 gpWrite 同理，已移到 GPDRCReportFile（io）。

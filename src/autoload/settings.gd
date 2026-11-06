@@ -179,6 +179,22 @@ signal gpMotionChanged
 signal gpCanvasStyleChanged
 
 
+# Register this autoload as the source of the UI font for the inner layers (GPFontSeam, ADR-10).
+# Installed in `_init`, NOT `_ready`, for the same measured reason as GPLocalizer: a headless
+# `--script` run reaches its own `_initialize()` before autoload `_ready` cascades, so a `_ready`
+# install would leave the frame un-fonted for the whole test run.
+# The lambda is deliberately LATE-BOUND: it reads gpFontKey on every call, so switching the preset
+# needs no reinstall. It returns Settings' cached instance (one per key, owned for the process
+# lifetime), which is what keeps a recorded frame draw command valid to the end of the frame.
+# 把本 autoload 注册为内层的 UI 字体来源（GPFontSeam 缝，ADR-10）。在 `_init` 而非 `_ready` 中装入，
+# 原因与 GPLocalizer 相同且为实测所得：headless `--script` 会在 autoload 的 `_ready` 级联之前进入
+# 自己的 `_initialize()`，若用 `_ready`，整轮测试里图框都拿不到字体。
+# 该 lambda 刻意**延迟求值**：每次调用才读 gpFontKey，故切换预设无需重装本缝。它返回 Settings 缓存
+# 的实例（每键一个、进程级持有），这正是「已记录的图框绘制命令活到帧末」的前提。
+func _init() -> void:
+	GPFontSeam.gpSetUiFontResolver(func() -> Font: return gpLoadFont(gpFontKey))
+
+
 # Load settings from disk and apply them.
 # 从磁盘加载设置并应用。
 func _ready() -> void:
@@ -236,8 +252,10 @@ func _gpBuildFont(p_gpKey: String) -> Font:
  # 尚未导入（首次启动导入扫描前）。编辑器内可用原始字节构造；无显示的
  # headless 脚本运行则回退引擎默认，避免在无窗口环境分配大字形缓存而崩溃。
 		if OS.has_feature("editor"):
-			var gpBytes: PackedByteArray = FileAccess.get_file_as_bytes(gpSpec["res"])
-			if gpBytes != null and gpBytes.size() > 0:
+			# Reading stops at the io gateway (ADR-2) instead of this autoload opening the file.
+			# 读文件止步于 io 网关（ADR-2），不再由本 autoload 亲自开文件。
+			var gpBytes: PackedByteArray = GPFileGateway.gpReadBytes(str(gpSpec["res"]))
+			if gpBytes.size() > 0:
 				var gpF: FontFile = FontFile.new()
 				gpF.font_data = gpBytes
 				gpF.antialiased = true

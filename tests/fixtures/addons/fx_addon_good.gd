@@ -4,13 +4,13 @@ extends GPIPIDAddon
 # 夹具（B3）：最小且格式正确的插件。它只用于让加载器测试证明「好插件会被加载、命名、收集」，
 # 应用启动时绝不会扫描这里。
 
-func _gpGetName() -> String:
+func gpGetName() -> String:
 	return "fixture.good"
 
 
-func _gpGetTools() -> Array:
+func gpGetTools() -> Array:
 	return [{"action": "fixture_hello", "label": "Hello"}]
 
 
-func _gpGetPanels() -> Array:
+func gpGetPanels() -> Array:
 	return ["res://tests/fixtures/addons/fx_panel.tscn"]

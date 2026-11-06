@@ -228,11 +228,10 @@ static func gpExportLists(gpGraph: GPPIDGraph, gpDir: String,
 	for gpCat in gpCategories(gpGraph, gpDefs):
 		var gpRows: Array[Dictionary] = gpBuildList(gpGraph, gpCat, gpDefs)
 		var gpPath: String = gpDir.path_join(gpCat + GP_LIST_EXT)
-		var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.WRITE)
-		if gpF == null:
+		# Through GPFileGateway: one crash-safe write path for every file the app produces.
+		# 经 GPFileGateway：应用产生的每个文件都走同一条崩溃安全写入路径。
+		if not GPFileGateway.gpWriteText(gpPath, gpListToCsv(gpRows)):
 			continue
-		gpF.store_string(gpListToCsv(gpRows))
-		gpF.close()
 		gpOut[gpCat] = gpPath
 	return gpOut
 
@@ -287,11 +286,8 @@ static func gpExportOpenEnds(gpGraph: GPPIDGraph, gpDir: String) -> String:
 	if gpRows.is_empty():
 		return ""
 	var gpPath: String = gpDir.path_join("open_ends" + GP_LIST_EXT)
-	var gpF: FileAccess = FileAccess.open(gpPath, FileAccess.WRITE)
-	if gpF == null:
+	if not GPFileGateway.gpWriteText(gpPath, gpListToCsv(gpRows)):
 		return ""
-	gpF.store_string(gpListToCsv(gpRows))
-	gpF.close()
 	return gpPath
 
 

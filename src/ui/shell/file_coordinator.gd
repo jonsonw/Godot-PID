@@ -8,10 +8,10 @@ extends RefCounted
 # GPMainWindow had grown to 1,759 lines carrying eight unrelated responsibilities; the file
 # lifecycle alone was ~360 of them. This coordinator owns that one use case end to end —
 # the file dialog, the current-path bookkeeping, the dirty-flag settlement and the exit
-# three-way — so the root keeps only assembly and forwarding.
+# three-way — so the root keeps only assembly — the sibling relays live in the GPShellHost contract.
 # GPMainWindow 一度膨胀到 1,759 行、承载八类互不相关的职责，其中文件生命周期独占约 360 行。
 # 本协调者端到端接管这一用例 —— 文件对话框、当前路径记账、脏标记结算与退出三选一 ——
-# 使根类只保留装配与转发。
+# 使根类只保留装配 —— 兄弟中继已在 GPShellHost 契约里。
 #
 # Interaction / 交互方式：
 # - the root creates this coordinator and injects itself as gpHost (composition root);
@@ -25,7 +25,11 @@ extends RefCounted
 # Coding rule: every variable declares its type explicitly.
 # 编码规范：所有变量均显式声明类型。
 
-var gpHost: GPMainWindow = null
+# The SHELL CONTRACT, not the scene root: this type declares every member a coordinator
+# may touch, so an undeclared reach is a parse error at gate 5 instead of a code review miss.
+# **外壳契约**，而非场景根类：该类型声明了协调者可以触碰的每个成员，故未声明的伸手在门 5
+# 就是解析错误，而不是评审疏忽。
+var gpHost: GPShellHost = null
 
 # Autosave POLICY + its timer. gpAutoSave holds the STATE (armed? which cadence); the Timer is
 # the MECHANISM. Armed only after the first successful manual save (ADR-9).
@@ -647,7 +651,7 @@ func gpPrintSheet() -> void:
 		gpHost.gpSetState("status.export_empty")
 		return
 	var gpDir: String = "user://print"
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(gpDir))
+	GPFileGateway.gpEnsureDir(gpDir)
 	var gpStamp: String = Time.get_datetime_string_from_system().replace(":", "-")
 	var gpName: String = gpHost.gpCurrentPath.get_file().get_basename()
 	if gpName == "":

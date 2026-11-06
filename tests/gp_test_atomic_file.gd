@@ -188,3 +188,70 @@ func gpTestSaveShortcutEventShape() -> void:
 		gpCheck(gpE.meta_pressed, "on macOS the primary modifier should be Cmd")
 	else:
 		gpCheck(gpE.ctrl_pressed, "on Win/Linux the primary modifier should be Ctrl")
+
+
+# ==================== gateway writes are atomic too / 网关的写入同样是原子的 ====================
+
+# Scratch file for the gateway cases.
+# 网关用例使用的临时文件。
+const GP_GW_PATH: String = "user://gp_test_gateway.csv"
+
+
+# Remove the scratch file and every sibling artifact.
+# 删除临时文件及其所有伴生产物。
+func _gpGwCleanup() -> void:
+	GPFileGateway.gpDeleteArchive(GP_GW_PATH)
+
+
+# The gateway is the app's ONLY write path, so it must inherit the atomic guarantee. Asserting
+# the writer itself is not enough: the callers that matter (symbol packs, project standard, repair
+# plan, DRC reports, BOM CSVs) reach the disk through this function and nothing else.
+# 网关是应用**唯一**的写入路径，故必须继承原子保证。只断言写入器本身不够：真正重要的调用方
+#（图元包、项目标准、修复计划、DRC 报告、BOM CSV）都是经此函数而非别处落盘的。
+func gpTestGatewayWriteIsAtomic() -> void:
+	_gpGwCleanup()
+	gpCheck(GPFileGateway.gpWriteText(GP_GW_PATH, "first"), "the first gateway write should succeed")
+	gpCheck(GPFileGateway.gpWriteText(GP_GW_PATH, "second"), "the second gateway write should succeed")
+	gpEq(GPFileGateway.gpReadText(GP_GW_PATH), "second", "the target should hold the newest text")
+	gpCheck(not FileAccess.file_exists(GP_GW_PATH + ".tmp"),
+		"a gateway write must not leave a temp file behind")
+	# The previous good copy is the only recovery path when a save is bad-but-parseable.
+	# 上一份完好副本是「写坏但仍能解析」时唯一的退路。
+	gpEq(GPFileGateway.gpReadText(GP_GW_PATH + ".bak"), "first",
+		"the previous copy should survive as .bak")
+	_gpGwCleanup()
+
+
+# Deleting through the gateway has to cover the whole archive. Deleting only the .json/.csv leaves
+# a .bak holding exactly the data the user asked to remove — "deleted" content still on disk.
+# 经网关删除必须覆盖整个存档。只删 .json/.csv 会留下一个 .bak，里面正是用户要求删除的数据 ——
+# "已删除"的内容仍躺在磁盘上。
+func gpTestGatewayDeleteRemovesArtifacts() -> void:
+	_gpGwCleanup()
+	gpCheck(GPFileGateway.gpWriteText(GP_GW_PATH, "v1"), "setup write should succeed")
+	gpCheck(GPFileGateway.gpWriteText(GP_GW_PATH, "v2"), "setup rewrite should succeed")
+	gpCheck(FileAccess.file_exists(GP_GW_PATH + ".bak"), "setup should have produced a backup")
+
+	gpCheck(GPFileGateway.gpDeleteArchive(GP_GW_PATH), "deleting the archive should succeed")
+	gpCheck(not FileAccess.file_exists(GP_GW_PATH), "the archive itself should be gone")
+	gpCheck(not FileAccess.file_exists(GP_GW_PATH + ".bak"),
+		"the backup must go too — otherwise the deleted content is still on disk")
+	gpCheck(not FileAccess.file_exists(GP_GW_PATH + ".tmp"), "no temp file may remain")
+
+
+# A backup must never be mistaken for another archive. GPSymbolPackStore lists user://symbol_packs
+# filtered by ".json", so a .bak surviving next to a pack would otherwise register the SAME symbol
+# twice in the palette — a bug the atomic writer would have introduced while fixing another one.
+# 备份绝不能被当成另一个存档。GPSymbolPackStore 按 ".json" 过滤列目录，若包旁的 .bak 被算进去，
+# 同一个图元就会在库里登记两次 —— 那是原子写入器在修复另一个问题时会顺手引入的缺陷。
+func gpTestBackupIsNotListedAsAnArchive() -> void:
+	_gpGwCleanup()
+	gpCheck(GPFileGateway.gpWriteText(GP_GW_PATH, "a"), "setup write")
+	gpCheck(GPFileGateway.gpWriteText(GP_GW_PATH, "b"), "setup rewrite")
+	gpCheck(FileAccess.file_exists(GP_GW_PATH + ".bak"), "setup should have produced a backup")
+
+	var gpListed: PackedStringArray = GPFileGateway.gpListFiles("user://", ".csv")
+	gpCheck(gpListed.has("gp_test_gateway.csv"), "the archive itself must still be listed")
+	gpCheck(not gpListed.has("gp_test_gateway.csv.bak"),
+		"the backup must not match the archive suffix filter")
+	_gpGwCleanup()

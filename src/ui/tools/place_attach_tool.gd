@@ -46,11 +46,16 @@ var _gpDrag: GPMountDragOps = GPMountDragOps.new()
 # The most recent candidate anchor (mode 1 preview). Empty dictionary = no hit.
 var _gpCand: Dictionary = {}
 
-# 最近一次移动事件的世界坐标。持有它是为了在不命中锚点时仍能把幽灵画在光标处 ——
-# 画布上的 `_gpLastMouseWorld` 是私有字段，跨对象读取会违反「零私有调用」硬约束。
-# World position of the most recent motion event. Kept so the ghost can still be drawn at the
-# cursor when no anchor is in range — the canvas's `_gpLastMouseWorld` is private, and reading it
-# across objects would break the "no cross-object private access" hard rule.
+# 最近一次**交给本工具**的移动世界坐标。持有它是为了在不命中锚点时仍能把幽灵画在光标处。
+# 这不是「绕开私有字段」的权宜：gpDrawOverlay() 与移动分派是**两个**调用，覆盖层重绘时必须
+# 知道最后一次移动落在哪里，而那时并没有事件参数可读。S7 之后路由有了只读端口
+# （gpInputRouter.gpLastMouseWorld()），但本字段记录的是**本工具收下的那个值**，与谁来问无关。
+# World position of the most recent motion event HANDED TO THIS TOOL. Kept so the ghost can still
+# be drawn at the cursor when no anchor is in range.
+# This is not a workaround for a private field: gpDrawOverlay() and motion dispatch are TWO
+# different calls, and an overlay repaint needs the last motion position with no event parameter
+# in hand. Since S7 the router publishes a read-only port (gpInputRouter.gpLastMouseWorld()), but
+# this field records the value THIS tool was given — independent of who else can ask.
 var _gpGhostWorld: Vector2 = Vector2.ZERO
 
 # 最近一次算出的**落位元组**（模式一预览与落位共用 GPMountResolver.gpPlacementTuple 这一条

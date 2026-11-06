@@ -1069,3 +1069,18 @@ func gpSetLocale(gpLocaleCode: String) -> void:
 		return
 	gpLocale = gpLocaleCode
 	gpLocaleChanged.emit(gpLocale)
+
+
+# Register this autoload as the translator for the inner layers (GPLocalizer seam, ADR-10).
+# Installed in `_init`, NOT `_ready`: a headless `--script` run (the gate-2 runner) reaches its own
+# `_initialize()` before autoload `_ready` cascades, so a `_ready` install would leave core
+# untranslated for the whole test run — measured, not assumed.
+# 在 `_init` 中装入，**不是** `_ready`：headless `--script`（门 2 运行器）会在 autoload 的 `_ready`
+# 级联之前进入自己的 `_initialize()`，若用 `_ready` 装入，整轮测试里 core 都拿不到翻译 ——
+# 这是实测结论，不是推测。
+# core may not name an autoload, so it names a Callable it owns and the composition root fills it.
+# 把本 autoload 注册为内层的翻译器（GPLocalizer 缝，ADR-10）。core 不可命名 autoload，
+# 故它只认一个自己持有的 Callable，由组合根填充。
+func _init() -> void:
+	GPLocalizer.gpSetTranslator(gpTr)
+	GPLocalizer.gpSetBothTranslator(gpTrBoth)

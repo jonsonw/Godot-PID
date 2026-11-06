@@ -363,26 +363,27 @@ func _gpDrawTextCentred(gpFont: Font, gpPosMM: Vector2, gpText: String,
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-# Resolve a font without depending on the Settings autoload, so this view still draws
-# under headless `--script` runs where autoloads do not exist.
-# 取字体时不依赖 Settings 自动加载，使本视图在 autoload 不存在的 headless `--script` 下
-# 依然能绘制。
+# Resolve the UI font through the GPFontSeam seam (ADR-10). Render may not name the Settings
+# autoload — that was an upward dependency on a global that does not exist in a headless
+# `--script` run. The seam is installed by src/autoload/settings.gd `_init`, and with nothing
+# installed it falls back to the engine font, which is exactly the previous no-autoload behaviour.
+# The font it returns is owned by Settings' per-key cache, so the recorded draw commands stay
+# valid to the end of the frame (see the 2026-10-16 note in settings.gd).
+# 经 GPFontSeam 缝取 UI 字体（ADR-10）。render 不可命名 Settings 自动加载 —— 那是对一个在 headless
+# `--script` 下并不存在的全局对象的上行依赖。该缝由 src/autoload/settings.gd 的 `_init` 装入，
+# 未装入时回退引擎字体，正是旧「无 autoload」时的行为。它返回的字体由 Settings 的每键缓存持有，
+# 故已记录的绘制命令活到帧末仍有效（见 settings.gd 的 2026-10-16 说明）。
 func _gpFont() -> Font:
-	var gpSet: Object = get_node_or_null("/root/Settings")
-	if gpSet != null and gpSet.has_method("gpLoadFont"):
-		var gpF: Font = gpSet.gpLoadFont(str(gpSet.get("gpFontKey"))) as Font
-		if gpF != null:
-			return gpF
-	return ThemeDB.fallback_font
+	return GPFontSeam.gpUiFont()
 
 
-# Bilingual caption lookup with an autoload-free fallback to the raw key.
-# 双语字段名查询；无 autoload 时回退为原始键。
+# Bilingual caption lookup through the GPLocalizer seam (ADR-10). The result is IDENTICAL to the
+# old autoload read — the seam is installed by src/autoload/i18n.gd `_init` and falls back to the
+# raw key when nothing is installed, which is exactly the previous "no autoload" behaviour.
+# 经 GPLocalizer 缝取双语标题（ADR-10）。结果与旧的 autoload 读法**完全一致** —— 该缝由
+# src/autoload/i18n.gd 的 `_init` 装入，未装入时回退为原始键，正是旧「无 autoload」时的行为。
 func _gpTrBoth(gpKey: String) -> String:
-	var gpI: Object = get_node_or_null("/root/I18n")
-	if gpI != null and gpI.has_method("gpTrBoth"):
-		return str(gpI.gpTrBoth(gpKey, gpKey))
-	return gpKey
+	return GPLocalizer.gpTrBoth(gpKey)
 
 
 # Re-render after any frame-affecting change.

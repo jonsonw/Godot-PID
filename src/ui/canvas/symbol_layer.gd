@@ -66,10 +66,10 @@ func gpRefreshEdges() -> void:
 # Topmost node under a world point, or "". Delegates to GPCanvasHitTest .
 # 世界点下最上层的节点，无则 ""。委托 GPCanvasHitTest。
 func gpHitTest(gpWorld: Vector2) -> String:
-	return GPCanvasHitTest.gpHitNode(gpHost.gpGraph, gpHost.gpBinder, gpWorld)
+	return GPCanvasHitTest.gpHitNode(gpHost.gpGraph, gpDefLookupCallable(), gpWorld)
 
 func gpNodeRect(gpId: String) -> Rect2:
-	return GPCanvasHitTest.gpNodeRect(gpHost.gpGraph, gpHost.gpBinder, gpId)
+	return GPCanvasHitTest.gpNodeRect(gpHost.gpGraph, gpDefLookupCallable(), gpId)
 
 # ============================ lookup ============================
 # ============================ 查找 ============================

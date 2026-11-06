@@ -96,9 +96,9 @@ func gpTestSchedulerRunsAndPublishesFindings() -> void:
 	var gpCv: GPCanvas2D = _gpCanvasWithFinding()
 	var gpSched: GPRuleScheduler = GPRuleScheduler.new()
 	add_child(gpSched)
-	gpSched.gpBind(gpCv, [])
+	gpSched.gpBind(gpCv.gpGraph, gpCv.gpSheet, [])
 	var gpGot: Array = []
-	gpSched.gpFindingsReady.connect(func(gpF: Array[GPFinding], _c: GPCanvas2D) -> void:
+	gpSched.gpFindingsReady.connect(func(gpF: Array[GPFinding], _g: GPPIDGraph) -> void:
 		gpGot.append(gpF))
 	gpSched.gpRunNow()
 	gpEq(gpGot.size(), 1, "scheduler publishes once / 调度器发布一次")
@@ -145,7 +145,7 @@ func gpTestSchedulerRecordsBudgetMetric() -> void:
 	var gpCv: GPCanvas2D = _gpCanvasWithFinding()
 	var gpSched: GPRuleScheduler = GPRuleScheduler.new()
 	add_child(gpSched)
-	gpSched.gpBind(gpCv, [])
+	gpSched.gpBind(gpCv.gpGraph, gpCv.gpSheet, [])
 	gpSched.gpRunNow()
 	gpCheck(gpSched.gpLastRunUsec >= 0, "scheduler records run cost / 调度器记录耗时")
 	gpCheck(gpSched.gpOverBudget == (gpSched.gpLastRunUsec > GPRuleScheduler.GP_BUDGET_USEC),
@@ -173,7 +173,7 @@ func gpTestSchedulerTimeSlicesPublishAfterAllFamilies() -> void:
 	var gpCv: GPCanvas2D = _gpCanvasWithFinding()
 	var gpSched: GPRuleScheduler = GPRuleScheduler.new()
 	add_child(gpSched)
-	gpSched.gpBind(gpCv, [])
+	gpSched.gpBind(gpCv.gpGraph, gpCv.gpSheet, [])
 	gpSched._gpRunning = true
 	gpSched._gpSlice = 0
 	gpSched._gpAccum.clear()

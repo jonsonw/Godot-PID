@@ -38,14 +38,14 @@ static func gpCheck(gpSheets: Array, gpDefs: Array[GPSymbolDef] = [],
 		"waived": gpWaived,
 		"doc_hash": gpDocHash(gpSheets),
 		"rules_hash": gpRulesHash(gpStdUsed),
-		"summary": I18n.gpTr("drc.summary") % [gpErrors, gpWarnings, gpInfos],
+		"summary": GPLocalizer.gpTr("drc.summary") % [gpErrors, gpWarnings, gpInfos],
 	}
 
 
 # Human-readable refusal line for a dialog / status bar.
 # 供对话框 / 状态栏使用的拒绝文案。
 static func gpBlockerText(gpGate: Dictionary) -> String:
-	return I18n.gpTr("drc.export_blocked") % int(gpGate.get("errors", 0))
+	return GPLocalizer.gpTr("drc.export_blocked") % int(gpGate.get("errors", 0))
 
 
 # Deterministic hash of the drawing data (sheets / graphs / title blocks). Same project →

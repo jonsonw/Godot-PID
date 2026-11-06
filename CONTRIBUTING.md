@@ -75,8 +75,22 @@ To avoid collisions with Godot's native classes and third-party plugins in the g
 - **Constants / enum values**: `GP_` + SCREAMING_SNAKE — `GP_EQUIPMENT`.
 - **Enum names**: `GP` + PascalCase — `GPSymbolCategory`, `GPMode`.
 - **File names**: keep `snake_case` (Godot convention, no prefix) — `pid_graph.gd` defines class `GPPIDGraph`.
+- **Contract hooks** (methods an addon is *meant* to override in another repository, e.g. `GPIPIDAddon`):
+  public `gp` + CamelCase. The `_` prefix means "private to this class"; a hook is the opposite of private —
+  and in the Open-Core split that base class is the file external implementers read first.
 
 Do **not** rename: Godot virtual methods (`_ready`, `_draw`, `_gui_input`, `_process`…); engine built-ins (`position`, `name`, `size`, `visible`); dictionary keys (`"id"`, `"from"`, `"to"` — they are the data contract); single-letter coordinate loop vars (`x`, `y`, `z`, `w`, `h`).
+
+### Where new features go（强制 / mandatory）
+A new feature starts in a **new file**. The file you already have open is a wiring point, not a dumping ground — one addition there is reasonable, a hundred is the debt you will spend a week refactoring later.
+
+- **R1 — new module first.** New domain responsibility → new `src/<layer>/<module>.gd` + its own `tests/gp_test_<module>.gd`. Existing large files may only gain **wiring** (instantiate, inject, connect) or **lose code** (extract).
+- **R2 — budgets only shrink.** Any file over **500 lines** or any function over **200 lines** is pinned at today's size by `gp_test_architecture.gd`. The gate fails on a single added line. Raising a budget is a review-level decision, never an edit.
+- **R3 — cut by "what changes together"**, not by "who calls whom". If the code needs its own test, it needs its own file.
+- **R4 — cross the module boundary through a port or contract.** Private members never cross an object boundary (also gated since S8). Corollary: *whoever holds the handler holds the wiring* — connect a signal in the class that implements its handler.
+- **R5 — an extraction without a test is a move, not a refactor.** Ship the suite file, a behaviour assertion, and an anti-backslide assertion in the same change.
+
+Full reasoning, the decision tree and the exception process: internal `docs/ADR/2026-11-06-ADR-47-模块化与新增功能落位.md`.
 
 ### Symbol id rule（强制 / mandatory）
 Every symbol definition carries an id of the form **`<source><CATEGORY><3-digit sequence>`**:
@@ -163,8 +177,22 @@ HOME=/tmp/gpidhome "$GODOT" --headless --path . --editor --quit
 - **常量 / 枚举值**：`GP_` + SCREAMING_SNAKE —— `GP_EQUIPMENT`。
 - **枚举名**：`GP` + PascalCase —— `GPSymbolCategory`、`GPMode`。
 - **文件名**：保持 `snake_case`（Godot 约定，不带前缀）—— `pid_graph.gd` 定义类 `GPPIDGraph`。
+- **契约钩子**（**就是给另一个仓库覆写**的方法，如 `GPIPIDAddon`）：用公开的 `gp` + CamelCase。
+  `_` 前缀的含义是「本类私有」，而钩子恰恰相反 —— 且在 Open-Core 拆分中，那个基类是外部实现者
+  最先读的文件。
 
 **禁止改名**：Godot 虚方法（`_ready`、`_draw`、`_gui_input`、`_process` 等）；引擎内置属性（`position`、`name`、`size`、`visible`）；字典键（`"id"`、`"from"`、`"to"`，属数据契约）；单字母坐标循环变量（`x`、`y`、`z`、`w`、`h`）。
+
+### 新增功能落位（强制）
+新增功能**从新文件开始**。你已经打开的那个文件是**接线点**，不是堆放场 —— 往里加一次合理，加一百次就是几周后必须偿还的债。
+
+- **R1 模块先行**：新的领域职责 → 新建 `src/<层>/<模块>.gd` 与配套 `tests/gp_test_<模块>.gd`。既有大文件只允许两种改动：**接线**（实例化、注入、连信号）或**变短**（把代码搬出去）。
+- **R2 预算只减不增**：超过 **500 行**的文件、超过 **200 行**的函数，由 `gp_test_architecture.gd` 钉住今天的行数；加一行即红。上调预算属评审级决议，不是顺手改数字。
+- **R3 按「谁会一起变」切**，不按「谁调用谁」切。如果这段代码需要单独的测试，它就需要单独的文件。
+- **R4 跨模块只经端口/契约**，私有成员不出对象边界（自 S8 起亦有守卫）。推论：**谁持有处理器，谁持有接线** —— 信号的 `connect` 写在实现其处理器的那个类里。
+- **R5 没有测试的提取只能叫「搬家」**，不算重构。同一次提交里要带上：套件文件 + 一条行为断言 + 一条防回流断言。
+
+完整理由、落位决策树与例外流程见内部 `docs/ADR/2026-11-06-ADR-47-模块化与新增功能落位.md`。
 
 ### 图元标识 id 命名规则（强制）
 每个图元定义的 id 形如 **`<来源码><类别码><三位序号>`**：

@@ -201,15 +201,15 @@ func gpTestPickModes() -> void:
 	var gpCenter: Vector2 = Vector2(10.0, 10.0)
 	var gpRim: Vector2 = Vector2(10.0, -8.0)
 	var gpNone: GPGraphBinder = _gpBinderOf(GPSymbolDef.GP_PICK_NONE)
-	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpNone, gpCenter), "", "NONE 模式中心点不应命中")
+	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpNone.gpDefFor, gpCenter), "", "NONE 模式中心点不应命中")
 	gpNone.free()
 	var gpBorder: GPGraphBinder = _gpBinderOf(GPSymbolDef.GP_PICK_BORDER)
-	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpBorder, gpCenter), "",
+	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpBorder.gpDefFor, gpCenter), "",
 		"BORDER 模式中心点不应命中（穿透到下方）")
-	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpBorder, gpRim), "N1", "BORDER 模式边框带应命中")
+	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpBorder.gpDefFor, gpRim), "N1", "BORDER 模式边框带应命中")
 	gpBorder.free()
 	var gpFull: GPGraphBinder = _gpBinderOf(GPSymbolDef.GP_PICK_FULL)
-	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpFull, gpCenter), "N1", "FULL 模式中心点应命中")
+	gpEq(GPCanvasHitTest.gpHitNode(gpG, gpFull.gpDefFor, gpCenter), "N1", "FULL 模式中心点应命中")
 	gpFull.free()
 
 

@@ -168,7 +168,7 @@ static func gpPolyline(gpCv: GPCanvas2D, gpE: GPPIDEdge) -> PackedVector2Array:
 static func gpEdgeUnderNode(gpCv: GPCanvas2D,gpNode: GPPIDNode) -> String:
 	if gpNode == null or gpCv.gpGraph == null:
 		return ""
-	var gpRect: Rect2 = GPCanvasHitTest.gpNodeRect(gpCv.gpGraph, gpCv.gpBinder, gpNode.gpInstanceId)
+	var gpRect: Rect2 = GPCanvasHitTest.gpNodeRect(gpCv.gpGraph, gpCv.gpDefLookupCallable(), gpNode.gpInstanceId)
 	if gpRect == Rect2():
 		return ""
 	for gpE in gpCv.gpGraph.gpEdges:
@@ -186,7 +186,7 @@ static func gpEdgeUnderNode(gpCv: GPCanvas2D,gpNode: GPPIDNode) -> String:
 static func gpEdgesUnderNode(gpCv: GPCanvas2D,gpNode: GPPIDNode) -> Array[String]:
 	if gpNode == null or gpCv.gpGraph == null:
 		return []
-	var gpRect: Rect2 = GPCanvasHitTest.gpNodeRect(gpCv.gpGraph, gpCv.gpBinder, gpNode.gpInstanceId)
+	var gpRect: Rect2 = GPCanvasHitTest.gpNodeRect(gpCv.gpGraph, gpCv.gpDefLookupCallable(), gpNode.gpInstanceId)
 	if gpRect == Rect2():
 		return []
 	var gpHits: Array[String] = []
