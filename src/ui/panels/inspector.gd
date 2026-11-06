@@ -1010,8 +1010,7 @@ func _gpAddShapeLayer(gpCurrent: String) -> void:
 
 # ============================ edge form / 边表单 ============================
 
-# Show the form for a single selected edge. Pass null to clear.
-# 显示单选边的表单。edge 为 null 时清空。
+# Show the form for a single selected edge. Pass null to clear. / 显示单选边的表单。null 时清空。
 func gpShowEdge(gpEdge: GPPIDEdge) -> void:
 	gpCurrentDef = null
 	gpCurrentNode = null
@@ -1028,11 +1027,11 @@ func gpShowEdge(gpEdge: GPPIDEdge) -> void:
 	gpHead.text = "▾ %s" % I18n.gpTr(GPEdgeStyle.gpLineTypeKey(gpEdge.gpKind, gpEdge.gpSignalType))
 	gpFormRoot.add_child(gpHead)
 	var gpSections: Dictionary = gpEdgeFieldSections(gpEdge, _gpEdgeStandard())
-	# Follow mode (user feedback 2026-11-04, round 2): when the B-side edge follows its
-	# source, every inheritable field shows the SOURCE value and is locked; keys the source
-	# does not carry stay editable-local. The number is locked too — it follows by contract.
-	# 跟随模式（用户反馈 2026-11-04 第二轮）：B 端边跟随源端时，所有可继承字段显示**源端**值
-	# 且锁定；源端没有的键保持本地可编辑。编号同样锁定 —— 它按契约跟随。
+	# Follow mode (user feedback 2026-11-04, round 2): when the B-side edge follows its source,
+	# every inheritable field shows the SOURCE value and is locked; keys the source does not
+	# carry stay editable-local. The number is locked too — it follows by contract.
+	# 跟随模式（用户反馈 2026-11-04 第二轮）：B 端边跟随源端时，可继承字段显示**源端**值且锁定，
+	# 源端没有的键保持本地可编辑；编号同样锁定 —— 它按契约跟随。
 	var gpInherit: Dictionary = {}
 	if gpEdgeInheritProvider.is_valid() and gpEdge.gpKind != GPPIDEdge.GP_SIGNAL:
 		gpInherit = gpEdgeInheritProvider.call(gpEdge.gpInstanceId) as Dictionary
@@ -1054,7 +1053,7 @@ func gpShowEdge(gpEdge: GPPIDEdge) -> void:
 		gpEdge, false, gpLockedVals)
 	# Cross-sheet inherit checkbox (user feedback 2026-11-04): only on a B-side continuation
 	# (the shell decides via the provider), never on signal lines (they carry no line number).
-	# 跨图纸继承勾选框（用户反馈 2026-11-04）：仅在 B 端延续段显示（外壳经 provider 判定）；
+	# 跨图纸继承勾选框（用户反馈 2026-11-04）：仅在 B 端延续段显示（外壳经 provider 判定），
 	# 信号线绝不显示（其不带管线号）。
 	if bool(gpInherit.get("show", false)):
 		var gpInhRow: HBoxContainer = _gpFieldRow(I18n.gpTr("offpage.insp_inherit"))
@@ -1067,11 +1066,11 @@ func gpShowEdge(gpEdge: GPPIDEdge) -> void:
 		gpInhRow.add_child(gpInhChk)
 
 
-# Field keys shown in the edge form for a given kind. SIGNAL edges hide the pipe-only
-# fields (dn / medium / spec / insulation) because a signal line has none of them; PROCESS
-# and UTILITY keep all eight. Pure + headless-testable (no widget built here).
-# 给定类型下边表单显示的字段键。信号线隐藏管道专属字段（dn/medium/spec/insulation），
-# 因信号线没有这些；PROCESS 与 UTILITY 保留全部八个。纯函数、可 headless 测试（此处不建控件）。
+# Field keys shown in the edge form for a given kind. SIGNAL edges hide the pipe-only fields
+# (dn / medium / spec / insulation) because a signal line has none of them; PROCESS and UTILITY
+# keep all eight. Pure + headless-testable (no widget built here).
+# 给定类型下边表单显示的字段键。信号线隐藏管道专属字段（dn/medium/spec/insulation，因信号线
+# 没有这些），PROCESS 与 UTILITY 保留全部八个。纯函数、可 headless 测试（此处不建控件）。
 static func gpEdgeFieldKeys(gpKind: String) -> Array[String]:
 	var gpKeys: Array[String] = ["kind", "tag", "show_arrow", "show_tag"]
 	if gpKind == GPPIDEdge.GP_SIGNAL:
@@ -1216,9 +1215,8 @@ static func gpEdgeFieldLabel(gpKey: String, gpStd: GPProjectStandard) -> String:
 	return I18n.gpTr("edge." + gpKey, gpKey)
 
 
-# Add one titled group; the identity group gets the "edit line attributes" entry, which is the
-# only way back to the full dialog for an existing pipe.
-# 添加一个带标题的字段组；标识组带「编辑管线属性」入口 —— 已有管线回到完整面板的唯一路径。
+# Add one titled group; the identity group gets the "edit line attributes" entry, the only way
+# back to the full dialog for an existing pipe. / 添加带标题字段组；标识组带「编辑管线属性」入口。
 func _gpAddEdgeSection(gpTitleKey: String, gpKeys: Array[String], gpEdge: GPPIDEdge,
 		gpWithEdit: bool, gpLockedVals: Dictionary = {}) -> void:
 	if gpKeys.is_empty():
@@ -1253,9 +1251,8 @@ func _gpAddEdgeSection(gpTitleKey: String, gpKeys: Array[String], gpEdge: GPPIDE
 		_gpAddEdgeField(gpEdge, gpKey, gpLockedVals)
 
 
-# Initial display values for an edge form (pure, headless-testable). tag is pre-filled from the
-# edge; show_tag defaults to "draw for pipes, hide for signal lines".
-# 边表单的初始显示值（纯函数，可 headless 测试）。tag 预填自边；show_tag 默认「管道画、信号线不画」。
+# Initial display values for an edge form (pure, headless-testable): tag pre-filled from the
+# edge, show_tag defaulting to "draw for pipes, hide for signal lines". / 纯函数可测：tag 预填自边。
 static func gpEdgeInitialValues(gpEdge: GPPIDEdge) -> Dictionary:
 	var gpOut: Dictionary = {}
 	gpOut["kind"] = gpEdge.gpKind
@@ -1270,9 +1267,8 @@ static func gpEdgeInitialValues(gpEdge: GPPIDEdge) -> Dictionary:
 	for gpKey in GP_EDGE_GENERAL_DEFAULTS:
 		if not gpOut.has(gpKey):
 			gpOut[gpKey] = str(gpEdge.gpAttrs.get(gpKey, ""))
-	# Project-standard / engineering attributes added after the fixed set: expose them too, so
-	# the pure helper matches what the dynamic form will render.
-	# 固定字段之后新增的项目标准 / 工程属性：一并暴露，使纯助手与动态表单一致。
+	# Attributes added after the fixed set are exposed too, so this pure helper matches the
+	# dynamic form. / 固定字段之后新增的属性一并暴露，使纯助手与动态表单一致。
 	for gpKeyRaw in gpEdge.gpAttrs.keys():
 		var gpKey: String = str(gpKeyRaw)
 		if not gpOut.has(gpKey) and not GP_EDGE_INTERNAL_ATTRS.has(gpKey):
@@ -1309,11 +1305,10 @@ func _gpAddEdgeField(gpEdge: GPPIDEdge, gpKey: String, gpLockedVals: Dictionary 
 				gpEdgeAttrChanged.emit(gpEdge.gpInstanceId, gpKey, gpV))
 			gpRow.add_child(gpChk)
 		_:
-			# Any attribute with a non-empty project code table is a picker — this is what
-			# makes `dn` a dropdown once the standard defines a dn table, and it also covers
-			# project-standard custom fields without a second hard-coded field map.
-			# 任何有非空项目代号表的属性都走下拉 —— 这就是项目标准定义 dn 表后管径变成
-			# 下拉的原因，也让项目标准自定义字段无需第二张硬编码字段表。
+			# Any attribute with a non-empty project code table is a picker — this is what makes
+			# `dn` a dropdown and covers custom fields without a second hard-coded field map.
+			# 任何有非空项目代号表的属性都走下拉 —— `dn` 因此成为下拉，项目标准自定义字段
+			# 也无需第二张硬编码字段表。
 			var gpChoices: Array[Dictionary] = gpEdgeAttrChoices(gpKey, gpStd)
 			if not gpChoices.is_empty():
 				_gpAddEdgeCodePicker(gpRow, gpEdge, gpKey, gpChoices, gpShown, gpLocked)
@@ -1321,12 +1316,11 @@ func _gpAddEdgeField(gpEdge: GPPIDEdge, gpKey: String, gpLockedVals: Dictionary 
 			_gpAddEdgeText(gpRow, gpEdge, gpKey, gpShown, gpLocked)
 
 
-# The code table behind an edge attribute key; "" when the field is not a code field.
-# 边属性键背后的代号表；不是代号字段时返回 ""。
-# A project-standard rule segment can name the table explicitly (material -> spec); otherwise
-# the attribute key itself is tried, which is what makes `dn` use the `dn` table.
-# 项目标准规则段可以显式指定表名（material -> spec）；否则直接试属性键本身 ——
-# 这正是 `dn` 使用 `dn` 代号表的原因。
+# The code table behind an edge attribute key; "" when the field is not a code field. A
+# project-standard rule segment may name it explicitly (material -> spec); otherwise the key
+# itself is tried — which is what makes `dn` use the `dn` table.
+# 边属性键背后的代号表；不是代号字段时返回 ""。项目标准规则段可显式指定表名
+#（material -> spec）；否则直接试属性键本身 —— 这正是 `dn` 使用 `dn` 代号表的原因。
 static func gpEdgeAttrTable(gpKey: String, gpStd: GPProjectStandard = null) -> String:
 	if gpStd != null:
 		var gpSeg: GPTagSegment = _gpLineSegmentFor(gpKey, gpStd)
@@ -1405,11 +1399,10 @@ func _gpAddEdgeCodePicker(gpRow: HBoxContainer, gpEdge: GPPIDEdge, gpKey: String
 	gpRow.add_child(gpOpt)
 
 
-# Single-line text field that commits on Enter AND on losing focus. Committing on focus loss is
-# what makes "type and click away" work — with Enter only, the edit looked like it did nothing.
-# gpShown/gpLock (cross-sheet inherit): show the source value, not editable.
-# 单行文本字段：回车**以及失焦**时提交。失焦提交让「打完点别处」也能生效 —— 只认回车时，
-# 这次编辑看起来就像什么都没发生。gpShown/gpLock（跨图纸继承）：显示**源端**值，不可编辑。
+# Single-line text field committing on Enter AND on focus loss — the focus-loss commit is what
+# makes "type and click away" work. gpShown/gpLock (cross-sheet inherit): source value, locked.
+# 单行文本字段：回车**以及失焦**时提交——失焦提交让「打完点别处」也能生效。
+# gpShown/gpLock（跨图纸继承）：显示**源端**值，不可编辑。
 func _gpAddEdgeText(gpRow: HBoxContainer, gpEdge: GPPIDEdge, gpKey: String,
 		gpShown: String = "", gpLock: bool = false) -> void:
 	var gpEdit: LineEdit = LineEdit.new()
@@ -1421,7 +1414,14 @@ func _gpAddEdgeText(gpRow: HBoxContainer, gpEdge: GPPIDEdge, gpKey: String,
 		gpEdit.text = gpEdge.gpTag if gpKey == "tag" else str(gpEdge.gpAttrs.get(gpKey, ""))
 	var gpOriginal: String = gpEdit.text
 	var gpCommit: Callable = func(gpV: String) -> void:
-		if gpV.strip_edges() != gpOriginal.strip_edges():
+		# Lambdas reset captured locals on every call, so the committed value lives on the
+		# WIDGET: the teardown focus loss of the just-committed field then compares equal and
+		# is a no-op — no re-emit, no re-entry into a mid-teardown rebuild.
+		# lambda 每次调用都重置捕获的局部变量，故已提交值记在**控件元数据**上：刚提交字段的
+		# 拆除失焦比较相等即空操作 —— 不重发、不在拆除中途重入重建。
+		var gpOrig: String = str(gpEdit.get_meta("gp_orig", gpOriginal))
+		if gpV.strip_edges() != gpOrig.strip_edges():
+			gpEdit.set_meta("gp_orig", gpV)
 			gpEdgeAttrChanged.emit(gpEdge.gpInstanceId, gpKey, gpV)
 	gpEdit.text_submitted.connect(gpCommit)
 	gpEdit.focus_exited.connect(func() -> void: gpCommit.call(gpEdit.text))

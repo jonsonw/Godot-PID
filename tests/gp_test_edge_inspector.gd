@@ -144,3 +144,83 @@ func gpTestBlankAttrSegmentFallsBackToKey() -> void:
 		"the blank-attr segment falls back to its key and stays visible")
 	gpEq(GPInspector.gpEdgeFieldLabel("subitem", std), "子项号",
 		"the segment label is used for the fallback key")
+
+
+# Regression pin (2026-11-06 live-error fix): a committed edge-text field must NOT re-commit
+# when the refresh rebuild tears it down while still focused — removing a focused LineEdit
+# fires focus_exited, and the old commit lambda re-emitted the just-applied value, re-entering
+# gpShowEdge mid-teardown (add_child failed: "parent is busy setting up children"; a row was
+# lost and an extra undo step existed). The fix advances the captured original on commit.
+# Pin A: commit once, then the same field's focus loss must be a no-op; rebuild must not fire.
+# Pin B: outside teardown, a real focus loss still commits exactly once.
+# 回归钉（2026-11-06 实机报错修复）：已提交的边文本字段在刷新重建拆除（仍持焦点）时不得重复
+# 提交——移除聚焦 LineEdit 触发 focus_exited，旧提交 lambda 把刚应用的值再发一次并在拆除中途
+# 重入 gpShowEdge（add_child 失败「父节点正忙于设置子节点」、丢行、多一步撤销）。
+# 修复＝提交即前进捕获的原始值。钉 A：提交一次后同字段失焦须为空操作、重建不得再发射；
+# 钉 B：非拆除期的真实失焦仍恰提交一次。
+func gpTestClearFormSwallowsFocusedCommitButUserFocusLossCommits() -> void:
+	var f: Array = _mkEdge(GPPIDEdge.GP_PROCESS)
+	var e: GPPIDEdge = f[2]
+	# The fixed fields all render as pickers under the default standard's code tables; a custom
+	# attribute WITHOUT a code table is what renders as the LineEdit under test.
+	# 默认标准的代号表让固定字段全渲染为下拉；无代号表的自定义属性才渲染为被测的 LineEdit。
+	e.gpAttrs["design_note"] = "NOTE-1"
+	var insp: GPInspector = GPInspector.new()
+	var gpRoot: VBoxContainer = VBoxContainer.new()
+	gpRoot.name = "FormRoot"
+	insp.add_child(gpRoot)
+	# The runner calls test methods while the tree is still setting up children, so the
+	# inspector's _ready (gpFormRoot = $FormRoot) may not have run yet — assign it explicitly.
+	# 运行器在树仍处 setup children 时调用测试方法，面板的 _ready（gpFormRoot = $FormRoot）
+	# 可能尚未执行 —— 显式赋值，不依赖 _ready 时序。
+	insp.gpFormRoot = gpRoot
+	add_child(insp)
+	var gpFires: Array = [0]
+	insp.gpEdgeAttrChanged.connect(func(_gpId: String, _gpK: String, _gpV) -> void:
+		gpFires[0] += 1)
+	insp.gpShowEdge(e)
+	# Pin A: exactly the live-error sequence — user commits via Enter (fires once and advances
+	# the captured original), the refresh rebuild tears the still-focused field down, and the
+	# removal-induced focus_exited must NOT re-commit.
+	# 钉 A：完整复现实机链——用户回车提交（发射一次并前进捕获的原始值），刷新重建拆除仍在
+	# 焦点上的字段，移除引发的 focus_exited 不得再提交。
+	var gpEdit: LineEdit = _gpFirstLineEdit(insp.gpFormRoot)
+	gpCheck(gpEdit != null, "edge form has a text field")
+	if gpEdit == null:
+		return
+	gpEdit.text = gpEdit.text + "X" # Uncommitted edit / 未提交的编辑
+	gpEdit.text_submitted.emit(gpEdit.text) # Simulate Enter commit / 模拟回车提交
+	gpEq(gpFires[0], 1, "enter commit fires exactly once")
+	# The teardown's removal-induced focus_exited is JUST ANOTHER CALL of the same commit
+	# lambda — emit it manually on the SAME field: the advanced original must swallow it.
+	#（The gate-2 runner cannot put widgets on a live viewport, so real focus is unavailable;
+	# the mechanism — per-lambda captured-original advance — is what this pin verifies.)
+	# 拆除时移除引发的 focus_exited 只是同一提交 lambda 的再一次调用 —— 在**同一字段**上手动
+	# 发射：前进后的原始值必须吞掉它。（门 2 运行器无法让控件进入活 viewport、真实焦点不可
+	# 用；本钉验证的机制＝lambda 实例内捕获原始值的前进。）
+	gpEdit.focus_exited.emit()
+	gpEq(gpFires[0], 1, "post-commit focus loss does not re-commit")
+	insp.gpShowEdge(e) # Rebuild = teardown + rebuild, as the refresh does / 重建=拆除+重建
+	gpEq(gpFires[0], 1, "rebuild does not re-commit either")
+	# Pin B: a real user focus loss outside teardown still commits exactly once.
+	# 钉 B：非拆除期的真实用户失焦仍恰提交一次。
+	var gpEdit2: LineEdit = _gpFirstLineEdit(insp.gpFormRoot)
+	gpCheck(gpEdit2 != null and gpEdit2 != gpEdit, "rebuild produced a fresh field")
+	if gpEdit2 == null:
+		return
+	gpEdit2.text = gpEdit2.text + "Y"
+	gpEdit2.focus_exited.emit() # Simulate real user focus loss / 模拟真实用户失焦
+	gpEq(gpFires[0], 2, "user focus loss outside teardown commits once")
+	insp.queue_free()
+
+
+# Depth-first first LineEdit under a node (rows are HBox{Label, LineEdit}).
+# 深度优先找某节点下第一个 LineEdit（行结构 = HBox{Label, LineEdit}）。
+func _gpFirstLineEdit(gpFrom: Node) -> LineEdit:
+	if gpFrom is LineEdit:
+		return gpFrom
+	for gpC in gpFrom.get_children():
+		var gpFound: LineEdit = _gpFirstLineEdit(gpC)
+		if gpFound != null:
+			return gpFound
+	return null
