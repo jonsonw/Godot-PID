@@ -70,3 +70,7 @@ gut_junit.xml
 /build/
 *.dmg
 
+
+# 2026-11 实机手动测试存档（scratch 数据，不入库）
+/[0-9]*.pid.json
+/[0-9]*.pid.json.bak

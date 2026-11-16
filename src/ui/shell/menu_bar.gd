@@ -90,7 +90,20 @@ const GP_MENUS: Dictionary = {
 		["menu.view_popback", "view_popback"],
 	],
 	"menu.project": [
-		["menu.project_tag_rules", "project_tag_rules"],
+		# 项目设置 IS the W11 numbering/project-standard dialog (user ruling 2026-11-09:
+		# the entry must be discoverable under the Godot-style name); the action id keeps
+		# its historical name so the coordinator wiring and its tests stay untouched.
+		# 「项目设置」就是 W11 的编号 / 项目标准对话框（用户拍板 2026-11-09：入口必须以
+		# Godot 式名称可发现）；动作 id 保留历史名，协调者接线与其测试零改动。
+		["menu.project_settings", "project_tag_rules"],
+		# W13 T5: sheet manager — list CRUD + preview + major equipment on the right.
+		# W13 T5：图纸管理 —— 列表增删改查 + 右侧预览 + 主要设备。
+		["menu.sheet_manager", "project_sheet_manager"],
+		# W13 T4: real deletion — the cascade confirmation lives in GPSheetLifecycle.
+		# W13 T4：真删除 —— 级联确认住在 GPSheetLifecycle。
+		["menu.sheet_delete", "project_sheet_delete"],
+		null,
+		["menu.project_exit", "project_exit"],
 	],
 	"menu.insert": [
 		# A14: the ONE entry that was missing from the whole product — creating a symbol from

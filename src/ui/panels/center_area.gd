@@ -888,15 +888,12 @@ func _gpAddTabWith(gpTitle: String, gpId: String = "", gpGraphIn: GPPIDGraph = n
 		gpSheetIn: GPSheet = null) -> void:
 	var gpGraph: GPPIDGraph = gpGraphIn if gpGraphIn != null else GPPIDGraph.new()
 	# ADR-36: every tab belongs to the SAME project, so it adopts the project's numbering
-	# standard instead of starting from its own factory copy. Without this, every new sheet
-	# began handing out P-1001 again — the cross-sheet duplicate that started this task.
-	# ADR-36：每个标签页都属于同一个工程，故采纳工程的编号标准，而不是从自己的出厂副本起步。
-	# 缺了这一步，每张新图纸都会再从 P-1001 发号 —— 正是引发本任务的跨页重复。
-	# When the file carries rules, the first tab seeds the project standard and every later tab
-	# adopts it; when it does not, each tab gets the LAZY provider, so the standard is created
-	# once (by whoever numbers something first) and shared from then on.
-	# 文件带规则时，第一页播下工程标准、后续每页采纳；不带规则时，每页拿到**惰性**来源，
-	# 故标准只会被「第一个需要它的页」建立一次，此后共享。
+	# standard instead of starting from its own factory copy — without this every new sheet
+	# began handing out P-1001 again (the cross-sheet duplicate that started this task).
+	# When the file carries rules, the first tab seeds the project standard and every later
+	# tab adopts it; when it does not, each tab gets the LAZY provider, so the standard is created once and shared.
+	# ADR-36：每个标签页都属于同一个工程，故采纳工程的编号标准，而不是从自己的出厂副本起步——缺了这一步，每张新图纸都会再从 P-1001 发号（正是引发本任务的跨页重复）。
+	# 文件带规则时，第一页播下工程标准、后续每页采纳；不带规则时，每页拿到**惰性**来源，故标准只会被「第一个需要它的页」建立一次，此后共享。
 	if gpProjectStandard == null and gpGraph.gpStandard != null:
 		gpProjectStandard = gpGraph.gpStandard
 	if gpProjectStandard != null:
@@ -906,6 +903,9 @@ func _gpAddTabWith(gpTitle: String, gpId: String = "", gpGraphIn: GPPIDGraph = n
 	var gpSheet: GPSheet = gpSheetIn
 	if gpSheet == null:
 		gpSheet = GPSheet.gpNew(gpId, gpTitle, gpTabs.size())
+		# W13 fix (user feedback 2026-11-11): a fresh sheet is numbered NOW — std template when adopted, bare sequence otherwise; survival stays with gpAssignNumber (ADR-38), this only mints the FIRST number. / W13 修复：新图纸立即发号（有标准走模板、否则裸序号）；手改存活仍归 gpAssignNumber，此处只铸第一枚编号。
+		if gpSheet.gpNumber.is_empty():
+			gpSheet.gpAssignNumber(GPSheetNumbering.gpNumberFor(gpTabs.size() + 1, gpProjectStandard))
 	gpSheet.gpGraph = gpGraph
 	_gpEnsureSheetIdentity(gpSheet)
 	var gpCanvas: GPCanvas2D = GPCanvas2D.new()
@@ -929,9 +929,9 @@ func _gpAddTabWith(gpTitle: String, gpId: String = "", gpGraphIn: GPPIDGraph = n
 	# the flag legend reads the DRAWING NUMBER and the tab caption shows "<number> <name>",
 	# so a title-block edit (or a DRC number repair) must republish the snapshot and refresh
 	# the captions — the round-5 lesson extended to the sheet's own fields.
-	# 图纸级数据同样喂养跨图显示（用户反馈 2026-11-05 第七轮）：旗标图例读的是**图号**、
-	# 标签标题是「<图号> <名称>」，故图签编辑（或 DRC 补号）必须重发快照并刷新标题
-	# —— 第五轮的教训推广到图纸自身字段。
+	# 图纸级数据同样喂养跨图显示（用户反馈 2026-11-05 第七轮）：旗标图例读的是**图号**、标签
+	# 标题是「<图号> <名称>」，故图签编辑（或 DRC 补号）必须重发快照并刷新标题 —— 第五轮的
+	# 教训推广到图纸自身字段。
 	if gpSheet != null and not gpSheet.gpSheetChanged.is_connected(_gpOnSheetTouched):
 		gpSheet.gpSheetChanged.connect(_gpOnSheetTouched)
 	# Hand the sheet to the canvas so its frame renderer knows the size and title block.

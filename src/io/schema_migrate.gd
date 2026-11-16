@@ -208,7 +208,9 @@ static func _gpStepV1ToV2(gpOut: Dictionary, gpDocId: String, gpUsedUids: Dictio
 		gpSheet["shapes"] = gpShapesIn
 		gpSheetsOut.append(gpSheet)
 		gpIdx += 1
-	if gpSheetsOut.is_empty():
+	if gpSheetsOut.is_empty() and not gpOut.has("sheets"):
+		# Pad ONLY when no sheets section exists (legacy single-doc); an explicit "sheets": []
+		# is legitimately empty — the SHELL names one via gpAddTab. / 仅在无 sheets 段时补图；显式空列表合法为空，外壳经 gpAddTab 开一张有名有号的图纸。
 		gpSheetsOut.append(_gpEmptySheet(gpOut))
 	return gpSheetsOut
 
@@ -462,8 +464,7 @@ static func gpLooksLikeTag(gpText: String) -> bool:
 
 # Raw sheet-ish list from ANY shape: v3 sheets[], historic documents[].graph, or the
 # single-sheet top level. Always returns at least one entry.
-# 从任意形态取出原始图纸列表：v3 的 sheets[]、历史的 documents[].graph，或单图纸的顶层。
-# 恒返回至少一个条目。
+# 从任意形态取出原始图纸列表：v3 的 sheets[]、历史的 documents[].graph，或单图纸的顶层。恒返回至少一个条目。
 static func _gpRawSheetList(gpData: Dictionary) -> Array:
 	var gpOut: Array = []
 	var gpSheets: Variant = gpData.get("sheets", null)
@@ -502,18 +503,15 @@ static func _gpRawSheetList(gpData: Dictionary) -> Array:
 	return gpOut
 
 
-# The meta dictionary, or {} when the container has none at all. A `config` or `library`
-# export carries no meta, and `null as Dictionary` would crash on the next .get.
-# meta 字典，容器根本没有时返回 {}。`config` / `library` 导出不含 meta，
-# 而 `null as Dictionary` 会在紧接着的 .get 上崩溃。
+# The meta dictionary, or {} when the container has none at all (a null would crash on the
+# next .get). / meta 字典，容器没有时返回 {}（null 会在紧接着的 .get 上崩溃）。
 static func _gpMetaOf(gpData: Dictionary) -> Dictionary:
 	if gpData.get("meta") is Dictionary:
 		return gpData.get("meta") as Dictionary
 	return {}
 
 
-# A brand-new empty sheet, used when the archive carried no sheet data at all.
-# 全新的空图纸，用于存档完全不含图纸数据的情形。
+# A brand-new empty sheet, for archives with no sheet data at all. / 全新空图纸，用于存档完全不含图纸数据的情形。
 static func _gpEmptySheet(gpData: Dictionary) -> Dictionary:
 	return {
 		"id": GP_FIRST_SHEET_ID,

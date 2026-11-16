@@ -104,6 +104,13 @@ Move the new logic into a new file (R1) — the wiring you actually need is 1–
 
 Full reasoning, the decision tree and the exception process: internal `docs/ADR/2026-11-06-ADR-47-模块化与新增功能落位.md`.
 
+### Callable seams rule（强制 / mandatory · R7）
+A **lambda must never be stored into another script's static variable** (directly or through a setter). Root cause 2026-11-09: at exit the lambda's `UpdatableFuncPtr` is freed with its parent script, then destroyed again during the other script's static cleanup → `recursive_mutex EINVAL` → SIGABRT → the macOS "unexpectedly quit" dialog on **every** run (Godot issue #102569; the crash lived in `settings.gd` → `GPFontSeam`).
+
+- Cross-script Callable seams take a **member-function Callable** (`GPFontSeam.gpSetUiFontResolver(gpResolveUiFont)`), which rides a different engine implementation without the func-ptr.
+- Lambdas connected to signals of **instances** (buttons, dialogs, local sorts) are fine.
+- Enforced by detector 7 in `tests/gp_test_architecture.gd` (`gpTestNoLambdaIntoForeignStatic` + injection self-test). A new site fails the gate with its exact text.
+
 ### Symbol id rule（强制 / mandatory）
 Every symbol definition carries an id of the form **`<source><CATEGORY><3-digit sequence>`**:
 - `L` = **library** symbol (ships with the release, read-only) — `LVALVE001`, `LPUMP003`.
@@ -217,6 +224,18 @@ file budget exceeded — extract a module, do not raise the cap:
 把新逻辑挪进新文件（R1）—— 你真正需要的接线通常只有 1–5 行。**不要动那个数字。**
 
 完整理由、落位决策树与例外流程见内部 `docs/ADR/2026-11-06-ADR-47-模块化与新增功能落位.md`。
+
+### Callable 缝口规则（强制 · R7）
+**lambda 绝不存入另一脚本的静态变量**（直接赋值或经 setter）。2026-11-09 根因：退出时 lambda 的
+`UpdatableFuncPtr` 随父脚本先亡，另一脚本静态清理阶段再次析构并加锁 → `recursive_mutex EINVAL`
+→ SIGABRT → **每次**运行都弹 macOS「意外退出」报告（Godot issue #102569；本次崩溃源是
+`settings.gd` → `GPFontSeam`）。
+
+- 跨脚本的 Callable 缝口一律收**成员函数** Callable（`GPFontSeam.gpSetUiFontResolver(gpResolveUiFont)`）——
+  成员 Callable 走引擎另一条不含函数指针的实现，不在雷区。
+- lambda 连接到**实例**信号（按钮、对话框、局部排序）是安全的。
+- 由 `tests/gp_test_architecture.gd` 第 7 检测器执行（`gpTestNoLambdaIntoForeignStatic` + 注入自测）；
+  新位点会带着精确文本在门禁转红。
 
 ### 图元标识 id 命名规则（强制）
 每个图元定义的 id 形如 **`<来源码><类别码><三位序号>`**：

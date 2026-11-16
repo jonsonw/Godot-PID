@@ -121,6 +121,19 @@ var gpMenuCoord: GPMenuCoordinator = null
 # DRC 呈现（S3）：停靠面板、结果弹窗、屏幕空间角标、实时调度器。
 var gpDrc: GPDrcPresenter = null
 
+# Real sheet deletion blade (W13 T4): pure plan + confirm dialog + apply. Lazily assembled
+# by the relay below — the root is budget-frozen (ADR-47) and must not grow.
+# 图纸真删除之刀（W13 T4）：纯计划 + 确认弹窗 + 执行。由下方中继**惰性**装配 ——
+# 根类受预算冻结（ADR-47），不许增长。
+var gpSheetLifecycle: GPSheetLifecycle = null
+
+# Sheet manager window (W13 T5): list CRUD + preview + major equipment. The PANEL is stored
+# here; the WINDOW around it is the relay's furniture. Lazily assembled — the root is
+# budget-frozen and must not grow.
+# 图纸管理弹窗（W13 T5）：列表增删改查 + 预览 + 主要设备。此**面板**存于契约；包住它的
+# **弹窗**归中继所有。惰性装配 —— 根类受预算冻结，不许增长。
+var gpSheetManager: GPSheetManagerPanel = null
+
 # ============================ content / document ============================
 # ============================ 内容 / 文档 ============================
 # Available symbol definitions shown in the left palette (and resolved by gpDefFor).
@@ -342,3 +355,90 @@ func gpRunDrc() -> void:
 
 func gpShowDrcDialog() -> void:
 	gpDrc.gpShowDialog()
+
+
+# Open an archive from the project center (W13 T2b). The center is a sibling that
+# legitimately needs file coordination; the relay keeps it off gpFileCoord directly —
+# the same rule every other coordinator consumer follows.
+# 由项目中心打开存档（W13 T2b）。项目中心是合法需要文件协调的兄弟；中继使它不必直接
+# 伸手 gpFileCoord —— 与其它协调者的使用方同一条规则。
+func gpOpenProjectPath(gpPath: String) -> void:
+	if gpFileCoord != null:
+		gpFileCoord.gpReadProject(gpPath)
+
+
+# Exit to the project manager (Godot-style 项目 menu, W13 user feedback). The boot root
+# owns the swap AND the unsaved-work confirmation; the contract only forwards. Guarded:
+# no boot root in the tree (direct main.tscn run, tests) -> silently nothing, the editor
+# keeps running.
+# 退回项目管理器（Godot 式「项目」菜单，W13 实机反馈）。换屏**与**未保存确认都归 boot
+# root 所有；契约只转发。有守卫：场景树中无 boot root（直跑 main.tscn、测试）时静默
+# 不动，编辑器继续运行。
+func gpExitToManager() -> void:
+	var gpBoot: GPBootRoot = get_tree().get_first_node_in_group(GPBootRoot.GP_BOOT_GROUP) as GPBootRoot
+	if gpBoot != null:
+		gpBoot.gpShowManager()
+
+
+# The ONE real-deletion blade (W13 T4), created on first use; T5's sheet manager panel
+# will reuse the same instance via this getter.
+# 唯一的真删除之刀（W13 T4），首次使用时创建；T5 的图纸管理面板将经本 getter 复用
+# 同一实例。
+func gpSheetLifecycleEnsure() -> GPSheetLifecycle:
+	if gpSheetLifecycle == null:
+		gpSheetLifecycle = GPSheetLifecycle.new()
+		gpSheetLifecycle.gpHost = self
+	return gpSheetLifecycle
+
+
+# Menu relay: delete the ACTIVE sheet with the cross-sheet cascade confirmation.
+# 菜单中继：删除**活动**图纸，带跨图纸级联确认。
+func gpDeleteActiveSheet() -> void:
+	gpSheetLifecycleEnsure().gpDeleteActiveSheet()
+
+
+# Open (or re-show) the sheet manager window (W13 T5). One window for the session: hidden on
+# close, refreshed on every open — the panel is rebuilt FROM the live sheets each time, so a
+# stale list is impossible.
+# 打开（或重新显示）图纸管理弹窗（W13 T5）。一次会话一个弹窗：关闭即隐藏，每次打开都刷新
+# —— 面板每次都从**实时图纸**重建，陈旧列表不可能出现。
+func gpShowSheetManager() -> void:
+	if gpSheetManager == null or not is_instance_valid(gpSheetManager):
+		var gpWin: Window = Window.new()
+		gpWin.title = I18n.gpTr("sm.title")
+		gpWin.min_size = Vector2i(760, 480)
+		gpWin.size = Vector2i(920, 600)
+		# ADR-48: every popup is adaptive, draggable AND resizable. unresizable is already
+		# false by default — declared here so the ADR-48 invariant is visible in code.
+		# ADR-48：所有弹窗自适应、可拖拽且可缩放。unresizable 默认已为 false ——
+		# 此处显式声明，让 ADR-48 的不变量在代码里可见。
+		gpWin.unresizable = false
+		# THE TRAP (W13 defect ②): a Window node defaults to visible = true. Added to the
+		# tree it would appear at (0, 0) WITHOUT popup semantics — no centering, no title-bar
+		# drag, no resize grip. Create HIDDEN; the open path below goes through
+		# popup_centered(), which grants all three.
+		# 陷阱所在（W13 缺陷②）：Window 节点默认 visible = true，加入场景树后会以 (0, 0)
+		# 出现，且**没有 popup 语义** —— 不居中、标题栏不可拖、无缩放边。必须以隐藏态创建，
+		# 由下方打开路径经 popup_centered() 赋予全部三项能力。
+		gpWin.visible = false
+		gpSheetManager = GPSheetManagerPanel.new()
+		gpSheetManager.gpHost = self
+		gpWin.add_child(gpSheetManager)
+		add_child(gpWin)
+		gpWin.close_requested.connect(gpWin.hide)
+	var gpWin2: Window = gpSheetManager.get_parent() as Window
+	if gpWin2 != null:
+		if not gpWin2.visible:
+			gpWin2.popup_centered(Vector2i(920, 600))
+		else:
+			# Godot 4.7 Window API: move_to_foreground (NOT move_to_front — that name does
+			# not exist on Window and is a runtime error).
+			# Godot 4.7 的 Window API：move_to_foreground（**不是** move_to_front ——
+			# 该名在 Window 上不存在，调用即运行期错误）。
+			gpWin2.move_to_foreground()
+	# Defensive (W13 defect ④: the user saw an EMPTY list once; not reproduced headless).
+	# Refreshing again AFTER the window is visibly up makes the rebuild happen with the panel
+	# fully in-tree and laid out. Idempotent: it just rebuilds the same rows.
+	# 防御（W13 缺陷④：用户实机见过一次**空列表**；headless 未复现）。在窗口确定可见后
+	# 再刷一次，使重建发生在面板完全入树并布局之后。幂等：只是重建同样的行。
+	gpSheetManager.gpRefresh()

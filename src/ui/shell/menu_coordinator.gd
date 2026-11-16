@@ -319,6 +319,22 @@ func gpOnMenu(gpAction: String) -> void:
 				gpBgObj.gpSave()
 				gpHost.gpSetState("status.bg_changed", [gpNext])
 		"project_tag_rules":
+			# Action id keeps its historical name; the menu label is now 项目设置
+			# (user ruling 2026-11-09 — same W11 dialog, Godot-style name).
+			# 动作 id 保留历史名；菜单标签现为「项目设置」（用户拍板 2026-11-09 ——
+			# 同一个 W11 对话框，Godot 式名称）。
 			gpHost.gpTagCoord.gpOpenTagRuleDialog()
+		"project_exit":
+			gpHost.gpExitToManager()
+		"project_sheet_manager":
+			# W13 T5: open the sheet manager (lazy window assembly lives in the contract).
+			# W13 T5：打开图纸管理器（弹窗的惰性装配住在契约里）。
+			gpHost.gpShowSheetManager()
+		"project_sheet_delete":
+			# W13 T4: real deletion + cross-sheet cascade confirm; GPSheetLifecycle is the
+			# ONE blade, shared with T5's sheet manager panel later.
+			# W13 T4：真删除 + 跨图纸级联确认；GPSheetLifecycle 是唯一一把刀，
+			# 后续与 T5 图纸管理面板共用。
+			gpHost.gpDeleteActiveSheet()
 		_:
 			gpHost.gpSetState("status.feature_todo", [gpAction])

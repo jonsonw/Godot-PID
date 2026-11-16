@@ -1351,6 +1351,21 @@ const GP_FUNC_SOFT_MAX: int = 200
 const GP_FILE_BUDGET_CEILING: int = 35
 const GP_FUNC_BUDGET_CEILING: int = 4
 
+# Budget exemptions: files that may grow FREELY despite exceeding the soft max. Adding a
+# name here is a review-level act (ADR-47 appendix B) — currently exactly one, and the
+# reason must live with the entry.
+# 预算豁免表：超过软上限仍可自由增长的文件。往这里加名字是评审级动作（ADR-47 附录 B）
+# —— 当前有且仅有一个，理由必须随条目落档。
+# WHY i18n.gd / 为何豁免 i18n.gd（user ruling 2026-11-09 15:20）：
+# It is a DATA TABLE (key -> {zh,en} dictionary), not logic. Its length tracks the
+# vocabulary of the product, one key = one line by construction; its functions are
+# small and stable. A line budget on a translation table would only push translations
+# out of the file into worse places. Logic budgets still apply (test 3 below).
+# 它是数据表（键 -> {zh,en} 字典），不是逻辑。长度随产品词汇量走，一个键天然一行；
+# 其函数少且稳定。给翻译表上行为预算只会把翻译挤到更糟的地方去。逻辑预算照常适用
+#（见下方第 3 条测试）。
+const GP_FILE_BUDGET_EXEMPT: Array[String] = ["src/autoload/i18n.gd"]
+
 # ACTIVE budget — the only table a working session needs to look at.
 # 使用中的预算 —— 日常干活只需要看这一张表。
 const GP_FILE_BUDGET: Dictionary = {
@@ -1361,7 +1376,6 @@ const GP_FILE_BUDGET: Dictionary = {
 	"src/app/edit_service.gd": 1220,
 	"src/io/dexpi_exporter.gd": 1208,
 	"src/ui/dialogs/project_standard_dialog.gd": 1113,
-	"src/autoload/i18n.gd": 1086,
 	"src/core/view/frame_geometry.gd": 1027,
 	"src/core/model/sheet.gd": 997,
 	"src/io/deliverable/gp_deliverable_model.gd": 979,
@@ -1402,7 +1416,6 @@ const GP_FILE_BUDGET_FROZEN: Dictionary = {
 	"src/app/edit_service.gd": 1220,
 	"src/io/dexpi_exporter.gd": 1208,
 	"src/ui/dialogs/project_standard_dialog.gd": 1113,
-	"src/autoload/i18n.gd": 1086,
 	"src/core/view/frame_geometry.gd": 1027,
 	"src/core/model/sheet.gd": 997,
 	"src/io/deliverable/gp_deliverable_model.gd": 979,
@@ -1489,6 +1502,8 @@ func gpTestFileBudgetsOnlyShrink() -> void:
 	var gpOver: Array[String] = []
 	for gpPath in gpFiles:
 		var gpKey: String = _gpKeyPath(gpPath)
+		if gpKey in GP_FILE_BUDGET_EXEMPT:
+			continue
 		var gpLines: int = _gpLineCount(FileAccess.get_file_as_string(gpPath))
 		var gpCap: int = int(GP_FILE_BUDGET.get(gpKey, GP_FILE_SOFT_MAX))
 		if gpLines > gpCap:
@@ -1582,3 +1597,131 @@ func gpTestBudgetMeasurersAreHonest() -> void:
 	var gpLambda: String = "func gpC() -> void:\n\tvar gpF: Callable = func() -> void:\n\t\tpass\n"
 	gpEq(int(_gpLongestFunc(gpLambda)["lines"]), 3,
 		"an indented lambda is not a member function")
+
+
+# ============================================================================
+# Detector 7 · lambda into a foreign static surface (Godot #102569 exit abort)
+# 检测器 7 · lambda 存入外来静态面（Godot #102569 退出崩溃）
+# ============================================================================
+
+# A lambda stored in ANOTHER script's static variable aborts the engine at exit: the
+# lambda's UpdatableFuncPtr is freed with its parent script, then destroyed again during
+# static cleanup -> recursive_mutex EINVAL -> SIGABRT -> macOS "unexpectedly quit" dialog
+# on EVERY run (root-caused 2026-11-09: settings.gd -> GPFontSeam). Rule: seams that must
+# hold a Callable across scripts take a MEMBER-FUNCTION Callable, never a lambda.
+# Two textual shapes are flagged: passing a lambda INTO a class-name receiver's call
+# (the setter form) and assigning one to `ClassName.member` (the direct form). The
+# capitalised receiver demands a word boundary first — `gpOut.sort_custom(func...)` is a
+# local callable argument and must NOT match.
+# lambda 存进**另一脚本**的静态变量会让引擎在退出时 abort：lambda 的 UpdatableFuncPtr
+# 随父脚本先亡，静态清理阶段再次析构并加锁 -> recursive_mutex EINVAL -> SIGABRT ->
+# 每次运行都弹 macOS「意外退出」（2026-11-09 根因定位：settings.gd -> GPFontSeam）。
+# 铁律：跨脚本持有 Callable 的缝口一律收**成员函数** Callable，绝不收 lambda。
+# 两种文本形态会被标记：把 lambda 传入**类名接收者**的调用（setter 形态），以及给
+# `类名.成员` 赋值 lambda（直接形态）。大写接收者必须先过词边界 ——
+# `gpOut.sort_custom(func...)` 是局部 Callable 实参，**不得**命中。
+const GP_LAMBDA_CALL_PATTERN: String = "(?<![A-Za-z0-9_])[A-Z][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*\\([^\\n]*\\bfunc\\b"
+const GP_LAMBDA_ASSIGN_PATTERN: String = "^[ \\t]*[A-Z][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*[ \\t]*=[^\\n]*\\bfunc\\b"
+
+
+# Pure scan over one file's text: the lambda-static findings, oldest-shape keys
+# ("<Class>.<method>"). Comments are stripped first (a doc mentioning the shape is not
+# an offence — the root-cause fix itself documents it).
+# 对单文件文本的纯扫描：lambda-静态形态发现，键 =「<类>.<方法>」。先剥注释
+# （文档提到该形态不算犯事 —— 根因修复注释本身就写着它）。
+func _gpScanLambdaStaticText(gpText: String) -> Array[String]:
+	var gpOut: Array[String] = []
+	var gpReCall: RegEx = RegEx.create_from_string(GP_LAMBDA_CALL_PATTERN)
+	var gpReAssign: RegEx = RegEx.create_from_string(GP_LAMBDA_ASSIGN_PATTERN)
+	var gpCode: String = _gpStripComments(gpText)
+	for gpLine in gpCode.split("\n"):
+		for gpM in gpReCall.search_all(gpLine):
+			if not gpOut.has(gpM.get_string(0)):
+				gpOut.append(gpM.get_string(0))
+		if gpReAssign.search(gpLine) != null:
+			if not gpOut.has(gpLine.strip_edges()):
+				gpOut.append(gpLine.strip_edges())
+	gpOut.sort()
+	return gpOut
+
+
+# The gate: zero lambda-into-foreign-static sites in src/. Clean start (2026-11-09), and
+# the detector keeps it that way — a new site fails here with its exact text.
+# 门禁：src/ 中 lambda 存入外来静态面**零**位点。2026-11-09 起点即干净，检测器保持
+# 这个状态 —— 新位点会带着精确文本在此转红。
+func gpTestNoLambdaIntoForeignStatic() -> void:
+	var gpFindings: Array[String] = []
+	for gpPath in _gpGdFiles(GP_SRC_ROOT):
+		for gpFinding in _gpScanLambdaStaticText(FileAccess.get_file_as_string(gpPath)):
+			gpFindings.append("%s: %s" % [_gpKeyPath(gpPath), gpFinding])
+	gpEq(gpFindings.size(), 0,
+		"no lambda may be stored into another script's static surface (Godot #102569): "
+		+ ", ".join(gpFindings))
+
+
+# Injection self-test: the detector must catch both shapes and must NOT flag the
+# lowercase-receiver sort_custom form — that regression would drown the gate in noise.
+# 注入自测：检测器必须抓到两种形态，且**不得**命中小写接收者的 sort_custom 形态 ——
+# 那个回归会让门禁淹没在噪音里。
+func gpTestLambdaStaticDetectorCatchesInjection() -> void:
+	var gpBad: String = "\tGPSeam.gpSetResolver(func() -> int: return 1)\n"
+	gpEq(_gpScanLambdaStaticText(gpBad).size(), 1,
+		"the setter form (lambda into a class-name receiver) must be flagged")
+	var gpAssign: String = "\tGPSeam._gpResolver = func() -> void: pass\n"
+	gpEq(_gpScanLambdaStaticText(gpAssign).size(), 1,
+		"the direct-assignment form must be flagged")
+	var gpLegal: String = "\tgpOut.sort_custom(func(gpA: int, gpB: int) -> bool: return gpA < gpB)\n"
+	gpEq(_gpScanLambdaStaticText(gpLegal).size(), 0,
+		"a lambda passed through a lowercase LOCAL receiver must stay legal")
+	var gpComment: String = "# GPSeam.gpSetResolver(func() -> int: return 1) is documented above.\n"
+	gpEq(_gpScanLambdaStaticText(gpComment).size(), 0,
+		"a comment mentioning the shape must not be flagged")
+
+
+# ============================================================================
+# 检测器 8 · 裸 set_anchors_preset（W13 实机：管理器整屏缩在左上角）
+# ============================================================================
+
+# `set_anchors_preset()` moves ONLY the anchors — a freshly created control keeps its
+# current rect (0x0), so the whole screen renders min-size in the top-left corner (W13
+# on-device bug 2026-11-09, the manager screen). The codebase convention is the
+# anchors-AND-offsets form; the bare form is banned outright in src/. The long name
+# does not contain the bare one as a substring, so a plain contains() cannot mis-fire.
+# `set_anchors_preset()` 只动锚点 —— 新建控件保持当前矩形（0 尺寸），整屏内容按最小尺寸
+# 堆在左上角（W13 实机缺陷 2026-11-09，管理器主屏）。代码库惯例是「锚点+偏移」形；
+# src/ 内直接禁用裸形。长名不包含裸名子串，普通 contains() 不会误伤。
+func _gpScanBareAnchorPresetText(gpText: String) -> Array[String]:
+	var gpOut: Array[String] = []
+	var gpCode: String = _gpStripComments(gpText)
+	for gpLine in gpCode.split("\n"):
+		if gpLine.contains("set_anchors_preset("):
+			if not gpOut.has(gpLine.strip_edges()):
+				gpOut.append(gpLine.strip_edges())
+	return gpOut
+
+
+# The gate: zero bare set_anchors_preset() sites in src/. Clean start (2026-11-09) after
+# fixing the manager screen, the margin container and the switch pill.
+# 门禁：src/ 中裸 set_anchors_preset() **零**位点。修复管理器主屏、外边距容器与切换
+# 胶囊后（2026-11-09）起点即干净。
+func gpTestNoBareSetAnchorsPreset() -> void:
+	var gpFindings: Array[String] = []
+	for gpPath in _gpGdFiles(GP_SRC_ROOT):
+		for gpFinding in _gpScanBareAnchorPresetText(FileAccess.get_file_as_string(gpPath)):
+			gpFindings.append("%s: %s" % [_gpKeyPath(gpPath), gpFinding])
+	gpEq(gpFindings.size(), 0,
+		"set_anchors_preset() alone never resizes a fresh control — use "
+		+ "set_anchors_and_offsets_preset(): " + ", ".join(gpFindings))
+
+
+# Injection self-test: the detector must flag the bare form, stay quiet on the
+# anchors-and-offsets form, and stay quiet inside comments.
+# 注入自测：检测器必须命中裸形，对「锚点+偏移」形沉默，对注释沉默。
+func gpTestBareAnchorPresetDetectorCatchesInjection() -> void:
+	gpEq(_gpScanBareAnchorPresetText("\tset_anchors_preset(Control.PRESET_FULL_RECT)\n").size(), 1,
+		"the bare form must be flagged")
+	gpEq(_gpScanBareAnchorPresetText(
+		"\tset_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)\n").size(), 0,
+		"the anchors-and-offsets form must stay legal")
+	gpEq(_gpScanBareAnchorPresetText("# set_anchors_preset() is banned by detector 8.\n").size(), 0,
+		"a comment mentioning the ban must not be flagged")

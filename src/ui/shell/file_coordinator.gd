@@ -492,7 +492,7 @@ func gpReadProject(gpPath: String) -> void:
 	var gpPayload: Dictionary = gpSheetsResult.gpPayload as Dictionary
 	var gpSheets: Array = gpPayload.get("sheets", []) as Array
 	if gpSheets.is_empty():
-		gpHost.gpSetState("status.load_fail", [gpPath])
+		GPFreshOpen.gpOpen(gpHost, gpPath)
 		return
 	var gpNewGraph: GPPIDGraph = (gpSheets[0] as GPSheet).gpGraph
 	# Rebuild EVERY tab, not just the active one: a multi-sheet file whose extra sheets were

@@ -3,8 +3,8 @@
 > English: a quick read for GitHub visitors. Authoritative full version: `G-PID_项目架构说明_20260908.html` (workspace `架构/交付/`).
 > 中文：供 GitHub 访客速读。权威完整版见工作区 `架构/交付/G-PID_项目架构说明_20260908.html`。
 >
-> **基线 2026-11-06（阶段 2 收口 + ADR-47）**：`src/**/*.gd` **290 文件 / 79,600 行**，Godot 4.7。
-> 门禁：导入 0 错 · GPGTest **129 套 / 10,759 断言 / 0 失败** · GUT **5 passing / 3,409 asserts** · 编译与冒烟 `SCRIPT ERROR` **0**。
+> **基线 2026-11-12（W13 T3 图册批量导出）**：`src/**/*.gd` **303 文件 / 82,474 行**，Godot 4.7。
+> 门禁：导入 0 错 · GPGTest **135 套 / 11,172 断言 / 0 失败** · GUT 5/5 passing · 编译与冒烟 `SCRIPT ERROR` 基线 2（open_end / popup_helper）。
 > **本文件是基线数字的唯一出处** —— 其它文档引用它，不复制（复制来的数字第二次修改就会变成谎）。
 > 与代码冲突之处，一律以代码为准。
 

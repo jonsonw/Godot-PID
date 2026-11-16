@@ -183,16 +183,28 @@ signal gpCanvasStyleChanged
 # Installed in `_init`, NOT `_ready`, for the same measured reason as GPLocalizer: a headless
 # `--script` run reaches its own `_initialize()` before autoload `_ready` cascades, so a `_ready`
 # install would leave the frame un-fonted for the whole test run.
-# The lambda is deliberately LATE-BOUND: it reads gpFontKey on every call, so switching the preset
-# needs no reinstall. It returns Settings' cached instance (one per key, owned for the process
-# lifetime), which is what keeps a recorded frame draw command valid to the end of the frame.
-# 把本 autoload 注册为内层的 UI 字体来源（GPFontSeam 缝，ADR-10）。在 `_init` 而非 `_ready` 中装入，
-# 原因与 GPLocalizer 相同且为实测所得：headless `--script` 会在 autoload 的 `_ready` 级联之前进入
-# 自己的 `_initialize()`，若用 `_ready`，整轮测试里图框都拿不到字体。
-# 该 lambda 刻意**延迟求值**：每次调用才读 gpFontKey，故切换预设无需重装本缝。它返回 Settings 缓存
-# 的实例（每键一个、进程级持有），这正是「已记录的图框绘制命令活到帧末」的前提。
+# The resolver is deliberately LATE-BOUND: it reads gpFontKey on every call, so switching the
+# preset needs no reinstall. It returns Settings' cached instance (one per key, owned for the
+# process lifetime), which is what keeps a recorded frame draw command valid to the end of the frame.
+# It is installed as a MEMBER-FUNCTION Callable, never a lambda: a lambda stored in another
+# script's static variable aborts the engine at exit (Godot #102569 — the lambda's
+# UpdatableFuncPtr is freed with its parent script before the static cleanup runs, then locked
+# again → recursive_mutex EINVAL → SIGABRT → macOS "unexpectedly quit" dialog on every run).
+# Member callables ride a different implementation without the func-ptr and are safe.
+# 该解析器刻意**延迟求值**：每次调用才读 gpFontKey，故切换预设无需重装本缝。它返回 Settings
+# 缓存的实例（每键一个、进程级持有），这正是「已记录的图框绘制命令活到帧末」的前提。
+# 它以**成员函数 Callable** 装入，绝不用 lambda：lambda 存进另一脚本的静态变量会让引擎在
+# 退出时 abort（Godot #102569 —— lambda 的 UpdatableFuncPtr 随父脚本先亡，静态清理阶段再次
+# 析构并加锁 → recursive_mutex EINVAL → SIGABRT → 每次运行都弹 macOS「意外退出」）。
+# 成员 Callable 走另一条不含函数指针的实现，安全。
 func _init() -> void:
-	GPFontSeam.gpSetUiFontResolver(func() -> Font: return gpLoadFont(gpFontKey))
+	GPFontSeam.gpSetUiFontResolver(gpResolveUiFont)
+
+
+# Late-bound UI-font resolver for GPFontSeam; see _init for why this is a member function.
+# GPFontSeam 的延迟求值 UI 字体解析器；为何用成员函数见 _init 注释。
+func gpResolveUiFont() -> Font:
+	return gpLoadFont(gpFontKey)
 
 
 # Load settings from disk and apply them.

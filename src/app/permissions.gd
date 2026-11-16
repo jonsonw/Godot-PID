@@ -44,3 +44,32 @@ static func gpCanEditProps() -> bool:
 # 几乎必然需要分别授权。
 static func gpCanEditSchema() -> bool:
 	return not gpForceDeny
+
+
+# ==================== project-level gates / 项目级闸门（W13 反馈 2026-11-11） ====================
+# The project manager's create / rename / delete actions ask THESE gates (buttons disable
+# and action entries refuse here), for the same reason as the entry gates above: the real
+# permission system (W14 identity model, ADR-40 — members/roles already live in the v4
+# container) lands later, and ONLY this file changes when it does. Project deletion is the
+# widest blast radius in the app, so it gets its own gate rather than sharing one.
+# 项目管理器的创建 / 改名 / 删除动作问**这三道闸**（按钮禁用态与动作入口都在这里问），
+# 理由与上面条目级闸门相同：真正的权限系统（W14 身份模型，ADR-40 —— members/roles 已
+# 随 v4 容器落库）后续落地，届时**只改本文件**。工程删除是全应用影响半径最大的动作，
+# 故独享一道闸而非共用。
+
+# May the user CREATE or REGISTER a project (new archive / import)?
+# 用户可否创建或登记工程（新建存档 / 导入）？
+static func gpCanCreateProject() -> bool:
+	return not gpForceDeny
+
+
+# May the user RENAME a project?
+# 用户可否重命名工程？
+static func gpCanRenameProject() -> bool:
+	return not gpForceDeny
+
+
+# May the user DELETE a project (move to trash)?
+# 用户可否删除工程（移入废纸篓）？
+static func gpCanDeleteProject() -> bool:
+	return not gpForceDeny

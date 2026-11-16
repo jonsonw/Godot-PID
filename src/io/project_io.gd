@@ -113,6 +113,12 @@ static func gpWriteSheets(gpSheets: Array, gpPath: String, gpLinks: Array = []) 
 	gpOut["sheets"] = gpSheetsOut
 	gpOut["kind"] = GPSchemaMigrate.GP_KIND_PROJECT
 	gpOut["meta"]["sheets"] = gpSheetsOut.size()
+	# ADR-41 (revised 2026-11-09): every multi-sheet save is stamped to container v4 —
+	# the ONLY container form (no v1-v3 tolerance). The three project-level sections and
+	# the version key are owned by GPProjectContainerV4; this file stays a delegation line.
+	# ADR-41（2026-11-09 修订）：每次多图纸保存都盖为容器 v4 —— 唯一容器形态（不做 v1–v3 宽容读）。
+	# 三个工程级段与版本键归 GPProjectContainerV4 所有；本文件只保留这一行转发。
+	GPProjectContainerV4.gpStampV4(gpOut)
 	# ADR-43: container-level cross-sheet links go out under the HISTORIC "cross_links" key
 	# (reserved by the multi-document era; the migration chain preserves it). The key is
 	# written ONLY when links exist, and the array is sorted by id so repeated saves are
@@ -167,9 +173,15 @@ static func gpReadSheetsWithLinks(gpPath: String) -> GPIOResult:
 		return gpRead
 	var gpV3: Dictionary = gpRead.gpPayload as Dictionary
 	if gpV3.is_empty():
+		# W13 fix (2026-11-11): an empty payload is reported HONESTLY as zero sheets — io
+		# cannot reach I18n (layer rule), so a padded sheet could only ever be NAMELESS,
+		# and its empty title blanked the tab bar / pop-out title / pane pickers. The SHELL
+		# owns the "one fresh sheet" semantics (GPFreshOpen.gpOpen).
+		# W13 修复：空载荷**如实**上报零张图纸 —— io 拿不到 I18n（分层铁律），补的图纸
+		# 只能无名，空名曾刷空标签栏/摘出窗口标题/窗格选择器。开图语义归外壳
+		#（GPFreshOpen.gpOpen）。
 		GPSymbolLibrary.gpSetDocSizeScale(1.0)
-		return GPIOResult.gpSuccessWith(
-			{"sheets": [GPSheet.gpNew("sheet-1", "", 0)], "links": []}, "io.loaded", gpPath)
+		return GPIOResult.gpSuccessWith({"sheets": [], "links": []}, "io.loaded", gpPath)
 	# P0-5: set the shared library's symbol scale BEFORE any sheet / user pack is rebuilt.
 	# The previous document may have left a legacy 0.5 active; registering this archive's
 	# packs against the wrong scale would double-shrink (or double-grow) them.
@@ -201,9 +213,11 @@ static func gpReadSheetsWithLinks(gpPath: String) -> GPIOResult:
 		gpD.erase("tag_rules")
 		gpSheetsOut.append(GPSheet.gpFromDict(gpD))
 		gpI += 1
-	if gpSheetsOut.is_empty():
-		gpSheetsOut.append(GPSheet.gpNew("sheet-1", str((gpV3.get("meta", {})
-			as Dictionary).get("title", "")), 0))
+	# W13 fix (2026-11-11): an explicitly empty sheet list is reported AS EMPTY — the old
+	# pad produced a NAMELESS sheet (v4 containers carry project_meta, not meta) whose
+	# empty title blanked every title surface. The SHELL opens it via GPFreshOpen.gpOpen.
+	# W13 修复：显式空图纸列表**如实**上报为空 —— 旧的补图产出**无名**图纸（v4 容器是
+	# project_meta 而非 meta），空名刷空所有标题表面。开图归外壳 GPFreshOpen.gpOpen。
 	# One standard object, adopted by every sheet. Absent in a v1/v2 file without rules:
 	# then the graphs stay null and a first mint creates one lazily (single-sheet behaviour
 	# is unchanged; cross-sheet sharing is seeded on the first rule edit or by a new tab).

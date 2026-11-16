@@ -95,7 +95,14 @@ const GP_METHOD_PREFIX: String = "gpTest"
 # 127 = 126 + gp_test_offpage_resolver.gd（W12-P2/A3 GPOffPageResolver 显式上下文派生解析）。
 # 128 = 127 + gp_test_offpage_report.gd（W12-P3/U5 GPOffPageReport 跨图纸连接报表）。
 # 129 = 128 + gp_test_canvas_pane.gd（W13 实机反馈：窗格挂载显式 reparent 语义）。
-const GP_EXPECTED_SUITES: int = 129
+# 130 = 129 + gp_test_container_v4.gd（W13 / ADR-41 容器 v4 装配·校验·写路径接线）。
+# 132 = 131 + gp_test_sheet_lifecycle.gd（W13 T4 图纸真删除：纯计划 + 级联 + 容器无残留往返）。
+# 133 = 132 + gp_test_sheet_manager.gd（W13 T5 图纸管理：类别码解析 + 设备分类 + 行模型）。
+# 134 = 133 + gp_test_project_delete.gd（W13 实机反馈：工程删除契约 —— 敌意输入拒收 +
+# 强制删除 + 最近列表自清理 + 成功形状 + 项目级权限闸）。
+# 135 = 134 + gp_test_atlas_export.gd（W13 T3 图册批量导出：整套 PDF + 目录页 + 逐图诚实
+# 报告 + 实测耗时 + 文件名安全 + 目录分页）。
+const GP_EXPECTED_SUITES: int = 135
 
 # Engine errors the legacy suites are *expected* to emit. GUT fails any test that leaves an
 # error unhandled, so these are marked handled explicitly (see _gpHandleExpectedErrors).
