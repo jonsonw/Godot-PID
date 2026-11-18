@@ -139,6 +139,8 @@ func gpReload() -> void:
 	gpMembers = []
 	gpTable.clear()
 	var gpRootItem: TreeItem = gpTable.create_item()
+	if gpRootItem == null:
+		return
 	var gpHeader: GPIOResult = GPProjectIO.gpReadHeader(gpArchivePath)
 	if gpHeader.gpIsOk():
 		var gpRaw: Variant = (gpHeader.gpPayload as Dictionary).get("members", null)
@@ -150,6 +152,8 @@ func gpReload() -> void:
 		var gpMDict: Dictionary = gpM
 		var gpUser: String = str(gpMDict.get("user", ""))
 		var gpItem: TreeItem = gpTable.create_item(gpRootItem)
+		if gpItem == null:
+			continue
 		# The identity anchor: inline edits resolve through it even after a rename.
 		# 身份锚点：改名后内联编辑仍能据此定位。
 		gpItem.set_meta("gp_user", gpUser)
@@ -199,7 +203,14 @@ func _gpOnRolePicked(gpId: int) -> void:
 
 
 # Dispatch an inline edit: 0 = rename, 2 = enabled, 3 = display name.
+# The handler runs INSIDE the Tree's own item_edited emission — rebuilding the table
+# there (clear + create_item) makes create_item return null and set_meta crashes
+# (on-device bug 2026-11-18). So: snapshot PLAIN DATA here, defer every mutation and
+# reload out of the emission frame.
 # 分派内联编辑：0 = 改名，2 = 启停，3 = 显示名。
+# 本回调运行在 Tree 自身 item_edited 发射**中途** —— 在这里重建表格（clear + create_item）
+# 会让 create_item 返回 null、set_meta 崩溃（实机缺陷 2026-11-18）。因此：此处只快照
+# **纯数据**，所有变更与重建延迟出信号帧。
 func _gpOnEdited() -> void:
 	var gpItem: TreeItem = gpTable.get_edited()
 	if gpItem == null:
@@ -208,10 +219,22 @@ func _gpOnEdited() -> void:
 	var gpOld: String = str(gpItem.get_meta("gp_user", ""))
 	if gpOld == "":
 		return
+	call_deferred("_gpOnEditedDeferred", gpCol, gpOld, gpItem.get_text(0),
+		gpItem.is_checked(2), gpItem.get_text(3))
+
+
+# Deferred twin of _gpOnEdited: safe to rebuild the tree here — the emission is done.
+# _gpOnEdited 的延迟孪生：此刻重建表格安全 —— 信号发射已结束。
+func _gpOnEditedDeferred(gpCol: int, gpOld: String, gpNewUser: String,
+		gpChecked: bool, gpDisplay: String) -> void:
 	match gpCol:
 		0:
+			# No-op commit (double-click then Enter without a change): stay silent.
+			# 无变化提交（双击后直接回车）：静默忽略。
+			if gpNewUser == gpOld:
+				return
 			var gpPlan: Dictionary = GPCMemberRoster.gpRenameUser(gpMembers, gpOld,
-				gpItem.get_text(0))
+				gpNewUser)
 			if bool(gpPlan.get("ok", false)):
 				_gpApply()
 			else:
@@ -219,7 +242,7 @@ func _gpOnEdited() -> void:
 				gpReload()
 		2:
 			var gpPlan: Dictionary = GPCMemberRoster.gpSetEnabled(gpMembers, gpOld,
-				gpItem.is_checked(2))
+				gpChecked)
 			if bool(gpPlan.get("ok", false)):
 				_gpApply()
 			else:
@@ -229,7 +252,7 @@ func _gpOnEdited() -> void:
 			var gpM: Dictionary = GPCMemberRoster.gpFind(gpMembers, gpOld)
 			if gpM.is_empty():
 				return
-			gpM["display_name"] = gpItem.get_text(3)
+			gpM["display_name"] = gpDisplay
 			_gpApply()
 
 
