@@ -102,7 +102,9 @@ const GP_METHOD_PREFIX: String = "gpTest"
 # 强制删除 + 最近列表自清理 + 成功形状 + 项目级权限闸）。
 # 135 = 134 + gp_test_atlas_export.gd（W13 T3 图册批量导出：整套 PDF + 目录页 + 逐图诚实
 # 报告 + 实测耗时 + 文件名安全 + 目录分页）。
-const GP_EXPECTED_SUITES: int = 135
+# 138 = 135 + gp_test_revision.gd + gp_test_identity.gd + gp_test_lock.gd（W14 身份与登录：
+# revision 哈希链 / 凭据与名单 / 尽力而为文件锁，ADR-40 D4/D6）。
+const GP_EXPECTED_SUITES: int = 138
 
 # Engine errors the legacy suites are *expected* to emit. GUT fails any test that leaves an
 # error unhandled, so these are marked handled explicitly (see _gpHandleExpectedErrors).

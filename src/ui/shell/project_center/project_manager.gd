@@ -163,6 +163,15 @@ func _gpBuildUi() -> void:
 	gpSideRevealBtn.pressed.connect(_gpOnRevealSelected)
 	gpRail.add_child(gpSideRevealBtn)
 	gpTextBindings.append({"node": gpSideRevealBtn, "prop": "text", "key": "pc.reveal"})
+	# W14 T4b: the identity entry — the W13 reserved hook (pc.tab_identity) lands here as
+	# a rail action on the SELECTED archive; the panel reads/edits its plaintext header.
+	# W14 T4b：身份入口 —— W13 预留挂点（pc.tab_identity）落为右栏动作，作用于**选中**
+	# 存档；面板读写其明文头部。
+	var gpIdentityBtn: Button = Button.new()
+	gpIdentityBtn.pressed.connect(_gpOnIdentitySelected)
+	gpIdentityBtn.disabled = not GPPermissions.gpCanManageMembers()
+	gpRail.add_child(gpIdentityBtn)
+	gpTextBindings.append({"node": gpIdentityBtn, "prop": "text", "key": "pc.identity"})
 	# Delete = a destructive action on user data: kept as its own rail button + context
 	# menu entry, and ALWAYS behind a confirmation dialog (trash is recoverable, but the
 	# surprise is not).
@@ -315,6 +324,17 @@ func gpOnCardOpen(gpPath: String) -> void:
 
 func _gpOnOpenSelected() -> void:
 	gpOnCardOpen(gpSelectedPath)
+
+
+# W14 T4b: open the identity panel on the selected archive (fresh dialog per request, R7).
+# W14 T4b：对选中存档打开身份面板（弹窗按次重建，R7）。
+func _gpOnIdentitySelected() -> void:
+	if gpSelectedPath.is_empty():
+		return
+	var gpPanel: GPIdentityPanel = GPIdentityPanel.new()
+	gpPanel.gpSetup(gpSelectedPath)
+	add_child(gpPanel)
+	gpPanel.popup_centered(Vector2i(580, 440))
 
 
 # Rename: dialog collects the new display name; the io layer rewrites the archive in

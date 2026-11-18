@@ -26,7 +26,8 @@ static func gpEnsurePidExt(gpPath: String) -> String:
 # 序列化 gpGraph 并写入磁盘；.pid.json 扩展名会被自动强制。
 # Returns OK on success, or a FileAccess error code when the file cannot be opened for writing.
 # 成功返回 OK，无法打开写文件时返回 FileAccess 错误码。
-static func gpWriteProject(gpGraph: GPPIDGraph, gpPath: String) -> int:
+static func gpWriteProject(gpGraph: GPPIDGraph, gpPath: String, gpAuthor: String = "local",
+		gpAt: String = "", gpPriorRevisions: Array = []) -> int:
 	var gpFilePath: String = gpEnsurePidExt(gpPath)
 	# The caller is expected to have embedded any user symbol packs already (via
 	# GPPIDGraph.gpEmbedUserPacks()), because gpToDict() serializes them verbatim.
@@ -38,7 +39,12 @@ static func gpWriteProject(gpGraph: GPPIDGraph, gpPath: String) -> int:
 	# 原子写（ADR-4）：文本先在临时文件中构造并校验，再 rename 覆盖目标。
 	# 直接写目标（旧行为）在进程写入途中死亡时会留下被截断、无法解析的存档。
 	# 上一份完好副本保留为 <path>.bak，使一次失败的保存仍有退路。
-	var gpWrite: GPIOResult = GPAtomicFile.gpWriteJsonAtomic(gpFilePath, gpGraph.gpToDict())
+	# W14 (ADR-40 D6): every save stamps a content revision into the header (optimistic
+	# concurrency backstop; GPRevision owns the chain mechanics).
+	# W14（ADR-40 D6）：每次保存都向头部盖内容修订（乐观并发兜底；链机制归 GPRevision）。
+	var gpOut: Dictionary = gpGraph.gpToDict()
+	GPRevision.gpStampRevision(gpOut, gpAuthor, gpAt, gpPriorRevisions)
+	var gpWrite: GPIOResult = GPAtomicFile.gpWriteJsonAtomic(gpFilePath, gpOut)
 	if not gpWrite.gpIsOk():
 		return FAILED
 	return OK
@@ -48,9 +54,10 @@ static func gpWriteProject(gpGraph: GPPIDGraph, gpPath: String) -> int:
 # gpWriteProject() 的结果类型版本：说明写入「为何」失败，而非仅返回裸 int。
 # The legacy int API is preserved verbatim and reused, so no existing caller changes.
 # 旧 int API 原样保留并被复用，故既有调用方无需改动。
-static func gpWriteProjectResult(gpGraph: GPPIDGraph, gpPath: String) -> GPIOResult:
+static func gpWriteProjectResult(gpGraph: GPPIDGraph, gpPath: String, gpAuthor: String = "local",
+		gpAt: String = "", gpPriorRevisions: Array = []) -> GPIOResult:
 	var gpFilePath: String = gpEnsurePidExt(gpPath)
-	var gpErr: int = gpWriteProject(gpGraph, gpPath)
+	var gpErr: int = gpWriteProject(gpGraph, gpFilePath, gpAuthor, gpAt, gpPriorRevisions)
 	if gpErr != OK:
 		return GPIOResult.gpFailure("io.write_failed", "status.save_fail", gpFilePath)
 	return GPIOResult.gpSuccess("io.saved", gpFilePath)
@@ -86,7 +93,9 @@ static func gpReadProject(gpPath: String) -> GPPIDGraph:
 # graph, because that is where GPPIDGraph keeps it today.
 # 工程级数据（meta / tag_rules / 内嵌图元包）取自**第一张**图纸的图，
 # 因为 GPPIDGraph 目前就是把它存在那里的。
-static func gpWriteSheets(gpSheets: Array, gpPath: String, gpLinks: Array = []) -> int:
+static func gpWriteSheets(gpSheets: Array, gpPath: String, gpLinks: Array = [],
+		gpAuthor: String = "local", gpAt: String = "", gpPriorRevisions: Array = [],
+		gpMembers: Array = []) -> int:
 	if gpSheets.is_empty():
 		return FAILED
 	var gpFilePath: String = gpEnsurePidExt(gpPath)
@@ -119,6 +128,13 @@ static func gpWriteSheets(gpSheets: Array, gpPath: String, gpLinks: Array = []) 
 	# ADR-41（2026-11-09 修订）：每次多图纸保存都盖为容器 v4 —— 唯一容器形态（不做 v1–v3 宽容读）。
 	# 三个工程级段与版本键归 GPProjectContainerV4 所有；本文件只保留这一行转发。
 	GPProjectContainerV4.gpStampV4(gpOut)
+	# W14 T4a: the roster carried through the session is written back, so a member edit
+	# (identity panel) survives every subsequent session save — the container is rebuilt
+	# from the model on save and would otherwise revert members to [].
+	# W14 T4a：随会话携带的名单被回写，使身份面板的成员变更在后续每次会话保存后仍存活
+	# —— 保存时容器按模型重建，否则 members 会回退为空。
+	if not gpMembers.is_empty():
+		gpOut["members"] = gpMembers.duplicate(true)
 	# ADR-43: container-level cross-sheet links go out under the HISTORIC "cross_links" key
 	# (reserved by the multi-document era; the migration chain preserves it). The key is
 	# written ONLY when links exist, and the array is sorted by id so repeated saves are
@@ -146,6 +162,12 @@ static func gpWriteSheets(gpSheets: Array, gpPath: String, gpLinks: Array = []) 
 			for gpModel in gpModels:
 				gpLinksOut.append(gpModel.gpToDict())
 			gpOut["cross_links"] = gpLinksOut
+	# W14 (ADR-40 D6): every multi-sheet save stamps a content revision into the v4 header
+	# AFTER the payload is fully assembled (cross_links included), so the hash covers the
+	# exact bytes being written; GPRevision owns the chain mechanics.
+	# W14（ADR-40 D6）：每次多图纸保存都在载荷**完全装配后**（含 cross_links）向 v4 头部
+	# 盖内容修订，使哈希覆盖即将写出的确切内容；链机制归 GPRevision。
+	GPRevision.gpStampRevision(gpOut, gpAuthor, gpAt, gpPriorRevisions)
 	var gpWrite: GPIOResult = GPAtomicFile.gpWriteJsonAtomic(gpFilePath, gpOut)
 	if not gpWrite.gpIsOk():
 		return FAILED
@@ -153,8 +175,11 @@ static func gpWriteSheets(gpSheets: Array, gpPath: String, gpLinks: Array = []) 
 
 
 # Result-typed variant of gpWriteSheets(). / gpWriteSheets() 的结果类型版本。
-static func gpWriteSheetsResult(gpSheets: Array, gpPath: String, gpLinks: Array = []) -> GPIOResult:
-	var gpErr: int = gpWriteSheets(gpSheets, gpPath, gpLinks)
+static func gpWriteSheetsResult(gpSheets: Array, gpPath: String, gpLinks: Array = [],
+		gpAuthor: String = "local", gpAt: String = "", gpPriorRevisions: Array = [],
+		gpMembers: Array = []) -> GPIOResult:
+	var gpErr: int = gpWriteSheets(gpSheets, gpPath, gpLinks, gpAuthor, gpAt, gpPriorRevisions,
+		gpMembers)
 	if gpErr != OK:
 		return GPIOResult.gpFailure("io.write_failed", "status.save_fail", gpPath)
 	return GPIOResult.gpSuccess("io.saved", gpPath)
@@ -181,7 +206,10 @@ static func gpReadSheetsWithLinks(gpPath: String) -> GPIOResult:
 		# 只能无名，空名曾刷空标签栏/摘出窗口标题/窗格选择器。开图语义归外壳
 		#（GPFreshOpen.gpOpen）。
 		GPSymbolLibrary.gpSetDocSizeScale(1.0)
-		return GPIOResult.gpSuccessWith({"sheets": [], "links": []}, "io.loaded", gpPath)
+		# W14: the empty payload honestly reports empty revision state too.
+		# W14：空载荷同样如实上报空的修订状态。
+		return GPIOResult.gpSuccessWith(
+			{"sheets": [], "links": [], "revision": "", "revisions": []}, "io.loaded", gpPath)
 	# P0-5: set the shared library's symbol scale BEFORE any sheet / user pack is rebuilt.
 	# The previous document may have left a legacy 0.5 active; registering this archive's
 	# packs against the wrong scale would double-shrink (or double-grow) them.
@@ -259,7 +287,46 @@ static func gpReadSheetsWithLinks(gpPath: String) -> GPIOResult:
 			var gpLink: GPOffPageLink = GPOffPageLink.gpFromDict(gpRaw as Dictionary)
 			if gpLink != null:
 				gpLinksOut.append(gpLink)
-	return GPIOResult.gpSuccessWith({"sheets": gpSheetsOut, "links": gpLinksOut},
+	return GPIOResult.gpSuccessWith(
+		{
+			"sheets": gpSheetsOut,
+			"links": gpLinksOut,
+			# W14 (ADR-40 D6): carry the header revision state out to the shell, which
+			# compares it against the on-disk revision before the NEXT save (optimistic
+			# concurrency). The revisions list rides along for chain continuity.
+			# W14（ADR-40 D6）：把头部修订状态带出给外壳，供下一次保存前与盘上修订比对
+			#（乐观并发）。修订清单随行，保证链的连续性。
+			"revision": str(gpV3.get("revision", "")),
+			"revisions": (gpV3.get("revisions", []) as Array) if (gpV3.get("revisions") is Array) else [],
+			# T4a: the roster rides along for the session save write-back.
+			# T4a：名单随行，供会话保存回写。
+			"members": (gpV3.get("members", []) as Array) if (gpV3.get("members") is Array) else [],
+		},
+		"io.loaded", gpPath)
+
+
+# W14 (ADR-40 D6 / F02): read ONLY the plaintext header revision state of an archive —
+# the cheap probe the shell runs before overwriting a file, so two stations editing the
+# same archive on a LAN share detect the conflict BEFORE either write lands.
+# W14（ADR-40 D6 / F02）：只读取档的明文头部修订状态 —— 外壳在覆盖文件前运行的廉价探针，
+# 使局域网共享盘上编辑同一存档的两个工作站**在任何一方写入前**就发现冲突。
+# Payload on success: {"revision": String, "revisions": Array}（缺键 → 空串 / 空数组）。
+static func gpReadHeader(gpPath: String) -> GPIOResult:
+	var gpRead: GPIOResult = GPAtomicFile.gpReadJsonDict(gpPath)
+	if not gpRead.gpIsOk():
+		return gpRead
+	var gpDict: Dictionary = gpRead.gpPayload as Dictionary
+	var gpList: Array = (gpDict.get("revisions", []) as Array) if (gpDict.get("revisions") is Array) else []
+	var gpMembers: Array = (gpDict.get("members", []) as Array) if (gpDict.get("members") is Array) else []
+	return GPIOResult.gpSuccessWith(
+		{
+			"revision": str(gpDict.get("revision", "")),
+			"revisions": gpList,
+			# W14 T4a: the roster rides along so the identity coordinator can decide the
+			# login mode without a second file read.
+			# W14 T4a：名单随行，使身份协调者无需第二次读文件即可判定登录模式。
+			"members": gpMembers,
+		},
 		"io.loaded", gpPath)
 
 

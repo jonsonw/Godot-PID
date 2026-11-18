@@ -145,7 +145,7 @@ func gpOnDirtyChanged(_gpDirty: bool) -> void:
 # 关闭路径：干净 -> 立即退出；脏 -> 询问，绝不替用户决定。
 func gpOnCloseRequested() -> void:
 	if not gpHost.gpDocManager.gpIsDirty():
-		gpHost.get_tree().quit()
+		gpHost.gpIdentity.gpReleaseOnExit(); gpHost.get_tree().quit() # W14 T5mini: release lock / 释放锁
 		return
 	gpAskUnsaved()
 
@@ -198,7 +198,7 @@ func gpOnUnsavedSave(gpDlg: ConfirmationDialog) -> void:
 	# 仅在保存确实清除了脏标记后才退出；保存失败必须让窗口保持打开，
 	# 否则这道护栏本身就变成了丢失工作的原因。
 	if not gpHost.gpDocManager.gpIsDirty():
-		gpHost.get_tree().quit()
+		gpHost.gpIdentity.gpReleaseOnExit(); gpHost.get_tree().quit() # W14 T5mini: release lock / 释放锁
 
 
 # "Don't Save" chosen: discard and quit.
@@ -207,7 +207,7 @@ func gpOnUnsavedDiscard(gpAction: StringName, gpDlg: ConfirmationDialog) -> void
 	if str(gpAction) != "discard":
 		return
 	gpDlg.queue_free()
-	gpHost.get_tree().quit()
+	gpHost.gpIdentity.gpReleaseOnExit(); gpHost.get_tree().quit() # W14 T5mini: release lock / 释放锁
 
 
 # ============================ project save / open ============================
@@ -406,11 +406,7 @@ func gpWriteProject(gpPath: String, gpIsAuto: bool = false) -> void:
 	# 把库的 schema 指纹盖进文件，使日后打开能察觉期间字段被增 / 改名 / 删过。
 	gpHost.gpActiveGraph().gpSchemaFingerprints = GPPropertyResolver.gpFingerprintsFor(gpHost.gpDefs)
 	var gpFilePath: String = GPProjectIO.gpEnsurePidExt(gpPath)
-	# A leftover .tmp means the last save died mid-write. Discard it: the target is still the
-	# 残留的 .tmp 意味着上次保存写了一半就死了。清掉它：目标仍是上一份完好副本，
-	if GPAtomicFile.gpHasTempRemains(gpFilePath):
-		GPAtomicFile.gpDiscardTempRemains(gpFilePath)
-		gpHost.gpSetState("status.tmp_cleaned", [gpFilePath])
+	if not gpHost.gpRevisionGuard.gpGateSave(gpFilePath): return # W14 pre-save gate / 保存前闸
 	# Prefer the GPIOResult API: it carries a machine-readable code plus an i18n reason key,
 	# so the shell can explain WHY a save failed instead of only knowing that it did.
 	# 优先使用 GPIOResult API：它携带机器可读码与 i18n 原因键，使外壳能解释保存「为何」失败，
@@ -422,7 +418,8 @@ func gpWriteProject(gpPath: String, gpIsAuto: bool = false) -> void:
 	var gpWriteResult: GPIOResult
 	if gpSheets.size() > 1:
 		gpWriteResult = GPProjectIO.gpWriteSheetsResult(gpSheets, gpFilePath,
-			gpHost.gpCenter.gpOffPageLinks)
+			gpHost.gpCenter.gpOffPageLinks, gpHost.gpCurrentUser, Time.get_datetime_string_from_system(),
+			gpHost.gpLoadedRevisions, gpHost.gpLoadedMembers)
 	else:
 		# A single-sheet archive keeps the v2 shape, which has NO sheets[] section — so the
 		# tab title must be stamped into meta["title"], or the migration chain reconstructs
@@ -441,11 +438,13 @@ func gpWriteProject(gpPath: String, gpIsAuto: bool = false) -> void:
 		# （旧档 0.5 / 新档 1.0），使兼容决定在 v2 往返后仍存活。
 		if gpFirst != null:
 			(gpFirst.gpGraph if gpFirst.gpGraph != null else gpHost.gpActiveGraph()).gpMeta["symbol_scale"] = gpFirst.gpSymbolScale
-		gpWriteResult = GPProjectIO.gpWriteProjectResult(gpHost.gpActiveGraph(), gpFilePath)
+		gpWriteResult = GPProjectIO.gpWriteProjectResult(gpHost.gpActiveGraph(), gpFilePath,
+			gpHost.gpCurrentUser, Time.get_datetime_string_from_system(), gpHost.gpLoadedRevisions)
 	if not gpWriteResult.gpIsOk():
 		gpHost.gpSetState("status.save_fail", [gpFilePath])
 		return
 	gpHost.gpCurrentPath = gpFilePath
+	gpHost.gpRevisionGuard.gpRefreshAfterSave(gpFilePath) # W14: refresh session revision state / 刷新会话修订状态
 	# a successful save clears the unsaved-dirty flag so the title bar / project tree update.
 	# 保存成功清除未保存脏标记，使标题栏/工程树同步。
 	gpHost.gpDocManager.gpClearDirty()
@@ -458,7 +457,7 @@ func gpWriteProject(gpPath: String, gpIsAuto: bool = false) -> void:
 	# 兑现关闭拦截留下的待退出（退出时无路径的另存为）。
 	if gpHost.gpQuitAfterSave:
 		gpHost.gpQuitAfterSave = false
-		gpHost.get_tree().quit()
+		gpHost.gpIdentity.gpReleaseOnExit(); gpHost.get_tree().quit() # W14 T5mini: release lock / 释放锁
 		return
 	if gpIsAuto:
 		# A quieter, distinct line so the user can tell a background checkpoint apart from
@@ -491,6 +490,7 @@ func gpReadProject(gpPath: String) -> void:
 		return
 	var gpPayload: Dictionary = gpSheetsResult.gpPayload as Dictionary
 	var gpSheets: Array = gpPayload.get("sheets", []) as Array
+	gpHost.gpRevisionGuard.gpCaptureOnLoad(gpPayload) # W14: baseline for the optimistic check / 乐观校验基线
 	if gpSheets.is_empty():
 		GPFreshOpen.gpOpen(gpHost, gpPath)
 		return
@@ -537,7 +537,7 @@ func gpReadProject(gpPath: String) -> void:
 	gpHost.gpActiveCanvas().gpConnectFrom = ""
 	gpHost.gpActiveCanvas().gpShapeSel.clear()
 	gpHost.gpActiveCanvas().queue_redraw()
-	gpHost.gpCurrentPath = gpPath
+	gpHost.gpCurrentPath = gpPath; gpHost.gpIdentity.gpOnProjectLoaded(gpPath) # W14: login prompt on multi-member projects / 多人工程提示登录
 	gpHost.gpSetState("status.loaded_with_packs", [gpPath, gpNewGraph.gpUserSymbolPacks.size()])
 
 

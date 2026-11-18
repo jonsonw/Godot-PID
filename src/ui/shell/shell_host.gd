@@ -152,6 +152,55 @@ var gpDocManager: GPAppDocumentManager = GPAppDocumentManager.new()
 # 上次打开/保存的工程路径；保存复用它，另存为/打开则重新选择。
 var gpCurrentPath: String = ""
 
+# ============================ W14 identity & revision session state ============================
+# ============================ W14 身份与修订会话状态 ============================================
+# Members a coordinator (file_coordinator, identity panel, login dialog) reads or writes;
+# they live in the contract because the ROOT never touches them itself.
+# 供协调者（file_coordinator、身份面板、登录对话框）读写的成员；它们进契约，
+# 是因为**根类自己**从不触碰。
+
+# The archive header revision AS LOADED into this session (ADR-40 D6). The save path
+# compares it against the on-disk header before overwriting; "" = legacy archive / new
+# file (no optimistic check). Refreshed after every successful save.
+# 本会话载入时的存档头部修订（ADR-40 D6）。保存路径在覆盖前与盘上头部比对；
+# 空串＝旧档 / 新文件（不做乐观校验）。每次保存成功后刷新。
+var gpLoadedRevision: String = ""
+
+# The revision list carried through the session, so each save's chain continues from the
+# last stamp instead of restarting (bounded by GPRevision.GP_MAX_REVISIONS on write).
+# 会话携带的修订清单，使每次保存的链从上一次盖章继续而非重启
+#（写入侧按 GPRevision.GP_MAX_REVISIONS 截断）。
+var gpLoadedRevisions: Array = []
+
+# The member roster carried through the session (W14 T4a): written back on every
+# multi-sheet save so identity-panel edits survive session saves.
+# 随会话携带的成员名单（W14 T4a）：每次多图纸保存回写，使身份面板的成员变更
+# 在会话保存后仍存活。
+var gpLoadedMembers: Array = []
+
+# The current session user (ADR-40 user identity — NOT ADR-17 object identity). "local"
+# until a login succeeds; stamped into saves (last_saved_by) and checked by permission gates.
+# 当前会话用户（ADR-40 用户身份——不是 ADR-17 对象身份）。登录成功前为 "local"；
+# 盖进保存（last_saved_by）并被权限闸门检查。
+var gpCurrentUser: String = "local"
+
+# W14 revision gate coordinator (revision_guard.gd). Self-injected here because the root's
+# assembly (main_window) is budget-frozen and this guard is a pure save-path concern.
+# W14 修订闸协调者（revision_guard.gd）。在契约内自注入 —— 根类装配（main_window）
+# 预算冻结，且本闸是纯保存路径关注点。
+var gpRevisionGuard: GPRevisionGuard = GPRevisionGuard.new()
+
+# W14 identity coordinator (identity_coordinator.gd): login flow on multi-member projects
+# and the session user. Self-injected for the same budget-frozen-root reason.
+# W14 身份协调者（identity_coordinator.gd）：多人工程的登录流程与会话用户。
+# 自注入理由同上（根类装配预算冻结）。
+var gpIdentity: GPIdentityCoordinator = GPIdentityCoordinator.new()
+
+
+func _init() -> void:
+	gpRevisionGuard.gpHost = self
+	gpIdentity.gpHost = self
+
 # ============================ scene nodes the ports expose ============================
 # ============================ 端口暴露的场景节点 ============================
 # Only the nodes a coordinator or a relay actually reaches. The root's own furniture is NOT

@@ -73,3 +73,13 @@ static func gpCanRenameProject() -> bool:
 # 用户可否删除工程（移入废纸篓）？
 static func gpCanDeleteProject() -> bool:
 	return not gpForceDeny
+
+
+# May the user manage the member roster of a project (W14 T4b / ADR-40 D3: 维护成员与授权
+# is the MANAGER's capability)? The role matrix enforcement is W15 — until then the gate
+# is wired (login dialog / identity panel ask HERE), so W15 only changes THIS file.
+# 用户可否管理工程的成员名单（W14 T4b / ADR-40 D3：维护成员与授权是**管理者**能力）？
+# 角色矩阵强制是 W15 —— 届时闸门已在此接线（登录对话框 / 身份面板都问这里），
+# W15 只需改本文件。
+static func gpCanManageMembers() -> bool:
+	return not gpForceDeny

@@ -43,6 +43,16 @@ extends RefCounted
 # project_meta / 项目级元信息：Dictionary 占位（字段随 ADR-38 项目信息演进；
 # 本篇只冻结「键存在且必为 dict」，不冻结内部字段）。
 #
+# ==================== W14 REVISION HEADER (ADR-40 D6 / F02, stamped by GPRevision) ====
+# ==================== W14 修订头部（ADR-40 D6 / F02，由 GPRevision 盖章）================
+# 明文 header 键（只增不改；旧档缺键 → 校验/比对跳过，渐进兼容）。哈希刻意排除这四键。
+# Plaintext header keys (append-only; archives without them skip verify/compare). The
+# hash deliberately excludes these four keys.
+#   "revision":       String   当前内容哈希（sha256 hex；乐观并发校验的比对值）
+#   "revisions":      Array    修订清单 [{revision, parent, author, at}]，上限 100 条（截旧）
+#   "last_saved_by":  String   最后保存者（会话用户；未登录＝"local"）
+#   "last_saved_at":  String   最后保存时间（ISO 字符串，由外壳传入）
+#
 # ==================== v4 SHAPE / v4 形态 ====================
 # v3 mechanical keys (meta / sheets / cross_links / library / config / tag_rules) are
 # KEPT AS-IS; v4 adds four top-level sections and stamps container_version=4. Rationale:
