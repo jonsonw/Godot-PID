@@ -177,9 +177,15 @@ func gpReload() -> void:
 
 
 # The roles dropdown: clicked the roles cell of a row -> offer the three roles.
-# 角色下拉：点击某行的角色单元格 -> 弹出三角色。
-func _gpOnCellSelected(gpItem: TreeItem, gpCol: int) -> void:
-	if gpCol != 1:
+# Godot 4's cell_selected emits ZERO arguments — the selected cell comes from
+# get_selected()/get_selected_column() (arg mismatch = the callable aborts and the
+# dropdown never opens, on-device bug 2026-11-18).
+# 角色下拉：点击某行的角色单元格 -> 弹出三角色。Godot 4 的 cell_selected **零参数**，
+# 选中单元格经 get_selected()/get_selected_column() 取（参数不匹配 = 回调中断、下拉弹不出，
+# 实机缺陷 2026-11-18）。
+func _gpOnCellSelected() -> void:
+	var gpItem: TreeItem = gpTable.get_selected()
+	if gpItem == null or gpTable.get_selected_column() != 1:
 		return
 	_gpRoleMenuUser = str(gpItem.get_meta("gp_user", ""))
 	if _gpRoleMenuUser == "":

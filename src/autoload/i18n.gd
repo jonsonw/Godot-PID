@@ -493,7 +493,7 @@ const GP_STRINGS: Dictionary = {
 	"identity.logged_in": { "zh": "已登录：%s", "en": "Signed in: %s" },
 	"identity.login_cancelled": { "zh": "未登录 —— 以本地身份（local）继续，编辑将以 local 署名。", "en": "Not signed in — continuing as local; edits will be stamped as local." },
 	"identity.panel_title": { "zh": "身份与成员", "en": "Identity & Members" },
-	"identity.panel_info": { "zh": "管理者分配模型：添加成员即同时分配用户名、初始密码与角色（凭据哈希随工程文件走，各工作站通用）。选中行后可在下方修改密码 / 显示名 / 角色；表格为只读。角色能力矩阵 W15 生效，本面板当前仅由权限闸门管控。", "en": "Manager-assigns model: adding a member assigns username, initial password and roles at once (the credential hash travels with the archive; valid on every workstation). Select a row to edit its password / display name / roles below; the table is read-only. Role capability matrix lands in W15." },
+	"identity.panel_info": { "zh": "管理者分配模型：添加成员即同时分配用户名、初始密码与角色（凭据哈希随工程文件走，各工作站通用）。表格即编辑器：用户名 / 显示名点击就地修改，启用列直接打勾，点击角色列弹出下拉选择；改密码选中行后用下方专用行。角色能力矩阵 W15 生效，本面板当前仅由权限闸门管控。", "en": "Manager-assigns model: adding a member assigns username, initial password and roles at once (the credential hash travels with the archive; valid on every workstation). The table IS the editor: click username / display name to edit in place, tick the enabled cell, click the roles cell for a dropdown; passwords ride the dedicated row below after selecting a row. Role capability matrix lands in W15." },
 	"identity.roles": { "zh": "角色", "en": "Roles" },
 	"identity.enabled": { "zh": "启用", "en": "Enabled" },
 	"identity.yes": { "zh": "是", "en": "Yes" },
