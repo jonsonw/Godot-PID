@@ -42,10 +42,15 @@ var gpInfoLabel: Label
 
 # Build the form. gpPrefill = the first enabled roster user at open time (typical case:
 # one workstation, one primary user) — prefill ONLY, never the source of truth.
+# NB: the parameter is gpPath, NOT gpArchivePath — a same-name param SHADOWS the member
+# and `gpArchivePath = gpArchivePath` would leave the member "" forever (every submit
+# then fails its header read; latent bug found 2026-11-18 while tracing the open gate).
 # 构建表单。gpPrefill = 打开时的第一个启用成员（典型：一机一主用户）—— **仅预填**，
-# 绝不作鉴权依据。
-func gpSetup(gpArchivePath: String, gpPrefill: String) -> void:
-	gpArchivePath = gpArchivePath
+# 绝不作鉴权依据。注意：参数名是 gpPath 而**非** gpArchivePath —— 同名参数会**遮蔽**
+# 成员，`gpArchivePath = gpArchivePath` 将让成员永远为空串（此后每次提交的头部读取
+# 必失败；2026-11-18 排查打开门禁时发现的潜伏缺陷）。
+func gpSetup(gpPath: String, gpPrefill: String) -> void:
+	gpArchivePath = gpPath
 	title = I18n.gpTr("identity.login_title")
 	# ADR-48: created hidden; shown via popup_centered by the caller. Resizable per准则.
 	# ADR-48：创建即隐藏；显示由调用方走 popup_centered。按准则可缩放。

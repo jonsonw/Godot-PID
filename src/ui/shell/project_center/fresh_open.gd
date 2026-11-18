@@ -52,4 +52,10 @@ func gpRun(gpPath: String) -> void:
 	# 文档管理器切到新图（重置脏标记并向总线通告）。
 	gpHost.gpDocManager.gpSetGraph(gpHost.gpActiveGraph())
 	gpHost.gpCurrentPath = gpPath
+	# W14 identity hook — the EMPTY-archive path used to skip it entirely: no login gate
+	# on multi-member rosters, no open lock (on-device gap 2026-11-18). Same one-liner
+	# as the sheeted path in file_coordinator.
+	# W14 身份钩子 —— 空工程通路此前**完全**跳过它：多成员名单不弹登录门、不上开档锁
+	#（实机缺口 2026-11-18）。与 file_coordinator 带图纸路径同一行式。
+	gpHost.gpIdentity.gpOnProjectLoaded(gpPath)
 	gpHost.gpSetState("status.loaded_with_packs", [gpPath, 0])
