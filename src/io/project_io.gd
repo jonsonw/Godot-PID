@@ -290,7 +290,7 @@ static func gpReadSheetsWithLinks(gpPath: String) -> GPIOResult:
 	if gpV3.has("tag_rules"):
 		var gpStd: GPProjectStandard = GPProjectStandard.gpFromDict(
 			gpV3.get("tag_rules", {}) as Dictionary)
-		var gpNoIdx: int = 0
+		var gpNoUsed: Dictionary = GPSheetNumbering.gpUsedNumbers(gpSheetsOut)
 		for gpSheetRaw in gpSheetsOut:
 			var gpSheetObj: GPSheet = gpSheetRaw as GPSheet
 			if gpSheetObj != null and gpSheetObj.gpGraph != null:
@@ -301,9 +301,10 @@ static func gpReadSheetsWithLinks(gpPath: String) -> GPIOResult:
 				# ADR-38：尚无编号的图纸（编号功能之前的存档）按项目规则补号，其**空缺**的标题栏
 				# 字段继承项目信息 —— 用户逐张填过的值不动。
 				if gpSheetObj.gpNumber.strip_edges() == "":
-					gpSheetObj.gpAssignNumber(gpStd.gpSheetNumberFor(gpNoIdx + 1))
+					var gpNo: String = GPSheetNumbering.gpNextNumber(gpNoUsed, gpStd)
+					gpSheetObj.gpAssignNumber(gpNo)
+					gpNoUsed[gpNo] = true
 				gpSheetObj.gpApplyProjectInfo(gpStd)
-			gpNoIdx += 1
 	# ADR-43: rebuild the container-level links. Only the NEW record shape enters the
 	# model; historic shape entries are skipped (and stay untouched on disk until the
 	# next save, which rebuilds the container from models — the same policy as every

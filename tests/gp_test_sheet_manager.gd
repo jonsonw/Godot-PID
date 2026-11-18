@@ -196,3 +196,47 @@ func gpTestSheetNumbering() -> void:
 	gpStd.gpSheetNoRule["template"] = "{project_no}-{seq:3}"
 	gpEq(GPSheetNumbering.gpNumberFor(4, gpStd), "PRJ-004",
 		"with a standard the template wins (the fresh sheet matches the renumber)")
+
+
+# ==================== project-wide identity / 全工程身份 ====================
+
+# 2026-11-18 duplicate-number fix. Deleting the FIRST sheet used to reset the tab counter, so
+# the next "+" re-minted the survivor's id, name AND number ("002 图纸 2" twice). All three
+# identities must instead be derived from the whole project (open + hidden).
+# 2026-11-18 重号修复：删掉第一张会重置标签计数器，下一次「+」会重铸幸存图纸的 id、名称与
+# 编号（两个「002 图纸 2」）。三种身份都必须从全工程（打开+隐藏）推导。
+func gpTestCreationNeverReusesSurvivorIdentity() -> void:
+	var gpSurvivor: GPSheet = GPSheet.gpNew("sheet-2", "图纸 2", 0)
+	gpSurvivor.gpAssignNumber("002")
+	var gpSheets: Array = [gpSurvivor]
+	var gpUsed: Dictionary = GPSheetNumbering.gpUsedNumbers(gpSheets)
+	gpCheck(gpUsed.has("002"), "the survivor's number is reserved")
+	gpEq(GPSheetNumbering.gpNextNumber(gpUsed, null), "003",
+		"a new sheet continues past the highest in-use number; it never re-mints 002")
+	gpEq(GPSheetIdentity.gpNextNameIndex(gpSheets), 3,
+		"the display name continues from the survivor, not from the open-tab count")
+	var gpNewId: String = GPSheetIdentity.gpNewId(gpSheets, 1000)
+	gpCheck(gpNewId != gpSurvivor.gpId and gpNewId.begins_with("sheet-s"),
+		"a new id is opaque and cannot be the survivor's id")
+	var gpSecondId: String = GPSheetIdentity.gpNewId(
+		[gpSurvivor, GPSheet.gpNew(gpNewId, "图纸 3", 1)], 1001)
+	gpCheck(gpSecondId != gpNewId and gpSecondId != gpSurvivor.gpId,
+		"two new sheets can never share an id")
+	gpEq(GPSheetNumbering.gpSequenceOf("PRJ-002"), 2, "the trailing sequence is parsed")
+	gpEq(GPSheetNumbering.gpSequenceOf("REV-A"), 0, "a non-numeric number advances nothing")
+
+
+# A hidden sheet still belongs to the project: its number is reserved during a renumber, so an
+# open sheet cannot be re-numbered onto it. Hidden sheets keep their own number verbatim.
+# 隐藏图纸仍属本工程：重编时其号占槽位，打开图纸不得重编到该号上；隐藏图纸自身号码不变。
+func gpTestRenumberReservesHiddenNumbers() -> void:
+	var gpA: GPSheet = GPSheet.gpNew("a", "图纸 1", 0)
+	gpA.gpAssignNumber("001")
+	var gpB: GPSheet = GPSheet.gpNew("b", "图纸 2", 1)
+	gpB.gpAssignNumber("002")
+	var gpHidden: GPSheet = GPSheet.gpNew("h", "图纸 3", 2)
+	gpHidden.gpAssignNumber("002")
+	var gpPlan: Dictionary = GPSheetNumbering.gpPlanRenumber([gpA, gpB, gpHidden], 2, null)
+	gpEq(str(gpPlan.get("a", "")), "001", "the first free slot is unchanged")
+	gpEq(str(gpPlan.get("b", "")), "003", "the hidden sheet's 002 is skipped")
+	gpCheck(not gpPlan.has("h"), "a hidden sheet is never renumbered by an open-tab pass")

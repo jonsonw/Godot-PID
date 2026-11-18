@@ -122,10 +122,6 @@ var gpProjectStandard: GPProjectStandard = null
 # 所有图纸共用的图元定义（经 gpSetDefs() 保持同步）。
 var gpDefs: Array[GPSymbolDef] = []
 
-# Monotonic counter used to number new sheet titles (P&ID 1, P&ID 2, ...).
-# 用于给新图纸标题编号（图纸 1、图纸 2 …）的单调递增计数。
-var gpSheetSeq: int = 0
-
 # Whether fullscreen mode is currently active.
 # 当前是否处于全屏模式。
 var gpFullscreen: bool = false
@@ -383,9 +379,10 @@ func _gpBuildBody() -> Control:
 # Add a new sheet with a fresh graph and canvas, make it active, and announce it.
 # 新建一张含独立图与画布的图纸并设为活动页，同时向外通告。
 func gpAddTab() -> void:
-	gpSheetSeq += 1
-	var gpTitle: String = I18n.gpTr("center.sheet") + " " + str(gpSheetSeq)
-	_gpAddTabWith(gpTitle, "sheet-" + str(gpSheetSeq))
+	var gpAll: Array = gpToSheets()
+	var gpTitle: String = I18n.gpTr("center.sheet") \
+		+ " " + str(GPSheetIdentity.gpNextNameIndex(gpAll))
+	_gpAddTabWith(gpTitle, GPSheetIdentity.gpNewId(gpAll))
 
 
 # Return the active sheet's canvas (null if none).
@@ -698,7 +695,6 @@ func gpLoadSheets(gpSheets: Array) -> void:
 	_gpClosedSheets.clear()
 	gpTabBar.clear_tabs()
 	gpActive = -1
-	gpSheetSeq = 0
 	# A different project brings a different convention: drop the old shared standard so the
 	# first sheet of the incoming file seeds its own (ADR-36).
 	# 换了工程就换了约定：丢掉旧的共享标准，让载入文件的第一张图纸播下自己的（ADR-36）。
@@ -715,7 +711,6 @@ func gpLoadSheets(gpSheets: Array) -> void:
 		var gpSheet: GPSheet = gpS as GPSheet
 		if gpSheet == null:
 			continue
-		gpSheetSeq += 1
 		_gpAddTabWith(gpSheet.gpName, gpSheet.gpId, gpSheet.gpGraph, gpSheet)
 	_gpLoading = false
 	# Pane i <- sheet i (clamped to the pane count; extra sheets stay reachable via the
@@ -778,7 +773,8 @@ func _gpEnsureSheetIdentity(gpSheet: GPSheet) -> void:
 	if gpStd == null:
 		return
 	if gpSheet.gpNumber.strip_edges() == "":
-		gpSheet.gpAssignNumber(gpStd.gpSheetNumberFor(gpSheet.gpIndex + 1))
+		gpSheet.gpAssignNumber(GPSheetNumbering.gpNextNumber(
+			GPSheetNumbering.gpUsedNumbers(gpToSheets()), gpStd))
 	gpSheet.gpApplyProjectInfo(gpStd)
 
 
@@ -798,22 +794,20 @@ func _gpTabTitleOf(gpSheet: GPSheet) -> String:
 	return "%s %s" % [gpNo, gpName]
 
 
-# Regenerate every sheet's number from tab order (ADR-38). Hand-edited drawing numbers survive
-# because gpAssignNumber only overwrites the block while it still shows the previous auto value.
-# 按标签顺序重编全部图纸编号（ADR-38）。手改过的图号会保留 —— gpAssignNumber 只在图签仍是
-# 上一个自动值时才覆盖。
+# Renumber from a whole-project plan: hidden + hand-edited numbers reserve their slots (ADR-38).
+# 依全工程规划重编：隐藏图纸与手改号占槽位，手改仍然保留（ADR-38）。
 func gpRenumberSheets() -> void:
 	var gpStd: GPProjectStandard = gpProjectStandard
 	if gpStd == null:
 		return
-	var gpI: int = 0
-	for gpTabRaw in gpTabs:
-		var gpSheet: GPSheet = (gpTabRaw as Dictionary).get("sheet") as GPSheet
-		if gpSheet != null:
-			gpSheet.gpAssignNumber(gpStd.gpSheetNumberFor(gpI + 1))
+	var gpPlan: Dictionary = GPSheetNumbering.gpPlanRenumber(gpToSheets(), gpTabs.size(), gpStd)
+	for gpI in range(gpTabs.size()):
+		var gpSheet: GPSheet = (gpTabs[gpI] as Dictionary).get("sheet") as GPSheet
+		var gpNo: String = str(gpPlan.get(gpSheet.gpId, "")) if gpSheet != null else ""
+		if gpNo != "":
+			gpSheet.gpAssignNumber(gpNo)
 			gpSheet.gpApplyProjectInfo(gpStd)
 			gpTabBar.set_tab_title(gpI, _gpTabTitleOf(gpSheet))
-		gpI += 1
 	# D09: links FOLLOW the renumber — a NON-manual tag re-mints as
 	# "<peer(B) sheet number>-<seq>" (the creation convention); a manual tag is a deliberate
 	# choice and stays. A closed (hidden) sheet keeps its own number, so a link pointing at
@@ -905,7 +899,8 @@ func _gpAddTabWith(gpTitle: String, gpId: String = "", gpGraphIn: GPPIDGraph = n
 		gpSheet = GPSheet.gpNew(gpId, gpTitle, gpTabs.size())
 		# W13 fix (user feedback 2026-11-11): a fresh sheet is numbered NOW — std template when adopted, bare sequence otherwise; survival stays with gpAssignNumber (ADR-38), this only mints the FIRST number. / W13 修复：新图纸立即发号（有标准走模板、否则裸序号）；手改存活仍归 gpAssignNumber，此处只铸第一枚编号。
 		if gpSheet.gpNumber.is_empty():
-			gpSheet.gpAssignNumber(GPSheetNumbering.gpNumberFor(gpTabs.size() + 1, gpProjectStandard))
+			gpSheet.gpAssignNumber(GPSheetNumbering.gpNextNumber(
+				GPSheetNumbering.gpUsedNumbers(gpToSheets()), gpProjectStandard))
 	gpSheet.gpGraph = gpGraph
 	_gpEnsureSheetIdentity(gpSheet)
 	var gpCanvas: GPCanvas2D = GPCanvas2D.new()
