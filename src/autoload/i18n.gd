@@ -502,6 +502,7 @@ const GP_STRINGS: Dictionary = {
 	"identity.role_designer": { "zh": "设计者", "en": "Designer" },
 	"identity.role_reviewer": { "zh": "校审者", "en": "Reviewer" },
 	"identity.roster_add": { "zh": "添加成员", "en": "Add member" },
+	"identity.roster_reset_pw": { "zh": "重设密码", "en": "Reset password" },
 	"identity.roster_apply_changes": { "zh": "应用变更", "en": "Apply changes" },
 	"identity.roster_toggle": { "zh": "启用 / 停用", "en": "Enable / Disable" },
 	"identity.roster_remove": { "zh": "移除成员", "en": "Remove member" },

@@ -211,6 +211,30 @@ func gpTestEnabledProjection() -> void:
 		"the disabled, blank and malformed entries must be filtered out")
 
 
+# Rename IN PLACE keeps the credential, roles and enabled flag (the inline table edit
+# must not cost a password re-assignment).
+# 原地改名保留凭据、角色与启停（内联表格编辑绝不能顺带要求重设密码）。
+func gpTestRenameUserKeepsCredential() -> void:
+	var gpMembers: Array = []
+	gpCheck(bool(GPCMemberRoster.gpAdd(gpMembers, "alice", "pw-alice", ["designer"]).get("ok", false)),
+		"adding alice must succeed")
+	gpCheck(bool(GPCMemberRoster.gpRenameUser(gpMembers, "alice", "alicia").get("ok", false)),
+		"renaming alice must succeed")
+	gpEq(GPCMemberRoster.gpFind(gpMembers, "alice"), {},
+		"the old name must be gone")
+	var gpEntry: Dictionary = GPCMemberRoster.gpFind(gpMembers, "alicia")
+	gpCheck(str(gpEntry.get("hash", "")) != "",
+		"the credential hash must survive the rename")
+	gpCheck(bool(GPCMemberRoster.gpVerifyLogin(gpMembers, "alicia", "pw-alice").get("ok", false)),
+		"the assigned password must still verify under the new name")
+	gpEq(str(GPCMemberRoster.gpRenameUser(gpMembers, "ghost", "x").get("code", "")),
+		GPCMemberRoster.GP_ERR_NOT_FOUND, "renaming an absent member must fail")
+	gpCheck(bool(GPCMemberRoster.gpAdd(gpMembers, "bob", "pw-bob", ["designer"]).get("ok", false)),
+		"adding bob must succeed")
+	gpEq(str(GPCMemberRoster.gpRenameUser(gpMembers, "alicia", "bob").get("code", "")),
+		GPCMemberRoster.GP_ERR_DUPLICATE, "renaming onto an existing name must fail")
+
+
 # The apply blade: read → swap members → RE-STAMP revision → atomic write; the archive
 # verifies clean afterwards (the roster participates in the content hash).
 # 落盘刀：读 → 换名单 → **重盖修订** → 原子写；随后存档校验干净

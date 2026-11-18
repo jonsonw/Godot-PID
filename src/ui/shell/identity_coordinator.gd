@@ -6,16 +6,15 @@ extends RefCounted
 # 身份会话协调者（W14 T4a/T4b，ADR-40 D2/D4）：多人工程的登录流程、会话用户记账，
 # 以及（T4b）管理者编辑的成员名单。
 #
-# MODE SEMANTICS / 模式语义（ADR-40 D2）：
+# MODE SEMANTICS / 模式语义（ADR-40 D2；v1.3 收紧）：
 # - single mode (<= 1 member): ZERO disturbance — session user stays "local/manager", no
 #   login prompt ever.
-# - multi mode (> 1 member): opening the archive prompts login. CANCEL is honest, not an
-#   error: the session continues as "local" with a status line saying so. Enforcement of
-#   role capabilities is W15 (the permission matrix) — W14 only establishes WHO is editing.
+# - multi mode (> 1 member): opening the archive prompts login. CANCEL / close EXITS back
+#   to the project manager (v1.3 user decision 2026-11-18) — a multi-user project has no
+#   "local" bypass. Enforcement of role capabilities is W15 (the permission matrix).
 # - 单人模式（成员数 <= 1）：零打扰 —— 会话用户保持 "local/manager"，永不弹登录。
-# - 多人模式（成员数 > 1）：打开存档即提示登录。取消是**如实**状态而非错误：
-#   会话以 "local" 继续并如实提示。角色能力的强制是 W15（权限矩阵）——
-#   W14 只确立「谁在编辑」。
+# - 多人模式（成员数 > 1）：打开存档即提示登录。取消 / 关闭即**退回项目管理器**
+#（v1.3 用户拍板 2026-11-18）—— 多人工程没有「本地」旁路。角色能力强制是 W15（权限矩阵）。
 #
 # Contract holder per the shell rule; self-injected by shell_host._init() because the
 # root's assembly is budget-frozen (same reason as revision_guard).
@@ -40,6 +39,10 @@ var _gpDialog: GPLoginDialog = null
 # W14 T5mini：本会话当前持锁的存档（"" = 无）。切换工程与退出时释放；崩溃留给僵尸回收。
 var _gpLockedPath: String = ""
 
+# The archive the login dialog authenticates against (the dialog re-reads it LIVE on
+# every submit). / 登录对话框鉴权用的存档路径（对话框每次提交**实时重读**）。
+var _gpCurrentPath: String = ""
+
 
 # Called by file_coordinator AFTER a successful archive load. Resets the session to
 # "local" (identity is per-project-load), reads the roster from the plaintext header,
@@ -50,6 +53,7 @@ func gpOnProjectLoaded(gpFilePath: String) -> void:
 	gpHost.gpCurrentUser = "local"
 	gpMembers = []
 	gpEnabledUsers = []
+	_gpCurrentPath = gpFilePath
 	gpOnProjectLock(gpFilePath)
 	var gpHeader: GPIOResult = GPProjectIO.gpReadHeader(gpFilePath)
 	if not gpHeader.gpIsOk():
@@ -115,14 +119,18 @@ func gpPromptLogin() -> void:
 		_gpDialog.move_to_foreground()
 		return
 	_gpDialog = GPLoginDialog.new()
-	_gpDialog.gpSetup(gpEnabledUsers, gpMembers)
+	var gpPrefill: String = gpEnabledUsers[0] if not gpEnabledUsers.is_empty() else ""
+	_gpDialog.gpSetup(_gpCurrentPath, gpPrefill)
 	gpHost.add_child(_gpDialog)
 	_gpDialog.gpLoginDone.connect(_gpOnLoginDone)
 	_gpDialog.popup_centered(Vector2i(430, 320))
 
 
-# Login outcome: success -> the session user changes; cancel -> honest "local" note.
-# 登录结果：成功 -> 会话用户切换；取消 -> 如实标注「本地」身份。
+# Login outcome: success -> the session user changes. Cancel / close -> EXIT back to the
+# project manager (v1.3 user decision 2026-11-18: a multi-user project has NO "local"
+# bypass — being able to draw after cancelling the login was the reported leak).
+# 登录结果：成功 -> 会话用户切换。取消 / 关闭 -> **退回项目管理器**（v1.3 用户拍板
+# 2026-11-18：多人工程**没有**「本地」旁路 —— 取消登录后还能画图是用户报的漏洞）。
 func _gpOnLoginDone(gpUser: String, gpOk: bool) -> void:
 	_gpDialog = null
 	if gpOk and gpUser != "":
@@ -137,6 +145,7 @@ func _gpOnLoginDone(gpUser: String, gpOk: bool) -> void:
 			gpHost.gpSetState("identity.logged_in", [gpUser])
 	else:
 		gpHost.gpSetState("identity.login_cancelled", [])
+		gpHost.gpExitToManager()
 
 
 # The enabled roster for the login dialog / panel callers.

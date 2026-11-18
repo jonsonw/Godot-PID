@@ -104,6 +104,25 @@ static func gpSetCredential(gpMembers: Array, gpUser: String, gpPassword: String
 	return {"ok": true, "code": ""}
 
 
+# Rename a member IN PLACE: the credential hash, roles, enabled flag and display name
+# all stay untouched (the inline table edit needs this — renaming must not cost a
+# password re-assignment).
+# 原地改名：凭据哈希、角色、启停与显示名**全部保留**（表格内联编辑需要 ——
+# 改名绝不能顺带要求重设密码）。
+static func gpRenameUser(gpMembers: Array, gpOld: String, gpNew: String) -> Dictionary:
+	var gpName: String = gpNew.strip_edges()
+	if gpName == "":
+		return {"ok": false, "code": GP_ERR_BAD_USER}
+	var gpM: Dictionary = gpFind(gpMembers, gpOld)
+	if gpM.is_empty():
+		return {"ok": false, "code": GP_ERR_NOT_FOUND}
+	var gpClash: Dictionary = gpFind(gpMembers, gpName)
+	if gpName != gpOld and gpClash != {}:
+		return {"ok": false, "code": GP_ERR_DUPLICATE}
+	gpM["user"] = gpName
+	return {"ok": true, "code": ""}
+
+
 # Enable / disable a member (a disabled member stays on the roster for audit — ADR-40 D4
 # entry comment: 停用成员保留名单便于审计). / 启停成员（停用者保留名单便于审计）。
 static func gpSetEnabled(gpMembers: Array, gpUser: String, gpEnabled: bool) -> Dictionary:

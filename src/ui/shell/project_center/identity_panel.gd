@@ -1,28 +1,20 @@
 class_name GPIdentityPanel
 extends Window
 # Copyright © 2026 Jonson Wang
-# Identity panel (W14 T4b, v1.3 credential model): the manager-side roster view of the
-# SELECTED archive — member table (user / roles / enabled / display name), add-with-
-# password, apply-changes on the selected row (password / display name / roles), and
-# enable-disable / remove.
-# 身份面板（W14 T4b，v1.3 凭据模型）：对**选中存档**的管理者侧名单视图 —— 成员表
-#（用户 / 角色 / 启停 / 显示名）、带密码添加、对选中行「应用变更」（密码 / 显示名 / 角色），
-# 以及启停 / 移除。
+# Identity panel (W14 T4b, v1.3 credential model, inline-edit iteration): the manager-side
+# roster view of the SELECTED archive. The table IS the editor (user request 2026-11-18):
+# username / enabled / display name edit in place, roles pick from a dropdown, and the
+# password column shows a mask — password changes ride the dedicated row below.
+# 身份面板（W14 T4b，v1.3 凭据模型，内联编辑迭代）：对**选中存档**的管理者侧名单视图。
+# 表格**就是**编辑器（用户要求 2026-11-18）：用户名 / 启用 / 显示名就地编辑，角色走下拉，
+# 密码列显示遮罩 —— 改密码走下方专用行。
 #
-# v1.3 MODEL / v1.3 模型（2026-11-18 用户拍板）：the manager IS the registrar — adding a
-# member assigns username + initial password + roles at once; the credential hash lives
-# in the member entry and travels with the archive (every workstation can verify it).
-# The table stays READ-ONLY (a Tree is not a spreadsheet) — all edits go through the
-# controls below, applied to the SELECTED row.
-# v1.3 模型（2026-11-18 用户拍板）：管理者**就是**登记人 —— 添加成员即同时分配用户名 +
-# 初始密码 + 角色；凭据哈希在成员条目里、随存档走（每个工作站都能验证）。表格保持**只读**
-#（Tree 不是电子表格）—— 所有编辑经下方控件作用于**选中行**。
-#
-# SAFETY / 安全：every change goes through GPCMemberRoster.gpApplyToArchive (read → swap
-# members → RE-STAMP the revision — the roster participates in the content hash → atomic
-# write). The panel never edits the sheet payload.
-# 安全：每次变更都经 GPCMemberRoster.gpApplyToArchive（读 → 换名单 → **重盖修订**
-#（名单参与内容哈希）→ 原子写）。面板绝不触碰图纸载荷。
+# v1.3 MODEL / v1.3 模型：the manager IS the registrar — adding a member assigns
+# username + initial password + roles; the credential hash lives in the member entry and
+# travels with the archive. Every change still goes through GPCMemberRoster.gpApplyToArchive
+# (read → swap → RE-STAMP revision → atomic write).
+# 管理者**就是**登记人 —— 添加成员即分配用户名 + 初始密码 + 角色；凭据哈希随存档走。
+# 所有变更仍经 GPCMemberRoster.gpApplyToArchive（读 → 换 → 重盖修订 → 原子写）。
 #
 # ADR-48: created hidden, shown via popup_centered, unresizable=false, content root
 # FULL_RECT (R8). R7: member-function callbacks, no lambdas across frames.
@@ -37,10 +29,12 @@ var gpMembers: Array = []
 var gpTable: Tree
 var gpUserEdit: LineEdit
 var gpPassEdit: LineEdit
+var gpRoleOption: OptionButton
 var gpNewPassEdit: LineEdit
-var gpDisplayEdit: LineEdit
-var gpRoleChecks: Dictionary = {}
 var gpInfoLabel: Label
+var gpRoleMenu: PopupMenu
+# The user name the roles popup currently targets. / 角色弹出菜单当前指向的用户名。
+var _gpRoleMenuUser: String = ""
 
 
 # Open on one archive. / 面向某个存档打开。
@@ -57,27 +51,35 @@ func gpSetup(gpPath: String) -> void:
 	gpInfoLabel.text = I18n.gpTr("identity.panel_info")
 	gpInfoLabel.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	gpRoot.add_child(gpInfoLabel)
-	# Roster table. hide_root kills the phantom blank first row (on-device bug
-	# 2026-11-18: the invisible Tree root painted as an un-editable "member").
-	# 名单表。hide_root 消灭幻影空首行（实机缺陷 2026-11-18：不可见的 Tree 根
-	# 被画成一行「不可编辑的成员」）。
+	# Roster table: username / roles / enabled / display name / password mask.
+	# hide_root kills the phantom blank first row (on-device bug 2026-11-18).
+	# 名单表：用户名 / 角色 / 启用 / 显示名 / 密码遮罩。hide_root 消灭幻影空首行
+	#（实机缺陷 2026-11-18）。
 	gpTable = Tree.new()
 	gpTable.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	gpTable.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	gpTable.hide_root = true
 	gpRoot.add_child(gpTable)
-	gpTable.columns = 4
+	gpTable.columns = 5
 	gpTable.set_column_title(0, I18n.gpTr("identity.user"))
 	gpTable.set_column_title(1, I18n.gpTr("identity.roles"))
 	gpTable.set_column_title(2, I18n.gpTr("identity.enabled"))
 	gpTable.set_column_title(3, I18n.gpTr("identity.display_name_col"))
+	gpTable.set_column_title(4, I18n.gpTr("identity.password"))
 	gpTable.set_column_titles_visible(true)
-	# Selecting a row mirrors its roles + display name into the edit controls (R7:
-	# member-function callback). / 选中行时把该行角色与显示名镜像进编辑控件
-	#（R7：成员函数回调）。
-	gpTable.item_selected.connect(_gpOnRowSelected)
-	# Add row: username + initial password + role checkboxes + button (v1.3: the manager
-	# assigns the credential). / 添加行：用户名 + 初始密码 + 角色勾选 + 按钮
+	# R7: member-function callbacks. Inline edits and the roles dropdown both land here.
+	# R7：成员函数回调。内联编辑与角色下拉都汇到这里。
+	gpTable.item_edited.connect(_gpOnEdited)
+	gpTable.cell_selected.connect(_gpOnCellSelected)
+	# The roles dropdown (one PopupMenu per panel, shown per click — R7, no closures).
+	# 角色下拉（每面板一个 PopupMenu，按次显示 —— R7，不用闭包）。
+	gpRoleMenu = PopupMenu.new()
+	add_child(gpRoleMenu)
+	for gpI in range(GPProjectContainerV4.GP_ROLES.size()):
+		gpRoleMenu.add_item(I18n.gpTr("identity.role_" + str(GPProjectContainerV4.GP_ROLES[gpI])), gpI)
+	gpRoleMenu.id_pressed.connect(_gpOnRolePicked)
+	# Add row: username + initial password + roles dropdown + button (v1.3: the manager
+	# assigns the credential). / 添加行：用户名 + 初始密码 + 角色下拉 + 按钮
 	#（v1.3：管理者分配凭据）。
 	var gpAddRow: HBoxContainer = HBoxContainer.new()
 	gpRoot.add_child(gpAddRow)
@@ -90,45 +92,35 @@ func gpSetup(gpPath: String) -> void:
 	gpPassEdit.secret = true
 	gpPassEdit.placeholder_text = I18n.gpTr("identity.password_initial")
 	gpAddRow.add_child(gpPassEdit)
-	for gpRole in GPProjectContainerV4.GP_ROLES:
-		var gpCheck: CheckBox = CheckBox.new()
-		gpCheck.text = I18n.gpTr("identity.role_" + str(gpRole))
-		if str(gpRole) == "designer":
-			gpCheck.button_pressed = true
-		gpAddRow.add_child(gpCheck)
-		gpRoleChecks[str(gpRole)] = gpCheck
+	gpRoleOption = OptionButton.new()
+	for gpI in range(GPProjectContainerV4.GP_ROLES.size()):
+		gpRoleOption.add_item(I18n.gpTr("identity.role_" + str(GPProjectContainerV4.GP_ROLES[gpI])), gpI)
+	gpRoleOption.select(1)  # designer / 设计者
+	gpAddRow.add_child(gpRoleOption)
 	var gpAddBtn: Button = Button.new()
 	gpAddBtn.text = I18n.gpTr("identity.roster_add")
 	gpAddBtn.disabled = not GPPermissions.gpCanManageMembers()
 	gpAddBtn.pressed.connect(_gpOnAdd)
 	gpAddRow.add_child(gpAddBtn)
-	# Edit row: new password (blank = keep) + display name + apply-to-selected.
-	# 编辑行：新密码（空 = 不改）+ 显示名 + 应用到选中行。
-	var gpEditRow: HBoxContainer = HBoxContainer.new()
-	gpRoot.add_child(gpEditRow)
+	# Password row: re-assign the password of the SELECTED row (the mask column is
+	# read-only on purpose — a password never sits in an inline table).
+	# 密码行：重设**选中行**的密码（遮罩列刻意只读 —— 密码绝不进内联表格）。
+	var gpPassRow: HBoxContainer = HBoxContainer.new()
+	gpRoot.add_child(gpPassRow)
 	gpNewPassEdit = LineEdit.new()
 	gpNewPassEdit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	gpNewPassEdit.secret = true
 	gpNewPassEdit.placeholder_text = I18n.gpTr("identity.new_password")
-	gpEditRow.add_child(gpNewPassEdit)
-	gpDisplayEdit = LineEdit.new()
-	gpDisplayEdit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	gpDisplayEdit.placeholder_text = I18n.gpTr("identity.display_name_col")
-	gpEditRow.add_child(gpDisplayEdit)
-	var gpApplyBtn: Button = Button.new()
-	gpApplyBtn.text = I18n.gpTr("identity.roster_apply_changes")
-	gpApplyBtn.disabled = not GPPermissions.gpCanManageMembers()
-	gpApplyBtn.pressed.connect(_gpOnApplyChanges)
-	gpEditRow.add_child(gpApplyBtn)
-	# Action row: enable-disable / remove. / 动作行：启停 / 移除。
+	gpPassRow.add_child(gpNewPassEdit)
+	var gpPassBtn: Button = Button.new()
+	gpPassBtn.text = I18n.gpTr("identity.roster_reset_pw")
+	gpPassBtn.disabled = not GPPermissions.gpCanManageMembers()
+	gpPassBtn.pressed.connect(_gpOnResetPassword)
+	gpPassRow.add_child(gpPassBtn)
+	# Action row: remove / close. / 动作行：移除 / 关闭。
 	var gpActRow: HBoxContainer = HBoxContainer.new()
 	gpActRow.alignment = BoxContainer.ALIGNMENT_END
 	gpRoot.add_child(gpActRow)
-	var gpToggleBtn: Button = Button.new()
-	gpToggleBtn.text = I18n.gpTr("identity.roster_toggle")
-	gpToggleBtn.disabled = not GPPermissions.gpCanManageMembers()
-	gpToggleBtn.pressed.connect(_gpOnToggle)
-	gpActRow.add_child(gpToggleBtn)
 	var gpRemoveBtn: Button = Button.new()
 	gpRemoveBtn.text = I18n.gpTr("identity.roster_remove")
 	gpRemoveBtn.disabled = not GPPermissions.gpCanManageMembers()
@@ -158,96 +150,133 @@ func gpReload() -> void:
 		var gpMDict: Dictionary = gpM
 		var gpUser: String = str(gpMDict.get("user", ""))
 		var gpItem: TreeItem = gpTable.create_item(gpRootItem)
+		# The identity anchor: inline edits resolve through it even after a rename.
+		# 身份锚点：改名后内联编辑仍能据此定位。
+		gpItem.set_meta("gp_user", gpUser)
 		gpItem.set_text(0, gpUser)
+		gpItem.set_editable(0, true)
 		var gpRoleTexts: PackedStringArray = PackedStringArray()
 		var gpRolesRaw: Variant = gpMDict.get("roles", null)
 		if gpRolesRaw is Array:
 			for gpR in gpRolesRaw as Array:
 				gpRoleTexts.append(I18n.gpTr("identity.role_" + str(gpR)))
 		gpItem.set_text(1, " / ".join(gpRoleTexts))
-		gpItem.set_text(2, I18n.gpTr("identity.yes") if bool(gpMDict.get("enabled", true)) else I18n.gpTr("identity.no"))
-		# v1.3: the display name is a manager-assigned fact in the member entry.
-		# v1.3：显示名是成员条目里管理者分配的事实。
+		# Enabled = a real checkbox cell; the toggle rides item_edited. / 启用 = 真勾选
+		# 单元格；切换经 item_edited。
+		gpItem.set_cell_mode(2, TreeItem.CELL_MODE_CHECK)
+		gpItem.set_checked(2, bool(gpMDict.get("enabled", true)))
+		gpItem.set_editable(2, true)
 		gpItem.set_text(3, str(gpMDict.get("display_name", "")))
+		gpItem.set_editable(3, true)
+		# Password mask: readable-only on purpose. / 密码遮罩：刻意只读。
+		gpItem.set_text(4, "●●●●●●" if str(gpMDict.get("hash", "")) != "" else "—")
 
 
-# The roles currently ticked in the shared checkbox row. / 共用勾选行当前勾中的角色。
-func _gpTickedRoles() -> Array:
-	var gpRoles: Array = []
-	for gpRole in GPProjectContainerV4.GP_ROLES:
-		if (gpRoleChecks[str(gpRole)] as CheckBox).button_pressed:
-			gpRoles.append(str(gpRole))
-	return gpRoles
+# The roles dropdown: clicked the roles cell of a row -> offer the three roles.
+# 角色下拉：点击某行的角色单元格 -> 弹出三角色。
+func _gpOnCellSelected(gpItem: TreeItem, gpCol: int) -> void:
+	if gpCol != 1:
+		return
+	_gpRoleMenuUser = str(gpItem.get_meta("gp_user", ""))
+	if _gpRoleMenuUser == "":
+		return
+	gpRoleMenu.position = gpTable.get_screen_position() + gpTable.get_local_mouse_position()
+	gpRoleMenu.popup()
 
 
-# Add: validate via the pure CRUD (password included), then apply to the archive. The
-# optional display name rides the shared display-name field.
-# 添加：经纯 CRUD 校验（含密码），然后落盘。可选显示名复用共用显示名框。
+# A role picked from the dropdown -> single-role assignment on the targeted row.
+# 下拉选定角色 -> 对目标行做**单角色**赋值。
+func _gpOnRolePicked(gpId: int) -> void:
+	if _gpRoleMenuUser == "":
+		return
+	var gpPlan: Dictionary = GPCMemberRoster.gpSetRoles(gpMembers, _gpRoleMenuUser,
+		[str(GPProjectContainerV4.GP_ROLES[gpId])])
+	_gpRoleMenuUser = ""
+	if not bool(gpPlan.get("ok", false)):
+		_gpSay(str(gpPlan.get("code", "")))
+		return
+	_gpApply()
+
+
+# Dispatch an inline edit: 0 = rename, 2 = enabled, 3 = display name.
+# 分派内联编辑：0 = 改名，2 = 启停，3 = 显示名。
+func _gpOnEdited() -> void:
+	var gpItem: TreeItem = gpTable.get_edited()
+	if gpItem == null:
+		return
+	var gpCol: int = gpTable.get_edited_column()
+	var gpOld: String = str(gpItem.get_meta("gp_user", ""))
+	if gpOld == "":
+		return
+	match gpCol:
+		0:
+			var gpPlan: Dictionary = GPCMemberRoster.gpRenameUser(gpMembers, gpOld,
+				gpItem.get_text(0))
+			if bool(gpPlan.get("ok", false)):
+				_gpApply()
+			else:
+				_gpSay(str(gpPlan.get("code", "")))
+				gpReload()
+		2:
+			var gpPlan: Dictionary = GPCMemberRoster.gpSetEnabled(gpMembers, gpOld,
+				gpItem.is_checked(2))
+			if bool(gpPlan.get("ok", false)):
+				_gpApply()
+			else:
+				_gpSay(str(gpPlan.get("code", "")))
+				gpReload()
+		3:
+			var gpM: Dictionary = GPCMemberRoster.gpFind(gpMembers, gpOld)
+			if gpM.is_empty():
+				return
+			gpM["display_name"] = gpItem.get_text(3)
+			_gpApply()
+
+
+# Add: validate via the pure CRUD (password included), then apply to the archive.
+# 添加：经纯 CRUD 校验（含密码），然后落盘。
 func _gpOnAdd() -> void:
 	var gpPlan: Dictionary = GPCMemberRoster.gpAdd(gpMembers, gpUserEdit.text,
-		gpPassEdit.text, _gpTickedRoles(), gpDisplayEdit.text.strip_edges())
+		gpPassEdit.text, [str(GPProjectContainerV4.GP_ROLES[gpRoleOption.selected])])
 	if not bool(gpPlan.get("ok", false)):
 		_gpSay(str(gpPlan.get("code", "")))
 		return
 	_gpApply()
 
 
-# Apply changes to the SELECTED row: new password (blank = keep), display name, roles.
-# 对**选中行**应用变更：新密码（空 = 不改）、显示名、角色。
-func _gpOnApplyChanges() -> void:
-	var gpUser: String = _gpSelectedUser()
-	if gpUser == "":
+# Re-assign the password of the SELECTED row; roles / display name / enabled stay.
+# 重设**选中行**的密码；角色 / 显示名 / 启停保持不变。
+func _gpOnResetPassword() -> void:
+	var gpItem: TreeItem = gpTable.get_selected()
+	if gpItem == null:
 		_gpSay(GPCMemberRoster.GP_ERR_NOT_FOUND)
 		return
-	var gpPlan: Dictionary = GPCMemberRoster.gpSetCredential(gpMembers, gpUser,
-		gpNewPassEdit.text, gpDisplayEdit.text.strip_edges(), _gpTickedRoles())
-	if not bool(gpPlan.get("ok", false)):
-		_gpSay(str(gpPlan.get("code", "")))
-		return
-	gpNewPassEdit.text = ""
-	_gpApply()
-
-
-# Mirror the selected row's roles + display name into the edit controls, so "apply
-# changes" edits what the user sees. / 把选中行的角色与显示名镜像进编辑控件，
-# 让「应用变更」编辑的就是用户看到的内容。
-func _gpOnRowSelected() -> void:
-	var gpUser: String = _gpSelectedUser()
-	if gpUser == "":
-		return
+	var gpUser: String = str(gpItem.get_meta("gp_user", ""))
 	var gpM: Dictionary = GPCMemberRoster.gpFind(gpMembers, gpUser)
 	if gpM.is_empty():
+		_gpSay(GPCMemberRoster.GP_ERR_NOT_FOUND)
 		return
+	var gpRoles: Array = []
 	var gpRolesRaw: Variant = gpM.get("roles", null)
-	for gpRole in GPProjectContainerV4.GP_ROLES:
-		var gpTick: bool = false
-		if gpRolesRaw is Array:
-			gpTick = (gpRolesRaw as Array).has(str(gpRole))
-		(gpRoleChecks[str(gpRole)] as CheckBox).button_pressed = gpTick
-	gpDisplayEdit.text = str(gpM.get("display_name", ""))
-	gpNewPassEdit.text = ""
-
-
-# Toggle the selected member's enabled flag. / 启停选中成员。
-func _gpOnToggle() -> void:
-	var gpUser: String = _gpSelectedUser()
-	if gpUser == "":
-		return
-	var gpM: Dictionary = GPCMemberRoster.gpFind(gpMembers, gpUser)
-	var gpPlan: Dictionary = GPCMemberRoster.gpSetEnabled(gpMembers, gpUser,
-		not bool(gpM.get("enabled", true)))
+	if gpRolesRaw is Array:
+		gpRoles = (gpRolesRaw as Array).duplicate(true)
+	var gpPlan: Dictionary = GPCMemberRoster.gpSetCredential(gpMembers, gpUser,
+		gpNewPassEdit.text, str(gpM.get("display_name", "")), gpRoles)
 	if not bool(gpPlan.get("ok", false)):
 		_gpSay(str(gpPlan.get("code", "")))
 		return
+	gpNewPassEdit.text = ""
 	_gpApply()
 
 
 # Remove the selected member. / 移除选中成员。
 func _gpOnRemove() -> void:
-	var gpUser: String = _gpSelectedUser()
-	if gpUser == "":
+	var gpItem: TreeItem = gpTable.get_selected()
+	if gpItem == null:
+		_gpSay(GPCMemberRoster.GP_ERR_NOT_FOUND)
 		return
-	var gpPlan: Dictionary = GPCMemberRoster.gpRemove(gpMembers, gpUser)
+	var gpPlan: Dictionary = GPCMemberRoster.gpRemove(gpMembers,
+		str(gpItem.get_meta("gp_user", "")))
 	if not bool(gpPlan.get("ok", false)):
 		_gpSay(str(gpPlan.get("code", "")))
 		return
@@ -265,14 +294,6 @@ func _gpApply() -> void:
 	gpUserEdit.text = ""
 	gpPassEdit.text = ""
 	gpReload()
-
-
-# The user name of the selected row. / 选中行的用户名。
-func _gpSelectedUser() -> String:
-	var gpItem: TreeItem = gpTable.get_selected()
-	if gpItem == null:
-		return ""
-	return gpItem.get_text(0)
 
 
 # Map a machine code to an honest info line. / 把机器码映射为如实的提示行。
