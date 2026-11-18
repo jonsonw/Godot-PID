@@ -9,14 +9,12 @@ extends Control
 # 打开工程后由编辑器换入。
 #
 # LAYOUT (mirrors the Godot PM, P&ID-adapted) / 布局（对照 Godot 管理器，P&ID 适配）：
-# - Top bar: brand + section tabs (项目 live / 资产 W21+ / 身份 W14).
+# - Top bar: brand + tabs (项目 live / 资产 W21+); identity entry = right-rail action,
+#   NOT a tab — the disabled "身份 · W14" placeholder misled testers (removed 2026-11-18).
 # - Toolbar: 创建 / 导入 / 扫描 / 筛选 / 排序（最近编辑 | 名称）.
-# - Body: card list (scan ∪ recents, merged by the io layer) + right action rail
-#   (打开图纸绘制 / 重命名 / 在文件夹中显示). The rail is the future home of the
-#   项目运营管理 entry — that button ships when the ops module exists (A10: no lying UI);
-#   the sidebar slot is reserved, not faked.
-#   （右栏是将来「项目运营管理」入口的家 —— 该按钮随运营模块落地（A10：界面不撒谎）；
-#   栏位预留，不做假按钮。）
+# - Body: card list (scan ∪ recents, io-merged) + right action rail (打开图纸绘制 /
+#   重命名 / 在文件夹中显示 / 身份与成员 / 删除项目). The rail is the future home of the
+#   项目运营管理 entry (A10: ships with the module, not before / 栏位预留，不做假按钮).
 # - Bottom bar: scan dir + honest count.
 #
 # DIFFERENTIATORS vs Godot / 与 Godot 的刻意差异：
@@ -44,6 +42,7 @@ var gpSideOpenBtn: Button
 var gpSideRenameBtn: Button
 var gpSideRevealBtn: Button
 var gpSideDeleteBtn: Button
+var gpSideIdentityBtn: Button
 var gpSaveDialog: FileDialog
 var gpOpenDialog: FileDialog
 var gpRenameDialog: AcceptDialog
@@ -97,7 +96,6 @@ func _gpBuildUi() -> void:
 	gpTop.add_child(gpTopSpacer)
 	gpTop.add_child(_gpTabLabel("pc.tab_projects", true, ""))
 	gpTop.add_child(_gpTabLabel("pc.tab_assets", false, " · W21+"))
-	gpTop.add_child(_gpTabLabel("pc.tab_identity", false, " · W14"))
 	# --- toolbar: create / import / scan / filter / sort / 工具栏：创建/导入/扫描/筛选/排序 ---
 	var gpBar: HBoxContainer = HBoxContainer.new()
 	gpBar.add_theme_constant_override("separation", 8)
@@ -167,11 +165,13 @@ func _gpBuildUi() -> void:
 	# a rail action on the SELECTED archive; the panel reads/edits its plaintext header.
 	# W14 T4b：身份入口 —— W13 预留挂点（pc.tab_identity）落为右栏动作，作用于**选中**
 	# 存档；面板读写其明文头部。
-	var gpIdentityBtn: Button = Button.new()
-	gpIdentityBtn.pressed.connect(_gpOnIdentitySelected)
-	gpIdentityBtn.disabled = not GPPermissions.gpCanManageMembers()
-	gpRail.add_child(gpIdentityBtn)
-	gpTextBindings.append({"node": gpIdentityBtn, "prop": "text", "key": "pc.identity"})
+	# W14 T4b: identity entry = rail action on the SELECTED archive, rides _gpSetRailEnabled
+	# like its siblings (fix 2026-11-18: self-lit + silent return = "click does nothing").
+	# 身份入口随兄弟按钮走选中状态联动；原自亮按钮+空选中静默返回＝「点了没反应」。
+	gpSideIdentityBtn = Button.new()
+	gpSideIdentityBtn.pressed.connect(_gpOnIdentitySelected)
+	gpRail.add_child(gpSideIdentityBtn)
+	gpTextBindings.append({"node": gpSideIdentityBtn, "prop": "text", "key": "pc.identity"})
 	# Delete = a destructive action on user data: kept as its own rail button + context
 	# menu entry, and ALWAYS behind a confirmation dialog (trash is recoverable, but the
 	# surprise is not).
@@ -314,6 +314,7 @@ func _gpSetRailEnabled(gpOn: bool) -> void:
 	gpSideRenameBtn.disabled = not gpOn or not GPPermissions.gpCanRenameProject()
 	gpSideRevealBtn.disabled = not gpOn
 	gpSideDeleteBtn.disabled = not gpOn or not GPPermissions.gpCanDeleteProject()
+	gpSideIdentityBtn.disabled = not gpOn or not GPPermissions.gpCanManageMembers()
 
 
 func gpOnCardOpen(gpPath: String) -> void:
