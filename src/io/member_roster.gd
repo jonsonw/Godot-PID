@@ -1,16 +1,21 @@
 class_name GPCMemberRoster
 extends RefCounted
 # Copyright © 2026 Jonson Wang
-# Pure member-roster CRUD + the archive-level apply blade (W14 T4b, ADR-40 D3/D4).
-# 纯成员名单增删改查 + 存档级落盘刀（W14 T4b，ADR-40 D3/D4）。
+# Pure member-roster CRUD + the archive-level apply blade (W14 T4b, ADR-40 D3; v1.3
+# credential model). Credential hashes live INSIDE the member entries — the manager
+# assigns username + initial password + roles, and the archive carries them to every
+# workstation via the shared NAS file.
+# 纯成员名单增删改查 + 存档级落盘刀（W14 T4b，ADR-40 D3；v1.3 凭据模型）。凭据哈希**内嵌**
+# 成员条目 —— 管理者分配用户名 + 初始密码 + 角色，存档经 NAS 共享把凭据带到每个工作站。
 #
-# SEMANTICS / 语义（「注册」的项目侧一半）：
-# The roster in the plaintext header IS the approval — being added by the manager means
-# the user may register credentials on their own machine (first-login set-password).
-# Roles are the frozen GP_ROLES vocabulary; the role CAPABILITY matrix is W15 — this file
-# only manages the DATA.
-# 明文头部的名单**就是**审批 —— 被管理者加入即可在自己机器上注册凭据（首登设密）。
-# 角色取冻结的 GP_ROLES 词表；角色**能力**矩阵是 W15 —— 本文件只管数据。
+# v1.3 MODEL / v1.3 模型（2026-11-18 用户拍板）：the manager IS the registrar — no
+# first-login set-password. Each member entry carries {user, roles, enabled, display_name,
+# salt, hash, iterations}. Trust level stays "anti-mistake, not anti-malicious" (ADR-40
+# D8): a shared hash can be brute-forced offline if the password is weak; the cloud phase
+# replaces this with server-side auth.
+# v1.3 模型（2026-11-18 用户拍板）：管理者**就是**登记人 —— 没有首登设密。每个成员条目
+# 携带 {user, roles, enabled, display_name, salt, hash, iterations}。信任等级保持
+# 「防误操作、不防恶意」（ADR-40 D8）：共享哈希在弱密码下可被离线爆破；云端阶段换服务端认证。
 #
 # LAYER RULE / 分层约束：the CRUD is pure-dict static (headless-testable); gpApplyToArchive
 # is the ONE place that reads an archive, swaps members, re-stamps the revision (members
@@ -23,9 +28,12 @@ extends RefCounted
 # Machine-readable codes (ADR-12 semantics).
 # 机器可读码（ADR-12 语义）。
 const GP_ERR_BAD_USER: String = "roster.bad_user"
+const GP_ERR_BAD_PASSWORD: String = "roster.bad_password"
 const GP_ERR_DUPLICATE: String = "roster.duplicate"
 const GP_ERR_BAD_ROLES: String = "roster.bad_roles"
 const GP_ERR_NOT_FOUND: String = "roster.not_found"
+const GP_ERR_DISABLED: String = "roster.disabled"
+const GP_ERR_NO_CREDENTIAL: String = "roster.no_credential"
 const GP_ERR_ARCHIVE_FAIL: String = "roster.archive_fail"
 
 
@@ -47,17 +55,52 @@ static func gpRolesValid(gpRoles: Array) -> bool:
 	return true
 
 
-# Add a member. Returns {ok: bool, code: String} — ok=false carries the machine code.
-# 添加成员。返回 {ok, code} —— ok=false 时携带机器可读码。
-static func gpAdd(gpMembers: Array, gpUser: String, gpRoles: Array, gpEnabled: bool = true) -> Dictionary:
+# Add a member WITH its assigned credential (v1.3: the manager sets the initial password).
+# 添加成员**并分配凭据**（v1.3：管理者设初始密码）。
+static func gpAdd(gpMembers: Array, gpUser: String, gpPassword: String, gpRoles: Array,
+		gpDisplayName: String = "", gpEnabled: bool = true) -> Dictionary:
 	var gpName: String = gpUser.strip_edges()
 	if gpName == "":
 		return {"ok": false, "code": GP_ERR_BAD_USER}
+	if not GPIdentityCredentials.gpIsValidPassword(gpPassword):
+		return {"ok": false, "code": GP_ERR_BAD_PASSWORD}
 	if gpFind(gpMembers, gpName) != {}:
 		return {"ok": false, "code": GP_ERR_DUPLICATE}
 	if not gpRolesValid(gpRoles):
 		return {"ok": false, "code": GP_ERR_BAD_ROLES}
-	gpMembers.append({"user": gpName, "roles": gpRoles.duplicate(true), "enabled": gpEnabled})
+	var gpSalt: String = GPIdentityCredentials.gpNewSalt()
+	gpMembers.append({
+		"user": gpName,
+		"roles": gpRoles.duplicate(true),
+		"enabled": gpEnabled,
+		"display_name": gpDisplayName,
+		"salt": gpSalt,
+		"hash": GPIdentityCredentials.gpHashPassword(gpPassword, gpSalt),
+		"iterations": GPIdentityCredentials.GP_ITERATIONS,
+	})
+	return {"ok": true, "code": ""}
+
+
+# Update a member's credential / display name / roles (the panel's apply-changes blade).
+# An EMPTY password keeps the current hash (edit display name / roles only).
+# 更新成员的凭据 / 显示名 / 角色（面板的「应用变更」刀）。**空**密码保持现有哈希
+#（只改显示名 / 角色）。
+static func gpSetCredential(gpMembers: Array, gpUser: String, gpPassword: String,
+		gpDisplayName: String, gpRoles: Array) -> Dictionary:
+	var gpM: Dictionary = gpFind(gpMembers, gpUser)
+	if gpM.is_empty():
+		return {"ok": false, "code": GP_ERR_NOT_FOUND}
+	if not gpRolesValid(gpRoles):
+		return {"ok": false, "code": GP_ERR_BAD_ROLES}
+	if gpPassword != "":
+		if not GPIdentityCredentials.gpIsValidPassword(gpPassword):
+			return {"ok": false, "code": GP_ERR_BAD_PASSWORD}
+		var gpSalt: String = GPIdentityCredentials.gpNewSalt()
+		gpM["salt"] = gpSalt
+		gpM["hash"] = GPIdentityCredentials.gpHashPassword(gpPassword, gpSalt)
+		gpM["iterations"] = GPIdentityCredentials.GP_ITERATIONS
+	gpM["display_name"] = gpDisplayName
+	gpM["roles"] = gpRoles.duplicate(true)
 	return {"ok": true, "code": ""}
 
 
@@ -91,6 +134,24 @@ static func gpRemove(gpMembers: Array, gpUser: String) -> Dictionary:
 			gpMembers.remove_at(gpI)
 			return {"ok": true, "code": ""}
 	return {"ok": false, "code": GP_ERR_NOT_FOUND}
+
+
+# The pure verify blade behind the login dialog: membership → enabled → credential →
+# hash. Every failure carries its machine code (the UI maps it to an honest line).
+# 登录对话框背后的纯验证刀：在册 → 启用 → 凭据 → 哈希。每个失败都携带机器码
+#（UI 把它映射为如实的提示行）。
+static func gpVerifyLogin(gpMembers: Array, gpUser: String, gpPassword: String) -> Dictionary:
+	var gpM: Dictionary = gpFind(gpMembers, gpUser)
+	if gpM.is_empty():
+		return {"ok": false, "code": GP_ERR_NOT_FOUND}
+	if not bool(gpM.get("enabled", true)):
+		return {"ok": false, "code": GP_ERR_DISABLED}
+	if str(gpM.get("hash", "")) == "":
+		return {"ok": false, "code": GP_ERR_NO_CREDENTIAL}
+	if GPIdentityCredentials.gpVerify(gpPassword, str(gpM.get("salt", "")),
+			str(gpM.get("hash", ""))):
+		return {"ok": true, "code": ""}
+	return {"ok": false, "code": GP_ERR_BAD_PASSWORD}
 
 
 # THE apply blade: read the archive, swap the members, re-stamp the revision (the roster

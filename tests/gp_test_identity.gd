@@ -1,17 +1,18 @@
 extends "res://tests/gp_test.gd"
-# Headless regression tests for identity: password hashing (core), the credential store
-# (io), the member roster CRUD + archive apply blade (io), and the enabled-member
-# projection used by the login flow (W14 T4a/T4b, ADR-40 D2/D3/D4).
-# 身份的 headless 回归测试：密码哈希（core）、凭据库（io）、成员名单 CRUD + 存档落盘刀
-#（io）、登录流程使用的启用成员投影（W14 T4a/T4b，ADR-40 D2/D3/D4）。
+# Headless regression tests for identity: password hashing (core), the member-embedded
+# credential model (v1.3: hashes live in member entries and travel with the archive),
+# the roster CRUD + archive apply blade (io), and the enabled-member projection used by
+# the login flow (W14 T4a/T4b, ADR-40 D2/D3; v1.3 manager-assigns model).
+# 身份的 headless 回归测试：密码哈希（core）、成员内嵌凭据模型（v1.3：哈希在成员条目里、
+# 随存档走）、名单 CRUD + 存档落盘刀（io）、登录流程使用的启用成员投影
+#（W14 T4a/T4b，ADR-40 D2/D3；v1.3 管理者分配模型）。
 
-const GP_STORE_PATH: String = "user://gp_test_credentials.json"
 const GP_ARCHIVE_PATH: String = "user://gp_test_identity.pid.json"
 
 
-# Clean both scratch files. / 清理两个临时文件。
+# Clean the scratch files. / 清理临时文件。
 func _gpCleanup() -> void:
-	for gpPath in [GP_STORE_PATH, GP_ARCHIVE_PATH, GP_ARCHIVE_PATH + ".bak", GP_ARCHIVE_PATH + ".tmp"]:
+	for gpPath in [GP_ARCHIVE_PATH, GP_ARCHIVE_PATH + ".bak", GP_ARCHIVE_PATH + ".tmp"]:
 		var gpAbs: String = ProjectSettings.globalize_path(gpPath)
 		if FileAccess.file_exists(gpAbs):
 			DirAccess.remove_absolute(gpAbs)
@@ -60,86 +61,117 @@ func gpTestPasswordRules() -> void:
 	gpCheck(GPIdentityCredentials.gpIsValidPassword("123456"), "a 6-char password must be accepted")
 
 
-# ============================ credential store (io) ============================
-# ============================ 凭据库（io） ============================
+# ===================== member-embedded credentials (v1.3) =====================
+# ===================== 成员内嵌凭据（v1.3） =====================
 
-# Set / has / verify / display-name / remove round-trip on an ISOLATED store path
-# (never the real user://credentials.json).
-# 在**隔离**库路径上的设 / 查 / 校验 / 显示名 / 删除往返（绝不触碰真实 user://credentials.json）。
-func gpTestStoreRoundTrip() -> void:
-	_gpCleanup()
-	gpCheck(not GPCredentialStore.gpHasUser("alice", GP_STORE_PATH),
-		"a fresh store must not know alice")
-	gpCheck(GPCredentialStore.gpSetCredential("alice", "hunter2!", "Alice Chen", GP_STORE_PATH),
-		"setting a credential must succeed")
-	gpCheck(GPCredentialStore.gpHasUser("alice", GP_STORE_PATH), "alice must now exist")
-	gpCheck(GPCredentialStore.gpVerifyLogin("alice", "hunter2!", GP_STORE_PATH),
-		"the right password must verify through the store")
-	gpCheck(not GPCredentialStore.gpVerifyLogin("alice", "wrong!", GP_STORE_PATH),
-		"a wrong password must fail through the store")
-	gpEq(str(GPCredentialStore.gpUserRecord("alice", GP_STORE_PATH).get("display_name", "")),
-		"Alice Chen", "the display name must survive the round-trip")
-	gpCheck(GPCredentialStore.gpSetDisplayName("alice", "Alice C.", GP_STORE_PATH),
-		"updating the display name must succeed")
-	gpEq(str(GPCredentialStore.gpUserRecord("alice", GP_STORE_PATH).get("display_name", "")),
+# The full credential round-trip on the ROSTER (v1.3: add-with-password, verify, re-set
+# password, display name) — the manager-assigns model's data path.
+# 名单上的完整凭据往返（v1.3：带密码添加、验证、重设密码、显示名）——
+# 管理者分配模型的数据通路。
+func gpTestMemberCredentialRoundTrip() -> void:
+	var gpMembers: Array = []
+	gpCheck(bool(GPCMemberRoster.gpAdd(gpMembers, "alice", "hunter2!", ["manager"],
+			"Alice Chen").get("ok", false)),
+		"adding alice with an assigned password must succeed")
+	var gpEntry: Dictionary = GPCMemberRoster.gpFind(gpMembers, "alice")
+	gpCheck(str(gpEntry.get("hash", "")) != "",
+		"the entry must carry a credential hash")
+	gpEq(str(gpEntry.get("display_name", "")), "Alice Chen",
+		"the display name must ride the entry")
+	gpCheck(bool(GPCMemberRoster.gpVerifyLogin(gpMembers, "alice", "hunter2!").get("ok", false)),
+		"the assigned password must verify through the roster")
+	gpCheck(not bool(GPCMemberRoster.gpVerifyLogin(gpMembers, "alice", "wrong!").get("ok", false)),
+		"a wrong password must fail through the roster")
+	gpCheck(bool(GPCMemberRoster.gpSetCredential(gpMembers, "alice", "",
+			"Alice C.", ["manager"]).get("ok", false)),
+		"a blank password must keep the hash (display-name edit only)")
+	gpEq(str(GPCMemberRoster.gpFind(gpMembers, "alice").get("display_name", "")),
 		"Alice C.", "the display-name update must persist")
-	gpCheck(GPCredentialStore.gpRemoveUser("alice", GP_STORE_PATH), "removing alice must succeed")
-	gpCheck(not GPCredentialStore.gpHasUser("alice", GP_STORE_PATH),
-		"alice must be gone after removal")
-	_gpCleanup()
+	var gpOldHash: String = str(GPCMemberRoster.gpFind(gpMembers, "alice").get("hash", ""))
+	gpCheck(bool(GPCMemberRoster.gpSetCredential(gpMembers, "alice", "new-pw-9",
+			"Alice C.", ["manager"]).get("ok", false)),
+		"re-assigning the password must succeed")
+	gpCheck(str(GPCMemberRoster.gpFind(gpMembers, "alice").get("hash", "")) != gpOldHash,
+		"the hash must change after a password re-assignment")
+	gpCheck(not bool(GPCMemberRoster.gpVerifyLogin(gpMembers, "alice", "hunter2!").get("ok", false)),
+		"the OLD password must stop verifying after the re-assignment")
+	gpCheck(bool(GPCMemberRoster.gpVerifyLogin(gpMembers, "alice", "new-pw-9").get("ok", false)),
+		"the NEW password must verify after the re-assignment")
+	gpCheck(bool(GPCMemberRoster.gpRemove(gpMembers, "alice").get("ok", false)),
+		"removing alice must succeed")
+	gpEq(str(GPCMemberRoster.gpVerifyLogin(gpMembers, "alice", "new-pw-9").get("code", "")),
+		GPCMemberRoster.GP_ERR_NOT_FOUND,
+		"a removed member must fail with not_found")
 
 
-# A corrupt store degrades to fresh (never crashes the login path).
-# 损坏的库降级为全新（登录路径永不崩溃）。
-func gpTestCorruptStoreDegrades() -> void:
-	_gpCleanup()
-	var gpAbs: String = ProjectSettings.globalize_path(GP_STORE_PATH)
-	var gpF: FileAccess = FileAccess.open(gpAbs, FileAccess.WRITE)
-	gpF.store_string("{ corrupt json")
-	gpF.close()
-	gpCheck(not GPCredentialStore.gpHasUser("bob", GP_STORE_PATH),
-		"a corrupt store must degrade to fresh, not crash")
-	_gpCleanup()
+# The honest failure codes: a legacy entry without a hash and a disabled member both
+# refuse to sign in with DISTINCT machine codes. / 如实的失败码：无哈希的旧式条目与
+# 停用成员都拒绝登录，且携带**不同**机器码。
+func gpTestVerifyFailureCodes() -> void:
+	var gpMembers: Array = [
+		{"user": "legacy", "roles": ["designer"], "enabled": true},
+		{"user": "ben", "roles": ["designer"], "enabled": false,
+			"salt": "s", "hash": "h", "iterations": 4096},
+	]
+	var gpNoCred: Dictionary = GPCMemberRoster.gpVerifyLogin(gpMembers, "legacy", "any")
+	gpCheck(not bool(gpNoCred.get("ok", false)),
+		"a member without an assigned password must not verify")
+	gpEq(str(gpNoCred.get("code", "")), GPCMemberRoster.GP_ERR_NO_CREDENTIAL,
+		"the missing credential must carry its machine code")
+	gpEq(str(GPCMemberRoster.gpVerifyLogin(gpMembers, "ben", "any").get("code", "")),
+		GPCMemberRoster.GP_ERR_DISABLED,
+		"a disabled member must be refused BEFORE the hash is even consulted")
 
 
-# Credentials NEVER enter the project archive: write an archive and grep its text — the
-# D4 guarantee the whole model rests on.
-# 凭据**绝不**进工程存档：写出存档并检查其文本 —— 这是整个模型立足的 D4 保证。
-func gpTestCredentialsNeverInArchive() -> void:
+# v1.3 reverses the D4 storage rule ON PURPOSE: the HASH travels inside the archive, but
+# the PLAINTEXT password must never appear in the file text.
+# v1.3 有意反转 D4 的存储规则：**哈希**随存档走，但**明文密码**绝不出现在文件文本里。
+func gpTestHashTravelsPlaintextNever() -> void:
 	_gpCleanup()
-	GPCredentialStore.gpSetCredential("carol", "secret-pw", "", GP_STORE_PATH)
 	var gpG: GPPIDGraph = GPPIDGraph.new()
 	gpG.gpAddNode(gpG.gpNewNode("n1", "pump", "P-101", Vector2(10, 20)))
 	var gpSheet: GPSheet = GPSheet.new()
 	gpSheet.gpGraph = gpG
 	gpEq(GPProjectIO.gpWriteSheets([gpSheet], GP_ARCHIVE_PATH, []), OK,
-		"the archive write must succeed")
+		"the base archive must save")
+	var gpMembers: Array = []
+	gpCheck(bool(GPCMemberRoster.gpAdd(gpMembers, "carol", "secret-pw", ["designer"]).get("ok", false)),
+		"adding carol with the plaintext under test must succeed")
+	var gpRes: GPIOResult = GPCMemberRoster.gpApplyToArchive(GP_ARCHIVE_PATH, gpMembers, "carol")
+	gpCheck(gpRes.gpIsOk(), "the archive write with the roster must succeed")
 	var gpText: String = FileAccess.get_file_as_string(GP_ARCHIVE_PATH)
-	gpCheck(not gpText.contains("secret-pw"), "the archive must not carry the password")
-	gpCheck(not gpText.contains("credentials.json"), "the archive must not reference the store")
+	gpCheck(not gpText.contains("secret-pw"),
+		"the PLAINTEXT password must never enter the archive")
+	gpCheck(gpText.contains("hash"),
+		"the credential HASH must travel inside the archive (v1.3)")
 	_gpCleanup()
 
 
 # ============================ member roster (io) ============================
 # ============================ 成员名单（io） ============================
 
-# Add / duplicate / bad-roles / set-enabled / set-roles / remove, all pure.
-# 添加 / 重复 / 非法角色 / 启停 / 改角色 / 移除，全部纯函数。
+# Add / duplicate / bad-roles / bad-password / set-enabled / set-roles / remove, all pure.
+# 添加 / 重复 / 非法角色 / 非法密码 / 启停 / 改角色 / 移除，全部纯函数。
 func gpTestRosterCrud() -> void:
 	var gpMembers: Array = []
-	gpCheck(bool(GPCMemberRoster.gpAdd(gpMembers, "alice", ["manager"]).get("ok", false)),
+	gpCheck(bool(GPCMemberRoster.gpAdd(gpMembers, "alice", "pw-alice", ["manager"]).get("ok", false)),
 		"adding alice as manager must succeed")
-	gpCheck(not bool(GPCMemberRoster.gpAdd(gpMembers, "alice", ["designer"]).get("ok", false)),
+	gpCheck(not bool(GPCMemberRoster.gpAdd(gpMembers, "alice", "pw-alice", ["designer"]).get("ok", false)),
 		"a duplicate user must be rejected")
-	gpEq(str(GPCMemberRoster.gpAdd(gpMembers, "alice", ["designer"]).get("code", "")),
+	gpEq(str(GPCMemberRoster.gpAdd(gpMembers, "alice", "pw-alice", ["designer"]).get("code", "")),
 		GPCMemberRoster.GP_ERR_DUPLICATE, "the duplicate must carry its machine code")
-	gpCheck(not bool(GPCMemberRoster.gpAdd(gpMembers, "bob", []).get("ok", false)),
+	gpCheck(not bool(GPCMemberRoster.gpAdd(gpMembers, "bob", "pw-bob", []).get("ok", false)),
 		"an empty role set must be rejected")
-	gpCheck(not bool(GPCMemberRoster.gpAdd(gpMembers, "bob", ["admin"]).get("ok", false)),
+	gpCheck(not bool(GPCMemberRoster.gpAdd(gpMembers, "bob", "pw-bob", ["admin"]).get("ok", false)),
 		"an out-of-vocabulary role must be rejected")
-	gpCheck(not bool(GPCMemberRoster.gpAdd(gpMembers, "  ", ["designer"]).get("ok", false)),
+	gpCheck(not bool(GPCMemberRoster.gpAdd(gpMembers, "bob", "12345", ["designer"]).get("ok", false)),
+		"a too-short password must be rejected (v1.3)")
+	gpEq(str(GPCMemberRoster.gpAdd(gpMembers, "bob", "12345", ["designer"]).get("code", "")),
+		GPCMemberRoster.GP_ERR_BAD_PASSWORD,
+		"the short password must carry its machine code")
+	gpCheck(not bool(GPCMemberRoster.gpAdd(gpMembers, "  ", "pw-bob", ["designer"]).get("ok", false)),
 		"a blank username must be rejected")
-	gpCheck(bool(GPCMemberRoster.gpAdd(gpMembers, "bob", ["designer", "reviewer"]).get("ok", false)),
+	gpCheck(bool(GPCMemberRoster.gpAdd(gpMembers, "bob", "pw-bob", ["designer", "reviewer"]).get("ok", false)),
 		"stacked roles must be accepted (ADR-40 D3)")
 	gpCheck(bool(GPCMemberRoster.gpSetEnabled(gpMembers, "bob", false).get("ok", false)),
 		"disabling bob must succeed")

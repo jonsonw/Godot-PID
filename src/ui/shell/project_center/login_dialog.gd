@@ -1,17 +1,14 @@
 class_name GPLoginDialog
 extends Window
 # Copyright © 2026 Jonson Wang
-# Login / first-time credential setup dialog (W14 T4a/T4b, ADR-40 D2/D4, ADR-48 rules).
-# 登录 / 首次凭据设置对话框（W14 T4a/T4b，ADR-40 D2/D4，遵守 ADR-48 准则）。
+# Login dialog (W14 T4a, ADR-40 D2; v1.3 credential model, ADR-48 rules).
+# 登录对话框（W14 T4a，ADR-40 D2；v1.3 凭据模型，遵守 ADR-48 准则）。
 #
-# MODES / 两种模式（per submit, resolved from the store）：
-# - VERIFY: the user has a local credential -> password is checked against it.
-# - SETUP: the user is on the roster but has NO local credential -> "在册即批准"：
-#   first-time set-password (confirm field + minimum length), then the credential is
-#   created and the login succeeds.
-# - VERIFY：用户在本机有凭据 -> 密码与凭据比对。
-# - SETUP：用户在名单上但本机无凭据 -> 「在册即批准」：首次设密（确认输入 + 最短长度），
-#   凭据创建后即登录成功。
+# v1.3 MODEL / v1.3 模型（2026-11-18 用户拍板）：VERIFY only — the manager assigns the
+# username AND the password, and the credential hash lives in the member entry (carried
+# by the archive). There is NO first-login setup; the old confirm/display fields are gone.
+# v1.3 模型（2026-11-18 用户拍板）：**纯验证** —— 管理者分配用户名与密码，凭据哈希在成员
+# 条目里（随存档走）。没有首登设密；旧的确认/显示名输入框已移除。
 #
 # ADR-48 compliance / 遵守 ADR-48：
 # - a Window node defaults to visible=true — created hidden, shown ONLY via popup_centered;
@@ -19,10 +16,10 @@ extends Window
 # - unresizable=false explicitly; content root FULL_RECT via set_anchors_and_offsets_preset (R8).
 # - unresizable=false 显式声明；内容根 FULL_RECT 用 set_anchors_and_offsets_preset（R8）。
 #
-# R7: callbacks are member functions, no lambda held across frames. The credential store
-# path is an injectable var (test seam) so tests never touch the real user:// store.
-# R7：回调一律成员函数，跨帧不持 lambda。凭据库路径为可注入成员（测试缝），
-# 测试绝不触碰真实 user:// 库。
+# R7: callbacks are member functions, no lambda held across frames. The member roster is
+# an injectable var (test seam) so tests never depend on a real archive.
+# R7：回调一律成员函数，跨帧不持 lambda。成员名单为可注入成员（测试缝），
+# 测试绝不依赖真实存档。
 
 # Emitted once per attempt outcome; "" user = cancelled / failed. The coordinator decides
 # what happens next (session user, status line) — the dialog only reports.
@@ -34,20 +31,19 @@ signal gpLoginDone(gpUser: String, gpOk: bool)
 # 允许登录的名单用户（打开工程的启用成员）。
 var gpAllowedUsers: Array[String] = []
 
-# Test seam: the credential store path (never the real store in tests).
-# 测试缝：凭据库路径（测试绝不触碰真实库）。
-var gpStorePath: String = GPCredentialStore.GP_STORE_PATH
+# Test seam: the FULL member roster (entries carry the credential hashes).
+# 测试缝：完整成员名单（条目携带凭据哈希）。
+var gpMembers: Array = []
 
 var gpUserEdit: LineEdit
 var gpPassEdit: LineEdit
-var gpConfirmEdit: LineEdit
-var gpDisplayEdit: LineEdit
 var gpInfoLabel: Label
 
 
 # Build the form. / 构建表单。
-func gpSetup(gpAllowed: Array[String]) -> void:
+func gpSetup(gpAllowed: Array[String], gpMembers: Array) -> void:
 	gpAllowedUsers = gpAllowed
+	gpMembers = gpMembers
 	title = I18n.gpTr("identity.login_title")
 	# ADR-48: created hidden; shown via popup_centered by the caller. Resizable per准则.
 	# ADR-48：创建即隐藏；显示由调用方走 popup_centered。按准则可缩放。
@@ -64,11 +60,6 @@ func gpSetup(gpAllowed: Array[String]) -> void:
 	gpPassEdit = LineEdit.new()
 	gpPassEdit.secret = true
 	_gpAddRow(gpForm, "identity.password", gpPassEdit)
-	gpConfirmEdit = LineEdit.new()
-	gpConfirmEdit.secret = true
-	_gpAddRow(gpForm, "identity.password_confirm", gpConfirmEdit)
-	gpDisplayEdit = LineEdit.new()
-	_gpAddRow(gpForm, "identity.display_name", gpDisplayEdit)
 	gpInfoLabel = Label.new()
 	gpInfoLabel.text = I18n.gpTr("identity.login_prompt")
 	gpInfoLabel.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -93,34 +84,19 @@ func gpSetup(gpAllowed: Array[String]) -> void:
 		gpUserEdit.text = gpAllowedUsers[0]
 
 
-# Submit: resolve mode from the store, then verify or set up.
-# 提交：按库解析模式，然后校验或设置。
+# Submit: pure verify against the member entries (in roster → enabled → hash).
+# 提交：对成员条目做纯验证（在册 → 启用 → 哈希）。
 func _gpOnSubmit() -> void:
 	var gpUser: String = gpUserEdit.text.strip_edges()
 	if not gpAllowedUsers.has(gpUser):
 		_gpSay("identity.not_member")
 		return
-	var gpPassword: String = gpPassEdit.text
-	if GPCredentialStore.gpHasUser(gpUser, gpStorePath):
-		# VERIFY. / 校验。
-		if GPCredentialStore.gpVerifyLogin(gpUser, gpPassword, gpStorePath):
-			_gpFinish(gpUser)
-		else:
-			_gpSay("identity.bad_credentials")
-		return
-	# SETUP ("在册即批准"): confirm + minimum length, then create the credential.
-	# 设置（「在册即批准」）：确认输入 + 最短长度，然后创建凭据。
-	if gpPassword != gpConfirmEdit.text:
-		_gpSay("identity.mismatch")
-		return
-	if not GPIdentityCredentials.gpIsValidPassword(gpPassword):
-		_gpSay("identity.too_short", [GPIdentityCredentials.GP_MIN_PASSWORD_LEN])
-		return
-	if GPCredentialStore.gpSetCredential(gpUser, gpPassword,
-			gpDisplayEdit.text.strip_edges(), gpStorePath):
+	var gpVerdict: Dictionary = GPCMemberRoster.gpVerifyLogin(gpMembers, gpUser,
+		gpPassEdit.text)
+	if bool(gpVerdict.get("ok", false)):
 		_gpFinish(gpUser)
 	else:
-		_gpSay("identity.store_fail")
+		_gpSay("identity.err_" + str(gpVerdict.get("code", "")).replace(".", "_"))
 
 
 # Cancel / close: report honestly, the coordinator keeps the "local" identity.
@@ -136,10 +112,10 @@ func _gpFinish(gpUser: String) -> void:
 	queue_free()
 
 
-# Show a reason in the info line (i18n key + optional args; never a bare literal).
-# 在提示行显示原因（i18n 键 + 可选参数；绝不用裸字面串）。
-func _gpSay(gpKey: String, gpArgs: Array = []) -> void:
-	gpInfoLabel.text = I18n.gpTr(gpKey) % gpArgs if not gpArgs.is_empty() else I18n.gpTr(gpKey)
+# Show a reason in the info line (i18n key; never a bare literal).
+# 在提示行显示原因（i18n 键；绝不用裸字面串）。
+func _gpSay(gpKey: String) -> void:
+	gpInfoLabel.text = I18n.gpTr(gpKey)
 
 
 # One label+edit row in the grid. / 网格中的一行标签 + 输入框。

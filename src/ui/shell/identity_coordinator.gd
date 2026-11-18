@@ -115,7 +115,7 @@ func gpPromptLogin() -> void:
 		_gpDialog.move_to_foreground()
 		return
 	_gpDialog = GPLoginDialog.new()
-	_gpDialog.gpSetup(gpEnabledUsers)
+	_gpDialog.gpSetup(gpEnabledUsers, gpMembers)
 	gpHost.add_child(_gpDialog)
 	_gpDialog.gpLoginDone.connect(_gpOnLoginDone)
 	_gpDialog.popup_centered(Vector2i(430, 320))
@@ -127,7 +127,10 @@ func _gpOnLoginDone(gpUser: String, gpOk: bool) -> void:
 	_gpDialog = null
 	if gpOk and gpUser != "":
 		gpHost.gpCurrentUser = gpUser
-		var gpDisplay: String = str(GPCredentialStore.gpUserRecord(gpUser).get("display_name", ""))
+		# v1.3: the display name is a manager-assigned fact in the member entry (the
+		# local credential store is retired).
+		# v1.3：显示名是成员条目里管理者分配的事实（本机凭据库已退役）。
+		var gpDisplay: String = str(GPCMemberRoster.gpFind(gpMembers, gpUser).get("display_name", ""))
 		if gpDisplay != "":
 			gpHost.gpSetState("identity.logged_in", [gpUser + " (" + gpDisplay + ")"])
 		else:
