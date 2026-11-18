@@ -43,6 +43,7 @@ static func gpWriteProject(gpGraph: GPPIDGraph, gpPath: String, gpAuthor: String
 	# concurrency backstop; GPRevision owns the chain mechanics).
 	# W14（ADR-40 D6）：每次保存都向头部盖内容修订（乐观并发兜底；链机制归 GPRevision）。
 	var gpOut: Dictionary = gpGraph.gpToDict()
+	_gpCarryProjectSections(gpOut, gpFilePath, [])
 	GPRevision.gpStampRevision(gpOut, gpAuthor, gpAt, gpPriorRevisions)
 	var gpWrite: GPIOResult = GPAtomicFile.gpWriteJsonAtomic(gpFilePath, gpOut)
 	if not gpWrite.gpIsOk():
@@ -61,6 +62,42 @@ static func gpWriteProjectResult(gpGraph: GPPIDGraph, gpPath: String, gpAuthor: 
 	if gpErr != OK:
 		return GPIOResult.gpFailure("io.write_failed", "status.save_fail", gpFilePath)
 	return GPIOResult.gpSuccess("io.saved", gpFilePath)
+
+
+# W14 fix (2026-11-18): saves rebuild the container from the MODEL, so project-level
+# sections (project_meta, members) silently revert — the freshly created v4 name was
+# clobbered (card title fell back to the sheet tab name: the reported "project name
+# changed" bug) and the roster was wiped (which also disarmed the multi-user login
+# gate). The CURRENT disk state is the source of truth for these sections: the identity
+# panel writes straight to it, a session snapshot goes stale, and the zero-sheet open
+# path never had one. A legacy meta["name"] (rename-blade artifact) is PROMOTED into
+# project_meta.name — never copied to both keys (ADR-41 rename rule).
+# Call BEFORE gpStampRevision so the stamped hash covers what is actually written.
+# W14 修复（2026-11-18）：保存按模型重建容器，工程级段（project_meta、members）被静默
+# 清空 —— 新建 v4 工程名被盖掉（卡片标题回退成图纸标签名，即用户报的「项目名变了」），
+# 名单被抹（连带拆掉了多用户登录门）。这些段以**当前盘上状态**为事实源：身份面板直接
+# 写盘，会话快照会陈旧，零图纸打开通路根本没有快照。旧档 meta["name"]（重命名刀产物）
+# **升格**为 project_meta.name —— 绝不复制到两个键下（ADR-41 重命名规则）。
+# 必须在 gpStampRevision **之前**调用，使盖下的哈希覆盖实际写出的内容。
+static func _gpCarryProjectSections(gpOut: Dictionary, gpFilePath: String,
+		gpMembers: Array) -> void:
+	var gpPrior: GPIOResult = GPAtomicFile.gpReadJsonDict(gpFilePath)
+	if gpPrior.gpIsOk() and (gpPrior.gpPayload is Dictionary):
+		var gpPriorDict: Dictionary = gpPrior.gpPayload as Dictionary
+		if gpPriorDict.get("project_meta") is Dictionary:
+			gpOut["project_meta"] = (gpPriorDict.get("project_meta") as Dictionary).duplicate(true)
+		elif gpPriorDict.get("meta") is Dictionary \
+				and str((gpPriorDict.get("meta") as Dictionary).get("name", "")) != "":
+			# Legacy promotion: the rename blade wrote meta.name on a pre-v4 archive.
+			# 旧档升格：重命名刀曾对 v4 前存档写过 meta.name。
+			gpOut["project_meta"] = {"name": str((gpPriorDict.get("meta") as Dictionary).get("name", ""))}
+		if gpPriorDict.get("members") is Array:
+			gpOut["members"] = (gpPriorDict.get("members") as Array).duplicate(true)
+			return
+	# Fallback (unreadable/new archive): the session-carried roster rides through.
+	# 兜底（读不到档 / 新档）：随会话携带的名单照常写入。
+	if not gpMembers.is_empty():
+		gpOut["members"] = gpMembers.duplicate(true)
 
 
 # Read and reconstruct a project graph from gpPath. Returns null on any failure
@@ -128,13 +165,12 @@ static func gpWriteSheets(gpSheets: Array, gpPath: String, gpLinks: Array = [],
 	# ADR-41（2026-11-09 修订）：每次多图纸保存都盖为容器 v4 —— 唯一容器形态（不做 v1–v3 宽容读）。
 	# 三个工程级段与版本键归 GPProjectContainerV4 所有；本文件只保留这一行转发。
 	GPProjectContainerV4.gpStampV4(gpOut)
-	# W14 T4a: the roster carried through the session is written back, so a member edit
-	# (identity panel) survives every subsequent session save — the container is rebuilt
-	# from the model on save and would otherwise revert members to [].
-	# W14 T4a：随会话携带的名单被回写，使身份面板的成员变更在后续每次会话保存后仍存活
-	# —— 保存时容器按模型重建，否则 members 会回退为空。
-	if not gpMembers.is_empty():
-		gpOut["members"] = gpMembers.duplicate(true)
+	# W14 fix (2026-11-18): project-level sections are carried from the CURRENT disk
+	# state — the session snapshot param (gpMembers) is now the FALLBACK only, because
+	# the zero-sheet open path never had one and a snapshot goes stale mid-session.
+	# W14 修复（2026-11-18）：工程级段改从**当前盘上状态**携带 —— 会话快照参数
+	#（gpMembers）降级为**兜底**：零图纸打开通路没有快照，快照在会话中途也会陈旧。
+	_gpCarryProjectSections(gpOut, gpFilePath, gpMembers)
 	# ADR-43: container-level cross-sheet links go out under the HISTORIC "cross_links" key
 	# (reserved by the multi-document era; the migration chain preserves it). The key is
 	# written ONLY when links exist, and the array is sorted by id so repeated saves are
