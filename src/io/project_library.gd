@@ -195,10 +195,16 @@ static func gpRecentSave(gpList: Array[Dictionary], gpStore: String = GP_RECENT_
 static func gpCreateArchiveV4(gpArchivePath: String, gpName: String) -> GPIOResult:
 	if FileAccess.file_exists(gpArchivePath):
 		return GPIOResult.gpFailure(GP_ERR_CREATE_EXISTS, "pc.create_exists", gpArchivePath)
+	# v1.3.1 (user request 2026-11-18): the seeded super-admin is admin/admin (forced to
+	# change at first open — gpIsDefaultAdmin detects it), replacing the anonymous "local".
+	# v1.3.1（用户要求 2026-11-18）：种入的超级管理员为 admin/admin（首开强制改密 ——
+	# gpIsDefaultAdmin 负责检测），取代匿名的 "local"。
+	var gpRoster: Array = []
+	GPCMemberRoster.gpSeedAdmin(gpRoster)
 	var gpContainer: Dictionary = GPProjectContainerV4.gpWrapV4(
 		{"kind": "project", "sheets": [], "cross_links": []},
 		{"name": gpName, "owner": ""},
-		[{"user": "local", "roles": ["manager"]}])
+		gpRoster)
 	var gpWrite: GPIOResult = GPAtomicFile.gpWriteJsonAtomic(gpArchivePath, gpContainer)
 	if not gpWrite.gpOk:
 		return GPIOResult.gpFailure(GP_ERR_CREATE_WRITE, "pc.create_failed", gpArchivePath)

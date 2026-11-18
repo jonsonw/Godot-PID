@@ -304,6 +304,13 @@ func gpSetState(gpKey: String, gpArgs: Array = []) -> void:
 	gpStateLabel.text = gpFmt % gpArgs if gpArgs.size() > 0 else gpFmt
 
 
+# The persistent status-bar user chip (v1.3.1), found by GROUP — the contract point the
+# identity coordinator mirrors the session user through (never touches the tree itself).
+# 持久状态栏用户铭牌（v1.3.1），经**分组**查找 —— 身份协调者镜像会话用户的契约点（协调者不碰场景树）。
+func gpStatusBarChip() -> GPStatusBar:
+	return get_tree().get_first_node_in_group(GPStatusBar.GP_GROUP) as GPStatusBar
+
+
 # The active canvas/graph are owned by the GPCenterArea; these accessors route the legacy
 # single-canvas logic to whichever sheet is currently active.
 # 活动画布/图由 GPCenterArea 持有；这些访问器把原先针对单一画布的逻辑，路由到当前活动图纸。

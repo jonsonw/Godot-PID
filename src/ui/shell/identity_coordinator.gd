@@ -34,6 +34,26 @@ var gpMembers: Array = []
 # 登录对话框，按次重建（成员变量而非 lambda 捕获 —— R7）。
 var _gpDialog: GPLoginDialog = null
 
+# v1.3.1: the first-run forced-change dialog (rebuilt per request, same R7 rule).
+# v1.3.1：首登强制改密对话框（按次重建，同一 R7 规则）。
+var _gpFirstRunDialog: GPFirstRunDialog = null
+
+
+# Set the SESSION user and mirror it onto the persistent status-bar chip (v1.3.1). The bar
+# comes through the CONTRACT relay gpStatusBarChip() (group lookup inside the shell); the
+# first contact binds the chip click to the self-service password dialog (roles stay
+# manager-only). / 设置**会话用户**并镜像到状态栏持久铭牌（v1.3.1）。状态栏经**契约中继**
+# gpStatusBarChip() 取得（分组查找在外壳内完成）；首次接触把铭牌点击接到自助改密对话框
+#（角色管理仍归管理者）。
+func gpSetSessionUser(gpUser: String) -> void:
+	gpHost.gpCurrentUser = gpUser
+	var gpBar: GPStatusBar = gpHost.gpStatusBarChip()
+	if gpBar == null:
+		return
+	if not gpBar.gpChangePasswordRequested.is_connected(gpPromptChangePassword):
+		gpBar.gpChangePasswordRequested.connect(gpPromptChangePassword)
+	gpBar.gpSetUser(gpUser)
+
 # W14 T5mini: the archive whose lock THIS session currently holds ("" = none). Released
 # on project switch and app exit; a crash leaves the lock to the stale reclaim.
 # W14 T5mini：本会话当前持锁的存档（"" = 无）。切换工程与退出时释放；崩溃留给僵尸回收。
@@ -63,8 +83,19 @@ func gpOnProjectLoaded(gpFilePath: String) -> void:
 	if gpRaw is Array:
 		gpMembers = gpRaw as Array
 	gpEnabledUsers = gpEnabledOf(gpMembers)
-	# Single mode: zero disturbance. / 单人模式：零打扰。
+	# v1.3.1: the SHIPPED admin/admin credential triggers the FORCED first-run change in
+	# BOTH modes — the default credential may never reach the editor.
+	# v1.3.1：**出厂** admin/admin 凭据在两种模式下都触发**强制**首登改密 ——
+	# 默认凭据永远进不了编辑器。
+	if GPCMemberRoster.gpIsDefaultAdmin(gpMembers):
+		gpPromptFirstRun()
+		return
+	# Single mode: zero disturbance — but the session identity is the SOLE enabled member
+	# (honest authorship on saves), shown on the status-bar chip.
+	# 单人模式：零打扰 —— 但会话身份即**唯一**启用成员（保存署名如实），显示在状态栏铭牌。
 	if gpMembers.size() <= 1:
+		var gpSole: String = gpEnabledUsers[0] if not gpEnabledUsers.is_empty() else ""
+		gpSetSessionUser(gpSole if gpSole != "" else "local")
 		return
 	gpPromptLogin()
 
@@ -134,7 +165,7 @@ func gpPromptLogin() -> void:
 func _gpOnLoginDone(gpUser: String, gpOk: bool) -> void:
 	_gpDialog = null
 	if gpOk and gpUser != "":
-		gpHost.gpCurrentUser = gpUser
+		gpSetSessionUser(gpUser)
 		# v1.3: the display name is a manager-assigned fact in the member entry (the
 		# local credential store is retired).
 		# v1.3：显示名是成员条目里管理者分配的事实（本机凭据库已退役）。
@@ -146,6 +177,45 @@ func _gpOnLoginDone(gpUser: String, gpOk: bool) -> void:
 	else:
 		gpHost.gpSetState("identity.login_cancelled", [])
 		gpHost.gpExitToManager()
+
+
+# v1.3.1 first-run: the shipped admin/admin must be replaced (new name + new password +
+# recovery email) before anything else. Cancel exits back to the manager — same gate as
+# the multi-user login.
+# v1.3.1 首登：出厂 admin/admin 必须先替换（新账户名 + 新密码 + 找回邮箱）才能继续。
+# 取消即退回项目管理器 —— 与多用户登录同一门。
+func gpPromptFirstRun() -> void:
+	if _gpFirstRunDialog != null and is_instance_valid(_gpFirstRunDialog):
+		_gpFirstRunDialog.move_to_foreground()
+		return
+	_gpFirstRunDialog = GPFirstRunDialog.new()
+	_gpFirstRunDialog.gpSetup(_gpCurrentPath)
+	gpHost.add_child(_gpFirstRunDialog)
+	_gpFirstRunDialog.gpFirstRunDone.connect(_gpOnFirstRunDone)
+	_gpFirstRunDialog.popup_centered(Vector2i(460, 380))
+
+
+func _gpOnFirstRunDone(gpUser: String, gpOk: bool) -> void:
+	_gpFirstRunDialog = null
+	if gpOk and gpUser != "":
+		gpSetSessionUser(gpUser)
+		gpHost.gpSetState("identity.first_run_changed", [gpUser])
+	else:
+		gpHost.gpSetState("identity.login_cancelled", [])
+		gpHost.gpExitToManager()
+
+
+# v1.3.1 self-service password change: opened from the status-bar user chip; the user can
+# change ONLY their own password — roles / display name / email ride through untouched.
+# v1.3.1 自助改密：从状态栏用户铭牌进入；用户**只能**改自己的密码 —— 角色 / 显示名 /
+# 邮箱原样保留。
+func gpPromptChangePassword() -> void:
+	if _gpCurrentPath == "" or gpHost.gpCurrentUser == "" or gpHost.gpCurrentUser == "local":
+		return
+	var gpDialog: GPChangePasswordDialog = GPChangePasswordDialog.new()
+	gpDialog.gpSetup(_gpCurrentPath, gpHost.gpCurrentUser)
+	gpHost.add_child(gpDialog)
+	gpDialog.popup_centered(Vector2i(440, 340))
 
 
 # The enabled roster for the login dialog / panel callers.

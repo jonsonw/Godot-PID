@@ -1,20 +1,23 @@
 class_name GPStatusBar
 extends HBoxContainer
 
-# 底部状态栏（视觉分层）。
-# Bottom status bar (visual layering).
-#
-# 在深色 chrome 上绘制：最暗一档背景 + 顶部 1px 边界线（与上方画布区分隔）；
-# 标签之间留白，首位留左内边距，由粗犷转为精致。背景自绘于底层，子标签前景在上。
-# Paints the darkest chrome background + a 1px top border (separating it from the
-# canvas above); generous spacing and a left inset refine the look. The background
-# is drawn beneath the label children.
-# 编码规范：所有变量均显式声明类型。
+# Group tag: the shell host finds this bar WITHOUT a scene-path or main_window wiring line
+# (the root's assembly is ADR-47 budget-frozen).
+# 分组标记：外壳宿主经分组找到状态栏 —— 不用场景路径、也不给根类加装配行（根类装配受
+# ADR-47 预算冻结）。
+const GP_GROUP: String = "gp_status_bar"
 
-# Build the status-bar look: spacing + left inset + a one-shot redraw so the
-# custom background paints after the first layout pass.
-# 构建状态栏外观：间距 + 左内边距 + 首帧重绘，使自绘背景在首次布局后绘制。
+# v1.3.1: the session-user chip. Persistent (unlike the transient StateLabel messages) and
+# clickable — the self-service password change entry (roles stay manager-only).
+# v1.3.1：会话用户铭牌。**持久**显示（区别于一闪而过的 StateLabel 消息）且可点击 ——
+# 自助改密的入口（角色管理仍归管理者）。
+signal gpChangePasswordRequested
+
+var _gpUserChip: Button
+
+
 func _ready() -> void:
+	add_to_group(GP_GROUP)
 	mouse_filter = MOUSE_FILTER_STOP
 	add_theme_constant_override("separation", 10)
 	var gpInset: Control = Control.new()
@@ -23,8 +26,30 @@ func _ready() -> void:
 	add_child(gpInset)
 	move_child(gpInset, 0)
 	_gpBuildToggles()
+	_gpBuildUserChip()
 	_gpPinLabelWidths()
 	queue_redraw()
+
+
+# The chip text follows the session user; empty = hidden (e.g. bare editor without a load).
+# 铭牌文字跟随会话用户；空 = 隐藏（例如未载入工程的裸编辑器）。
+func gpSetUser(gpUser: String) -> void:
+	if _gpUserChip == null:
+		return
+	_gpUserChip.visible = gpUser != ""
+	_gpUserChip.text = gpUser
+
+
+# Build the chip: flat button pinned right, click -> gpChangePasswordRequested.
+# 构建铭牌：扁平按钮钉在最右，点击 -> gpChangePasswordRequested。
+func _gpBuildUserChip() -> void:
+	_gpUserChip = Button.new()
+	_gpUserChip.flat = true
+	_gpUserChip.focus_mode = Control.FOCUS_NONE
+	_gpUserChip.tooltip_text = I18n.gpTr("identity.user_chip_tip")
+	_gpUserChip.visible = false
+	_gpUserChip.pressed.connect(func() -> void: gpChangePasswordRequested.emit())
+	add_child(_gpUserChip)
 
 
 # Pin the three live-text labels to fixed widths and make the state label clip its text.

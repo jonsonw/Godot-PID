@@ -273,3 +273,88 @@ func gpTestManageMembersGate() -> void:
 	gpCheck(not GPPermissions.gpCanManageMembers(), "the gate must deny under the test seam")
 	GPPermissions.gpForceDeny = false
 	gpCheck(GPPermissions.gpCanManageMembers(), "the gate must be restored")
+
+
+# ============================ v1.3.1 default admin / first run ============================
+# ============================ v1.3.1 默认管理员 / 首登 ============================
+
+# The shipped seed is admin/admin and gpIsDefaultAdmin detects it — the forced first-run
+# change triggers on exactly this state.
+# 出厂种子是 admin/admin 且 gpIsDefaultAdmin 能检出 —— 首登强制改密恰在此状态触发。
+func gpTestDefaultAdminSeedAndDetection() -> void:
+	var gpMembers: Array = []
+	GPCMemberRoster.gpSeedAdmin(gpMembers)
+	gpEq(gpMembers.size(), 1, "the seed must add exactly one entry")
+	gpEq(str((gpMembers[0] as Dictionary).get("user", "")), "admin",
+		"the seeded username must be admin")
+	gpCheck(bool(GPCMemberRoster.gpVerifyLogin(gpMembers, "admin", "admin").get("ok", false)),
+		"the shipped password must be admin")
+	gpCheck(GPCMemberRoster.gpIsDefaultAdmin(gpMembers),
+		"the fresh seed must be detected as the default admin")
+	gpCheck(bool(GPCMemberRoster.gpSetCredential(gpMembers, "admin", "s3cret-pw",
+		"Administrator", ["manager"]).get("ok", false)),
+		"re-credentialling the admin must succeed")
+	gpCheck(not GPCMemberRoster.gpIsDefaultAdmin(gpMembers),
+		"a changed password must clear the default-admin detection")
+
+
+# Creation seeds the admin/admin roster (not the anonymous "local" any more).
+# 新建工程种入 admin/admin 名单（不再使用匿名 "local"）。
+func gpTestCreateArchiveSeedsAdmin() -> void:
+	_gpCleanup()
+	var gpRes: GPIOResult = GPProjectLibrary.gpCreateArchiveV4(GP_ARCHIVE_PATH, "探针工程")
+	gpCheck(gpRes.gpIsOk(), "the v4 creation must succeed")
+	var gpHeader: GPIOResult = GPProjectIO.gpReadHeader(GP_ARCHIVE_PATH)
+	gpCheck(gpHeader.gpIsOk(), "the header must read back")
+	var gpMembers: Array = (gpHeader.gpPayload as Dictionary).get("members", []) as Array
+	gpCheck(gpMembers.size() >= 1 and str((gpMembers[0] as Dictionary).get("user", "")) == "admin",
+		"the seeded roster must start with admin")
+	gpCheck(GPCMemberRoster.gpIsDefaultAdmin(gpMembers),
+		"a freshly created archive must be on the default credential (first run)")
+	_gpCleanup()
+
+
+# The email field: gpAdd stores it, gpSetCredential with "" keeps it, with a value sets it.
+# 邮箱字段：gpAdd 落存；gpSetCredential 空串**保持**、有值**设置**。
+func gpTestEmailFieldSemantics() -> void:
+	var gpMembers: Array = []
+	gpCheck(bool(GPCMemberRoster.gpAdd(gpMembers, "dave", "dave-pass", ["designer"],
+		"", true, "dave@example.com").get("ok", false)),
+		"adding dave with an email must succeed")
+	gpEq(str(GPCMemberRoster.gpFind(gpMembers, "dave").get("email", "")), "dave@example.com",
+		"the email must be stored in the member entry")
+	gpCheck(bool(GPCMemberRoster.gpSetCredential(gpMembers, "dave", "new-pass-9",
+		"", ["designer"]).get("ok", false)),
+		"a credential update with an empty email must succeed")
+	gpEq(str(GPCMemberRoster.gpFind(gpMembers, "dave").get("email", "")), "dave@example.com",
+		"an empty email in gpSetCredential must KEEP the stored address")
+	gpCheck(bool(GPCMemberRoster.gpSetCredential(gpMembers, "dave", "new-pass-9",
+		"", ["designer"], "dave@new.example").get("ok", false)),
+		"a credential update with a real email must succeed")
+	gpEq(str(GPCMemberRoster.gpFind(gpMembers, "dave").get("email", "")), "dave@new.example",
+		"a real email in gpSetCredential must overwrite the stored address")
+
+
+# The self-service blade: roles/display/email ride through a password-only change.
+# 自助改密刀：只改密码时角色 / 显示名 / 邮箱原样保留。
+func gpTestSelfServicePasswordChangeKeepsRoles() -> void:
+	var gpMembers: Array = []
+	GPCMemberRoster.gpSeedAdmin(gpMembers)
+	var gpM: Dictionary = GPCMemberRoster.gpFind(gpMembers, "admin")
+	gpM["display_name"] = "Boss"
+	gpM["email"] = "boss@example.com"
+	gpCheck(bool(GPCMemberRoster.gpVerifyLogin(gpMembers, "admin", "admin").get("ok", false)),
+		"the old password must verify before the change")
+	gpCheck(bool(GPCMemberRoster.gpSetCredential(gpMembers, "admin", "boss-pw-77",
+		str(gpM.get("display_name", "")), gpM.get("roles", []) as Array,
+		str(gpM.get("email", ""))).get("ok", false)),
+		"the password-only re-credential must succeed")
+	var gpAfter: Dictionary = GPCMemberRoster.gpFind(gpMembers, "admin")
+	gpEq(str(gpAfter.get("roles", []) as Array), str(["manager"] as Array),
+		"the roles must ride through untouched")
+	gpEq(str(gpAfter.get("display_name", "")), "Boss", "the display name must ride through")
+	gpEq(str(gpAfter.get("email", "")), "boss@example.com", "the email must ride through")
+	gpCheck(bool(GPCMemberRoster.gpVerifyLogin(gpMembers, "admin", "boss-pw-77").get("ok", false)),
+		"the new password must verify")
+	gpCheck(not GPCMemberRoster.gpVerifyLogin(gpMembers, "admin", "admin").get("ok", false),
+		"the old password must stop verifying")

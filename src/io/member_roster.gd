@@ -58,7 +58,7 @@ static func gpRolesValid(gpRoles: Array) -> bool:
 # Add a member WITH its assigned credential (v1.3: the manager sets the initial password).
 # 添加成员**并分配凭据**（v1.3：管理者设初始密码）。
 static func gpAdd(gpMembers: Array, gpUser: String, gpPassword: String, gpRoles: Array,
-		gpDisplayName: String = "", gpEnabled: bool = true) -> Dictionary:
+		gpDisplayName: String = "", gpEnabled: bool = true, gpEmail: String = "") -> Dictionary:
 	var gpName: String = gpUser.strip_edges()
 	if gpName == "":
 		return {"ok": false, "code": GP_ERR_BAD_USER}
@@ -74,6 +74,7 @@ static func gpAdd(gpMembers: Array, gpUser: String, gpPassword: String, gpRoles:
 		"roles": gpRoles.duplicate(true),
 		"enabled": gpEnabled,
 		"display_name": gpDisplayName,
+		"email": gpEmail,
 		"salt": gpSalt,
 		"hash": GPIdentityCredentials.gpHashPassword(gpPassword, gpSalt),
 		"iterations": GPIdentityCredentials.GP_ITERATIONS,
@@ -81,12 +82,43 @@ static func gpAdd(gpMembers: Array, gpUser: String, gpPassword: String, gpRoles:
 	return {"ok": true, "code": ""}
 
 
-# Update a member's credential / display name / roles (the panel's apply-changes blade).
-# An EMPTY password keeps the current hash (edit display name / roles only).
-# 更新成员的凭据 / 显示名 / 角色（面板的「应用变更」刀）。**空**密码保持现有哈希
-#（只改显示名 / 角色）。
+# The SHIPPED default super-admin: username admin, password admin — INVALID by design
+# (5 < 6 chars) so the first-run dialog can never be skipped legitimately. It seeds the
+# roster at archive creation and gpIsDefaultAdmin() detects it on every open.
+# 出厂默认超级管理员：用户名 admin、密码 admin —— **刻意**不合法（5 < 6 位），使首登
+# 强制改密在逻辑上无法被正当跳过。创建存档时种入名单，gpIsDefaultAdmin() 在每次打开时检测。
+static func gpSeedAdmin(gpMembers: Array) -> void:
+	var gpSalt: String = GPIdentityCredentials.gpNewSalt()
+	gpMembers.append({
+		"user": "admin",
+		"roles": ["manager"],
+		"enabled": true,
+		"display_name": "Administrator",
+		"email": "",
+		"salt": gpSalt,
+		"hash": GPIdentityCredentials.gpHashPassword("admin", gpSalt),
+		"iterations": GPIdentityCredentials.GP_ITERATIONS,
+	})
+
+
+# Is the archive still on its SHIPPED default admin credential (admin/admin)? The first-run
+# forced change triggers exactly on this — and only on this.
+# 存档是否仍在**出厂默认** admin/admin 凭据上？首登强制改密只在此时触发。
+static func gpIsDefaultAdmin(gpMembers: Array) -> bool:
+	var gpM: Dictionary = gpFind(gpMembers, "admin")
+	if gpM.is_empty():
+		return false
+	return GPIdentityCredentials.gpVerify("admin", str(gpM.get("salt", "")),
+		str(gpM.get("hash", "")))
+
+
+# Update a member's credential / display name / roles / email (the panel's apply-changes
+# blade, the self-service password change and the first-run dialog). An EMPTY password
+# keeps the current hash; an EMPTY email keeps the current address.
+# 更新成员的凭据 / 显示名 / 角色 / 邮箱（面板「应用变更」刀、自助改密与首登对话框）。
+# **空**密码保持现有哈希；**空**邮箱保持现有地址。
 static func gpSetCredential(gpMembers: Array, gpUser: String, gpPassword: String,
-		gpDisplayName: String, gpRoles: Array) -> Dictionary:
+		gpDisplayName: String, gpRoles: Array, gpEmail: String = "") -> Dictionary:
 	var gpM: Dictionary = gpFind(gpMembers, gpUser)
 	if gpM.is_empty():
 		return {"ok": false, "code": GP_ERR_NOT_FOUND}
@@ -101,6 +133,8 @@ static func gpSetCredential(gpMembers: Array, gpUser: String, gpPassword: String
 		gpM["iterations"] = GPIdentityCredentials.GP_ITERATIONS
 	gpM["display_name"] = gpDisplayName
 	gpM["roles"] = gpRoles.duplicate(true)
+	if gpEmail != "":
+		gpM["email"] = gpEmail
 	return {"ok": true, "code": ""}
 
 
