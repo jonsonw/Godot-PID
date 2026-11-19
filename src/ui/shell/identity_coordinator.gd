@@ -45,6 +45,12 @@ var _gpFirstRunDialog: GPFirstRunDialog = null
 # request. / v1.3.2：资料对话框（基本信息 + 自助改密），按次重建。
 var _gpProfileDialog: GPProfileDialog = null
 
+# v1.3.4: TRUE while the open login dialog was raised by 切换用户 — cancel then keeps the
+# current session instead of exiting to the manager.
+# v1.3.4：当前打开的登录对话框由「切换用户」发起时为真 —— 取消则保留当前会话，
+# 不退回项目管理器。
+var _gpSwitching: bool = false
+
 
 # Set the SESSION user and mirror it onto (a) the persistent status-bar chip and (b) the
 # quick-toolbar user button (v1.3.2), both reached through the CONTRACT (no scene tree
@@ -61,9 +67,49 @@ func gpSetSessionUser(gpUser: String) -> void:
 		gpBar.gpSetUser(gpUser)
 	var gpQuick: GPPIDQuickToolbar = gpHost.gpQuickBar
 	if gpQuick != null:
-		if not gpQuick.gpProfileRequested.is_connected(gpPromptProfile):
-			gpQuick.gpProfileRequested.connect(gpPromptProfile)
+		if not gpQuick.gpUserMenuAction.is_connected(_gpOnUserMenu):
+			gpQuick.gpUserMenuAction.connect(_gpOnUserMenu)
 		gpQuick.gpSetUser(gpUser)
+
+
+# v1.3.4: the session-user dropdown (top quick toolbar): 修改密码 / 退出登录 / 切换用户.
+# A no-gate roster answers honestly instead of silently ignoring (the "click does
+# nothing" bug pattern from 2026-11-18 is never repeated).
+# v1.3.4：会话用户下拉（顶部快捷工具栏）：修改密码 / 退出登录 / 切换用户。
+# 无凭据名单**如实作答**而非静默忽略 —— 绝不重蹈 2026-11-18「点了没反应」的覆辙。
+func _gpOnUserMenu(gpId: String) -> void:
+	match gpId:
+		"profile":
+			gpPromptProfile()
+		"logout":
+			gpLogout()
+		"switch":
+			gpPromptSwitch()
+
+
+# v1.3.4 LOGOUT: drop this machine's remember token for the open archive, then exit to
+# the project manager — the session is over, the next open REQUIRES sign-in.
+# v1.3.4 退出登录：删除本机对该工程的记住令牌，然后退回项目管理器 —— 会话结束，
+# 下次打开**必须**登录。
+func gpLogout() -> void:
+	if _gpCurrentPath != "":
+		GPLoginRemember.gpDrop(_gpCurrentPath)
+	gpSetSessionUser("local")
+	gpHost.gpSetState("identity.logged_out", [])
+	gpHost.gpExitToManager()
+
+
+# v1.3.4 SWITCH USER: re-open the login dialog for a DIFFERENT member (blank prefill).
+# Cancel keeps the CURRENT session (already authenticated this session) — unlike the
+# open-time gate, an aborted switch is not an error.
+# v1.3.4 切换用户：重新打开登录对话框换一位成员（**空白预填**）。取消保留**当前**会话
+#（本次会话已通过鉴权）—— 与打开时的登录门不同，中途放弃切换不是错误。
+func gpPromptSwitch() -> void:
+	if _gpCurrentPath == "" or not gpGateRequired(gpMembers):
+		gpHost.gpSetState("identity.no_gate", [])
+		return
+	_gpSwitching = true
+	gpPromptLogin(true)
 
 # W14 T5mini: the archive whose lock THIS session currently holds ("" = none). Released
 # on project switch and app exit; a crash leaves the lock to the stale reclaim.
@@ -175,8 +221,12 @@ static func gpEnabledOf(gpMembers: Array) -> Array[String]:
 	return gpOut
 
 
-# Show (or refocus) the login dialog. / 显示（或置前）登录对话框。
-func gpPromptLogin() -> void:
+# Show (or refocus) the login dialog. gpBlankPrefill = raise it with an EMPTY username
+# (切换用户 must not assume who comes next); the default prefills the first enabled
+# member (the typical one-workstation-one-user case).
+# 显示（或置前）登录对话框。gpBlankPrefill = 以**空白**用户名弹出（切换用户不能预判
+# 下一位是谁）；默认预填第一个启用成员（典型的一机一用户场景）。
+func gpPromptLogin(gpBlankPrefill: bool = false) -> void:
 	if _gpDialog != null and is_instance_valid(_gpDialog):
 		# ADR-48: refocus an existing window with move_to_foreground (move_to_front does
 		# NOT exist on Window). / ADR-48：复用窗口置前用 move_to_foreground
@@ -184,11 +234,11 @@ func gpPromptLogin() -> void:
 		_gpDialog.move_to_foreground()
 		return
 	_gpDialog = GPLoginDialog.new()
-	var gpPrefill: String = gpEnabledUsers[0] if not gpEnabledUsers.is_empty() else ""
+	var gpPrefill: String = "" if gpBlankPrefill or gpEnabledUsers.is_empty() else gpEnabledUsers[0]
 	_gpDialog.gpSetup(_gpCurrentPath, gpPrefill)
 	gpHost.add_child(_gpDialog)
 	_gpDialog.gpLoginDone.connect(_gpOnLoginDone)
-	_gpDialog.popup_centered(Vector2i(430, 320))
+	_gpDialog.popup_centered(Vector2i(430, 360))
 
 
 # Login outcome: success -> the session user changes (and, when the remember box was
@@ -198,6 +248,8 @@ func gpPromptLogin() -> void:
 # 存储**）。取消 / 关闭 -> 退回项目管理器（v1.3：没有「本地」旁路）。
 func _gpOnLoginDone(gpUser: String, gpOk: bool, gpRemember: bool) -> void:
 	_gpDialog = null
+	var gpWasSwitching: bool = _gpSwitching
+	_gpSwitching = false
 	if gpOk and gpUser != "":
 		if gpRemember and _gpCurrentPath != "":
 			GPLoginRemember.gpPut(_gpCurrentPath, gpUser, Time.get_unix_time_from_system())
@@ -210,6 +262,11 @@ func _gpOnLoginDone(gpUser: String, gpOk: bool, gpRemember: bool) -> void:
 			gpHost.gpSetState("identity.logged_in", [gpUser + " (" + gpDisplay + ")"])
 		else:
 			gpHost.gpSetState("identity.logged_in", [gpUser])
+	elif gpWasSwitching:
+		# v1.3.4: an aborted SWITCH keeps the current (already authenticated) session —
+		# no exit, no error message.
+		# v1.3.4：中途放弃**切换**保留当前（已鉴权的）会话 —— 不退出、不报错。
+		return
 	else:
 		gpHost.gpSetState("identity.login_cancelled", [])
 		gpHost.gpExitToManager()
@@ -252,12 +309,16 @@ func _gpOnFirstRunDone(gpUser: String, gpOk: bool) -> void:
 
 
 # v1.3.2 profile: basic info (read-only) + self-service password change, opened from the
-# quick-toolbar user button or the status-bar chip. The user can change ONLY their own
-# password — roles / display name / email ride through untouched.
-# v1.3.2 资料：基本信息（只读）+ 自助改密，从快捷工具栏用户按钮或状态栏铭牌进入。
-# 用户**只能**改自己的密码 —— 角色 / 显示名 / 邮箱原样保留。
+# session-user dropdown or the status-bar chip. The user can change ONLY their own
+# password — roles / display name / email ride through untouched. A no-gate roster
+# answers HONESTLY instead of silently ignoring (2026-11-18 bug pattern).
+# v1.3.2 资料：基本信息（只读）+ 自助改密，从会话用户下拉或状态栏铭牌进入。
+# 用户**只能**改自己的密码 —— 角色 / 显示名 / 邮箱原样保留。无凭据名单**如实作答**
+# 而非静默忽略（2026-11-18 的坑不再重蹈）。
 func gpPromptProfile() -> void:
-	if _gpCurrentPath == "" or gpHost.gpCurrentUser == "" or gpHost.gpCurrentUser == "local":
+	if _gpCurrentPath == "" or not gpGateRequired(gpMembers) \
+			or gpHost.gpCurrentUser == "" or gpHost.gpCurrentUser == "local":
+		gpHost.gpSetState("identity.no_gate", [])
 		return
 	if _gpProfileDialog != null and is_instance_valid(_gpProfileDialog):
 		_gpProfileDialog.move_to_foreground()

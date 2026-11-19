@@ -25,11 +25,12 @@ extends HBoxContainer
 # 工具栏动作触发时发出，携带菜单动作 id（如 "file_save"）。
 signal gpActionTriggered(gpId: String)
 
-# v1.3.2: emitted when the trailing SESSION-USER button is pressed (NOT a menu action —
-# it opens the profile dialog, so it gets its own signal outside the action pipeline).
-# v1.3.2：末端**会话用户**按钮按下时发出（不是菜单动作 —— 它打开资料对话框，
-# 故走动作管线之外的独立信号）。
-signal gpProfileRequested
+# v1.3.4: emitted when the user picks an item in the session-user dropdown:
+# "profile" (修改密码 — the existing profile dialog) / "logout" (退出登录) /
+# "switch" (切换用户). The coordinator owns all three behaviors.
+# v1.3.4：会话用户下拉菜单选中时发出："profile"（修改密码 —— 复用现有资料对话框）/
+# "logout"（退出登录）/ "switch"（切换用户）。三个行为都归协调者。
+signal gpUserMenuAction(gpId: String)
 
 # Icon strip spec: menu action id + tooltip i18n key + icon file stem.
 # 图标带定义：菜单动作 id + 提示语 i18n 键 + 图标文件名。
@@ -65,9 +66,14 @@ const GP_ITEMS: Array = [
 # 以动作为键的按钮，便于启用/禁用与提示语刷新。
 var _gpBtns: Dictionary = {}
 
-# v1.3.2: the trailing session-user button (shows the logged-in name; click = profile).
-# v1.3.2：末端会话用户按钮（显示登录名；点击 = 资料对话框）。
+# v1.3.2: the trailing session-user button (shows the logged-in name; click = dropdown).
+# v1.3.2：末端会话用户按钮（显示登录名；点击 = 下拉菜单）。
 var _gpUserBtn: Button = null
+
+# v1.3.4: the user dropdown (修改密码 / 退出登录 / 切换用户), filled fresh per press so
+# translations never go stale.
+# v1.3.4：用户下拉（修改密码 / 退出登录 / 切换用户），每次按下重新填充，译文永不过时。
+var _gpUserMenu: PopupMenu = null
 
 # The export submenu popup (owned by the export button).
 # 导出子菜单弹出层（归导出按钮所有）。
@@ -112,7 +118,7 @@ func _ready() -> void:
 	gpUserHover.set_content_margin_all(2.0)
 	gpUserHover.set_corner_radius_all(3)
 	_gpUserBtn.add_theme_stylebox_override("hover", gpUserHover)
-	_gpUserBtn.pressed.connect(_gpOnProfilePressed)
+	_gpUserBtn.pressed.connect(_gpOnUserPressed)
 	add_child(_gpUserBtn)
 	I18n.gpLocaleChanged.connect(_gpRefreshTooltips)
 	_gpRefreshTooltips(I18n.gpLocale)
@@ -129,10 +135,28 @@ func gpSetUser(gpUser: String) -> void:
 	_gpUserBtn.visible = gpUser != ""
 
 
-# v1.3.2: user button press -> the profile signal (R7: member-function callback).
-# v1.3.2：用户按钮按下 -> 资料信号（R7：成员函数回调）。
-func _gpOnProfilePressed() -> void:
-	gpProfileRequested.emit()
+# v1.3.4: user button press -> the three-item dropdown under the button (fresh items per
+# press; R7 member-function callbacks).
+# v1.3.4：用户按钮按下 -> 按钮下方弹出三项目菜单（每按一次重新填充；R7 成员函数回调）。
+func _gpOnUserPressed() -> void:
+	if _gpUserMenu == null:
+		_gpUserMenu = PopupMenu.new()
+		_gpUserMenu.id_pressed.connect(_gpOnUserMenuId)
+		add_child(_gpUserMenu)
+	_gpUserMenu.clear()
+	var gpIdx: int = 0
+	for gpRow in [["identity.menu_profile", "profile"], ["identity.menu_logout", "logout"],
+			["identity.menu_switch", "switch"]]:
+		_gpUserMenu.add_item(I18n.gpTr(str(gpRow[0])), gpIdx)
+		_gpUserMenu.set_item_metadata(gpIdx, str(gpRow[1]))
+		gpIdx += 1
+	GPPopupHelper.gpPopupAtMouse(_gpUserMenu, _gpUserBtn)
+
+
+# Forward the picked item's id to the coordinator (which owns the behaviors).
+# 把选中项的 id 转发给协调者（行为归协调者所有）。
+func _gpOnUserMenuId(gpIndex: int) -> void:
+	gpUserMenuAction.emit(str(_gpUserMenu.get_item_metadata(gpIndex)))
 
 
 # Build one icon-only flat button (tooltip = localized name, AutoCAD style).
