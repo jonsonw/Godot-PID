@@ -24,12 +24,12 @@ extends Window
 # R7: callbacks are member functions, no lambda held across frames.
 # R7：回调一律成员函数，跨帧不持 lambda。
 
-# Emitted once per attempt outcome; "" user = cancelled / failed. The coordinator decides
-# what happens next (session user, status line, or the exit back to the manager) — the
-# dialog only reports.
-# 每次尝试产出一次信号；gpUser 为空串 = 取消 / 失败。后续（会话用户、状态行、退回管理
-# 器）归协调者 —— 对话框只上报。
-signal gpLoginDone(gpUser: String, gpOk: bool)
+# Emitted once per attempt outcome; "" user = cancelled / failed. gpRemember carries the
+# "skip sign-in for 24 hours" checkbox (v1.3.3) — the coordinator decides what to store
+# (machine-local token; the password is never persisted). The dialog only reports.
+# 每次尝试产出一次信号；gpUser 为空串 = 取消 / 失败。gpRemember 携带「24 小时免输入」
+# 勾选状态（v1.3.3）—— 存什么归协调者（本机令牌；密码绝不落盘）。对话框只上报。
+signal gpLoginDone(gpUser: String, gpOk: bool, gpRemember: bool)
 
 # The archive whose (live-re-read) roster authenticates this login.
 # 由该存档（实时重读）的名单鉴权本次登录。
@@ -37,6 +37,7 @@ var gpArchivePath: String = ""
 
 var gpUserEdit: LineEdit
 var gpPassEdit: LineEdit
+var gpRememberCheck: CheckBox
 var gpInfoLabel: Label
 
 
@@ -67,6 +68,11 @@ func gpSetup(gpPath: String, gpPrefill: String) -> void:
 	gpPassEdit = LineEdit.new()
 	gpPassEdit.secret = true
 	_gpAddRow(gpForm, "identity.password", gpPassEdit)
+	# v1.3.3: the 24-hour remember checkbox (machine-local token; password never stored).
+	# v1.3.3：「24 小时免输入」勾选（本机令牌；密码不存储）。
+	gpRememberCheck = CheckBox.new()
+	gpRememberCheck.text = I18n.gpTr("identity.remember_24h")
+	gpRoot.add_child(gpRememberCheck)
 	gpInfoLabel = Label.new()
 	gpInfoLabel.text = I18n.gpTr("identity.login_prompt")
 	gpInfoLabel.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -112,17 +118,18 @@ func _gpOnSubmit() -> void:
 		_gpSay("identity.err_" + str(gpVerdict.get("code", "")).replace(".", "_"))
 
 
-# Cancel / close: report honestly; the coordinator exits back to the manager (v1.3: a
-# multi-user project has no "local" bypass).
-# 取消 / 关闭：如实上报；协调者退回项目管理器（v1.3：多人工程没有「本地」旁路）。
+# Cancel / close: report honestly; the coordinator exits back to the manager (v1.3: no
+# "local" bypass for credential-gated rosters).
+# 取消 / 关闭：如实上报；协调者退回项目管理器（v1.3：凭据门控名单没有「本地」旁路）。
 func _gpOnCancel() -> void:
-	gpLoginDone.emit("", false)
+	gpLoginDone.emit("", false, false)
 	queue_free()
 
 
-# Success: report and close. / 成功：上报并关闭。
+# Success: report (with the remember checkbox state) and close.
+# 成功：上报（连同记住勾选状态）并关闭。
 func _gpFinish(gpUser: String) -> void:
-	gpLoginDone.emit(gpUser, true)
+	gpLoginDone.emit(gpUser, true, gpRememberCheck.button_pressed)
 	queue_free()
 
 

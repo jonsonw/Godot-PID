@@ -358,3 +358,58 @@ func gpTestSelfServicePasswordChangeKeepsRoles() -> void:
 		"the new password must verify")
 	gpCheck(not GPCMemberRoster.gpVerifyLogin(gpMembers, "admin", "admin").get("ok", false),
 		"the old password must stop verifying")
+
+
+# v1.3.3: the credential gate is required iff some ENABLED member carries a hash.
+# v1.3.3：当且仅当存在**启用**成员带哈希时才需要凭据门。
+func gpTestGateRequired() -> void:
+	gpCheck(not GPIdentityCoordinator.gpGateRequired([]),
+		"an empty roster must NOT require the gate (nothing to authenticate)")
+	var gpMembers: Array = []
+	GPCMemberRoster.gpSeedAdmin(gpMembers)
+	gpCheck(GPIdentityCoordinator.gpGateRequired(gpMembers),
+		"a seeded admin (with hash) must require the gate")
+	var gpM: Dictionary = GPCMemberRoster.gpFind(gpMembers, "admin")
+	gpM["hash"] = ""
+	gpCheck(not GPIdentityCoordinator.gpGateRequired(gpMembers),
+		"a hash-less roster must NOT require the gate (legacy fallback)")
+	gpM["hash"] = "abc"
+	gpM["enabled"] = false
+	gpCheck(not GPIdentityCoordinator.gpGateRequired(gpMembers),
+		"a DISABLED-only credential must NOT require the gate")
+
+
+# v1.3.3: the 24h remember token — roundtrip, expiry, isolation, malformed store.
+# v1.3.3：24 小时记住令牌 —— 存取、过期、隔离、坏库。
+func gpTestRememberTokenLifecycle() -> void:
+	var gpStore: String = "user://gp_test_remember.json"
+	GPLoginRemember.gpDrop("res://a.pid.json", gpStore)
+	gpEq(GPLoginRemember.gpGet("res://a.pid.json", 1000.0, gpStore), "",
+		"an absent token must read as empty")
+	gpCheck(GPLoginRemember.gpPut("res://a.pid.json", "alice", 1000.0, gpStore),
+		"recording a login must succeed")
+	gpEq(GPLoginRemember.gpGet("res://a.pid.json", 1000.0 + 86399.0, gpStore), "alice",
+		"the token must still answer just inside the 24h window")
+	gpEq(GPLoginRemember.gpGet("res://a.pid.json", 1000.0 + 86401.0, gpStore), "",
+		"the token must expire past the 24h window")
+	gpCheck(GPLoginRemember.gpPut("res://a.pid.json", "alice", 1000.0, gpStore),
+		"re-recording must succeed")
+	gpEq(GPLoginRemember.gpGet("res://b.pid.json", 1001.0, gpStore), "",
+		"another archive's key must NOT receive this token")
+	gpEq(GPLoginRemember.gpGet("res://a.pid.json", 1001.0, gpStore), "alice",
+		"the original archive must keep its token")
+	GPLoginRemember.gpDrop("res://a.pid.json", gpStore)
+	gpEq(GPLoginRemember.gpGet("res://a.pid.json", 1001.0, gpStore), "",
+		"after gpDrop the token must be gone")
+	gpCheck(not GPLoginRemember.gpPut("", "alice", 1000.0, gpStore),
+		"an empty archive path must be rejected")
+	gpCheck(not GPLoginRemember.gpPut("res://a.pid.json", "", 1000.0, gpStore),
+		"an empty user must be rejected")
+	# Malformed store: reads honestly empty, never crashes. / 坏库：如实空读，绝不崩溃。
+	var gpF: FileAccess = FileAccess.open(gpStore, FileAccess.WRITE)
+	gpF.store_string("not-json{")
+	gpF.close()
+	gpEq(GPLoginRemember.gpGet("res://a.pid.json", 1000.0, gpStore), "",
+		"a malformed store must read as empty")
+	GPLoginRemember.gpDrop("res://a.pid.json", gpStore)
+	DirAccess.remove_absolute(gpStore)

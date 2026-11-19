@@ -500,6 +500,8 @@ const GP_STRINGS: Dictionary = {
 	"identity.new_password2": { "zh": "新密码", "en": "New password" },
 	"identity.email": { "zh": "安全邮箱（用于找回密码）", "en": "Recovery email (for password recovery)" },
 	"identity.email_bad": { "zh": "邮箱格式不正确（需包含 @）。", "en": "Invalid email address (must contain @)." },
+	"identity.password_confirm": { "zh": "确认密码", "en": "Confirm password" },
+	"identity.remember_24h": { "zh": "24小时内免输入用户名和密码（仅本机）", "en": "Skip sign-in for 24 hours (this machine only)" },
 	"identity.default_pw": { "zh": "新密码不能是默认密码 admin。", "en": "The new password must not be the default \"admin\"." },
 	"identity.too_short_fmt": { "zh": "密码至少 6 位。", "en": "Password must be at least 6 characters." },
 	"identity.change_pw_title": { "zh": "修改密码", "en": "Change password" },

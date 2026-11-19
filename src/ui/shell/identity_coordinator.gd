@@ -6,15 +6,17 @@ extends RefCounted
 # 身份会话协调者（W14 T4a/T4b，ADR-40 D2/D4）：多人工程的登录流程、会话用户记账，
 # 以及（T4b）管理者编辑的成员名单。
 #
-# MODE SEMANTICS / 模式语义（ADR-40 D2；v1.3 收紧）：
-# - single mode (<= 1 member): ZERO disturbance — session user stays "local/manager", no
-#   login prompt ever.
-# - multi mode (> 1 member): opening the archive prompts login. CANCEL / close EXITS back
-#   to the project manager (v1.3 user decision 2026-11-18) — a multi-user project has no
-#   "local" bypass. Enforcement of role capabilities is W15 (the permission matrix).
-# - 单人模式（成员数 <= 1）：零打扰 —— 会话用户保持 "local/manager"，永不弹登录。
-# - 多人模式（成员数 > 1）：打开存档即提示登录。取消 / 关闭即**退回项目管理器**
-#（v1.3 用户拍板 2026-11-18）—— 多人工程没有「本地」旁路。角色能力强制是 W15（权限矩阵）。
+# MODE SEMANTICS / 模式语义（v1.3.3，用户拍板 2026-11-19 —— 覆盖 v1.3 的单人零打扰）：
+# - EVERY open of a credential-carrying roster requires sign-in, single or multi member.
+#   The only bypass is a VALID machine-local 24h remember token (GPLoginRemember; the
+#   password is never stored). Cancel / close EXITS back to the project manager.
+# - Legacy rosters WITHOUT any credential (empty, or no enabled member carries a hash)
+#   keep zero disturbance — there is nothing to authenticate against; the session stays
+#   "local" honestly.
+# - 任何带凭据的名单（单人或多人）**每次打开都必须登录**。唯一旁路是有效的本机
+#   24 小时记住令牌（GPLoginRemember；密码不存储）。取消 / 关闭即退回项目管理器。
+# - 无凭据的遗留名单（空名单，或无任何启用成员带哈希）保持零打扰 —— 没有可验证之物，
+#   会话如实保持 "local"。
 #
 # Contract holder per the shell rule; self-injected by shell_host._init() because the
 # root's assembly is budget-frozen (same reason as revision_guard).
@@ -93,20 +95,43 @@ func gpOnProjectLoaded(gpFilePath: String) -> void:
 		gpMembers = gpRaw as Array
 	gpEnabledUsers = gpEnabledOf(gpMembers)
 	# v1.3.1: the SHIPPED admin/admin credential triggers the FORCED first-run change in
-	# BOTH modes — the default credential may never reach the editor.
+	# BOTH modes — the default credential may never reach the editor. After the change the
+	# user still signs in with the NEW credentials (v1.3.3).
 	# v1.3.1：**出厂** admin/admin 凭据在两种模式下都触发**强制**首登改密 ——
-	# 默认凭据永远进不了编辑器。
+	# 默认凭据永远进不了编辑器。改密后仍需用**新**凭据登录（v1.3.3）。
 	if GPCMemberRoster.gpIsDefaultAdmin(gpMembers):
 		gpPromptFirstRun()
 		return
-	# Single mode: zero disturbance — but the session identity is the SOLE enabled member
-	# (honest authorship on saves), shown on the status-bar chip.
-	# 单人模式：零打扰 —— 但会话身份即**唯一**启用成员（保存署名如实），显示在状态栏铭牌。
-	if gpMembers.size() <= 1:
-		var gpSole: String = gpEnabledUsers[0] if not gpEnabledUsers.is_empty() else ""
-		gpSetSessionUser(gpSole if gpSole != "" else "local")
+	# v1.3.3: credential-less legacy rosters (empty, or no enabled member carries a hash)
+	# keep zero disturbance — nothing to authenticate against.
+	# v1.3.3：无凭据的遗留名单（空名单，或无启用成员带哈希）保持零打扰 —— 无可验证之物。
+	if not gpGateRequired(gpMembers):
+		gpSetSessionUser(gpEnabledUsers[0] if not gpEnabledUsers.is_empty() else "local")
+		return
+	# v1.3.3: a VALID machine-local 24h remember token (user still enabled) skips re-entry.
+	# v1.3.3：有效的本机 24 小时记住令牌（用户仍启用）跳过重输。
+	var gpRemembered: String = GPLoginRemember.gpGet(gpFilePath, Time.get_unix_time_from_system())
+	if gpRemembered != "" and gpEnabledUsers.has(gpRemembered):
+		gpSetSessionUser(gpRemembered)
 		return
 	gpPromptLogin()
+
+
+# Pure, testable: does this roster require the credential gate? TRUE iff at least one
+# ENABLED member carries a password hash. Empty / hash-less rosters cannot authenticate
+# and stay zero-disturbance (honest fallback, v1.3.3).
+# 纯函数、可测：该名单是否需要凭据门？当且仅当至少一个**启用**成员带密码哈希时为真。
+# 空名单 / 无哈希名单无法鉴权，保持零打扰（如实兜底，v1.3.3）。
+static func gpGateRequired(gpMembers: Array) -> bool:
+	for gpEntry in gpMembers:
+		if not (gpEntry is Dictionary):
+			continue
+		var gpM: Dictionary = gpEntry as Dictionary
+		if not bool(gpM.get("enabled", true)):
+			continue
+		if str(gpM.get("hash", "")) != "":
+			return true
+	return false
 
 
 # W14 T5mini (ADR-40 D6③): best-effort lock on open — check first (advise a sheet split
@@ -166,14 +191,16 @@ func gpPromptLogin() -> void:
 	_gpDialog.popup_centered(Vector2i(430, 320))
 
 
-# Login outcome: success -> the session user changes. Cancel / close -> EXIT back to the
-# project manager (v1.3 user decision 2026-11-18: a multi-user project has NO "local"
-# bypass — being able to draw after cancelling the login was the reported leak).
-# 登录结果：成功 -> 会话用户切换。取消 / 关闭 -> **退回项目管理器**（v1.3 用户拍板
-# 2026-11-18：多人工程**没有**「本地」旁路 —— 取消登录后还能画图是用户报的漏洞）。
-func _gpOnLoginDone(gpUser: String, gpOk: bool) -> void:
+# Login outcome: success -> the session user changes (and, when the remember box was
+# ticked, a machine-local 24h token is recorded — the PASSWORD IS NEVER STORED).
+# Cancel / close -> EXIT back to the project manager (v1.3: no "local" bypass).
+# 登录结果：成功 -> 会话用户切换（勾选记住时记一条**本机** 24 小时令牌 —— **密码绝不
+# 存储**）。取消 / 关闭 -> 退回项目管理器（v1.3：没有「本地」旁路）。
+func _gpOnLoginDone(gpUser: String, gpOk: bool, gpRemember: bool) -> void:
 	_gpDialog = null
 	if gpOk and gpUser != "":
+		if gpRemember and _gpCurrentPath != "":
+			GPLoginRemember.gpPut(_gpCurrentPath, gpUser, Time.get_unix_time_from_system())
 		gpSetSessionUser(gpUser)
 		# v1.3: the display name is a manager-assigned fact in the member entry (the
 		# local credential store is retired).
@@ -207,8 +234,18 @@ func gpPromptFirstRun() -> void:
 func _gpOnFirstRunDone(gpUser: String, gpOk: bool) -> void:
 	_gpFirstRunDialog = null
 	if gpOk and gpUser != "":
-		gpSetSessionUser(gpUser)
-		gpHost.gpSetState("identity.first_run_changed", [gpUser])
+		# v1.3.3 (user request 2026-11-19): after replacing the shipped credential the user
+		# still SIGNS IN with the new username + password — re-read the (changed) roster
+		# from disk, then prompt the login gate.
+		# v1.3.3（用户要求 2026-11-19）：替换出厂凭据后仍需用新用户名 + 密码**登录** ——
+		# 先从盘上重读（已变更的）名单，再弹登录门。
+		var gpHeader: GPIOResult = GPProjectIO.gpReadHeader(_gpCurrentPath)
+		if gpHeader.gpIsOk():
+			var gpRaw: Variant = (gpHeader.gpPayload as Dictionary).get("members", null)
+			if gpRaw is Array:
+				gpMembers = gpRaw as Array
+			gpEnabledUsers = gpEnabledOf(gpMembers)
+		gpPromptLogin()
 	else:
 		gpHost.gpSetState("identity.login_cancelled", [])
 		gpHost.gpExitToManager()
