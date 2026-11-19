@@ -39,20 +39,29 @@ var _gpDialog: GPLoginDialog = null
 var _gpFirstRunDialog: GPFirstRunDialog = null
 
 
-# Set the SESSION user and mirror it onto the persistent status-bar chip (v1.3.1). The bar
-# comes through the CONTRACT relay gpStatusBarChip() (group lookup inside the shell); the
-# first contact binds the chip click to the self-service password dialog (roles stay
-# manager-only). / 设置**会话用户**并镜像到状态栏持久铭牌（v1.3.1）。状态栏经**契约中继**
-# gpStatusBarChip() 取得（分组查找在外壳内完成）；首次接触把铭牌点击接到自助改密对话框
+# v1.3.2: the profile dialog (basic info + self-service password change), rebuilt per
+# request. / v1.3.2：资料对话框（基本信息 + 自助改密），按次重建。
+var _gpProfileDialog: GPProfileDialog = null
+
+
+# Set the SESSION user and mirror it onto (a) the persistent status-bar chip and (b) the
+# quick-toolbar user button (v1.3.2), both reached through the CONTRACT (no scene tree
+# access here). First contact binds their clicks to the profile dialog (roles stay
+# manager-only). / 设置**会话用户**并镜像到 (a) 状态栏持久铭牌与 (b) 快捷工具栏用户按钮
+#（v1.3.2），两者都经**契约**取得（此处不碰场景树）。首次接触把两者的点击接到资料对话框
 #（角色管理仍归管理者）。
 func gpSetSessionUser(gpUser: String) -> void:
 	gpHost.gpCurrentUser = gpUser
 	var gpBar: GPStatusBar = gpHost.gpStatusBarChip()
-	if gpBar == null:
-		return
-	if not gpBar.gpChangePasswordRequested.is_connected(gpPromptChangePassword):
-		gpBar.gpChangePasswordRequested.connect(gpPromptChangePassword)
-	gpBar.gpSetUser(gpUser)
+	if gpBar != null:
+		if not gpBar.gpChangePasswordRequested.is_connected(gpPromptProfile):
+			gpBar.gpChangePasswordRequested.connect(gpPromptProfile)
+		gpBar.gpSetUser(gpUser)
+	var gpQuick: GPPIDQuickToolbar = gpHost.gpQuickBar
+	if gpQuick != null:
+		if not gpQuick.gpProfileRequested.is_connected(gpPromptProfile):
+			gpQuick.gpProfileRequested.connect(gpPromptProfile)
+		gpQuick.gpSetUser(gpUser)
 
 # W14 T5mini: the archive whose lock THIS session currently holds ("" = none). Released
 # on project switch and app exit; a crash leaves the lock to the stale reclaim.
@@ -205,17 +214,28 @@ func _gpOnFirstRunDone(gpUser: String, gpOk: bool) -> void:
 		gpHost.gpExitToManager()
 
 
-# v1.3.1 self-service password change: opened from the status-bar user chip; the user can
-# change ONLY their own password — roles / display name / email ride through untouched.
-# v1.3.1 自助改密：从状态栏用户铭牌进入；用户**只能**改自己的密码 —— 角色 / 显示名 /
-# 邮箱原样保留。
-func gpPromptChangePassword() -> void:
+# v1.3.2 profile: basic info (read-only) + self-service password change, opened from the
+# quick-toolbar user button or the status-bar chip. The user can change ONLY their own
+# password — roles / display name / email ride through untouched.
+# v1.3.2 资料：基本信息（只读）+ 自助改密，从快捷工具栏用户按钮或状态栏铭牌进入。
+# 用户**只能**改自己的密码 —— 角色 / 显示名 / 邮箱原样保留。
+func gpPromptProfile() -> void:
 	if _gpCurrentPath == "" or gpHost.gpCurrentUser == "" or gpHost.gpCurrentUser == "local":
 		return
-	var gpDialog: GPChangePasswordDialog = GPChangePasswordDialog.new()
-	gpDialog.gpSetup(_gpCurrentPath, gpHost.gpCurrentUser)
-	gpHost.add_child(gpDialog)
-	gpDialog.popup_centered(Vector2i(440, 340))
+	if _gpProfileDialog != null and is_instance_valid(_gpProfileDialog):
+		_gpProfileDialog.move_to_foreground()
+		return
+	_gpProfileDialog = GPProfileDialog.new()
+	_gpProfileDialog.gpSetup(_gpCurrentPath, gpHost.gpCurrentUser)
+	_gpProfileDialog.gpProfileDone.connect(_gpOnProfileDone)
+	gpHost.add_child(_gpProfileDialog)
+	_gpProfileDialog.popup_centered(Vector2i(460, 480))
+
+
+func _gpOnProfileDone(gpOk: bool) -> void:
+	_gpProfileDialog = null
+	if gpOk:
+		gpHost.gpSetState("identity.pw_changed", [])
 
 
 # The enabled roster for the login dialog / panel callers.

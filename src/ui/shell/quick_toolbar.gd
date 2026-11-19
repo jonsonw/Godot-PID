@@ -25,6 +25,12 @@ extends HBoxContainer
 # 工具栏动作触发时发出，携带菜单动作 id（如 "file_save"）。
 signal gpActionTriggered(gpId: String)
 
+# v1.3.2: emitted when the trailing SESSION-USER button is pressed (NOT a menu action —
+# it opens the profile dialog, so it gets its own signal outside the action pipeline).
+# v1.3.2：末端**会话用户**按钮按下时发出（不是菜单动作 —— 它打开资料对话框，
+# 故走动作管线之外的独立信号）。
+signal gpProfileRequested
+
 # Icon strip spec: menu action id + tooltip i18n key + icon file stem.
 # 图标带定义：菜单动作 id + 提示语 i18n 键 + 图标文件名。
 const GP_ITEMS: Array = [
@@ -59,6 +65,10 @@ const GP_ITEMS: Array = [
 # 以动作为键的按钮，便于启用/禁用与提示语刷新。
 var _gpBtns: Dictionary = {}
 
+# v1.3.2: the trailing session-user button (shows the logged-in name; click = profile).
+# v1.3.2：末端会话用户按钮（显示登录名；点击 = 资料对话框）。
+var _gpUserBtn: Button = null
+
 # The export submenu popup (owned by the export button).
 # 导出子菜单弹出层（归导出按钮所有）。
 var _gpExportPopup: PopupMenu = null
@@ -83,9 +93,46 @@ func _ready() -> void:
 			add_child(gpGap)
 			continue
 		add_child(_gpBuildBtn(gpEntry as Dictionary))
+	# v1.3.2: trailing gap + session-user button at the RIGHT end of the strip (user
+	# request 2026-11-19: the logged-in name visible in the top toolbar, click = profile).
+	# v1.3.2：图标带**右端**加空隙 + 会话用户按钮（用户要求 2026-11-19：登录名常驻顶部
+	# 工具栏，点击弹资料）。
+	var gpTailGap: Control = Control.new()
+	gpTailGap.custom_minimum_size = Vector2(14.0, 0.0)
+	gpTailGap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(gpTailGap)
+	_gpUserBtn = Button.new()
+	_gpUserBtn.flat = true
+	_gpUserBtn.focus_mode = Control.FOCUS_NONE
+	_gpUserBtn.text = ""
+	_gpUserBtn.add_theme_font_size_override("font_size", 12)
+	_gpUserBtn.custom_minimum_size = Vector2(0.0, 24.0)
+	var gpUserHover: StyleBoxFlat = StyleBoxFlat.new()
+	gpUserHover.bg_color = GPChromeStyle.GP_SPLIT_HI
+	gpUserHover.set_content_margin_all(2.0)
+	gpUserHover.set_corner_radius_all(3)
+	_gpUserBtn.add_theme_stylebox_override("hover", gpUserHover)
+	_gpUserBtn.pressed.connect(_gpOnProfilePressed)
+	add_child(_gpUserBtn)
 	I18n.gpLocaleChanged.connect(_gpRefreshTooltips)
 	_gpRefreshTooltips(I18n.gpLocale)
 	queue_redraw()
+
+
+# v1.3.2: mirror the session user onto the trailing button ("" hides it — no anonymous
+# click target). / v1.3.2：把会话用户镜像到末端按钮（"" 即隐藏 —— 不给匿名状态提供点击目标）。
+func gpSetUser(gpUser: String) -> void:
+	if _gpUserBtn == null:
+		return
+	_gpUserBtn.text = gpUser
+	_gpUserBtn.tooltip_text = I18n.gpTr("identity.profile_title") if gpUser != "" else ""
+	_gpUserBtn.visible = gpUser != ""
+
+
+# v1.3.2: user button press -> the profile signal (R7: member-function callback).
+# v1.3.2：用户按钮按下 -> 资料信号（R7：成员函数回调）。
+func _gpOnProfilePressed() -> void:
+	gpProfileRequested.emit()
 
 
 # Build one icon-only flat button (tooltip = localized name, AutoCAD style).
@@ -193,6 +240,10 @@ func _gpRefreshTooltips(_gpLocale: String) -> void:
 			gpBtn.tooltip_text = I18n.gpTr(str(gpBtn.get_meta("gpKey")))
 			if gpBtn.has_meta("gpTextKey"):
 				gpBtn.text = I18n.gpTr(str(gpBtn.get_meta("gpTextKey")))
+	# v1.3.2: the user button's tooltip follows the locale too.
+	# v1.3.2：用户按钮的提示语随语言切换刷新。
+	if _gpUserBtn != null and _gpUserBtn.visible and _gpUserBtn.text != "":
+		_gpUserBtn.tooltip_text = I18n.gpTr("identity.profile_title")
 
 
 # Paint the chrome background + a dark bottom groove (separates the toolbar from
